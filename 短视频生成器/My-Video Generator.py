@@ -1467,8 +1467,8 @@ class DocuMakerLiteV7:
         self.llm_config_presets = list(LLMConfig.PRESETS.keys())
         self.current_llm_config = LLMConfig("质量优先")
         
-        # 视频设置 - 初始值为交叉溶解，由load_config加载
-        self.transition_var = tk.StringVar(value="交叉溶解")
+        # 视频设置 - 初始值为硬切（无过渡效果，速度最快），由load_config加载
+        self.transition_var = tk.StringVar(value="硬切")
         self.transition_dropdown_visible = False
         
         # 绘图设置
@@ -7849,6 +7849,11 @@ class DocuMakerLiteV7:
             else:
                 self.log(f"🎬 单张画面动画: 无")
             
+            # 详细记录每个分镜的时间戳信息（用于调试音画同步）
+            self.log("📊 分镜时间戳详情:")
+            for i, shot in enumerate(self.shots_data):
+                self.log(f"   分镜{i+1}: start={shot['start']:.3f}s, end={shot['end']:.3f}s, duration={shot['duration']:.3f}s")
+            
             for i, shot in enumerate(self.shots_data):
                 # 检查是否被取消
                 if not self.task_running:
@@ -7868,8 +7873,9 @@ class DocuMakerLiteV7:
                         image_file = self.image_map[expected_num]
                         image_path = os.path.join(self.images_dir, image_file)
                         if os.path.exists(image_path):
-                            # 使用 start 时间戳来设置片段的起始位置
-                            clip = ImageClip(image_path).with_duration(shot['duration']).with_start(shot['start'])
+                            # 修复：只设置duration，不设置start，让concatenate自动计算时间轴
+                            clip = ImageClip(image_path).with_duration(shot['duration'])
+                            self.log(f"   分镜{i+1}: 图片={image_file}, duration={shot['duration']:.3f}s")
                             # 应用动画效果
                             if animation_type != "无":
                                 clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
@@ -7882,8 +7888,9 @@ class DocuMakerLiteV7:
                     # 正常模式使用固定文件名
                     image_path = os.path.join(self.images_dir, shot['image_file'])
                     if os.path.exists(image_path):
-                        # 使用 start 时间戳来设置片段的起始位置
-                        clip = ImageClip(image_path).with_duration(shot['duration']).with_start(shot['start'])
+                        # 修复：只设置duration，不设置start，让concatenate自动计算时间轴
+                        clip = ImageClip(image_path).with_duration(shot['duration'])
+                        self.log(f"   分镜{i+1}: 图片={shot['image_file']}, duration={shot['duration']:.3f}s")
                         # 应用动画效果
                         if animation_type != "无":
                             clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
@@ -7904,7 +7911,7 @@ class DocuMakerLiteV7:
             # 应用过渡效果
             self.update_task_progress("正在应用过渡效果...", 60)
             self.log("🔄 正在应用过渡效果...")
-            transition_type = self.transition_var.get() if hasattr(self, 'transition_var') else "交叉溶解"
+            transition_type = self.transition_var.get() if hasattr(self, 'transition_var') else "硬切"
             self.log(f"🎬 使用过渡模式: {transition_type}")
             
             # 获取视频宽度和高度
@@ -7917,72 +7924,67 @@ class DocuMakerLiteV7:
                 except:
                     pass
             
-            # 根据选择的过渡模式应用效果
-            # 使用 CompositeVideoClip 叠加所有片段，每个片段在其 start 时间出现
-            if len(clips) > 1:
-                # 对于多个片段，应用过渡效果
-                transition_duration = 0.5  # 过渡效果持续时间（秒）
-                
-                # 创建背景 clip
-                bg_clip = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
-                bg_clip = bg_clip.with_fps(30)
-                
-                if transition_type == "硬切":
-                    # 硬切：直接叠加所有片段
-                    self.log(f"🎬 应用硬切效果（基于原始时间戳）")
-                    final_clip = CompositeVideoClip([bg_clip] + clips)
-                    actual_video_duration = audio_duration
-                    
-                elif transition_type == "淡入淡出":
-                    # 淡入淡出效果
-                    self.log(f"🎬 应用淡入淡出效果（基于原始时间戳）")
-                    from moviepy.video.fx import FadeIn, FadeOut
-                    
-                    # 为每个片段添加淡入淡出效果
-                    clips_with_fade = []
-                    for i, clip in enumerate(clips):
-                        if i == 0:
-                            clips_with_fade.append(clip.with_effects([FadeIn(transition_duration)]))
-                        elif i == len(clips) - 1:
-                            clips_with_fade.append(clip.with_effects([FadeIn(transition_duration), FadeOut(transition_duration)]))
-                        else:
-                            clips_with_fade.append(clip.with_effects([FadeIn(transition_duration)]))
-                    final_clip = CompositeVideoClip([bg_clip] + clips_with_fade)
-                    actual_video_duration = audio_duration
-                    
-                elif transition_type == "交叉溶解":
-                    # 交叉溶解效果
-                    self.log(f"🎬 应用交叉溶解效果（基于原始时间戳）")
-                    from moviepy.video.fx import CrossFadeIn
-                    
-                    # 应用交叉溶解
-                    clips_with_crossfade = []
-                    for i, clip in enumerate(clips):
-                        if i == 0:
-                            clips_with_crossfade.append(clip)
-                        else:
-                            # 应用交叉溶解效果
-                            clip_with_transition = clip.with_effects([CrossFadeIn(transition_duration)])
-                            clips_with_crossfade.append(clip_with_transition)
-                    final_clip = CompositeVideoClip([bg_clip] + clips_with_crossfade)
-                    actual_video_duration = audio_duration
+            # 修复：使用concatenate_videoclips替代CompositeVideoClip，确保时间轴精准
+            transition_duration = 0.5  # 过渡效果持续时间（秒）
+            
+            if transition_type == "硬切":
+                # 硬切：直接拼接，无过渡效果，时间最精准
+                self.log(f"🎬 应用硬切效果（时间最精准）")
+                if len(clips) > 1:
+                    final_clip = concatenate_videoclips(clips, method="chain")
                 else:
-                    # 默认使用硬切
-                    self.log(f"🎬 使用默认效果（基于原始时间戳）")
-                    final_clip = CompositeVideoClip([bg_clip] + clips)
-                    actual_video_duration = audio_duration
+                    final_clip = clips[0]
+                    
+            elif transition_type == "淡入淡出":
+                # 淡入淡出效果
+                self.log(f"🎬 应用淡入淡出效果")
+                from moviepy.video.fx import FadeIn, FadeOut
+                
+                # 为每个片段添加淡入淡出效果
+                clips_with_fade = []
+                for i, clip in enumerate(clips):
+                    if i == 0:
+                        clips_with_fade.append(clip.with_effects([FadeIn(transition_duration)]))
+                    elif i == len(clips) - 1:
+                        clips_with_fade.append(clip.with_effects([FadeIn(transition_duration), FadeOut(transition_duration)]))
+                    else:
+                        clips_with_fade.append(clip.with_effects([FadeIn(transition_duration)]))
+                
+                if len(clips_with_fade) > 1:
+                    final_clip = concatenate_videoclips(clips_with_fade, method="chain")
+                else:
+                    final_clip = clips_with_fade[0]
+                    
+            elif transition_type == "交叉溶解":
+                # 交叉溶解效果
+                self.log(f"🎬 应用交叉溶解效果")
+                from moviepy.video.fx import CrossFadeIn
+                
+                # 应用交叉溶解
+                clips_with_crossfade = []
+                for i, clip in enumerate(clips):
+                    if i == 0:
+                        clips_with_crossfade.append(clip)
+                    else:
+                        # 应用交叉溶解效果
+                        clip_with_transition = clip.with_effects([CrossFadeIn(transition_duration)])
+                        clips_with_crossfade.append(clip_with_transition)
+                
+                if len(clips_with_crossfade) > 1:
+                    final_clip = concatenate_videoclips(clips_with_crossfade, method="chain")
+                else:
+                    final_clip = clips_with_crossfade[0]
             else:
-                # 只有一个片段时，直接使用，但也要应用时间戳
-                single_clip = clips[0]
-                # 创建一个与音频总时长相同的背景
-                try:
-                    width, height = single_clip.size
-                except:
-                    width, height = 1920, 1080
-                bg_clip = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
-                bg_clip = bg_clip.with_fps(30)
-                final_clip = CompositeVideoClip([bg_clip, single_clip])
-                actual_video_duration = audio_duration
+                # 默认使用硬切
+                self.log(f"🎬 使用默认硬切效果")
+                if len(clips) > 1:
+                    final_clip = concatenate_videoclips(clips, method="chain")
+                else:
+                    final_clip = clips[0]
+            
+            # 计算实际视频时长
+            actual_video_duration = sum(clip.duration for clip in clips)
+            self.log(f"📊 片段总时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
             
             # 修复：验证视频时长与音频时长是否匹配
             self.log(f"📊 视频时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
@@ -7990,18 +7992,25 @@ class DocuMakerLiteV7:
             # 添加音频
             self.update_task_progress("正在添加音频...", 70)
             # 修复：确保视频时长与音频时长精确匹配，实现音画同步
-            duration_diff = abs(actual_video_duration - audio_duration)
+            # 获取拼接后的实际视频时长
+            final_video_duration = final_clip.duration
+            self.log(f"📊 拼接后视频时长: {final_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
+            
+            duration_diff = abs(final_video_duration - audio_duration)
             if duration_diff > 0.001:  # 更严格的阈值 1ms
-                self.log(f"🔄 视频时长({actual_video_duration:.3f}s)与音频时长({audio_duration:.3f}s)差异: {duration_diff:.3f}s")
-                if actual_video_duration > audio_duration:
+                self.log(f"🔄 视频时长({final_video_duration:.3f}s)与音频时长({audio_duration:.3f}s)差异: {duration_diff:.3f}s")
+                if final_video_duration > audio_duration:
                     self.log("   视频比音频长，将截断视频以匹配音频")
                 else:
                     self.log("   视频比音频短，将延长最后一帧以匹配音频")
                 # 使用音频时长作为最终时长，确保音画同步
                 final_clip = final_clip.with_duration(audio_duration)
-                actual_video_duration = audio_duration
+                final_video_duration = audio_duration
             else:
                 self.log(f"✅ 视频时长与音频时长已精确匹配: {audio_duration:.3f}s")
+            
+            # 再次验证最终时长
+            self.log(f"🔍 最终验证 - 视频时长: {final_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s, 差异: {abs(final_video_duration - audio_duration):.6f}s")
             
             final_clip = final_clip.with_audio(audio)
             
