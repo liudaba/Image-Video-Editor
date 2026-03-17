@@ -29,9 +29,10 @@ models/*.pth
 models/*.ckpt
 models/*.safetensors
 
-# 输出文件
+# 输出文件和目录
 output/
 outputs/
+output_project/
 *.mp4
 *.avi
 *.mov
@@ -42,6 +43,12 @@ outputs/
 *.jpeg
 *.png
 *.gif
+*.json
+
+# 临时文件
+*.tmp
+*.temp
+*.log
 
 # IDE
 .vscode/
