@@ -8,7 +8,7 @@
   "ollama_model": "qwen3:4b",
   "llm_config_preset": "极速模式",
   "whisper_model": "medium",
-  "transition": "硬切",
+  "transition": "交叉溶解",
   "selected_styles": [],
   "custom_theme": "战争",
   "custom_visual_tone": "战场，城市废墟",

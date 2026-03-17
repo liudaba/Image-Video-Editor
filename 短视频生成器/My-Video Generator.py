@@ -8783,11 +8783,11 @@ class DocuMakerLiteV7:
                 else:
                     self.whisper_model_var = tk.StringVar(value="medium")
                 
-                # 加载视频设置 - 如果没有则使用默认值
+                # 加载视频设置 - 如果没有则使用默认值"硬切"
                 if 'transition' in config and config['transition']:
                     self.transition_var.set(config['transition'])
                 else:
-                    self.transition_var.set("交叉溶解")
+                    self.transition_var.set("硬切")
                 
                 # 加载风格设置
                 if 'selected_styles' in config and hasattr(self, 'dlr_vars'):
