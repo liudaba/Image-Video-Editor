@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 模型文件 (太大，从其他渠道下载)
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/*.safetensors
+
+# 输出文件和目录
+output/
+outputs/
+output_project/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.json
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
