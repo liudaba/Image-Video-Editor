@@ -7068,6 +7068,7 @@ class DocuMakerLiteV7:
                         
                         # 兼容多种返回格式：可能是列表、分镜列表+主题信息字典，或None
                         parsed_shots = []
+                        theme_info = {'core_theme': '', 'visual_tone': '', 'theme_elements': []}  # 初始化 theme_info
                         if parsed_shots_result is None:
                             parsed_shots = []
                         elif isinstance(parsed_shots_result, list):
