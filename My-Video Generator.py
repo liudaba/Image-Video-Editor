@@ -86,6 +86,7 @@ psutil = None
 GPUtil = None
 OLLAMA_AVAILABLE = False
 ollama = None
+ollama_lock = threading.Lock()  # 全局锁，保护Ollama API调用
 requests = None
 PIL = None
 Image = None
@@ -282,11 +283,13 @@ class MultiModelFusion:
         
     def discover_models(self):
         """发现可用的Ollama模型"""
+        global ollama_lock
         if not OLLAMA_AVAILABLE:
             return []
         
         try:
-            models = ollama.list()
+            with ollama_lock:
+                models = ollama.list()
             if "models" in models:
                 self.available_models = []
                 for model in models["models"]:
@@ -297,7 +300,9 @@ class MultiModelFusion:
                         self.model_weights[name] = self._calculate_model_weight(name)
                 return self.available_models
         except Exception as e:
-            print(f"发现模型失败: {e}")
+            error_msg = str(e)
+            status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
+            print(f"发现模型失败: {error_msg} (status code: {status_code})")
         return []
     
     def _calculate_model_weight(self, model_name):
@@ -328,6 +333,7 @@ class MultiModelFusion:
     
     def parallel_generate(self, prompt_template, models=None, timeout=60):
         """并行调用多个模型生成结果"""
+        global ollama_lock
         if not OLLAMA_AVAILABLE:
             return None
         
@@ -355,14 +361,15 @@ class MultiModelFusion:
                 else:
                     config = LLMConfig("平衡模式")
                 
-                response = ollama.chat(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": prompt_template["system"]},
-                        {"role": "user", "content": prompt_template["user"]}
-                    ],
-                    options=config.get_options(num_predict=1500)
-                )
+                with ollama_lock:
+                    response = ollama.chat(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": prompt_template["system"]},
+                            {"role": "user", "content": prompt_template["user"]}
+                        ],
+                        options=config.get_options(num_predict=1500)
+                    )
                 
                 duration = _time.time() - start_time
                 result = response["message"]["content"].strip()
@@ -631,17 +638,22 @@ class PromptTemplates:
 - 语义贴切：每张图片都要尽量贴切地诠释对应语义所要表达的内容
 - 提示词质量：每个画面提示词必须专业、详细、可执行
 
-【输出格式】
-核心主题：[一句话概括文本的核心主题思想，如"这是一篇关于战争反思的评论文章"]
-视觉基调：[整体视觉风格+统一色调+情感氛围，如"纪实摄影风格，冷色调，沉重而深刻"]
-主题元素：[贯穿全篇的视觉元素列表，如"废墟、和平鸽、军人剪影、硝烟"]
+【输出格式 - 必须严格遵守】
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+核心主题：[一句话概括文本的核心主题思想]
+视觉基调：[整体视觉风格+统一色调+情感氛围]
+主题元素：[贯穿全篇的视觉元素列表]
+
 分镜脚本：
 1. **配音**：[润色后的口语化文本内容]
    - **语义解析**：[这句话的核心语义和情感]
    - **画面构思**：[围绕主题的具体构图思路]
    - **视觉元素**：[与主题和语义相关的具体元素]
-   - **画面提示词**：[英文，必须围绕核心主题，包含主题相关元素，与整体基调保持一致]
-   - **反向提示词**：[英文，避免的问题]""",
+   - **画面提示词**：[英文，必须围绕核心主题，包含主题相关元素]
+   - **反向提示词**：[英文，避免的问题]
+
+【注意】输出中必须包含"分镜脚本："这个关键词！""",
 
         "user_template": """【音频信息】
 - 片段数：{segment_count}个
@@ -740,17 +752,21 @@ class PromptTemplates:
 - 语义贴切：每张图片都要尽量贴切地诠释对应语义所要表达的内容
 - 提示词质量：每个画面提示词必须专业、详细、可执行
 
-【输出格式】
-核心主题：[一句话概括文本的核心主题思想，如"这是一篇关于战争反思的评论文章"]
-视觉基调：[整体视觉风格+统一色调+情感氛围，如"纪实摄影风格，冷色调，沉重而深刻"]
-主题元素：[贯穿全篇的视觉元素列表，如"废墟、和平鸽、军人剪影、硝烟"]
+【输出格式 - 必须严格遵守】
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+核心主题：[一句话概括文本的核心主题思想]
+视觉基调：[整体视觉风格+统一色调+情感氛围]
+主题元素：[贯穿全篇的视觉元素列表]
+
 分镜脚本：
 1. **配音**：[润色后的口语化文本内容]
    - **语义解析**：[这句话的核心语义和情感]
    - **画面构思**：[围绕主题的具体构图思路]
    - **视觉元素**：[与主题和语义相关的具体元素]
-   - **画面提示词**：[中文，必须围绕核心主题，包含主题相关元素，与整体基调保持一致]
-   （豆包提示词不需要负面提示词）""",
+   - **画面提示词**：[中文，必须围绕核心主题，包含主题相关元素]
+
+【注意】输出中必须包含"分镜脚本："这个关键词！""",
 
         "user_template": """【音频信息】
 - 片段数：{segment_count}个
@@ -822,22 +838,24 @@ class PromptTemplates:
 9. 所有分镜的提示词必须体现主题统一性，使用一致的视觉元素和色调
 10. 每个分镜必须提供英文负面提示词
 
-输出格式：
-- 核心主题：[文章的核心主题思想，如"这是一篇关于战争反思的评论文章"]
-- 视觉基调：[整体视觉风格+统一色调+情感氛围，如"纪实摄影风格，冷色调，沉重而深刻"]
-- 主题元素：[贯穿全篇的视觉元素列表，如"废墟、和平鸽、军人剪影、硝烟"]
+输出格式 - 必须严格遵守：
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+- 核心主题：[文章的核心主题思想]
+- 视觉基调：[整体视觉风格+统一色调+情感氛围]
+- 主题元素：[贯穿全篇的视觉元素列表]
 - **内容类型**：[从以下类型中选择最匹配的：military军事/politics政治/space太空/science科学/nature自然/technology科技/history历史/art艺术/business商业/health健康/travel旅游/general通用]
-- **关键词提取**：[提取文本中的核心关键词，包括：国家名、地名、组织名、军事装备、政治术语、科学概念等，用逗号分隔]
+- **关键词提取**：[提取文本中的核心关键词，用逗号分隔]
 - 主要内容：[文章的主要内容概述]
-- 错别字修正：[修正的错别字列表]
 - 转录文案：[带标点符号的完整文案]
-- 分镜脚本：
+
+分镜脚本：
   1. **[时间标记]**
      - **配音**：[润色后的配音文本内容]
      - **语义解析**：[这句话的核心语义和情感]
      - **画面构思**：[围绕主题的具体构图思路]
      - **视觉元素**：[与主题和语义相关的具体元素]
-     - **画面提示词**：[英文提示词，必须围绕核心主题，包含主题相关元素，与整体基调保持一致]
+     - **画面提示词**：[英文提示词，必须围绕核心主题]
      - **负面提示词**：[英文负面提示词]""",
 
         "user_template": """请严格按照要求处理以下语音转录文本：
@@ -917,21 +935,24 @@ class PromptTemplates:
 9. 所有分镜的提示词必须体现主题统一性，使用一致的视觉元素和色调
 10. 描述要生动具体，便于AI理解生成画面
 
-输出格式：
-- 核心主题：[文章的核心主题思想，如"这是一篇关于战争反思的评论文章"]
-- 视觉基调：[整体视觉风格+统一色调+情感氛围，如"纪实摄影风格，冷色调，沉重而深刻"]
-- 主题元素：[贯穿全篇的视觉元素列表，如"废墟、和平鸽、军人剪影、硝烟"]
+输出格式 - 必须严格遵守：
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+- 核心主题：[文章的核心主题思想]
+- 视觉基调：[整体视觉风格+统一色调+情感氛围]
+- 主题元素：[贯穿全篇的视觉元素列表]
 - 主要内容：[文章的主要内容概述]
-- 错别字修正：[修正的错别字列表]
 - 转录文案：[带标点符号的完整文案]
-- 分镜脚本：
+
+分镜脚本：
   1. **[时间标记]**
      - **配音**：[润色后的配音文本内容]
      - **语义解析**：[这句话的核心语义和情感]
      - **画面构思**：[围绕主题的具体构图思路]
      - **视觉元素**：[与主题和语义相关的具体元素]
-     - **画面提示词**：[中文画面描述，必须围绕核心主题，包含主题相关元素，与整体基调保持一致]
-     （豆包提示词不需要负面提示词）""",
+     - **画面提示词**：[中文画面描述，必须围绕核心主题]
+
+【注意】输出中必须包含"分镜脚本："这个关键词！""",
 
         "user_template": """请严格按照要求处理以下语音转录文本：
 
@@ -1012,21 +1033,24 @@ class PromptTemplates:
 10. 所有分镜的提示词必须体现主题统一性，使用一致的视觉元素和色调
 11. 每个分镜必须提供英文负面提示词
 
-输出格式：
-- 核心主题：[科普主题，如"探索量子力学的奥秘"]
-- 视觉基调：[整体视觉风格+统一色调+情感氛围，如"科技感十足，蓝紫色调，神秘而深邃"]
-- 主题元素：[贯穿全篇的视觉元素列表，如"粒子效果、公式、实验装置、星空"]
+输出格式 - 必须严格遵守：
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+- 核心主题：[科普主题]
+- 视觉基调：[整体视觉风格+统一色调+情感氛围]
+- 主题元素：[贯穿全篇的视觉元素列表]
 - 主要内容：[科普知识内容概述]
-- 错别字修正：[修正的错别字列表]
 - 转录文案：[带标点符号的完整文案]
-- 分镜脚本：
+
+分镜脚本：
   1. **[时间标记]**
      - **配音**：[润色后的配音文本内容]
      - **语义解析**：[这句话的核心科学知识]
      - **画面构思**：[围绕科普主题的具体构图思路]
      - **视觉元素**：[与主题和语义相关的科学元素]
-     - **画面提示词**：[英文提示词，必须围绕核心主题，包含科学相关元素，与整体基调保持一致]
-     - **负面提示词**：[英文负面提示词]""",
+     - **画面提示词**：[英文提示词，必须围绕核心主题]
+
+【注意】输出中必须包含"分镜脚本："这个关键词！""",
 
         "user_template": """请严格按照要求处理以下语音转录文本：
 
@@ -1104,21 +1128,24 @@ class PromptTemplates:
 10. 所有分镜的提示词必须体现主题统一性，使用一致的视觉元素和色调
 11. 描述要生动具体，便于AI理解生成画面
 
-输出格式：
-- 核心主题：[科普主题，如"探索量子力学的奥秘"]
-- 视觉基调：[整体视觉风格+统一色调+情感氛围，如"科技感十足，蓝紫色调，神秘而深邃"]
-- 主题元素：[贯穿全篇的视觉元素列表，如"粒子效果、公式、实验装置、星空"]
+输出格式 - 必须严格遵守：
+【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+
+- 核心主题：[科普主题]
+- 视觉基调：[整体视觉风格+统一色调+情感氛围]
+- 主题元素：[贯穿全篇的视觉元素列表]
 - 主要内容：[科普知识内容概述]
-- 错别字修正：[修正的错别字列表]
 - 转录文案：[带标点符号的完整文案]
-- 分镜脚本：
+
+分镜脚本：
   1. **[时间标记]**
      - **配音**：[润色后的配音文本内容]
      - **语义解析**：[这句话的核心科学知识]
      - **画面构思**：[围绕科普主题的具体构图思路]
      - **视觉元素**：[与主题和语义相关的科学元素]
-     - **画面提示词**：[中文画面描述，必须围绕核心主题，包含科学相关元素，与整体基调保持一致]
-     （豆包提示词不需要负面提示词）""",
+     - **画面提示词**：[中文画面描述，必须围绕核心主题]
+
+【注意】输出中必须包含"分镜脚本："这个关键词！""",
 
         "user_template": """请严格按照要求处理以下语音转录文本：
 
@@ -1572,9 +1599,10 @@ class DocuMakerLiteV7:
         
         # 启动时运行系统检查（延迟执行，让UI先加载）
         def delayed_system_check():
-            # 直接导入time模块，确保即使延迟导入还没完成也能执行
+            # 等待延迟导入完成
             import time
-            time.sleep(0.5)
+            time.sleep(1)  # 等待Ollama模块加载完成
+            
             self.system_check()
             # 系统检查完成后，尝试连接SD API（静默模式，不弹窗）
             time.sleep(1)
@@ -1623,6 +1651,18 @@ class DocuMakerLiteV7:
     def discover_available_models(self):
         """发现并记录可用的Ollama模型"""
         try:
+            global OLLAMA_AVAILABLE
+            if not OLLAMA_AVAILABLE:
+                try:
+                    import ollama
+                    OLLAMA_AVAILABLE = True
+                except ImportError:
+                    pass
+            
+            if not OLLAMA_AVAILABLE:
+                self.log("⚠️ Ollama模块未加载，跳过模型发现")
+                return
+            
             models = multi_model_fusion.discover_models()
             if models:
                 self.log(f"🤖 发现 {len(models)} 个可用大模型:")
@@ -2135,9 +2175,11 @@ class DocuMakerLiteV7:
         script_model_btn.pack(fill=tk.X, pady=1, padx=5)
         
         # 尝试获取本地已安装的Ollama模型
+        global ollama_lock
         try:
             if OLLAMA_AVAILABLE:
-                models = ollama.list()
+                with ollama_lock:
+                    models = ollama.list()
                 # 尝试不同的键名来获取模型列表
                 if "models" in models:
                     model_list = models["models"]
@@ -2242,7 +2284,9 @@ class DocuMakerLiteV7:
                     btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                     btn.pack(fill=tk.X, pady=1, padx=5)
         except Exception as e:
-            self.log(f"获取Ollama模型列表失败: {e}")
+            error_msg = str(e)
+            status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
+            self.log(f"获取Ollama模型列表失败: {error_msg} (status code: {status_code})")
             # 出错时显示默认模型
             default_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
             for model in default_models:
@@ -2440,19 +2484,21 @@ class DocuMakerLiteV7:
             
             # 使用创意模式生成风格描述
             config = LLMConfig("创意模式")
+            global ollama_lock
             
             # 调用Ollama API，使用优化参数
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": template["system"]},
-                    {"role": "user", "content": template["user"]}
-                ],
-                options=config.get_options(
-                    num_predict=800,
-                    num_ctx=2048
+            with ollama_lock:
+                response = ollama.chat(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": template["system"]},
+                        {"role": "user", "content": template["user"]}
+                    ],
+                    options=config.get_options(
+                        num_predict=800,
+                        num_ctx=2048
+                    )
                 )
-            )
             
             style_description = response["message"]["content"].strip()
             self.log(f"⚡ 风格描述生成完成: {style}: {style_description[:50]}...")
@@ -3246,96 +3292,202 @@ class DocuMakerLiteV7:
         """
         智能解析大模型返回的分镜分析结果
         完整提取：配音、语义解析、画面构思、视觉元素、画面提示词等所有信息
+        支持多种格式：中文、英文、Markdown粗体等
         """
         import re
         
-        if not analysis_result or "分镜脚本：" not in analysis_result:
+        if not analysis_result:
             return None
         
-        try:
-            shots_part = analysis_result.split("分镜脚本：")[1]
-            lines = [s.strip() for s in shots_part.split("\n") if s.strip()]
-            
-            parsed_shots = []
-            current_shot = {}
-            
-            for line in lines:
-                # 检测新分镜开始（数字序号开头）
-                if re.match(r'^\*?\*?\d+\.', line):
-                    # 保存前一个分镜
-                    if current_shot and current_shot.get('dubbing'):
-                        parsed_shots.append(current_shot.copy())
-                    
-                    # 初始化新分镜
-                    current_shot = {
-                        'dubbing': '',
-                        'semantic': '',
-                        'content_type': '',
-                        'keywords': '',
-                        'visual_concept': '',
-                        'visual_elements': '',
-                        'prompt': ''
-                    }
-                    continue
-                
-                # 提取配音
-                if '配音' in line and ':' in line:
-                    match = re.search(r'配音\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['dubbing'] = match.group(1).strip()
-                    continue
-                
-                # 提取语义解析
-                if '语义解析' in line and ':' in line:
-                    match = re.search(r'语义解析\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['semantic'] = match.group(1).strip()
-                    continue
-                
-                # 提取内容类型（大模型自动识别的）
-                if '内容类型' in line and ':' in line:
-                    match = re.search(r'内容类型\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['content_type'] = match.group(1).strip()
-                    continue
-                
-                # 提取关键词（大模型自动提取的）
-                if '关键词' in line and ':' in line:
-                    match = re.search(r'关键词\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['keywords'] = match.group(1).strip()
-                    continue
-                
-                # 提取画面构思
-                if '画面构思' in line and ':' in line:
-                    match = re.search(r'画面构思\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['visual_concept'] = match.group(1).strip()
-                    continue
-                
-                # 提取视觉元素
-                if '视觉元素' in line and ':' in line:
-                    match = re.search(r'视觉元素\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['visual_elements'] = match.group(1).strip()
-                    continue
-                
-                # 提取画面提示词（大模型直接生成的完整提示词）
-                if '画面提示词' in line and ':' in line:
-                    match = re.search(r'画面提示词\s*[:：]\s*(.+)', line)
-                    if match:
-                        current_shot['prompt'] = match.group(1).strip()
-                    continue
-            
-            # 添加最后一个分镜
-            if current_shot and current_shot.get('dubbing'):
-                parsed_shots.append(current_shot)
-            
-            return parsed_shots if parsed_shots else None
-            
-        except Exception as e:
-            self.log(f"⚠️ 智能解析失败: {e}")
+        # ============ 第一步：提取核心主题和视觉基调 ============
+        core_theme = None
+        visual_tone = None
+        theme_elements = None
+        
+        # 核心主题模式（支持多种格式）
+        core_theme_patterns = [
+            r'\*\*核心主题[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'核心主题[：:]\s*(.+?)(?:\n|$)',
+            r'\*\*Core Theme[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'Core Theme[：:]\s*(.+?)(?:\n|$)',
+            r'The Core Theme:[ ]*(.+?)(?:\n|$)',
+        ]
+        
+        # 视觉基调模式
+        visual_tone_patterns = [
+            r'\*\*视觉基调[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'视觉基调[：:]\s*(.+?)(?:\n|$)',
+            r'\*\*Visual Tone[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'Visual Tone[：:]\s*(.+?)(?:\n|$)',
+            r'Visual Tone:[ ]*(.+?)(?:\n|$)',
+            r'Overall Tone:[ ]*(.+?)(?:\n|$)',
+        ]
+        
+        # 主题元素模式
+        theme_elements_patterns = [
+            r'\*\*主题元素[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'主题元素[：:]\s*(.+?)(?:\n|$)',
+            r'\*\*Theme Elements[：:]\*\*\s*(.+?)(?:\n|$)',
+            r'Theme Elements:[ ]*(.+?)(?:\n|$)',
+        ]
+        
+        for pattern in core_theme_patterns:
+            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
+            if match:
+                core_theme = match.group(1).strip()
+                break
+        
+        for pattern in visual_tone_patterns:
+            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
+            if match:
+                visual_tone = match.group(1).strip()
+                break
+        
+        for pattern in theme_elements_patterns:
+            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
+            if match:
+                theme_elements = match.group(1).strip()
+                break
+        
+        # 记录提取到的主题信息
+        if core_theme:
+            self.log(f"🎯 核心主题: {core_theme[:100]}")
+        if visual_tone:
+            self.log(f"🎨 视觉基调: {visual_tone[:100]}")
+        
+        # ============ 第二步：查找分镜脚本部分 ============
+        # 支持的关键词列表
+        keywords = [
+            "分镜脚本：", "分镜脚本", 
+            "Storyboard Script:", "Storyboard Script", 
+            "Storyboard:", "Shot Script:",
+            "分镜列表：", "分镜："
+        ]
+        
+        shots_keyword = None
+        shots_part = None
+        
+        for kw in keywords:
+            if kw in analysis_result:
+                shots_keyword = kw
+                shots_part = analysis_result.split(kw, 1)[1]
+                break
+        
+        if not shots_part:
+            # 如果没有找到分镜脚本部分，返回主题信息
+            if core_theme or visual_tone:
+                return {"theme_info": {"core_theme": core_theme, "visual_tone": visual_tone, "theme_elements": theme_elements}}
             return None
+        
+        # ============ 第三步：解析分镜内容 ============
+        # 清理内容，移除Markdown粗体标记
+        shots_part = re.sub(r'\*\*([^*]+)\*\*', r'\1', shots_part)
+        
+        # 按行分割
+        lines = [s.strip() for s in shots_part.split('\n') if s.strip()]
+        
+        if not lines:
+            return None
+        
+        parsed_shots = []
+        current_shot = None
+        current_field = None
+        current_value = []
+        
+        # 分镜开始标记模式
+        shot_start_patterns = [
+            r'^\d+\.\s*',           # 1. 或 1、 
+            r'^\[\d+\]',            # [1]
+            r'^Shot\s*\d+',         # Shot 1
+            r'^Scene\s*\d+',        # Scene 1
+        ]
+        
+        def is_shot_start(line):
+            for pattern in shot_start_patterns:
+                if re.match(pattern, line, re.IGNORECASE):
+                    return True
+            return False
+        
+        for line in lines:
+            # 跳过空行和分隔符
+            if not line or line.startswith('---') or line.startswith('==='):
+                continue
+            
+            # 检测新分镜开始
+            if is_shot_start(line):
+                # 保存前一个分镜
+                if current_shot and any(current_shot.values()):
+                    parsed_shots.append(current_shot)
+                
+                # 创建新分镜
+                current_shot = {
+                    'dubbing': '',
+                    'semantic': '',
+                    'content_type': '',
+                    'keywords': '',
+                    'visual_concept': '',
+                    'visual_elements': '',
+                    'prompt': '',
+                    'negative_prompt': ''
+                }
+                current_field = None
+                continue
+            
+            # 检测字段
+            field_patterns = [
+                (r'配音[：:]\s*(.+?)$', 'dubbing'),
+                (r'语义解析[：:]\s*(.+?)$', 'semantic'),
+                (r'画面构思[：:]\s*(.+?)$', 'visual_concept'),
+                (r'视觉元素[：:]\s*(.+?)$', 'visual_elements'),
+                (r'画面提示词[：:]\s*(.+?)$', 'prompt'),
+                (r'提示词[：:]\s*(.+?)$', 'prompt'),
+                (r'负面提示词[：:]\s*(.+?)$', 'negative_prompt'),
+                (r'Dubbing[：:]\s*(.+?)$', 'dubbing'),
+                (r'Semantic[：:]\s*(.+?)$', 'semantic'),
+                (r'Visual Concept[：:]\s*(.+?)$', 'visual_concept'),
+                (r'Visual Elements[：:]\s*(.+?)$', 'visual_elements'),
+                (r'Prompt[：:]\s*(.+?)$', 'prompt'),
+                (r'Negative Prompt[：:]\s*(.+?)$', 'negative_prompt'),
+            ]
+            
+            matched = False
+            for pattern, field_name in field_patterns:
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    current_field = field_name
+                    value = match.group(1).strip()
+                    if current_shot:
+                        current_shot[current_field] = value
+                    matched = True
+                    break
+            
+            # 如果是字段的延续内容（缩进的行）
+            if not matched and current_field and current_shot:
+                if line.startswith('- ') or line.startswith('  ') or line.startswith('\t'):
+                    current_shot[current_field] += ' ' + line.lstrip('- \t')
+        
+        # 保存最后一个分镜
+        if current_shot and any(current_shot.values()):
+            parsed_shots.append(current_shot)
+        
+        if parsed_shots:
+            result = parsed_shots
+            if core_theme or visual_tone or theme_elements:
+                result = {
+                    'shots': parsed_shots,
+                    'theme_info': {
+                        'core_theme': core_theme,
+                        'visual_tone': visual_tone,
+                        'theme_elements': theme_elements
+                    }
+                }
+            return result
+        
+        # 如果没有解析到分镜，但有主题信息
+        if core_theme or visual_tone:
+            return {"theme_info": {"core_theme": core_theme, "visual_tone": visual_tone, "theme_elements": theme_elements}}
+        
+        return None
 
     def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, llm_keywords='', llm_prompt='', use_raw_text=False, core_theme='', visual_tone=''):
         """创建新分镜 - 增强版：根据每个分镜的独特内容生成个性化提示词
@@ -5279,6 +5431,7 @@ class DocuMakerLiteV7:
     def optimize_prompt_with_ollama(self, prompt, sentence):
         """使用Ollama大模型优化提示词 - 根据提示词类型进行针对性优化"""
         import time
+        global ollama_lock
         
         # 检查是否选择了"脚本自带"
         model = self.ollama_model_var.get()
@@ -5432,17 +5585,19 @@ class DocuMakerLiteV7:
             self.log(f"📝 提示词类型: {prompt_type} | 目标平台: {'Stable Diffusion' if is_sd else '豆包生图'}")
             
             # 调用Ollama API，使用优化参数
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                options=config.get_options(
-                    num_predict=1500,  # 确保足够长度
-                    num_ctx=4096      # 标准上下文
+            global ollama_lock
+            with ollama_lock:
+                response = ollama.chat(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    options=config.get_options(
+                        num_predict=1500,  # 确保足够长度
+                        num_ctx=4096      # 标准上下文
+                    )
                 )
-            )
             
             optimized_prompt = response["message"]["content"].strip()
             
@@ -5466,14 +5621,15 @@ class DocuMakerLiteV7:
                 
                 retry_prompt = user_prompt + "\n\n【重要】请确保输出质量，添加更多细节和专业术语，使画面更加生动具体。"
                 
-                response = ollama.chat(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": retry_prompt}
-                    ],
-                    options=retry_config.get_options()
-                )
+                with ollama_lock:
+                    response = ollama.chat(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": retry_prompt}
+                        ],
+                        options=retry_config.get_options()
+                    )
                 
                 optimized_prompt = response["message"]["content"].strip()
                 optimized_prompt = optimized_prompt.replace('"', '').replace("'", "").strip()
@@ -6299,6 +6455,23 @@ class DocuMakerLiteV7:
             self.log("🎬 开始一键生成分镜")
             self.log("=" * 50)
             
+            # 检查是否需要关闭Ollama以释放GPU资源给Whisper使用
+            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+            # 只有不使用大模型时才关闭Ollama
+            if optimization_method not in ["本地大模型"]:
+                self.log("🧹 检查GPU资源状态...")
+                try:
+                    import subprocess
+                    result = subprocess.run(['tasklist'], capture_output=True, text=True)
+                    if 'ollama.exe' in result.stdout:
+                        self.log("⚠️ 检测到Ollama进程占用GPU，正在关闭以释放资源...")
+                        subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
+                        import time
+                        time.sleep(2)
+                        self.log("✅ Ollama已关闭，GPU资源已释放")
+                except Exception as e:
+                    pass
+            
             # 步骤1: 音频分析
             self.log("\n📍 步骤 1/4: 音频语音识别")
             self.update_task_progress("正在分析音频...", 10)
@@ -6564,14 +6737,15 @@ class DocuMakerLiteV7:
                         if user_model == "脚本自带":
                             user_model = "gemma3:4b"
                         
-                        # 定义模型优先级列表（按参数量从小到大排序）
+                        # 定义模型优先级列表（按稳定性和速度排序）
                         # 格式: (模型名称, 参数量估算/GB, 描述)
                         model_priority_list = [
+                            ("gemma3:4b", 4, "通用模型，推荐首选"),
                             ("gemma3:1b", 1, "轻量级模型，速度最快"),
                             ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
                             ("qwen2.5:1.5b", 1.5, "轻量级模型"),
                             ("phi3:mini", 2, "微软轻量级模型"),
-                            ("gemma3:4b", 4, "通用模型，提示词优化"),
+                            ("qwen3:4b", 4, "通用模型（部分显卡可能不稳定）"),
                             ("qwen2.5:3b", 3, "阿里轻量级模型"),
                             ("qwen2.5:7b", 7, "阿里标准模型"),
                             ("llama3.2:3b", 3, "Meta轻量级模型"),
@@ -6587,10 +6761,12 @@ class DocuMakerLiteV7:
                         ]
                         
                         # 获取可用的模型列表
+                        global ollama_lock
                         def get_available_models():
                             """获取本地可用的Ollama模型列表"""
                             try:
-                                models_info = ollama.list()
+                                with ollama_lock:
+                                    models_info = ollama.list()
                                 available = []
                                 if "models" in models_info:
                                     for m in models_info["models"]:
@@ -6645,6 +6821,7 @@ class DocuMakerLiteV7:
                         
                         def call_ollama_with_model(model_name):
                             """使用指定模型调用Ollama"""
+                            global ollama_lock
                             try:
                                 is_sd = prompt_type == "SD提示词"
                                 
@@ -6765,17 +6942,18 @@ class DocuMakerLiteV7:
                                     task_complexity = "medium"
                                 
                                 # 调用Ollama API
-                                response = ollama.chat(
-                                    model=model_name,
-                                    messages=[
-                                        {"role": "system", "content": system_content},
-                                        {"role": "user", "content": template["user"]}
-                                    ],
-                                    options=config.get_options(
-                                        num_predict=4000 if task_complexity == "high" else 3000,
-                                        num_ctx=8192 if task_complexity == "high" else 4096
+                                with ollama_lock:
+                                    response = ollama.chat(
+                                        model=model_name,
+                                        messages=[
+                                            {"role": "system", "content": system_content},
+                                            {"role": "user", "content": template["user"]}
+                                        ],
+                                        options=config.get_options(
+                                            num_predict=4000 if task_complexity == "high" else 3000,
+                                            num_ctx=8192 if task_complexity == "high" else 4096
+                                        )
                                     )
-                                )
                                 
                                 return response["message"]["content"].strip()
                             except Exception as e:
@@ -6863,6 +7041,15 @@ class DocuMakerLiteV7:
                             self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
                             self.log(f"   候选模型列表: {', '.join(candidate_models)}")
                             self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
+                            # 关闭Ollama释放GPU资源
+                            try:
+                                import subprocess
+                                subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
+                                import time
+                                time.sleep(1)
+                                self.log("🧹 Ollama已关闭，GPU资源已释放")
+                            except:
+                                pass
                             analysis_result = ""
                         
                         # 缓存分析结果（即使是空结果也缓存，避免重复失败）
@@ -6877,7 +7064,19 @@ class DocuMakerLiteV7:
                         self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
                         
                         # 使用新的智能解析函数提取完整分镜信息
-                        parsed_shots = self._parse_shot_analysis_result(analysis_result)
+                        parsed_shots_result = self._parse_shot_analysis_result(analysis_result)
+                        
+                        # 兼容多种返回格式：可能是列表、分镜列表+主题信息字典，或None
+                        parsed_shots = []
+                        if parsed_shots_result is None:
+                            parsed_shots = []
+                        elif isinstance(parsed_shots_result, list):
+                            parsed_shots = parsed_shots_result
+                        elif isinstance(parsed_shots_result, dict):
+                            if 'shots' in parsed_shots_result:
+                                parsed_shots = parsed_shots_result.get('shots', [])
+                            if 'theme_info' in parsed_shots_result:
+                                theme_info = parsed_shots_result.get('theme_info', theme_info)
                         
                         if parsed_shots:
                             self.log(f"✅ 智能解析完成，共 {len(parsed_shots)} 个分镜")
@@ -6892,9 +7091,19 @@ class DocuMakerLiteV7:
                         # 兼容旧格式：如果没有解析到分镜，使用旧方法
                         sentences = []
                         if not parsed_shots:
-                            # 提取分镜脚本（改进解析逻辑，支持多种格式变体）
-                            if analysis_result and "分镜脚本：" in analysis_result:
-                                shots_part = analysis_result.split("分镜脚本：")[1]
+                            # 提取分镜脚本（支持多种关键词）
+                            keywords = ["分镜脚本：", "分镜脚本", "Storyboard Script:", "Storyboard:"]
+                            shots_keyword = None
+                            shots_part = None
+                            
+                            if analysis_result:
+                                for kw in keywords:
+                                    if kw in analysis_result:
+                                        shots_keyword = kw
+                                        shots_part = analysis_result.split(kw)[1]
+                                        break
+                            
+                            if shots_part:
                                 import re
                                 
                                 # 改进的分镜解析逻辑 - 支持多种格式变体
@@ -8790,16 +8999,12 @@ class DocuMakerLiteV7:
                 if 'api_url' in config:
                     self.sd_api_url_var.set(config['api_url'])
                 
-                # 加载大模型设置 - 如果没有则使用默认值
-                if 'optimization_method' in config and config['optimization_method']:
-                    self.optimization_method_var.set(config['optimization_method'])
-                else:
-                    self.optimization_method_var.set("脚本自带")
+                # 加载大模型设置 - 默认使用脚本自带，避免大模型调用卡住
+                # 强制设置为"脚本自带"，用户需要手动开启才使用大模型
+                self.optimization_method_var.set("脚本自带")
                     
-                if 'ollama_model' in config and config['ollama_model']:
-                    if hasattr(self, 'ollama_model_var'):
-                        self.ollama_model_var.set(config['ollama_model'])
-                elif hasattr(self, 'ollama_model_var'):
+                # 加载Ollama模型设置 - 强制默认使用脚本自带
+                if hasattr(self, 'ollama_model_var'):
                     self.ollama_model_var.set("脚本自带")
                     
                 if 'llm_config_preset' in config and config['llm_config_preset']:
