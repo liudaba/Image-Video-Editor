@@ -3757,7 +3757,7 @@ class DocuMakerLiteV7:
         return result
     
     def _infer_visual_concept_from_dubbing(self, dubbing):
-        """使用大模型从配音内容智能推断画面构思"""
+        """使用大模型从配音内容智能推断画面构思 - 生成高质量视觉描述"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
@@ -3769,15 +3769,32 @@ class DocuMakerLiteV7:
             model = self.ollama_model_var.get()
             ollama_url = "http://localhost:11434"
             
-            prompt = f"""根据以下配音文本，构思一个适合的图像画面场景。
-要求：
-1. 描述一个具体的画面场景，包含主要视觉元素
-2. 用英文描述
-3. 只返回画面描述，不要其他解释
+            prompt = f"""你是AI视频提示词工程师。请根据配音生成新闻纪录片风格视觉描述。
 
-配音文本：{dubbing}
+【原则】
+1. 理解整篇主题：每个分镜都要服务于全文核心主题
+2. 忠实原文：配音说什么就表达什么
+3. 用词精准：选择恰到好处的词汇
+4. 主题一致性：所有分镜保持统一视觉基调
+5. 抽象概念可视化：用数据/图表/概念图
+6. 隐喻用"metaphor"：如"火药桶"→"powder keg metaphor"
+7. 区分胡塞(也门)和真主党(黎巴嫩)
+8. 不要假设参与者：说"海峡"不要"U.S. Navy"
 
-返回格式：a detailed visual scene description"""
+【禁止】
+- 过度具体化、推测结果、张冠李戴、提伤亡数字
+
+【示例】
+配音：最新消息 → "breaking news graphic, headline alert"
+配音：火药桶 → "powder keg metaphor, multiple flashpoints, tension escalating"
+配音：空袭 → "airstrike, explosions, smoke over area"
+配音：三死四伤 → "casualties evacuated, emergency medical response"
+配音：胡塞武装 → "Houthi fighters in Yemen, weapons display"
+配音：毒黑雨 → "toxic black rain, oil fire smoke mixing with rain"
+
+配音：{dubbing}
+
+生成（英文tag，用逗号分隔）："""
             
             import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
@@ -3803,7 +3820,7 @@ class DocuMakerLiteV7:
             return ""
     
     def _infer_visual_elements_from_dubbing(self, dubbing):
-        """使用大模型从配音内容智能推断视觉元素"""
+        """使用大模型从配音内容智能推断视觉元素 - 生成高质量具体视觉"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
@@ -3815,15 +3832,19 @@ class DocuMakerLiteV7:
             model = self.ollama_model_var.get()
             ollama_url = "http://localhost:11434"
             
-            prompt = f"""从以下配音文本中提取所有能够用于图像生成的视觉元素关键词。
-要求：
-1. 提取具体的人、物、场景、动作等视觉元素
-2. 用英文逗号分隔每个关键词
-3. 只返回关键词列表，不要其他解释
+            prompt = f"""你是AI视频提示词工程师。请从配音文本提取视觉元素关键词。
 
-配音文本：{dubbing}
+【原则】
+1. 忠实原文：配音说什么就提取什么
+2. 信息少时用通用词：配音短时用"news graphic, headline"等
+3. 情感用相关词：如"解气"→"morale, satisfaction"
 
-返回格式：keyword1, keyword2, keyword3"""
+【禁止】
+- 过度具体化、推测结果、张冠李戴
+
+配音：{dubbing}
+
+提取关键词（英文逗号分隔）："""
             
             import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
@@ -6222,28 +6243,155 @@ class DocuMakerLiteV7:
                 # 根据是否有全文上下文选择不同的system prompt
                 if full_context and len(full_context) > 50:
                     # 有全文上下文 - 简化版prompt，加快生成速度
-                    system_prompt = """你是一个纪录片画面提示词工程师。
+                    system_prompt = """你是专业的AI视频生成提示词工程师。
 
 任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
 
-规则：
-1. 开头：documentary photography, cinematic still, war journalism, raw photo
-2. 中间：根据配音内容生成具体场景描述
-3. 结尾：8k uhd, film grain, shot on 35mm
-4. 长度：20-40个单词
-5. 只输出英文tag，禁止中文"""
+【核心原则 - 必须遵守】
+1. 理解整篇主题思想：先理解全文核心主题，每个分镜都要服务于这个主题
+2. 忠实于原文语义：配音说什么就表达什么，不要过度推测结果
+3. 用词精准：选择恰到好处的词汇表达核心意思
+4. 主题一致性：所有分镜要保持统一的视觉基调和主题元素
+5. 信息少时保持通用：配音只有几个字时，用通用的新闻/数据画面，不要编造具体场景
+6. 情感可视化：表达情绪用相关画面（如"解气"→"观看新闻、满意表情"）
+7. 抽象概念用会议/简报：表达"升级"用"战略会议、简报"
+8. 官员说话用发布会：表达"官员说"用"press conference、briefing"
+9. 态势用"under siege"：表达"挨炸越来越多"用"under siege"而不是具体爆炸画面
+10. 隐喻可视化：比喻句用"metaphor visualization"（如"火药桶"→"powder keg metaphor"）
+11. 区分胡塞和真主党：胡塞在也门，真主党在黎巴嫩，不要混淆！
+12. 不要假设参与者：说"海峡"不要假设"美国海军"
+
+【禁止的写法】
+- ❌ 过度具体化：生成具体的人物/场景/动作（如"油轮燃烧"、"船只沉没"、"导弹发射"）
+- ❌ 推测结果：配音说"要报复"，不能生成"导弹正在发射"
+- ❌ 配音信息少时编造：配音"最新消息"不要生成一堆具体场景
+- ❌ 堆砌元素：一个提示词混合多个视角
+- ❌ 重复内容：质量标签不要重复出现
+- ❌ 张冠李戴：不要把人物搞错（如内塔尼亚胡不是Elliott Abrams）
+- ❌ 不要提具体伤亡数字：说"三死四伤"不要生成"lying on the ground"
+- ❌ 胡塞≠真主党：胡塞是也门武装，真主党是黎巴嫩
+- ❌ 假设参与者：说"海峡"不要生成"U.S. Navy"
+
+【正确示例】
+配音：最新消息
+✅ "breaking news graphic, newsroom atmosphere, headline alert, media coverage in progress"
+
+配音：彻底摧毁政权的味道
+✅ "regime collapse indicators, strategic defeat visualization, victory briefing, final offensive phase"
+
+配音：战场外溢已经失控
+✅ "conflict spillover map, regional escalation indicators, border instability visualization"
+
+配音：伊朗导弹砸到科威特炼油厂
+✅ "Kuwaiti refinery under attack, energy facility strike visualization"
+
+配音：巴林沙特阿联酋部分地区也被波及
+✅ "regional impact visualization, Gulf states affected areas, energy infrastructure map"
+
+配音：霍尔木兹海峡航运继续卡壳
+✅ "Strait of Hormuz shipping congestion, maritime traffic disruption, oil shipment blockage"
+
+配音：全球油价像做火箭一样往上窜
+✅ "oil price chart soaring, energy market surge graph, price skyrocketing visualization"
+
+配音：海湾能源设施挨炸越来越多
+✅ "multiple oil facility fires, coordinated attack aftermath, energy infrastructure under siege"
+
+配音：毒黑雨都出来了
+✅ "toxic black rain, oil fire smoke mixing with rain, apocalyptic atmosphere, environmental disaster"
+
+配音：联合国人道官员直呼危机雪上加霜
+✅ "UN humanitarian official at press conference, concerned expression, refugee statistics display, aid workers in field"
+
+配音：周边国家难民潮又起
+✅ "refugee columns fleeing, families with belongings, border crossing points, humanitarian crisis"
+
+配音：油价难民和扩散风险全炸锅
+✅ "composite crisis visualization, oil prices, refugee flows, conflict spread indicators"
+
+配音：全球其他热点被吸血资源和注意力全往这清洗
+✅ "global attention draining to Middle East, other conflicts neglected, resource reallocation"
+
+配音：接下来几天
+✅ "calendar overlay, upcoming dates marked, escalation timeline, strategic countdown"
+
+配音：如果伊朗再来一波大报复
+✅ "retaliation preparation, missile launchers positioning, coordinated attack warning"
+
+配音：以色列又精准斩首了三名伊朗军官
+✅ "targeted elimination operation, intelligence operation briefing, operational success visualization"
+
+配音：包括情报高官和革命卫队关键指挥官
+✅ "military command structure chart, intelligence officials, Revolutionary Guard leadership"
+
+配音：内坦亚胡直接放话
+✅ "prime minister statement, official press conference, national address broadcast"
+
+配音：黎巴嫩南部昨天又有以色列空袭
+✅ "Israeli airstrike on southern Lebanon, explosions in residential area, smoke over villages"
+
+配音：政府军三死四伤
+✅ "military casualties being evacuated, emergency medical response, field hospital scene, grim aftermath"
+
+配音：胡塞武装扬言如果再掺合进来
+✅ "Houthi fighters in Yemen, weapons display, threatening rhetoric, tribal gathering"
+
+配音：曼德海峡也可能封
+✅ "Bab al-Mandab Strait strategic waterway, naval threats, shipping lane vulnerability"
+
+配音：整个波斯湾现在就是火药桶
+✅ "Persian Gulf region map, powder keg metaphor visualization, multiple flashpoints, tension escalating, red zones"
+
+配音：伊朗政权现在连油浓缩和导弹生产能力都基本废了
+✅ "production capacity chart, nuclear facility status, military capability decline graph"
+
+配音：这话听着解气
+✅ "military personnel watching news feed, satisfied expressions, morale boost moment"
+
+配音：但也透着这场仗已经从教训升级成
+✅ "military strategy meeting, generals around table, escalation briefings, war room atmosphere"
+
+配音：58艘舰艇两天内全报销
+✅ "satellite imagery of destroyed naval fleet, port facility in ruins, burning wreckage"
+
+配音：还有现在全在海底了
+✅ "underwater scene of sunken vessels, destroyed ships on sea floor, submarine perspective"
+
+【格式要求】
+- 开头：documentary photography, cinematic still, war journalism, raw photo
+- 中间：核心语义表达（用抽象概念/数据可视化/概念图/情感画面）
+- 结尾：8k uhd, high detail, film grain, natural lighting, shot on 35mm
+- 只输出英文tag，禁止中文
+- 不要重复质量标签"""
                 else:
                     # 没有全文上下文 - 仅基于当前配音生成
-                    system_prompt = """你是一个纪录片画面提示词工程师。
+                    system_prompt = """你是专业的AI视频生成提示词工程师。
 
 任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
 
-规则：
-1. 开头：documentary photography, cinematic still, war journalism, raw photo
-2. 中间：根据配音内容生成具体场景描述
-3. 结尾：8k uhd, film grain, shot on 35mm
-4. 长度：20-40个单词
-5. 只输出英文tag，禁止中文"""
+【核心原则】
+1. 理解整篇主题：先理解全文核心主题，每个分镜都要服务于这个主题
+2. 忠实原文：配音说什么就表达什么
+3. 用词精准：选择恰到好处的词汇
+4. 主题一致性：所有分镜保持统一视觉基调和主题元素
+5. 抽象概念可视化：用数据/图表/概念图
+6. 隐喻用"metaphor"：如"火药桶"→"powder keg metaphor"
+7. 区分胡塞(也门)和真主党(黎巴嫩)
+8. 不要假设参与者：说"海峡"不要"U.S. Navy"
+
+【禁止】
+- 过度具体化、推测结果、张冠李戴、提伤亡数字
+
+【示例】
+配音：火药桶 → "powder keg metaphor, multiple flashpoints, tension escalating, red zones"
+配音：空袭 → "airstrike, explosions, smoke over area"
+配音：三死四伤 → "casualties evacuated, emergency medical response, field hospital"
+
+【格式】
+- 开头：documentary photography, cinematic still, war journalism, raw photo
+- 中间：核心语义
+- 结尾：8k uhd, high detail, film grain, natural lighting, shot on 35mm
+- 只输出英文tag，禁止中文"""
 
                 if full_context and len(full_context) > 50:
                     # 简化user_prompt，只保留关键信息
@@ -7934,12 +8082,21 @@ class DocuMakerLiteV7:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             import os
             
-            # Ollama服务是单线程处理，减少线程数以避免无谓的等待
-            # CPU核心数的2倍，但不超过8个线程（因为Ollama只能串行处理）
+            # Ollama支持并行处理，增加线程数以提高速度
+            # 根据CPU核心数和任务数量动态调整
             cpu_count = os.cpu_count() or 4
-            thread_count = min(cpu_count * 2, 8)
+            task_count = len(shot_tasks)
             
-            self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理")
+            # 动态计算线程数：最少4个，最多16个，根据任务数量调整
+            # 任务多时增加并行度，任务少时减少开销
+            if task_count >= 16:
+                thread_count = min(cpu_count * 2, 16)
+            elif task_count >= 8:
+                thread_count = min(cpu_count * 2, 12)
+            else:
+                thread_count = min(task_count, 8)
+            
+            self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理 ({task_count}个任务)")
             
             completed_count = 0
             shots_dict = {}
