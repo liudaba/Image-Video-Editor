@@ -283,20 +283,17 @@ class MultiModelFusion:
         
     def discover_models(self):
         """发现可用的Ollama模型"""
-        global ollama_lock
         if not OLLAMA_AVAILABLE:
             return []
         
         try:
-            with ollama_lock:
-                models = ollama.list()
+            models = ollama.list()
             if "models" in models:
                 self.available_models = []
                 for model in models["models"]:
                     name = model.get("name") or model.get("model", "")
                     if name:
                         self.available_models.append(name)
-                        # 根据模型特性设置权重
                         self.model_weights[name] = self._calculate_model_weight(name)
                 return self.available_models
         except Exception as e:
@@ -361,15 +358,15 @@ class MultiModelFusion:
                 else:
                     config = LLMConfig("平衡模式")
                 
-                with ollama_lock:
-                    response = ollama.chat(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": prompt_template["system"]},
-                            {"role": "user", "content": prompt_template["user"]}
-                        ],
-                        options=config.get_options(num_predict=1500)
-                    )
+                # Ollama HTTP API 本身线程安全
+                response = ollama.chat(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": prompt_template["system"]},
+                        {"role": "user", "content": prompt_template["user"]}
+                    ],
+                    options=config.get_options(num_predict=1500)
+                )
                 
                 duration = _time.time() - start_time
                 result = response["message"]["content"].strip()
@@ -564,12 +561,20 @@ class PromptTemplates:
     SHOT_ANALYSIS_SD = {
         "system": """你是资深影视导演和视觉叙事专家，擅长将文本转化为电影级分镜脚本。
 
-【核心要求 - 主题统一性】
-1. 整篇深度阅读：必须完整阅读并深入理解整段转录文本，把握核心主题思想
-2. 主题提炼：准确提炼出文本的中心思想、情感基调和视觉主题
-3. 统一基调：所有分镜的画面提示词必须围绕同一主题思想、定准同一基调
-4. 视觉连贯：所有图片内容要风格统一、色调协调、构图有内在联系
-5. 综合表达：所有分镜画面综合起来必须突出表达那个核心主题思想
+【核心要求 - 必须遵守】
+1. 【强制】每个分镜的"配音"字段必须使用原始转录文本，禁止做任何总结或概括！
+2. 【强制】分镜数量必须充足，确保每个分镜时长在8-12秒之间，不宜过长
+3. 整篇深度阅读：必须完整阅读并深入理解整段转录文本，把握核心主题思想
+4. 主题提炼：准确提炼出文本的中心思想、情感基调和视觉主题
+5. 统一基调：所有分镜的画面提示词必须围绕同一主题思想、定准同一基调
+6. 视觉连贯：所有图片内容要风格统一、色调协调、构图有内在联系
+7. 综合表达：所有分镜画面综合起来必须突出表达那个核心主题思想
+
+【关键：分镜数量由你根据语义完整性自主决定】
+- 不要限制分镜数量，根据语义断句自由创建
+- 每一句完整的话或语义连贯的多个句子应该作为一个分镜
+- 分镜数量由大模型根据语义完整性自行判断
+- 不要合并语义完整的句子！
 
 【语义分析与拆分润色】
 1. 语义理解：深入分析每句话的具体语义，理解其深层含义和情感色彩
@@ -639,37 +644,51 @@ class PromptTemplates:
 - 提示词质量：每个画面提示词必须专业、详细、可执行
 
 【输出格式 - 必须严格遵守】
-【重要】你的输出必须严格按照以下格式返回，否则程序无法解析！
+【重要】你的输出必须严格按照以下格式返回，禁止使用其他格式！
 
 核心主题：[一句话概括文本的核心主题思想]
 视觉基调：[整体视觉风格+统一色调+情感氛围]
-主题元素：[贯穿全篇的视觉元素列表]
+主题元素：[贯穿全篇的视觉元素列表，用逗号分隔]
 
 分镜脚本：
-1. **配音**：[润色后的口语化文本内容]
-   - **语义解析**：[这句话的核心语义和情感]
-   - **画面构思**：[围绕主题的具体构图思路]
-   - **视觉元素**：[与主题和语义相关的具体元素]
-   - **画面提示词**：[英文，必须围绕核心主题，包含主题相关元素]
-   - **反向提示词**：[英文，避免的问题]
+1. **配音**：[原始转录文本，不要总结或概括]
+2. **画面提示词**：[英文关键词，用逗号分隔，权重使用(数字)格式，如 black hole(1.5)]
+3. **反向提示词**：[英文，避免的问题]
 
-【注意】输出中必须包含"分镜脚本："这个关键词！""",
+示例格式（请严格按照此格式输出）：
+```
+核心主题：黑洞的形成与宇宙命运
+视觉基调：神秘、科幻、深邃的蓝色调
+主题元素：黑洞、吸积盘、星云、星光
+
+分镜脚本：
+1. **配音**：在遥远的宇宙深处，隐藏着神秘的黑洞
+2. **画面提示词**：black hole(1.5), event horizon(1.3), deep space(1.2), cosmic dust(1.1), nebula(1.2), neutral lighting(1.0), balanced exposure(1.2), documentary style(1.3), wide angle shot(1.1), photorealistic style(1.4), cinematic composition(1.3), professional astrophotography, masterpiece, best quality(1.6), ultra detailed(1.1)
+3. **反向提示词**：worst quality, low quality, cartoon, anime, painting, illustration, ugly, deformed, blurry
+
+1. **配音**：恒星逐渐被黑洞引力吞噬，形成壮观的吸积盘
+2. **画面提示词**：dying star(1.6), black hole(1.5), accretion disk(1.8), gravitational pull(1.4), stellar collapse(1.5), space, hot plasma(1.4), orange glow(1.3), neutral lighting(1.0), balanced exposure(1.2), documentary style(1.3), medium shot(1.1), photorealistic style(1.4), cinematic composition(1.3), professional astrophotography, masterpiece, best quality(1.6), ultra detailed(1.1)
+3. **反向提示词**：worst quality, low quality, cartoon, anime, painting, illustration, ugly, deformed, blurry
+```
+
+【注意】输出中必须包含"分镜脚本："这个关键词！
+【关键】每个分镜的配音字段必须使用原始转录文本，绝对不能总结！""",
 
         "user_template": """【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 【转录文本】
 {text}
 
 【重要要求】
 1. 请先完整阅读整篇文本，深入理解其核心主题思想
-2. 根据语义合理拆分文本，对每句配音进行润色优化
-3. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-4. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
-5. 确保所有图片风格统一、色调协调、共同突出表达核心主题
-6. 每个画面都要贴切诠释对应语义的内容
+2. 根据语义合理拆分文本，每句完整的话或语义连贯的多个句子作为一个分镜
+3. 分镜数量不限制，由你根据语义完整性自主判断
+4. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
+5. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
+6. 确保所有图片风格统一、色调协调、共同突出表达核心主题
+7. 每个画面都要贴切诠释对应语义的内容
 
 请设计电影级分镜脚本，画面提示词必须使用英文："""
     }
@@ -771,24 +790,42 @@ class PromptTemplates:
         "user_template": """【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 【转录文本】
 {text}
 
 【重要要求】
 1. 请先完整阅读整篇文本，深入理解其核心主题思想
-2. 根据语义合理拆分文本，对每句配音进行润色优化
-3. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-4. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
-5. 确保所有图片风格统一、色调协调、共同突出表达核心主题
-6. 每个画面都要贴切诠释对应语义的内容
+2. 根据语义合理拆分文本，每句完整的话或语义连贯的多个句子作为一个分镜
+3. 分镜数量不限制，由你根据语义完整性自主判断
+4. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
+5. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
+6. 确保所有图片风格统一、色调协调、共同突出表达核心主题
+7. 每个画面都要贴切诠释对应语义的内容
 
 请设计电影级分镜脚本，画面提示词必须使用中文："""
     }
     
     # 为了保持兼容性，保留旧的SHOT_ANALYSIS引用（默认使用SD版本)
     SHOT_ANALYSIS = SHOT_ANALYSIS_SD
+
+    # 轻量级主题提取模板 - 仅提取核心主题和视觉基调，不生成分镜
+    THEME_EXTRACTION = {
+        "system": """你是专业的视频内容分析专家。请从以下语音转录文本中提取关键词，用于后续分镜生成。
+
+【重要】你必须直接返回关键词，不需要任何解释或描述。
+
+请用以下严格格式输出（只输出这些内容，不要有任何其他文字）：
+【核心主题】：关键词1, 关键词2, 关键词3（最多5个关键词，用逗号分隔）
+【视觉基调】：关键词1, 关键词2（最多3个关键词）
+【主题元素】：关键词1, 关键词2, 关键词3, 关键词4, 关键词5（最多5个关键词）
+
+示例：
+【核心主题】：战争, 军事, 伊朗, 美国, 冲突
+【视觉基调】：紧张, 纪实, 电影级
+【主题元素】：战场, 军队, 导弹, 硝烟, 废墟""",
+        "user_template": "语音转录文本：\n{text}"
+    }
     
     # 语音新闻播报分镜分析模板 - SD提示词版本
     VOICE_SHOT_ANALYSIS_SD = {
@@ -825,11 +862,11 @@ class PromptTemplates:
 2. 一字不差转录：严格按照原始语音内容进行转录，确保100%准确
 3. 标点符号添加：根据GB/T 15834—2011规范，结合语音节奏准确添加标点符号
 4. 错别字修正：仅修正明显的错别字
-5. 分镜脚本生成规则：
-   - 基于文章中心思想生成分镜脚本
-   - 每个分镜只对应一句话，绝不合并多个句子
-   - 每个独立的语义单元都必须是一个独立的分镜
-   - 分镜数量越多越好，不要限制分镜数量
+5. 分镜脚本生成规则 - 【强制要求】：
+   - 【必须遵守】每个语音片段必须对应一个独立的分镜！
+   - 【禁止合并】绝对不要将多个句子合并成一个分镜！
+   - 【数量要求】分镜数量不限制，由大模型根据语义完整性自主判断
+   - 【错别字修正】修正所有的错别字
    - 分镜之间要有连贯性，画面切换流畅自然
    - 所有分镜的画面提示词必须围绕同一主题、保持统一基调和风格
 6. 语言要求：使用中文简体
@@ -863,7 +900,6 @@ class PromptTemplates:
 【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 原始语音转录文本：
 {text}
@@ -874,15 +910,16 @@ class PromptTemplates:
 {custom_visual_tone_section}
 {selected_styles_section}
 
-【重要提醒】
+【重要提醒 - 必须遵守】
 1. 请一字不差地转录原始语音内容
-2. 根据语义进行断句，使用国标标点符号
+2.【强制】错别字修正：修正所有的错别字
 3. 请先完整阅读整篇文本，深入理解其核心主题思想
-4. 根据语义合理拆分文本，对每句配音进行润色优化
-5. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-6. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
-7. 确保所有图片风格统一、色调协调、共同突出表达核心主题
-8. 每个画面都要贴切诠释对应语义的内容
+4. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
+5.【强制】根据语义进行断句，一个断句生成一个分镜。
+6.【强制】分镜数量不限制，由大模型根据语义完整性自主判断
+7. 【强制】所有分镜的画面提示词必须围绕断句的语义使用恰当贴切的名词或形容词，视觉元素用词不得少于三个！
+8. 确保所有图片风格统一、色调协调、共同突出表达核心主题
+9.每个画面的视觉元素都要贴切诠释对应语义的内容
 
 请生成专业的分镜脚本。"""
     }
@@ -959,7 +996,6 @@ class PromptTemplates:
 【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 原始语音转录文本：
 {text}
@@ -970,15 +1006,16 @@ class PromptTemplates:
 {custom_visual_tone_section}
 {selected_styles_section}
 
-【重要提醒】
+【重要提醒 - 必须遵守】
 1. 请一字不差地转录原始语音内容
-2. 根据语义进行断句，使用国标标点符号
+2.【强制】错别字修正：修正所有的错别字
 3. 请先完整阅读整篇文本，深入理解其核心主题思想
-4. 根据语义合理拆分文本，对每句配音进行润色优化
-5. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-6. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
-7. 确保所有图片风格统一、色调协调、共同突出表达核心主题
-8. 每个画面都要贴切诠释对应语义的内容
+4. 根据文本语义添加与主题相关的视觉元素，进行主题化构图
+5.【强制】根据语义进行断句，一个断句生成一个分镜。
+6.【强制】分镜数量不限制，由大模型根据语义完整性自主判断
+7. 【强制】所有分镜的画面提示词必须围绕断句的语义使用恰当贴切的名词或形容词，视觉元素用词不得少于三个！
+8. 确保所有图片风格统一、色调协调、共同突出表达核心主题
+9.每个画面的视觉元素都要贴切诠释对应语义的内容
 
 请生成专业的分镜脚本。"""
     }
@@ -1057,7 +1094,6 @@ class PromptTemplates:
 【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 原始语音转录文本：
 {text}
@@ -1065,15 +1101,16 @@ class PromptTemplates:
 提示词类型：SD提示词（必须使用英文画面提示词）
 风格预设：{style_preset}
 
-【重要提醒】
+【重要提醒 - 必须遵守】
 1. 请一字不差地转录原始语音内容
-2. 根据语义进行断句，使用国标标点符号
+2.【强制】错别字修正：修正所有的错别字
 3. 请先完整阅读整篇文本，深入理解其核心科普主题
-4. 根据语义合理拆分文本，对每句配音进行润色优化
-5. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-6. 根据科学知识内容添加与主题相关的视觉元素，进行主题化构图
-7. 确保所有图片风格统一、色调协调、共同突出表达核心科普主题
-8. 每个画面都要贴切诠释对应语义的内容
+4. 根据科学知识内容添加与主题相关的视觉元素，进行主题化构图
+5.【强制】根据语义进行断句，一个断句生成一个分镜。
+6.【强制】分镜数量不限制，由大模型根据语义完整性自主判断
+7. 【强制】所有分镜的画面提示词必须围绕断句的语义使用恰当贴切的名词或形容词，视觉元素用词不得少于三个！
+8. 确保所有图片风格统一、色调协调、共同突出表达核心科普主题
+9.每个画面的视觉元素都要贴切诠释对应语义的内容
 
 请生成专业的分镜脚本。"""
     }
@@ -1152,7 +1189,6 @@ class PromptTemplates:
 【音频信息】
 - 片段数：{segment_count}个
 - 总时长：{duration:.1f}秒
-- 建议分镜：{optimal_shots}个
 
 原始语音转录文本：
 {text}
@@ -1160,15 +1196,16 @@ class PromptTemplates:
 提示词类型：豆包提示词（必须使用中文画面提示词）
 风格预设：{style_preset}
 
-【重要提醒】
+【重要提醒 - 必须遵守】
 1. 请一字不差地转录原始语音内容
-2. 根据语义进行断句，使用国标标点符号
+2.【强制】错别字修正：修正所有的错别字
 3. 请先完整阅读整篇文本，深入理解其核心科普主题
-4. 根据语义合理拆分文本，对每句配音进行润色优化
-5. 所有分镜的画面提示词必须围绕同一主题、定准同一基调
-6. 根据科学知识内容添加与主题相关的视觉元素，进行主题化构图
-7. 确保所有图片风格统一、色调协调、共同突出表达核心科普主题
-8. 每个画面都要贴切诠释对应语义的内容
+4. 根据科学知识内容添加与主题相关的视觉元素，进行主题化构图
+5.【强制】根据语义进行断句，一个断句生成一个分镜。
+6.【强制】分镜数量不限制，由大模型根据语义完整性自主判断
+7. 【强制】所有分镜的画面提示词必须围绕断句的语义使用恰当贴切的名词或形容词，视觉元素用词不得少于三个！
+8. 确保所有图片风格统一、色调协调、共同突出表达核心科普主题
+9.每个画面的视觉元素都要贴切诠释对应语义的内容
 
 请生成专业的分镜脚本。"""
     }
@@ -1244,11 +1281,19 @@ class PromptTemplates:
             "science_shot_analysis_sd": cls.SCIENCE_SHOT_ANALYSIS_SD,
             "science_shot_analysis_doubao": cls.SCIENCE_SHOT_ANALYSIS_DOUBAO,
             "style_description": cls.STYLE_DESCRIPTION,
-            "quality_assessment": cls.QUALITY_ASSESSMENT
+            "quality_assessment": cls.QUALITY_ASSESSMENT,
+            "theme_extraction": cls.THEME_EXTRACTION
         }
         
         if template_type not in templates:
             return None
+        
+        # 不再强制限制分镜数量，让大模型自主判断
+        # 保留这些键但设为 None，避免模板渲染错误
+        if 'min_shots' not in kwargs:
+            kwargs['min_shots'] = ""
+        if 'max_shots' not in kwargs:
+            kwargs['max_shots'] = ""
         
         template = templates[template_type]
         return {
@@ -2175,11 +2220,9 @@ class DocuMakerLiteV7:
         script_model_btn.pack(fill=tk.X, pady=1, padx=5)
         
         # 尝试获取本地已安装的Ollama模型
-        global ollama_lock
         try:
             if OLLAMA_AVAILABLE:
-                with ollama_lock:
-                    models = ollama.list()
+                models = ollama.list()
                 # 尝试不同的键名来获取模型列表
                 if "models" in models:
                     model_list = models["models"]
@@ -2195,7 +2238,7 @@ class DocuMakerLiteV7:
                         # 智能推荐模型
                         recommended_models = []
                         for model in model_names:
-                            if any(keyword in model.lower() for keyword in ["gemma", "deepseek", "llama", "mistral"]):
+                            if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
                                 recommended_models.append((model, True))
                             else:
                                 recommended_models.append((model, False))
@@ -2204,18 +2247,22 @@ class DocuMakerLiteV7:
                         for model, is_recommended in recommended_models:
                             # 添加模型任务标注
                             model_label = model
-                            if "qwen3:8b" in model:
+                            if "qwen2.5:7b" in model:
+                                model_label = f"{model} (通用任务，推荐)"
+                            elif "qwen2.5:3b" in model:
+                                model_label = f"{model} (轻量级任务，速度优先)"
+                            elif "qwen3:8b" in model:
                                 model_label = f"{model} (通用任务，内容分析)"
                             elif "qwen3:4b" in model:
                                 model_label = f"{model} (轻量级通用任务)"
                             elif "qwen3-vl:4b" in model:
                                 model_label = f"{model} (视觉任务)"
                             elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (代码和技术内容)"
+                                model_label = f"{model} (推理任务，逻辑分析)"
                             elif "gemma3:4b" in model:
                                 model_label = f"{model} (通用任务，提示词优化)"
                             elif "gemma3:1b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
+                                model_label = f"{model} (超轻量任务，极速响应)"
                             elif "mistral" in model:
                                 model_label = f"{model} (通用任务，创意生成)"
                             elif "llama3" in model:
@@ -2228,35 +2275,46 @@ class DocuMakerLiteV7:
                             btn.pack(fill=tk.X, pady=1, padx=5)
                     else:
                         # 如果没有模型，显示默认模型
-                        default_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+                        default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
                         for model in default_models:
                             # 添加模型任务标注
                             model_label = model
-                            if "gemma3:4b" in model:
+                            if "qwen2.5:7b" in model:
+                                model_label = f"{model} (通用任务，推荐)"
+                            elif "qwen2.5:3b" in model:
+                                model_label = f"{model} (轻量级任务，速度优先)"
+                            elif "gemma3:4b" in model:
                                 model_label = f"{model} (通用任务，提示词优化)"
                             elif "gemma3:1b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
+                                model_label = f"{model} (超轻量任务，极速响应)"
                             elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (代码和技术内容)"
+                                model_label = f"{model} (推理任务，逻辑分析)"
                             elif "mistral" in model:
                                 model_label = f"{model} (通用任务，创意生成)"
                             elif "llama3" in model:
                                 model_label = f"{model} (通用任务，长文本分析)"
                             
-                            btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                            if is_recommended:
+                                btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                            else:
+                                btn = ttk.Button(self.model_dropdown_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                             btn.pack(fill=tk.X, pady=1, padx=5)
                 else:
                     # 如果没有models键，显示默认模型
-                    default_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+                    default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
                     for model in default_models:
                         # 添加模型任务标注
                         model_label = model
-                        if "gemma3:4b" in model:
+                        if "qwen2.5:7b" in model:
+                            model_label = f"{model} (通用任务，推荐)"
+                        elif "qwen2.5:3b" in model:
+                            model_label = f"{model} (轻量级任务，速度优先)"
+                        elif "gemma3:4b" in model:
                             model_label = f"{model} (通用任务，提示词优化)"
                         elif "gemma3:1b" in model:
-                            model_label = f"{model} (轻量级任务，速度优先)"
+                            model_label = f"{model} (超轻量任务，极速响应)"
                         elif "deepseek-r1:8b" in model:
-                            model_label = f"{model} (代码和技术内容)"
+                            model_label = f"{model} (推理任务，逻辑分析)"
                         elif "mistral" in model:
                             model_label = f"{model} (通用任务，创意生成)"
                         elif "llama3" in model:
@@ -2266,16 +2324,20 @@ class DocuMakerLiteV7:
                         btn.pack(fill=tk.X, pady=1, padx=5)
             else:
                 # 如果Ollama不可用，显示默认模型
-                default_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+                default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
                 for model in default_models:
                     # 添加模型任务标注
                     model_label = model
-                    if "gemma3:4b" in model:
+                    if "qwen2.5:7b" in model:
+                        model_label = f"{model} (通用任务，推荐)"
+                    elif "qwen2.5:3b" in model:
+                        model_label = f"{model} (轻量级任务，速度优先)"
+                    elif "gemma3:4b" in model:
                         model_label = f"{model} (通用任务，提示词优化)"
                     elif "gemma3:1b" in model:
-                        model_label = f"{model} (轻量级任务，速度优先)"
+                        model_label = f"{model} (超轻量任务，极速响应)"
                     elif "deepseek-r1:8b" in model:
-                        model_label = f"{model} (代码和技术内容)"
+                        model_label = f"{model} (推理任务，逻辑分析)"
                     elif "mistral" in model:
                         model_label = f"{model} (通用任务，创意生成)"
                     elif "llama3" in model:
@@ -2288,16 +2350,20 @@ class DocuMakerLiteV7:
             status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
             self.log(f"获取Ollama模型列表失败: {error_msg} (status code: {status_code})")
             # 出错时显示默认模型
-            default_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+            default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
             for model in default_models:
                 # 添加模型任务标注
                 model_label = model
-                if "gemma3:4b" in model:
+                if "qwen2.5:7b" in model:
+                    model_label = f"{model} (通用任务，推荐)"
+                elif "qwen2.5:3b" in model:
+                    model_label = f"{model} (轻量级任务，速度优先)"
+                elif "gemma3:4b" in model:
                     model_label = f"{model} (通用任务，提示词优化)"
                 elif "gemma3:1b" in model:
-                    model_label = f"{model} (轻量级任务，速度优先)"
+                    model_label = f"{model} (超轻量任务，极速响应)"
                 elif "deepseek-r1:8b" in model:
-                    model_label = f"{model} (代码和技术内容)"
+                    model_label = f"{model} (推理任务，逻辑分析)"
                 elif "mistral" in model:
                     model_label = f"{model} (通用任务，创意生成)"
                 elif "llama3" in model:
@@ -2484,21 +2550,19 @@ class DocuMakerLiteV7:
             
             # 使用创意模式生成风格描述
             config = LLMConfig("创意模式")
-            global ollama_lock
             
-            # 调用Ollama API，使用优化参数
-            with ollama_lock:
-                response = ollama.chat(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": template["system"]},
-                        {"role": "user", "content": template["user"]}
-                    ],
-                    options=config.get_options(
-                        num_predict=800,
-                        num_ctx=2048
-                    )
+            # Ollama HTTP API 本身线程安全
+            response = ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": template["system"]},
+                    {"role": "user", "content": template["user"]}
+                ],
+                options=config.get_options(
+                    num_predict=800,
+                    num_ctx=2048
                 )
+            )
             
             style_description = response["message"]["content"].strip()
             self.log(f"⚡ 风格描述生成完成: {style}: {style_description[:50]}...")
@@ -3290,206 +3354,136 @@ class DocuMakerLiteV7:
 
     def _parse_shot_analysis_result(self, analysis_result):
         """
-        智能解析大模型返回的分镜分析结果
-        完整提取：配音、语义解析、画面构思、视觉元素、画面提示词等所有信息
-        支持多种格式：中文、英文、Markdown粗体等
+        智能解析大模型返回的分镜分析结果【最终增强版】
+        支持任何格式的大模型返回
         """
         import re
         
         if not analysis_result:
             return None
         
-        # ============ 第一步：提取核心主题和视觉基调 ============
+        self.log(f"🔍 开始解析大模型返回内容，长度: {len(analysis_result)} 字符")
+        
+        # 预处理：统一格式
+        cleaned_result = analysis_result
+        cleaned_result = cleaned_result.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # 提取主题信息
         core_theme = None
         visual_tone = None
         theme_elements = None
         
-        # 核心主题模式（支持多种格式）
-        core_theme_patterns = [
-            r'\*\*核心主题[：:]\*\*\s*(.+?)(?:\n|$)',
+        # 提取核心主题
+        theme_patterns = [
+            r'\*\*核心主题[：:]\s*(.+?)(?:\n|$)',
             r'核心主题[：:]\s*(.+?)(?:\n|$)',
-            r'\*\*Core Theme[：:]\*\*\s*(.+?)(?:\n|$)',
-            r'Core Theme[：:]\s*(.+?)(?:\n|$)',
-            r'The Core Theme:[ ]*(.+?)(?:\n|$)',
         ]
-        
-        # 视觉基调模式
-        visual_tone_patterns = [
-            r'\*\*视觉基调[：:]\*\*\s*(.+?)(?:\n|$)',
-            r'视觉基调[：:]\s*(.+?)(?:\n|$)',
-            r'\*\*Visual Tone[：:]\*\*\s*(.+?)(?:\n|$)',
-            r'Visual Tone[：:]\s*(.+?)(?:\n|$)',
-            r'Visual Tone:[ ]*(.+?)(?:\n|$)',
-            r'Overall Tone:[ ]*(.+?)(?:\n|$)',
-        ]
-        
-        # 主题元素模式
-        theme_elements_patterns = [
-            r'\*\*主题元素[：:]\*\*\s*(.+?)(?:\n|$)',
-            r'主题元素[：:]\s*(.+?)(?:\n|$)',
-            r'\*\*Theme Elements[：:]\*\*\s*(.+?)(?:\n|$)',
-            r'Theme Elements:[ ]*(.+?)(?:\n|$)',
-        ]
-        
-        for pattern in core_theme_patterns:
-            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
+        for pattern in theme_patterns:
+            match = re.search(pattern, cleaned_result, re.IGNORECASE | re.DOTALL)
             if match:
                 core_theme = match.group(1).strip()
                 break
         
-        for pattern in visual_tone_patterns:
-            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
+        # 提取视觉基调
+        tone_patterns = [
+            r'\*\*视觉基调[：:]\s*(.+?)(?:\n|$)',
+            r'视觉基调[：:]\s*(.+?)(?:\n|$)',
+        ]
+        for pattern in tone_patterns:
+            match = re.search(pattern, cleaned_result, re.IGNORECASE | re.DOTALL)
             if match:
                 visual_tone = match.group(1).strip()
                 break
         
-        for pattern in theme_elements_patterns:
-            match = re.search(pattern, analysis_result, re.IGNORECASE | re.DOTALL)
-            if match:
-                theme_elements = match.group(1).strip()
-                break
-        
-        # 记录提取到的主题信息
-        if core_theme:
-            self.log(f"🎯 核心主题: {core_theme[:100]}")
-        if visual_tone:
-            self.log(f"🎨 视觉基调: {visual_tone[:100]}")
-        
-        # ============ 第二步：查找分镜脚本部分 ============
-        # 支持的关键词列表
-        keywords = [
-            "分镜脚本：", "分镜脚本", 
-            "Storyboard Script:", "Storyboard Script", 
-            "Storyboard:", "Shot Script:",
-            "分镜列表：", "分镜："
-        ]
-        
-        shots_keyword = None
-        shots_part = None
-        
-        for kw in keywords:
-            if kw in analysis_result:
-                shots_keyword = kw
-                shots_part = analysis_result.split(kw, 1)[1]
-                break
-        
-        if not shots_part:
-            # 如果没有找到分镜脚本部分，返回主题信息
-            if core_theme or visual_tone:
-                return {"theme_info": {"core_theme": core_theme, "visual_tone": visual_tone, "theme_elements": theme_elements}}
-            return None
-        
-        # ============ 第三步：解析分镜内容 ============
-        # 清理内容，移除Markdown粗体标记
-        shots_part = re.sub(r'\*\*([^*]+)\*\*', r'\1', shots_part)
-        
-        # 按行分割
-        lines = [s.strip() for s in shots_part.split('\n') if s.strip()]
-        
-        if not lines:
-            return None
-        
+        # ============ 直接使用备用解析方法（更可靠）============
+        # 不再依赖复杂的标准解析，直接从全文提取
         parsed_shots = []
-        current_shot = None
-        current_field = None
-        current_value = []
         
-        # 分镜开始标记模式
-        shot_start_patterns = [
-            r'^\d+\.\s*',           # 1. 或 1、 
-            r'^\[\d+\]',            # [1]
-            r'^Shot\s*\d+',         # Shot 1
-            r'^Scene\s*\d+',        # Scene 1
+        # 方法1：直接搜索 "数字. 配音:" 模式（支持各种变体）
+        # 支持：1. 配音： / 1. **配音**： / 1.配音：
+        patterns_to_try = [
+            # 最宽松的模式：数字 + 任意空白 + 配音 + 任意冒号
+            r'(\d+)[.、\s]+[\*\*]*配[\*\*]*音[\*\*]*[：:\s]+(.+?)(?=\n\d+[.、\s]|$)',
+            # 带空格和全角冒号
+            r'(\d+)[\.．]\s*[\*\*]*配音[\*\*]*[：:]\s*(.+?)(?=\n\d+[\.．]|$)',
         ]
         
-        def is_shot_start(line):
-            for pattern in shot_start_patterns:
-                if re.match(pattern, line, re.IGNORECASE):
-                    return True
-            return False
-        
-        for line in lines:
-            # 跳过空行和分隔符
-            if not line or line.startswith('---') or line.startswith('==='):
-                continue
-            
-            # 检测新分镜开始
-            if is_shot_start(line):
-                # 保存前一个分镜
-                if current_shot and any(current_shot.values()):
-                    parsed_shots.append(current_shot)
-                
-                # 创建新分镜
-                current_shot = {
-                    'dubbing': '',
-                    'semantic': '',
-                    'content_type': '',
-                    'keywords': '',
-                    'visual_concept': '',
-                    'visual_elements': '',
-                    'prompt': '',
-                    'negative_prompt': ''
-                }
-                current_field = None
-                continue
-            
-            # 检测字段
-            field_patterns = [
-                (r'配音[：:]\s*(.+?)$', 'dubbing'),
-                (r'语义解析[：:]\s*(.+?)$', 'semantic'),
-                (r'画面构思[：:]\s*(.+?)$', 'visual_concept'),
-                (r'视觉元素[：:]\s*(.+?)$', 'visual_elements'),
-                (r'画面提示词[：:]\s*(.+?)$', 'prompt'),
-                (r'提示词[：:]\s*(.+?)$', 'prompt'),
-                (r'负面提示词[：:]\s*(.+?)$', 'negative_prompt'),
-                (r'Dubbing[：:]\s*(.+?)$', 'dubbing'),
-                (r'Semantic[：:]\s*(.+?)$', 'semantic'),
-                (r'Visual Concept[：:]\s*(.+?)$', 'visual_concept'),
-                (r'Visual Elements[：:]\s*(.+?)$', 'visual_elements'),
-                (r'Prompt[：:]\s*(.+?)$', 'prompt'),
-                (r'Negative Prompt[：:]\s*(.+?)$', 'negative_prompt'),
-            ]
-            
-            matched = False
-            for pattern, field_name in field_patterns:
-                match = re.match(pattern, line, re.IGNORECASE)
-                if match:
-                    current_field = field_name
-                    value = match.group(1).strip()
-                    if current_shot:
-                        current_shot[current_field] = value
-                    matched = True
+        for pattern in patterns_to_try:
+            matches = re.findall(pattern, cleaned_result, re.DOTALL | re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    shot_num, dubbing_text = match
+                    dubbing_text = dubbing_text.strip()
+                    if dubbing_text and len(dubbing_text) > 2:
+                        # 清理文本，移除可能的**标记
+                        dubbing_text = dubbing_text.replace('**', '').strip()
+                        parsed_shots.append({
+                            'dubbing': dubbing_text,
+                            'semantic': '',
+                            'content_type': '',
+                            'keywords': '',
+                            'visual_concept': '',
+                            'visual_elements': '',
+                            'prompt': '',
+                            'negative_prompt': ''
+                        })
+                if parsed_shots:
+                    self.log(f"✅ 解析完成，共找到 {len(parsed_shots)} 个分镜（方法1）")
                     break
+        
+        # 方法2：如果方法1失败，尝试搜索所有"配音："后面跟着的内容
+        if not parsed_shots:
+            # 查找所有"配音"出现的位置
+            dubbing_positions = []
+            for match in re.finditer(r'配音[：:]\s*', cleaned_result):
+                dubbing_positions.append(match.end())
             
-            # 如果是字段的延续内容（缩进的行）
-            if not matched and current_field and current_shot:
-                if line.startswith('- ') or line.startswith('  ') or line.startswith('\t'):
-                    current_shot[current_field] += ' ' + line.lstrip('- \t')
+            if len(dubbing_positions) >= 2:
+                # 从每个"配音："后面提取内容，直到下一个数字或结尾
+                for i, pos in enumerate(dubbing_positions):
+                    # 找到这段内容的结束位置（下一个"配音"或结尾）
+                    if i + 1 < len(dubbing_positions):
+                        end_pos = dubbing_positions[i + 1]
+                    else:
+                        end_pos = len(cleaned_result)
+                    
+                    text = cleaned_result[pos:end_pos].strip()
+                    # 清理并提取实际内容
+                    text = re.sub(r'^\s*[\*\*]*', '', text)
+                    text = text.split('\n')[0]  # 取第一行
+                    if text and len(text) > 2:
+                        parsed_shots.append({
+                            'dubbing': text,
+                            'semantic': '',
+                            'content_type': '',
+                            'keywords': '',
+                            'visual_concept': '',
+                            'visual_elements': '',
+                            'prompt': '',
+                            'negative_prompt': ''
+                        })
+                if parsed_shots:
+                    self.log(f"✅ 解析完成，共找到 {len(parsed_shots)} 个分镜（方法2）")
         
-        # 保存最后一个分镜
-        if current_shot and any(current_shot.values()):
-            parsed_shots.append(current_shot)
-        
+        # 返回结果
         if parsed_shots:
-            result = parsed_shots
-            if core_theme or visual_tone or theme_elements:
-                result = {
-                    'shots': parsed_shots,
-                    'theme_info': {
-                        'core_theme': core_theme,
-                        'visual_tone': visual_tone,
-                        'theme_elements': theme_elements
-                    }
+            return {
+                'shots': parsed_shots,
+                'theme_info': {
+                    'core_theme': core_theme or '',
+                    'visual_tone': visual_tone or '',
+                    'theme_elements': theme_elements or ''
                 }
-            return result
+            }
         
-        # 如果没有解析到分镜，但有主题信息
+        # 完全失败，返回主题信息
         if core_theme or visual_tone:
             return {"theme_info": {"core_theme": core_theme, "visual_tone": visual_tone, "theme_elements": theme_elements}}
         
+        self.log(f"❌ 解析失败")
         return None
 
-    def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, llm_keywords='', llm_prompt='', use_raw_text=False, core_theme='', visual_tone=''):
+    def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, llm_keywords='', llm_prompt='', use_raw_text=False, core_theme='', visual_tone='', theme_elements=None):
         """创建新分镜 - 增强版：根据每个分镜的独特内容生成个性化提示词
         
         Args:
@@ -3502,7 +3496,11 @@ class DocuMakerLiteV7:
             llm_prompt: 大模型生成的提示词（可选）
             core_theme: 核心主题（可选）
             visual_tone: 视觉基调（可选）
+            theme_elements: 主题元素列表（可选）
         """
+        # 确保 theme_elements 是列表
+        if theme_elements is None:
+            theme_elements = []
         shot_duration = end_time - start_time
         
         # 确保时长不小于最小分镜时长
@@ -3534,6 +3532,9 @@ class DocuMakerLiteV7:
             description_parts['custom_theme'] = effective_theme
         if effective_visual_tone:
             description_parts['custom_visual_tone'] = effective_visual_tone
+        # 添加主题元素列表
+        if theme_elements:
+            description_parts['theme_elements'] = theme_elements
         
         # 检查用户选择的提示词类型
         prompt_type = "SD提示词"
@@ -3562,24 +3563,17 @@ class DocuMakerLiteV7:
             self.log(f"🎯 当前优化方式: {optimization_method}")
             self._last_optimization_method = optimization_method
         
-        # 仅在"本地大模型"模式下评估质量，"脚本优化"模式跳过以提高速度
+        # 仅在"本地大模型"模式下评估质量
         prompt_quality = 0.0
         if optimization_method == "本地大模型":
             # 使用Ollama大模型优化提示词
             optimized_prompt = self.optimize_prompt_with_ollama(prompt_en, description_parts['dubbing'])
             prompt_quality = self.evaluate_prompt_quality(optimized_prompt, description_parts['dubbing'], content_type)
         elif optimization_method == "脚本优化":
-            # 检查缓存 - 脚本优化也使用缓存
-            cache_key = f"script_opt_{prompt_en}_{content_type}"
-            cached_prompt = self.cache_get('prompts', cache_key)
-            if cached_prompt:
-                optimized_prompt = cached_prompt
-            else:
-                # 使用脚本内置的优化逻辑
-                # 传递 custom_theme 和 custom_visual_tone
-                optimized_prompt = self._enhance_prompt_with_details(prompt_en, description_parts, content_type)
-                # 缓存优化后的提示词
-                self.cache_set('prompts', cache_key, optimized_prompt)
+            # "脚本优化"模式：直接使用 _generate_sd_prompt 或 _generate_doubao_prompt 生成的结果
+            # 不再调用 _enhance_prompt_with_details，避免重复生成
+            # 因为 _generate_*_prompt 函数已经包含了完整的生成逻辑
+            optimized_prompt = prompt_en
         else:
             # "脚本自带" - 直接使用原始提示词
             optimized_prompt = prompt_en
@@ -3608,9 +3602,9 @@ class DocuMakerLiteV7:
             "prompt_quality": prompt_quality
         }
         
-        # 如果是SD提示词模式，添加默认的反向提示词
+        # 如果是SD提示词模式，使用定制化的反向提示词
         if prompt_type == "SD提示词":
-            shot_data["negative_prompt"] = "(worst quality, low quality:1.4), cartoon, anime, painting, illustration, ugly, deformed, blurry, disfigured, bad anatomy, extra limbs, watermark, text, signature, mutated hands"
+            shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'])
         
         return shot_data
     
@@ -3704,13 +3698,14 @@ class DocuMakerLiteV7:
 返回格式：a detailed visual scene description"""
             
             import requests
+            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
             response = requests.post(
                 f"{ollama_url}/api/generate",
                 json={
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3}
+                    "options": config_options
                 },
                 timeout=30
             )
@@ -3749,13 +3744,14 @@ class DocuMakerLiteV7:
 返回格式：keyword1, keyword2, keyword3"""
             
             import requests
+            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
             response = requests.post(
                 f"{ollama_url}/api/generate",
                 json={
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3}
+                    "options": config_options
                 },
                 timeout=30
             )
@@ -3784,7 +3780,15 @@ class DocuMakerLiteV7:
         elif description_parts.get('dubbing'):
             # 如果没有画面构思，从配音文本推断（仅在大模型模式下）
             optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+            # 无论哪种模式，都尝试从配音文本推断视觉概念
             if optimization_method == "本地大模型":
+                inferred_concept = self._infer_visual_concept_from_dubbing(description_parts['dubbing'])
+                if inferred_concept:
+                    translated_concept = self._translate_visual_concept(inferred_concept)
+                    if translated_concept:
+                        prompt_parts.append(translated_concept)
+            else:
+                # 脚本自带/脚本优化模式也尝试提取
                 inferred_concept = self._infer_visual_concept_from_dubbing(description_parts['dubbing'])
                 if inferred_concept:
                     translated_concept = self._translate_visual_concept(inferred_concept)
@@ -3796,24 +3800,45 @@ class DocuMakerLiteV7:
         if scene_keywords:
             prompt_parts.append(scene_keywords)
         
-        # 3. 视觉元素
-        if description_parts['visual_elements']:
-            elements = self._translate_visual_concept(description_parts['visual_elements'])
-            prompt_parts.append(elements)
-        elif description_parts.get('dubbing'):
-            # 如果没有视觉元素，从配音文本直接提取
-            extracted_elements = self._extract_elements_from_dubbing(description_parts['dubbing'])
-            if extracted_elements:
-                translated_elements = self._translate_visual_concept(extracted_elements)
-                if translated_elements:
-                    prompt_parts.append(translated_elements)
-            else:
-                # 如果文本提取为空，根据内容类型自动添加相关视觉元素
-                fallback_elements = self._get_fallback_elements_by_content_type(content_type)
-                if fallback_elements:
-                    prompt_parts.append(fallback_elements)
+        # 3. 智能融合：核心主题 + 视觉基调 + 音频语义
+        semantic_elements = self._intelligent_fuse_semantics(
+            description_parts.get('dubbing', ''),
+            description_parts.get('custom_theme', ''),
+            description_parts.get('custom_visual_tone', ''),
+            content_type
+        )
+        if semantic_elements:
+            prompt_parts.append(semantic_elements)
         
-        # 3.5 自定义核心主题（如果有）
+        # 4. 视觉元素
+        # 无论哪种模式，都尝试从配音文本提取视觉元素
+        extracted_elements = self._extract_elements_from_dubbing(description_parts.get('dubbing', ''))
+        if extracted_elements:
+            translated_elements = self._translate_visual_concept(extracted_elements)
+            if translated_elements:
+                prompt_parts.append(translated_elements)
+        elif description_parts.get('theme_elements'):
+            # 使用大模型分析得到的主题元素
+            elements_list = description_parts['theme_elements']
+            if isinstance(elements_list, list):
+                elements_str = ', '.join(elements_list[:5])  # 限制最多5个元素
+            else:
+                elements_str = str(elements_list)
+            translated_elements = self._translate_visual_concept(elements_str)
+            if translated_elements:
+                prompt_parts.append(translated_elements)
+        elif description_parts.get('visual_elements'):
+            # 如果大模型没提取到，使用配置中的visual_elements
+            elements = self._translate_visual_concept(description_parts['visual_elements'])
+            if elements:
+                prompt_parts.append(elements)
+        else:
+            # 如果都没有，根据内容类型添加fallback
+            fallback_elements = self._get_fallback_elements_by_content_type(content_type)
+            if fallback_elements:
+                prompt_parts.append(fallback_elements)
+        
+        # 5. 自定义核心主题（如果有）
         if description_parts.get('custom_theme'):
             theme = description_parts['custom_theme']
             # 检查是否包含中文字符
@@ -3826,7 +3851,7 @@ class DocuMakerLiteV7:
                 # 如果是英文，直接使用
                 prompt_parts.append(theme)
         
-        # 3.6 自定义视觉基调（如果有）
+        # 6. 自定义视觉基调（如果有）
         if description_parts.get('custom_visual_tone'):
             tone = description_parts['custom_visual_tone']
             # 检查是否包含中文字符
@@ -3839,24 +3864,68 @@ class DocuMakerLiteV7:
                 # 如果是英文，直接使用
                 prompt_parts.append(tone)
         
-        # 4. 光线和氛围 - 根据情感基调
+        # 7. 光线和氛围 - 根据情感基调
         lighting = self._get_lighting_by_mood(description_parts['dubbing'])
         prompt_parts.append(lighting)
         
-        # 5. 构图和视角 - 根据shot_id轮换，增加多样性
+        # 8. 构图和视角 - 根据shot_id轮换，增加多样性
         composition = self._get_composition_by_shot_id(shot_id)
         prompt_parts.append(composition)
         
-        # 6. 艺术风格
+        # 9. 艺术风格
         style = self._get_art_style(content_type, description_parts.get('style', ''))
         prompt_parts.append(style)
         
-        # 7. 质量标签 - 包含正向提示词
+        # 10. 质量标签 - 包含正向提示词
         prompt_parts.extend([
-            "masterpiece, best quality, ultra detailed, photorealistic, cinematic still, dramatic lighting, film grain, 35mm lens, shallow depth of field, moody atmosphere, detailed skin texture, realistic pupils, soft shadows, cinematic color grading, professional photography, raw photo"
+            "masterpiece, best quality, ultra detailed, photorealistic, cinematic lighting, dramatic mood, high contrast, detailed, 8k, high resolution, professional photography"
         ])
         
-        return ", ".join([p for p in prompt_parts if p])
+        # 8. 合并并去重提示词
+        # 人体相关词，仅在需要人物出镜时保留
+        is_person_scene = any(word in description_parts.get('dubbing', '') for word in ['人', '人物', '人物', '主持人', '记者', '医生', '科学家', '总统', '官员', '人物'])
+        
+        all_prompt_parts = []
+        seen = set()
+        
+        # 需要过滤的词（仅在非人物场景时过滤）
+        person_only_tags = [
+            'detailed skin texture', 'realistic pupils', 'soft skin', 
+            'skin pores', 'eye detail', 'facial features', 'wrinkles',
+            'beautiful face', 'pretty face', 'ugly face'
+        ]
+        
+        for part in prompt_parts:
+            if not part:
+                continue
+            # 按逗号分隔每个tag
+            tags = [t.strip() for t in part.split(',')]
+            for tag in tags:
+                # 提取tag的基础词（去除权重）
+                base_tag = tag.strip().lower()
+                original_tag = tag.strip()
+                for suffix in ['(1.0)', '(1.1)', '(1.2)', '(1.3)', '(1.4)', '(1.5)', '(1.6)', '(1.7)', '(1.8)', '(1.9)', '(2.0)']:
+                    base_tag = base_tag.replace(suffix, '')
+                    original_tag = original_tag.replace(suffix, '')
+                base_tag = base_tag.strip()
+                original_tag = original_tag.strip()
+                
+                # 过滤人体相关词（非人物场景）
+                if not is_person_scene:
+                    if any(pt in base_tag for pt in person_only_tags):
+                        continue
+                
+                # 如果没出现过，添加
+                if base_tag and base_tag not in seen:
+                    seen.add(base_tag)
+                    # 恢复原始权重格式
+                    weight_match = tag.strip()
+                    if '(' in weight_match and ')' in weight_match:
+                        all_prompt_parts.append(tag.strip())
+                    else:
+                        all_prompt_parts.append(original_tag)
+        
+        return ", ".join(all_prompt_parts)
     
     def _generate_doubao_prompt(self, description_parts, content_type, shot_id):
         """生成豆包提示词 - 直接从配音文本生成，不依赖画面构思"""
@@ -3949,12 +4018,18 @@ class DocuMakerLiteV7:
             return "主题相关场景，与内容匹配的视觉画面，符合语境的环境"
     
     def _extract_elements_from_dubbing(self, dubbing):
-        """使用大模型从配音文本智能提取视觉元素"""
+        """从配音文本智能提取视觉元素 - 支持本地和大模型两种模式"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
-        # 检查是否配置了 Ollama
+        # 优先尝试本地提取（不依赖大模型）
+        local_result = self._extract_elements_locally(dubbing)
+        if local_result:
+            return local_result
+        
+        # 检查是否配置了 Ollama，如果配置了则尝试大模型提取
         if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+            # 没有配置大模型，返回空（已通过本地提取处理）
             return ""
         
         try:
@@ -3963,7 +4038,7 @@ class DocuMakerLiteV7:
             
             prompt = f"""从以下配音文本中提取出能够用于图像生成的视觉元素关键词。
 要求：
-1. 提取具体的视觉对象、场景、人物、物品等
+1. 提取具体的视觉对象、场景、人物、物品等（至少3-5个）
 2. 用英文逗号分隔每个关键词
 3. 只返回关键词，不要其他解释
 
@@ -3972,13 +4047,14 @@ class DocuMakerLiteV7:
 返回格式：关键词1, 关键词2, 关键词3"""
             
             import requests
+            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
             response = requests.post(
                 f"{ollama_url}/api/generate",
                 json={
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3}
+                    "options": config_options
                 },
                 timeout=30
             )
@@ -3986,7 +4062,6 @@ class DocuMakerLiteV7:
             if response.status_code == 200:
                 result = response.json()
                 visual_keywords = result.get('response', '').strip()
-                # 清理结果
                 visual_keywords = visual_keywords.strip()
                 if visual_keywords:
                     return visual_keywords
@@ -3994,6 +4069,158 @@ class DocuMakerLiteV7:
             return ""
         except Exception as e:
             return ""
+    
+    def _extract_elements_locally(self, dubbing):
+        """本地模式：从配音文本提取视觉元素（不依赖大模型）"""
+        import re
+        
+        if not dubbing:
+            return ""
+        
+        visual_keywords = []
+        
+        # 军事/战争相关关键词
+        military_mapping = {
+            '美军': 'US military, American soldiers, US army',
+            '伊朗': 'Iran, Iranian, Persia',
+            '革命卫队': 'Revolutionary Guard, IRGC, Iranian military',
+            '军队': 'military, armed forces, troops',
+            '部队': 'troops, military unit',
+            '战争': 'war, warfare, battlefield',
+            '冲突': 'conflict, clash, confrontation',
+            '战斗': 'battle, combat, fighting',
+            '导弹': 'missile, rocket, projectile',
+            '无人机': 'drone, UAV, unmanned aircraft',
+            '战斗机': 'fighter jet, aircraft, warplane',
+            '轰炸机': 'bomber, bombing aircraft',
+            '航母': 'aircraft carrier, warship',
+            '军舰': 'warship, naval vessel',
+            '海军': 'navy, naval forces',
+            '空军': 'air force, aviation',
+            '陆军': 'army, ground forces',
+            '武器': 'weapon, arms, armament',
+            '军事': 'military, armed, warfare',
+            '基地': 'military base, base',
+            '战场': 'battlefield, war zone, front line',
+            '进攻': 'attack, offensive, assault',
+            '防御': 'defense, defensive',
+            '轰炸': 'bombing, air strike, raid',
+            '摧毁': 'destroyed, devastated, ruin',
+            '爆炸': 'explosion, blast, detonation',
+            '伤亡': 'casualties, deaths, injuries',
+            '平民': 'civilians, civilians',
+            '难民': 'refugees, displaced people',
+            '国际': 'international, global',
+            '中东': 'Middle East, MENA region',
+        }
+        
+        # 合并所有关键词映射
+        keyword_mapping = dict(military_mapping)
+        keyword_mapping.update({
+            '黑洞': 'black hole, event horizon, accretion disk',
+            '宇宙': 'universe, cosmos, deep space',
+            '太空': 'outer space, celestial',
+            '星球': 'planet, celestial body',
+            '银河': 'milky way, galaxy',
+            '星系': 'galaxy, star system',
+            '恒星': 'star, sun',
+            '行星': 'planet',
+            '星云': 'nebula, cosmic dust',
+            'X射线': 'X-ray, radiation',
+            '光': 'light, rays, glow',
+            '热量': 'heat, thermal energy',
+            '温度': 'temperature, heat',
+            '攝氏度': 'Celsius degrees',
+            '數千萬': 'tens of millions',
+            '銀河系': 'Milky Way galaxy',
+            '中心': 'center, core',
+            '爆炸': 'explosion, blast',
+            '能量': 'energy, power',
+            '辐射': 'radiation',
+            '天体': 'celestial body, heavenly body',
+            '光年': 'light years',
+            '距离': 'distance',
+            '科学家': 'scientist, researcher',
+            '实验室': 'laboratory, research lab',
+            '仪器': 'instrument, device',
+            '观测': 'observation, telescope',
+            '研究': 'research, study',
+            '数据': 'data, statistics',
+            '屏幕': 'screen, monitor, display',
+            '图表': 'chart, graph',
+            '地图': 'map',
+            '地球': 'Earth, planet Earth',
+            '太阳': 'sun, solar',
+            '月亮': 'moon, lunar',
+            '火星': 'Mars',
+            '木星': 'Jupiter',
+            '土星': 'Saturn',
+            '城市': 'city, urban, cityscape',
+            '乡村': 'countryside, rural',
+            '山脉': 'mountain, mountain range',
+            '海洋': 'ocean, sea',
+            '河流': 'river',
+            '森林': 'forest, woods',
+            '云': 'cloud',
+            '天空': 'sky',
+            '建筑': 'building, architecture',
+            '房间': 'room, interior',
+            '办公室': 'office',
+            '教室': 'classroom',
+            '医院': 'hospital',
+            '餐厅': 'restaurant',
+            '商店': 'store, shop',
+            '街道': 'street, road',
+            '车辆': 'vehicle, car',
+            '飞机': 'aircraft, plane',
+            '船': 'ship, boat',
+            '人': 'person, people',
+            '男人': 'man',
+            '女人': 'woman',
+            '孩子': 'child',
+            '科学家': 'scientist',
+            '医生': 'doctor',
+            '老师': 'teacher',
+            '学生': 'student',
+            '工人': 'worker',
+            '农民': 'farmer',
+            '商人': 'businessman',
+            '官员': 'official',
+            '领袖': 'leader',
+            '动物': 'animal',
+            '鸟': 'bird',
+            '鱼': 'fish',
+            '狗': 'dog',
+            '猫': 'cat',
+            '马': 'horse',
+            '花': 'flower',
+            '树': 'tree',
+            '草': 'grass',
+            '石头': 'rock, stone',
+            '水': 'water',
+            '火': 'fire',
+            '雨': 'rain',
+            '雪': 'snow',
+            '风': 'wind',
+            '雷': 'thunder',
+            '闪电': 'lightning',
+            '山': 'mountain, hill',
+            '谷': 'valley',
+            '岛': 'island',
+            '湖': 'lake',
+            '海': 'sea, ocean',
+        })
+        
+        for chinese, english in keyword_mapping.items():
+            if chinese in dubbing:
+                for eng in english.split(', '):
+                    if eng.strip() not in visual_keywords:
+                        visual_keywords.append(eng.strip())
+        
+        if visual_keywords:
+            return ', '.join(visual_keywords[:5])
+        
+        return ""
     
     def _translate_visual_concept(self, chinese_concept):
         """将中文视觉概念转化为英文描述"""
@@ -4064,7 +4291,78 @@ class DocuMakerLiteV7:
         """根据配音内容智能获取场景关键词 - 无需调用大模型"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
-        
+
+        # 【整改新增】专业元素映射表 - 根据具体内容生成精确的提示词
+        professional_element_map = {
+            # 黑洞/宇宙主题专业元素
+            "黑洞": {
+                "core": ["black hole", "event horizon", "singularity"],
+                "effects": ["gravitational lensing", "accretion disk", "relativistic jets"],
+                "weight": 1.8
+            },
+            "克尔黑洞": {
+                "core": ["rotating Kerr black hole", "spinning black hole", "ergosphere"],
+                "effects": ["accretion disk", "relativistic beaming", "doppler shift"],
+                "weight": 2.0
+            },
+            "史瓦西": {
+                "core": ["Schwarzschild black hole", "non-rotating black hole"],
+                "effects": ["event horizon", "photon sphere", "schwarzschild radius"],
+                "weight": 2.0
+            },
+            "吸积盘": {
+                "core": ["accretion disk", "glowing disk", "circumstellar disk"],
+                "effects": ["hot plasma", "relativistic beaming", "doppler shift", "orange-red emission"],
+                "weight": 1.9
+            },
+            "人马座": {
+                "core": ["Sagittarius A*", "supermassive black hole", "galactic center"],
+                "effects": ["star cluster", "dense star field", "Milky Way core", "infrared emission"],
+                "weight": 2.0
+            },
+            "银河系": {
+                "core": ["Milky Way galaxy", "galactic spiral arm", "galactic disk"],
+                "effects": ["star field", "nebula", "cosmic dust", "spiral structure"],
+                "weight": 1.6
+            },
+            "恒星": {
+                "core": ["star", "dying star", "stellar surface"],
+                "effects": ["solar flare", "coronal mass ejection", "stellar wind", "nuclear fusion"],
+                "weight": 1.5
+            },
+            "星云": {
+                "core": ["nebula", "cosmic cloud", "emission nebula"],
+                "effects": ["ionized gas", "star formation", "cosmic dust", "colorful emission"],
+                "weight": 1.5
+            },
+            "宇宙": {
+                "core": ["deep space", "cosmos", "interstellar space"],
+                "effects": ["star field", "cosmic background", "dark matter visualization"],
+                "weight": 1.3
+            },
+            "宇宙深处": {
+                "core": ["deep space", "outer space", "cosmic void"],
+                "effects": ["distant galaxies", "cosmic background radiation", "darkness"],
+                "weight": 1.4
+            }
+        }
+
+        # 检查配音内容是否匹配专业元素
+        matched_elements = []
+        for keyword, element_info in professional_element_map.items():
+            if keyword in dubbing:
+                # 添加核心元素带权重
+                for elem in element_info["core"]:
+                    weight = element_info["weight"]
+                    matched_elements.append(f"{elem}({weight})")
+                # 添加效果元素
+                for elem in element_info["effects"][:2]:
+                    matched_elements.append(elem)
+
+        # 如果匹配到专业元素，返回它们
+        if matched_elements:
+            return ", ".join(matched_elements)
+
         # 脚本优化的场景关键词映射（无需调用大模型）
         scene_keywords_map = {
             '战争': 'war zone, battlefield, military conflict, ruins',
@@ -4086,12 +4384,12 @@ class DocuMakerLiteV7:
             '文化': 'cultural heritage, museum, art gallery, tradition',
             '国际': 'international affairs, global event, diplomatic scene',
         }
-        
+
         # 从配音文本中匹配场景关键词
         for key, keywords in scene_keywords_map.items():
             if key in dubbing:
                 return keywords
-        
+
         # 根据内容类型返回默认场景关键词
         if content_type:
             content_type_keywords = {
@@ -4108,9 +4406,329 @@ class DocuMakerLiteV7:
             }
             if content_type in content_type_keywords:
                 return content_type_keywords[content_type]
-        
+
         # 默认返回
         return "realistic scene, documentary style, photorealistic"
+
+    def _get_custom_negative_prompt(self, content_type, dubbing):
+        """【整改新增】根据内容类型和配音内容生成定制化负面提示词"""
+        base_negative = [
+            "worst quality",
+            "low quality",
+            "cartoon",
+            "anime",
+            "painting",
+            "illustration",
+            "ugly",
+            "deformed",
+            "blurry",
+            "disfigured",
+            "bad anatomy",
+            "extra limbs",
+            "mutated hands"
+        ]
+
+        # 根据内容类型添加特定排除
+        content_specific_negative = {
+            "space": [
+                "human", "person", "face", "building", "tree",
+                "landscape", "daytime", "sun", "satellite", "spacecraft",
+                "astronaut"  # 除非明确需要，否则排除宇航员
+            ],
+            "science": [
+                "cartoon character", "fictional creature", "fantasy"
+            ],
+            "nature": [
+                "urban", "building", "structure", "artificial"
+            ],
+            "history": [
+                "modern", "contemporary", "anachronism"
+            ]
+        }
+
+        # 检查配音内容是否包含特定主题，添加相应排除
+        additional_negative = []
+
+        # 黑洞/宇宙主题排除
+        if any(kw in dubbing for kw in ["黑洞", "宇宙", "银河", "恒星", "星云", "黑洞"]):
+            additional_negative.extend([
+                "star", "sun", "planet", "moon", "satellite",
+                "human", "person", "face", "building", "tree"
+            ])
+
+        # 政治/历史主题排除
+        if any(kw in dubbing for kw in ["政治", "历史", "古代", "战争"]):
+            additional_negative.extend([
+                "modern", "contemporary", "anachronism"
+            ])
+
+        # 合并所有排除项
+        all_negative = base_negative.copy()
+
+        # 添加内容类型特定的排除
+        content_type_lower = content_type.lower() if content_type else ""
+        for ct, negatives in content_specific_negative.items():
+            if ct in content_type_lower:
+                all_negative.extend(negatives)
+
+        # 添加额外的排除
+        all_negative.extend(additional_negative)
+
+        # 去重
+        all_negative = list(dict.fromkeys(all_negative))
+
+        return ", ".join(all_negative)
+    
+    def _extract_core_entities(self, dubbing, content_type):
+        """从配音文本中提取核心实体，直接作为视觉主体
+        
+        这是最关键的步骤：确保配音文本说的什么，SD生成的图片就是什么
+        例如："伊朗革命卫队正式宣布" → "Iranian Revolutionary Guard, military announcement, official statement"
+        """
+        if not dubbing:
+            return ""
+        
+        dubbing_clean = dubbing.strip()
+        entities = []
+        
+        # 国家/地区实体
+        country_mapping = {
+            '伊朗': 'Iran, Iranian', '美国': 'USA, American', '中国': 'China, Chinese',
+            '俄罗斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
+            '英国': 'UK, British', '法国': 'France, French', '德国': 'Germany, German',
+            '朝鲜': 'North Korea, Korean', '韩国': 'South Korea, Korean',
+            '乌克兰': 'Ukraine, Ukrainian', '欧洲': 'Europe, European',
+            '中东': 'Middle East', '亚洲': 'Asia, Asian',
+        }
+        
+        # 军事/安全机构实体
+        military_mapping = {
+            '革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+            '伊朗革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+            '美军': 'US military, American forces', '美军方': 'US military, Pentagon',
+            '军队': 'military, armed forces, troops', '部队': 'troops, military unit',
+            '海军': 'navy, naval forces', '空军': 'air force, aviation',
+            '陆军': 'army, ground forces', '导弹': 'missile, rocket',
+            '无人机': 'drone, UAV', '战斗机': 'fighter jet, aircraft',
+            '航母': 'aircraft carrier', '军舰': 'warship, naval vessel',
+            '武器': 'weapons, armaments', '军事': 'military, armed',
+            '国防部': 'Ministry of Defense, Pentagon', '五角大楼': 'Pentagon, US Defense Department',
+        }
+        
+        # 政治/组织实体
+        political_mapping = {
+            '政府': 'government, officials', '总统': 'president, head of state',
+            '总理': 'prime minister', '首相': 'prime minister',
+            '外交部': 'foreign ministry, diplomatic', '联合国': 'United Nations, UN',
+            '安理会': 'UN Security Council', '北约': 'NATO, NATO alliance',
+            '欧盟': 'European Union, EU', '国会': 'congress, parliament',
+            '议会': 'parliament, legislative', '政党': 'political party',
+            '官员': 'officials, authorities', '发言人': 'spokesperson, official spokesperson',
+        }
+        
+        # 事件/行动实体
+        event_mapping = {
+            '战争': 'war, warfare, conflict', '冲突': 'conflict, clash',
+            '战斗': 'battle, combat, fighting', '袭击': 'attack, strike, assault',
+            '爆炸': 'explosion, blast', '发射': 'launch, launch',
+            '试射': 'test, missile test', '军演': 'military exercise, drill',
+            '谈判': 'negotiation, talks', '会议': 'meeting, conference',
+            '声明': 'statement, announcement', '宣布': 'announcement, declare',
+            '签署': 'signing, agreement', '协议': 'agreement, deal, pact',
+            '制裁': 'sanctions, embargo', '援助': 'aid, assistance',
+        }
+        
+        # 地点/场景实体
+        location_mapping = {
+            '基地': 'base, military base', '机场': 'airport, air base',
+            '港口': 'port, harbor, naval base', '城市': 'city, urban',
+            '农村': 'rural, countryside', '山区': 'mountain, mountainous',
+            '沙漠': 'desert', '海边': 'coastal, seaside',
+            '海峡': 'strait, waterway', '油田': 'oil field, oil facility',
+            '核设施': 'nuclear facility', '工厂': 'factory, facility',
+            '大使馆': 'embassy', '领事馆': 'consulate',
+        }
+        
+        # 新闻/媒体相关
+        media_mapping = {
+            '新闻': 'news, news report, breaking news', '记者': 'journalist, reporter',
+            '主持人': 'anchor, presenter', '直播': 'live broadcast, livestream',
+            '报道': 'report, coverage', '采访': 'interview',
+            '发布会': 'press conference', '声明': 'official statement',
+        }
+        
+        # 通用开场/过渡词（需要结合主题）
+        generic_keywords = {
+            '今天': 'today, current events, breaking news',
+            '消息': 'news, information, report',
+            '全球': 'global, worldwide, international',
+            '牵动': 'impact, concern, attention',
+            '最新': 'latest, recent, breaking',
+            '关注': 'attention, focus, interest',
+            '热点': 'hot topic, trending, viral',
+            '重大': 'major, significant, important',
+            '紧急': 'urgent, emergency, breaking',
+            '刚刚': 'just happened, breaking, latest',
+            '最新消息': 'breaking news, latest update, recent development',
+            '据报道': 'according to reports, sources say',
+            '业内人士': 'industry sources, experts, insiders',
+        }
+        
+        # 按优先级匹配：军事 > 政治 > 事件 > 地点 > 国家 > 通用开场
+        all_mappings = [
+            (military_mapping, 'military'),
+            (political_mapping, 'political'),
+            (event_mapping, 'event'),
+            (location_mapping, 'location'),
+            (country_mapping, 'country'),
+            (media_mapping, 'media'),
+            (generic_keywords, 'generic'),
+        ]
+        
+        for mapping, mtype in all_mappings:
+            for cn_key, en_value in mapping.items():
+                if cn_key in dubbing_clean:
+                    entities.append(en_value)
+                    break
+        
+        # 内容类型补充
+        if content_type:
+            content_lower = content_type.lower()
+            if 'military' in content_lower:
+                entities.append('military scene, combat zone')
+            elif 'politics' in content_lower:
+                entities.append('political scene, government setting')
+            elif 'science' in content_lower:
+                entities.append('scientific scene, laboratory')
+        
+        if entities:
+            return ", ".join(entities)
+        
+        return ""
+    
+    def _intelligent_fuse_semantics(self, dubbing, core_theme, visual_tone, content_type):
+        """智能融合语义：核心主题 + 视觉基调 + 音频文本语义
+        
+        根据核心主题和视觉基调，结合当前音频片段的语义，
+        智能生成匹配的视觉元素提示词
+        重点：确保配音文本的核心内容能够直接体现在视觉提示词中
+        当配音文本太通用时，优先使用核心主题和视觉基调
+        """
+        if not dubbing:
+            return ""
+        
+        fused_elements = []
+        dubbing_lower = dubbing.lower()
+        
+        # 0. 【最重要】从配音文本中提取核心实体，直接作为视觉主体
+        core_entities = self._extract_core_entities(dubbing, content_type)
+        
+        # 如果没有提取到核心实体，使用核心主题作为备选
+        if not core_entities and core_theme:
+            core_entities = core_theme
+        
+        # 如果有核心实体或核心主题，添加到提示词
+        if core_entities:
+            fused_elements.append(core_entities)
+        
+        # 1. 基于核心主题，智能扩展视觉元素（如果还没有主题内容）
+        if core_theme and not core_entities:
+            theme_lower = core_theme.lower()
+            # 主题关键词映射到视觉元素
+            theme_to_visuals = {
+                '战争': 'war, battlefield, military, combat, destruction',
+                'peace': 'peaceful, calm, harmony, tranquility, dove',
+                '科技': 'technology, futuristic, digital, innovative, high-tech',
+                'science': 'scientific, laboratory, research, experiment, data',
+                '自然': 'nature, landscape, wilderness, environment, organic',
+                '历史': 'historical, ancient, vintage, classical, heritage',
+                '政治': 'political, government, diplomatic, official, ceremony',
+                '经济': 'economic, financial, business, commerce, trading',
+                '健康': 'healthcare, medical, wellness, hospital, medicine',
+                '旅行': 'travel, adventure, exploration, scenic, journey',
+                '太空': 'space, cosmos, galaxy, stars, planets, nebula',
+                '宇宙': 'space, cosmos, universe, celestial, cosmic',
+                '军事': 'military, armed forces, soldier, weapon, tactical',
+            }
+            for key, visual in theme_to_visuals.items():
+                if key in theme_lower:
+                    fused_elements.append(visual)
+                    break
+        
+        # 2. 基于视觉基调，添加氛围元素
+        if visual_tone:
+            tone_lower = visual_tone.lower()
+            tone_to_mood = {
+                '压抑': 'dark, somber, gloomy, oppressive, heavy atmosphere',
+                'dark': 'dark, shadowy, mysterious, dim lighting, moody',
+                '光明': 'bright, luminous, radiant, warm, illuminated',
+                'bright': 'bright, vibrant, colorful, vivid, energetic',
+                '激烈': 'intense, dramatic, dynamic, powerful, chaotic',
+                '平静': 'serene, peaceful, quiet, gentle, tranquil',
+                'cold': 'cold, icy, frozen, blue tones, winter',
+                '温暖': 'warm, cozy, golden hour, amber, sunset colors',
+                '科幻': 'sci-fi, futuristic, neon, holographic, cyberpunk',
+                '写实': 'realistic, documentary, authentic, natural, lifelike',
+                '电影': 'cinematic, film quality, dramatic, professional',
+                '梦幻': 'dreamlike, ethereal, surreal, fantastical, magical',
+            }
+            for key, mood in tone_to_mood.items():
+                if key in tone_lower:
+                    fused_elements.append(mood)
+                    break
+        
+        # 3. 基于音频文本语义，提取即时视觉元素
+        semantic_keywords = {
+            # 人物相关
+            ('人', '人物', '人们', '大家', '我们'): 'people, crowd, group of people',
+            ('主持人', '记者', '主播'): 'anchor, presenter, broadcaster at desk',
+            ('专家', '分析师', '学者'): 'expert, analyst, professional in office',
+            ('总统', '官员', '领导'): 'leader, official, authority figure',
+            ('医生', '护士', '医疗'): 'medical professional, healthcare worker',
+            ('科学家', '研究员'): 'scientist, researcher, in laboratory',
+            
+            # 场景相关
+            ('会议', '谈判', '会谈'): 'meeting room, conference, negotiation',
+            ('战场', '战争', '冲突'): 'battlefield, combat zone, war area',
+            ('城市', '街道', '建筑'): 'cityscape, urban street, architecture',
+            ('自然', '森林', '山'): 'nature, forest, mountain landscape',
+            ('海', '海洋', '船'): 'ocean, sea, marine, waterfront',
+            ('天空', '云', '飞行'): 'sky, clouds, aerial view, flying',
+            ('太空', '宇宙', '星球'): 'space, cosmos, planet, galaxy',
+            
+            # 物体/设备
+            ('飞机', '航空', '飞行'): 'aircraft, airplane, aviation',
+            ('导弹', '武器', '军事'): 'missile, weapon, military equipment',
+            ('屏幕', '显示器', '数据'): 'screen, monitor, data display',
+            ('图表', '数据', '分析'): 'chart, graph, data visualization',
+            
+            # 情感/氛围
+            ('紧张', '危机', '冲突'): 'tense, crisis, conflict, urgent',
+            ('希望', '胜利', '成功'): 'hopeful, victorious, success, achievement',
+            ('悲伤', '绝望', '失败'): 'sad, desperate, failure, gloom',
+            ('和平', '友好', '合作'): 'peaceful, friendly, cooperation, harmony',
+        }
+        
+        for keywords, visual in semantic_keywords.items():
+            if any(kw in dubbing for kw in keywords):
+                fused_elements.append(visual)
+                break
+        
+        # 4. 基于内容类型添加基础环境元素
+        if content_type:
+            content_lower = content_type.lower()
+            if 'space' in content_lower or '宇宙' in core_theme or '太空' in dubbing:
+                fused_elements.append('deep space, stars, cosmic background')
+            elif 'military' in content_lower or '战争' in dubbing:
+                fused_elements.append('military environment, tactical setting')
+            elif 'science' in content_type:
+                fused_elements.append('scientific environment, research setting')
+        
+        # 去重并组合
+        if fused_elements:
+            return ", ".join(fused_elements)
+        
+        return ""
     
     def _get_fallback_elements_by_content_type(self, content_type):
         """根据内容类型返回默认的视觉元素补充"""
@@ -4163,38 +4781,38 @@ class DocuMakerLiteV7:
         return "realistic scene, documentary style, photorealistic environment"
     
     def _get_lighting_by_mood(self, dubbing):
-        """根据情感基调获取光线描述"""
+        """根据情感基调获取光线描述（带权重）"""
         if any(w in dubbing for w in ["紧张", "危机", "冲突", "严峻", "沉重"]):
-            return "dramatic side lighting, dark shadows, moody atmosphere, desaturated colors"
+            return "dramatic side lighting(1.3), dark shadows(1.2), moody atmosphere(1.2), desaturated colors(1.0)"
         elif any(w in dubbing for w in ["绝望", "失败", "崩溃", "毁灭"]):
-            return "harsh lighting, high contrast, bleak atmosphere, gray tones"
+            return "harsh lighting(1.3), high contrast(1.2), bleak atmosphere(1.2), gray tones(1.0)"
         elif any(w in dubbing for w in ["希望", "胜利", "和平", "成功"]):
-            return "warm golden hour lighting, soft natural light, uplifting atmosphere"
+            return "warm golden hour lighting(1.3), soft natural light(1.2), uplifting atmosphere(1.2)"
         else:
-            return "neutral lighting, balanced exposure, documentary style"
+            return "neutral lighting(1.0), balanced exposure(1.2), documentary style(1.3)"
     
     def _get_composition_by_shot_id(self, shot_id):
-        """根据shot_id轮换构图，增加多样性"""
+        """根据shot_id轮换构图，增加多样性（带权重）"""
         compositions = [
-            "wide angle shot, establishing view",
-            "medium shot, eye level perspective",
-            "close-up shot, detailed view",
-            "low angle shot, looking up",
-            "high angle shot, bird's eye view",
-            "side angle, profile view",
-            "dutch angle, dynamic composition",
-            "over-the-shoulder shot",
+            "wide angle shot(1.2), establishing view(1.0)",
+            "medium shot(1.2), eye level perspective(1.0)",
+            "close-up shot(1.3), detailed view(1.1)",
+            "low angle shot(1.2), looking up(1.0)",
+            "high angle shot(1.2), bird's eye view(1.0)",
+            "side angle(1.2), profile view(1.0)",
+            "dutch angle(1.3), dynamic composition(1.1)",
+            "over-the-shoulder shot(1.2)",
         ]
         return compositions[shot_id % len(compositions)]
     
     def _get_art_style(self, content_type, style_hint):
-        """获取艺术风格"""
+        """获取艺术风格（带权重）"""
         if "纪实" in style_hint or "纪录片" in style_hint:
-            return "documentary photography style, photojournalistic, realistic"
+            return "documentary photography style(1.5), photojournalistic(1.3), realistic(1.4)"
         elif "military" in content_type:
-            return "war photography style, gritty realism, cinematic"
+            return "war photography style(1.4), gritty realism(1.3), cinematic(1.3)"
         else:
-            return "photorealistic style, cinematic composition, professional photography"
+            return "photorealistic style(1.5), cinematic composition(1.3), professional photography(1.4)"
     
     def _get_scene_type_zh(self, content_type, dubbing):
         """获取中文场景类型 - 增强版"""
@@ -5429,18 +6047,17 @@ class DocuMakerLiteV7:
         return shots
 
     def optimize_prompt_with_ollama(self, prompt, sentence):
-        """使用Ollama大模型优化提示词 - 根据提示词类型进行针对性优化"""
+        """使用Ollama大模型优化提示词"""
         import time
-        global ollama_lock
+        import re
         
-        # 检查是否选择了"脚本自带"
-        model = self.ollama_model_var.get()
-        if model == "脚本自带":
+        user_model = self.ollama_model_var.get()
+        if user_model == "脚本自带":
             return prompt
         
-        # 检查缓存 - 加入提示词类型到缓存键
         prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
-        cache_key = f"{sentence}_{model}_{prompt_type}"
+        
+        cache_key = f"{sentence}_{prompt_type}"
         cached_prompt = self.cache_get('prompts', cache_key)
         if cached_prompt:
             return cached_prompt
@@ -5448,128 +6065,84 @@ class DocuMakerLiteV7:
         if not OLLAMA_AVAILABLE:
             return prompt
         
+        model_priority_list = [
+            ("gemma3:4b", 4, "通用模型"),
+            ("gemma3:1b", 1, "轻量级模型"),
+            ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
+            ("qwen2.5:1.5b", 1.5, "轻量级模型"),
+            ("phi3:mini", 2, "微软轻量级模型"),
+            ("qwen3:4b", 4, "通用模型"),
+            ("qwen2.5:3b", 3, "阿里轻量级模型"),
+            ("llama3.2:3b", 3, "Meta轻量级模型"),
+            ("llama3.2:1b", 1, "Meta超轻量级模型"),
+            ("llama3", 8, "Meta通用模型"),
+            ("mistral", 7, "Mistral通用模型"),
+            ("deepseek-r1:8b", 8, "DeepSeek推理模型"),
+        ]
+        
+        def get_available_models():
+            try:
+                models_info = ollama.list()
+                available = []
+                if "models" in models_info:
+                    for m in models_info["models"]:
+                        model_name = m.get("name", m.get("model", ""))
+                        if model_name:
+                            available.append(model_name)
+                return available
+            except:
+                return []
+        
+        available_models = get_available_models()
+        
+        candidate_models = []
+        if user_model in available_models:
+            candidate_models.append(user_model)
+        
+        for model_name, size, desc in model_priority_list:
+            if model_name in available_models and model_name not in candidate_models:
+                candidate_models.append(model_name)
+        
+        if not candidate_models:
+            return prompt
+        
         start_time = time.time()
         
         try:
-            # 分析内容类型和情感基调
-            content_type = self.analyze_content_type(sentence)
-            mood = self.analyze_mood(sentence)
-            
-            # 获取当前选择的风格
-            style = self.get_current_style()
-            
-            # 根据提示词类型选择不同的优化策略
             is_sd = prompt_type == "SD提示词"
             
+            # 构建清晰简洁的指令
             if is_sd:
-                # SD提示词优化 - 英文，针对Stable Diffusion优化
-                system_prompt = """你是世界级的Stable Diffusion提示词工程师，拥有深厚的艺术、摄影、电影和视觉设计背景。
+                system_prompt = """你是专业的SD提示词工程师。
 
-【SD提示词专业要求】
-1. 必须使用英文撰写提示词
-2. 精通Stable Diffusion的语法和特性：
-   - 使用权重语法 (word:1.2) 强调重要元素
-   - 使用括号 () 增加权重，方括号 [] 降低权重
-   - 理解tag顺序对生成结果的影响（越靠前权重越高）
-3. 熟悉SD的特性和限制：
-   - 擅长处理的具体艺术风格
-   - 对人物、场景、物体的表现能力
-   - 常见的生成问题和如何避免
+任务：将中文配音文本转换为简洁的英文SD提示词。
 
-【视觉联想引导】
-请从以下维度进行丰富的视觉联想：
-1. 主体元素：核心主体、细节特征、外观、材质、状态、动作
-2. 环境场景：背景环境、建筑风格、天气、时间、地点
-3. 光线氛围：光线类型、方向、强度、色温、光影对比
-4. 色彩色调：主色调、辅助色、饱和度、对比度
-5. 构图视角：视角选择、构图法则、景别
-6. 艺术风格：写实/插画/油画/赛博朋克等、质感纹理
+严格规则（必须遵守）：
+1. 只输出英文tag，用英文逗号分隔，禁止任何中文
+2. 必须保留核心主体和动作
+3. 必须添加质量词：masterpiece, best quality
+4. 禁止添加解释、禁止添加引号、禁止换行
+5. 总长度控制在20-40个英文单词以内
+6. 直接输出提示词，不要有任何前缀文字"""
 
-【SD优化原则】
-- Tag化：使用简洁的英文tag，用逗号分隔
-- 权重排序：重要元素放前面，使用权重语法强调
-- 质量词：添加masterpiece, best quality, highly detailed等
-- 负面提示词：考虑需要避免的问题（变形、低质量等）
-- 结构化：主体→环境→光线→色彩→风格→质量词
-
-【输出要求】
-- 只返回优化后的英文提示词
-- 使用逗号分隔不同tag
-- 长度控制在80-150词之间
-- 使用权重语法强调关键元素
-- 包含质量增强词"""
-                
-                user_prompt = f"""【原始描述】
-{sentence}
-
-【原始提示词】
-{prompt}
-
-【上下文信息】
-- 场景类型: {content_type}
-- 情感基调: {mood}
-- 视觉风格: {style}
-- 目标平台: Stable Diffusion (SD)
-
-请优化以上提示词，生成专业的SD格式英文提示词："""
+                user_prompt = f"配音文本：{sentence}\n\n直接输出英文提示词，严格遵守以上规则。"
                 
             else:
-                # 豆包提示词优化 - 中文，针对豆包生图优化
-                system_prompt = """你是世界级的AI图像生成提示词工程师，专门针对豆包生图平台优化。
+                system_prompt = """你是专业的图像提示词工程师。
 
-【豆包提示词专业要求】
-1. 必须使用中文撰写提示词
-2. 豆包平台特性：
-   - 对自然语言理解能力强，可以使用描述性语句
-   - 支持详细的中文场景描述
-   - 擅长理解中文语境和文化元素
-   - 不需要复杂的权重语法，使用清晰描述即可
-3. 提示词结构：
-   - 使用完整的中文句子或短语
-   - 描述要具体、生动、有画面感
-   - 按重要性组织描述顺序
+任务：将中文配音文本转换为简洁的图像提示词。
 
-【视觉联想引导】
-请从以下维度进行丰富的视觉联想：
-1. 主体元素：核心主体、细节特征、外观、材质、状态、动作
-2. 环境场景：背景环境、建筑风格、天气、时间、地点
-3. 光线氛围：光线类型、方向、强度、色温、光影对比
-4. 色彩色调：主色调、辅助色、饱和度、对比度
-5. 构图视角：视角选择、构图法则、景别
-6. 艺术风格：写实/插画/油画/水彩/国风/动漫等
+严格规则（必须遵守）：
+1. 只输出中文描述，禁止英文
+2. 必须保留核心主体和动作
+3. 总长度控制在20-40个中文字符
+4. 禁止添加解释、禁止添加引号、禁止换行
+5. 直接输出提示词，不要有任何前缀文字"""
 
-【豆包优化原则】
-- 自然语言：使用流畅的中文描述，像在给画家讲解画面
-- 具体细节：提供丰富的视觉细节，让AI理解画面构成
-- 场景完整：描述完整的场景，包括前景、中景、背景
-- 氛围营造：强调画面的整体氛围和情感基调
-- 文化元素：善用中文语境下的文化符号和意象
-
-【输出要求】
-- 只返回优化后的中文提示词
-- 使用流畅的中文描述
-- 长度控制在100-200字之间
-- 描述要具体、生动、有画面感
-- 不需要负面提示词（豆包不需要）"""
-                
-                user_prompt = f"""【原始描述】
-{sentence}
-
-【原始提示词】
-{prompt}
-
-【上下文信息】
-- 场景类型: {content_type}
-- 情感基调: {mood}
-- 视觉风格: {style}
-- 目标平台: 豆包生图
-
-请优化以上提示词，生成专业的豆包格式中文提示词："""
+                user_prompt = f"配音文本：{sentence}\n\n直接输出中文提示词，严格遵守以上规则。"
             
-            # 获取用户选择的优化方式
             optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "平衡模式"
             
-            # 根据用户选择的优化方式设置任务复杂度
             if optimization_method == "极速模式":
                 task_complexity = "low"
             elif optimization_method == "质量优先":
@@ -5577,76 +6150,118 @@ class DocuMakerLiteV7:
             else:
                 task_complexity = "medium"
             
-            # 获取最优配置（根据用户选择的优化方式）
             config = llm_optimizer.get_optimal_config(task_complexity=task_complexity)
             
-            # 记录使用的配置
-            self.log(f"🎯 使用配置: {config.preset} | temperature={config.config.get('temperature')} | top_p={config.config.get('top_p')}")
-            self.log(f"📝 提示词类型: {prompt_type} | 目标平台: {'Stable Diffusion' if is_sd else '豆包生图'}")
+            if not hasattr(self, '_ollama_config_logged') or not self._ollama_config_logged:
+                self.log(f"🎯 优化模式: {optimization_method} | {prompt_type}")
+                self.log(f"   候选模型数: {len(candidate_models)}个")
+                self._ollama_config_logged = True
             
-            # 调用Ollama API，使用优化参数
+            optimized_prompt = None
+            last_error = None
+            
+            refusal_patterns = [
+                "cannot provide", "can't provide", "cannot help", "can't help",
+                "sorry", "unable to", "not able to", "I cannot", "I can't",
+                "拒绝", "无法", "抱歉", "对不起"
+            ]
+            
             global ollama_lock
-            with ollama_lock:
-                response = ollama.chat(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    options=config.get_options(
-                        num_predict=1500,  # 确保足够长度
-                        num_ctx=4096      # 标准上下文
-                    )
-                )
             
-            optimized_prompt = response["message"]["content"].strip()
-            
-            # 清理提示词（去除可能的引号、换行等）
-            optimized_prompt = optimized_prompt.replace('"', '').replace("'", "").strip()
-            
-            # 记录性能
-            duration = time.time() - start_time
-            llm_optimizer.record_call(duration, True)
-            
-            # 评估提示词质量
-            prompt_quality = self.evaluate_prompt_quality(optimized_prompt, sentence, content_type)
-            
-            # 如果质量不达标，尝试使用更高质量配置重试
-            if prompt_quality < 0.75:
-                self.log(f"⚠️ 提示词质量 {prompt_quality:.2f} 低于阈值，使用当前配置重试...")
-                
-                # 使用用户选择的优化方式
-                optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "平衡模式"
-                retry_config = LLMConfig(optimization_method)
-                
-                retry_prompt = user_prompt + "\n\n【重要】请确保输出质量，添加更多细节和专业术语，使画面更加生动具体。"
-                
-                with ollama_lock:
+            for model in candidate_models:
+                try:
                     response = ollama.chat(
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": retry_prompt}
+                            {"role": "user", "content": user_prompt}
                         ],
-                        options=retry_config.get_options()
+                        options=config.get_options(num_predict=500)
                     )
+                    optimized_prompt = response["message"]["content"].strip()
+                    
+                    is_refusal = any(pattern in optimized_prompt.lower() for pattern in refusal_patterns)
+                    if is_refusal:
+                        last_error = Exception(f"模型 {model} 拒绝生成内容")
+                        optimized_prompt = None
+                        continue
+                    
+                    self.log(f"   使用模型: {model}")
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+            
+            if not optimized_prompt:
+                self.log(f"⚠️ Ollama调用失败: {last_error}")
+                return prompt
+            
+            # 清理输出
+            optimized_prompt = optimized_prompt.strip()
+            
+            if is_sd:
+                if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
+                    self.log(f"⚠️ 模型返回了中文，使用原始提示词")
+                    return prompt
                 
-                optimized_prompt = response["message"]["content"].strip()
-                optimized_prompt = optimized_prompt.replace('"', '').replace("'", "").strip()
-                new_quality = self.evaluate_prompt_quality(optimized_prompt, sentence, content_type)
-                self.log(f"✅ 重试后质量: {new_quality:.2f}")
+                optimized_prompt = re.sub(r'^(Prompt|提示词|SD)[:\s]*', '', optimized_prompt, flags=re.IGNORECASE)
+                optimized_prompt = re.sub(r'^[\*\#\-\=\s]+', '', optimized_prompt)
+                optimized_prompt = re.sub(r'["\']', '', optimized_prompt)
+                optimized_prompt = optimized_prompt.strip()
+                
+                has_colon = ':' in optimized_prompt
+                if has_colon:
+                    parts = optimized_prompt.split(':', 1)
+                    content_part = parts[0].strip()
+                else:
+                    content_part = optimized_prompt
+                
+                prompt_lower = content_part.lower()
+                has_masterpiece = 'masterpiece' in prompt_lower
+                has_best_quality = 'best quality' in prompt_lower
+                
+                temp_prompt = content_part
+                if has_masterpiece:
+                    temp_prompt = re.sub(r',?\s*[Mm]asterpiece\s*,?', ', ', temp_prompt)
+                if has_best_quality:
+                    temp_prompt = re.sub(r',?\s*[Bb]est [Qq]uality\s*,?', ', ', temp_prompt)
+                temp_prompt = re.sub(r'^[\,\s]+', '', temp_prompt)
+                temp_prompt = re.sub(r'[\,\s]+$', '', temp_prompt)
+                temp_prompt = temp_prompt.strip()
+                
+                if temp_prompt:
+                    optimized_prompt = f"{temp_prompt}, masterpiece, best quality"
+                else:
+                    optimized_prompt = prompt
+                
+                optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
+                optimized_prompt = re.sub(r'^\s*,\s*', '', optimized_prompt)
+                optimized_prompt = re.sub(r'\s*,\s*$', '', optimized_prompt)
+                optimized_prompt = optimized_prompt.strip()
+            else:
+                if re.search(r'[a-zA-Z]', optimized_prompt):
+                    self.log(f"⚠️ 模型返回了英文，使用原始提示词")
+                    return prompt
+                
+                optimized_prompt = re.sub(r'^(Prompt|提示词)[:\s]*', '', optimized_prompt, flags=re.IGNORECASE)
+                optimized_prompt = re.sub(r'^[\*\#\-\=\s]+', '', optimized_prompt)
+                optimized_prompt = re.sub(r'["\']', '', optimized_prompt)
+                optimized_prompt = optimized_prompt.strip()
+                optimized_prompt = re.sub(r'\s+', '', optimized_prompt)
+                optimized_prompt = optimized_prompt.strip()
             
-            self.log(f"⚡ 提示词优化完成 ({duration:.1f}s): {optimized_prompt[:80]}...")
+            duration = time.time() - start_time
+            llm_optimizer.record_call(duration, True)
             
-            # 缓存结果
+            self.log(f"⚡ 优化完成 ({duration:.1f}s): {optimized_prompt[:50]}...")
+            
             self.cache_set('prompts', cache_key, optimized_prompt)
             
             return optimized_prompt
             
         except Exception as e:
-            duration = time.time() - start_time
-            llm_optimizer.record_call(duration, False)
-            self.log(f"⚠️ Ollama优化失败，使用原始提示词: {e}")
+            llm_optimizer.record_call(time.time() - start_time, False)
+            self.log(f"⚠️ 优化失败: {e}")
             return prompt
     
     def analyze_mood(self, sentence):
@@ -5665,7 +6280,67 @@ class DocuMakerLiteV7:
             return "消极/沉重"
         else:
             return "中性/客观"
-
+    
+    def _simplify_theme(self, theme_text):
+        """简化核心主题：提取关键词，去除描述性内容
+        
+        例如："美军对伊朗的军事行动已进入第20天" → "军事行动"
+        """
+        if not theme_text:
+            return theme_text
+        
+        import re
+        
+        # 去除常见描述性前缀
+        prefixes_to_remove = [
+            '这是一段关于', '本文讨论的是', '主要讲述', '主要内容是',
+            '文章讲述', '本文介绍', '视频讲述', '这段音频讲述',
+            '报道了', '介绍了', '讲述了', '关于',
+        ]
+        
+        cleaned = theme_text
+        for prefix in prefixes_to_remove:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+        
+        # 提取关键名词短语（人、地点、组织、事件）
+        # 按优先级排序：长匹配在前
+        key_patterns = [
+            # 优先级1：具体国家/军队（最具体）
+            '美军', '俄军', '伊军', '以军', '朝军', '韩军', '英军', '法军', '德军', '日军',
+            # 优先级2：多国组合
+            '美以', '美俄', '美中', '俄乌', '美伊', '以伊', '俄以',
+            # 优先级3：具体组织
+            '革命卫队', '联合国', '北约',
+            # 优先级4：具体国家
+            '伊朗', '美国', '俄罗斯', '中国', '以色列', '乌克兰',
+            '英国', '法国', '德国', '日本', '朝鲜', '韩国',
+            # 优先级5：抽象行动类型（放最后）
+            '军事行动', '军队', '部队',
+            # 优先级6：战争相关
+            '战争', '冲突', '战斗', '袭击', '爆炸', '发射',
+            # 优先级7：事件
+            '制裁', '谈判', '迈入新阶段', '新阶段',
+            # 优先级8：地点
+            '中东', '欧洲', '亚洲', '美洲', '非洲', '太平洋', '印度洋',
+        ]
+        
+        # 简单字符串匹配
+        found_keywords = []
+        for pattern in key_patterns:
+            if pattern in cleaned:
+                found_keywords.append(pattern)
+        
+        # 如果找到关键词，只保留前2个
+        if found_keywords:
+            return ' '.join(found_keywords[:2])
+        
+        # 如果没有匹配到任何模式，截取前10个字符
+        if len(cleaned) > 10:
+            cleaned = cleaned[:10]
+        
+        return cleaned
+    
     def extract_theme_info(self, analysis_result):
         """从大模型分析结果中提取主题信息"""
         theme_info = {
@@ -5678,28 +6353,54 @@ class DocuMakerLiteV7:
             return theme_info
 
         try:
-            # 提取核心主题
-            if '核心主题：' in analysis_result:
-                core_match = analysis_result.split('核心主题：')[1].split('\n')[0].strip()
-                theme_info['core_theme'] = core_match
-            elif '中心思想：' in analysis_result:
-                core_match = analysis_result.split('中心思想：')[1].split('\n')[0].strip()
+            # 清理analysis_result中的**标记，避免解析问题
+            import re
+            cleaned_result = analysis_result.replace('**', '')
+
+            # 提取核心主题（支持中英文，包括**格式）
+            if '核心主题：' in cleaned_result:
+                core_match = cleaned_result.split('核心主题：')[1].split('\n')[0].strip()
+            elif '中心思想：' in cleaned_result:
+                core_match = cleaned_result.split('中心思想：')[1].split('\n')[0].strip()
+            elif 'Core Theme:' in cleaned_result:
+                core_match = cleaned_result.split('Core Theme:')[1].split('\n')[0].strip()
+            elif 'core theme' in cleaned_result.lower():
+                match = re.search(r'(?:core theme|主题)[:\s]+([^\n]+)', cleaned_result, re.IGNORECASE)
+                if match:
+                    core_match = match.group(1).strip()
+                else:
+                    core_match = ""
+            else:
+                core_match = ""
+            
+            # 简化核心主题：提取关键词，去除描述性内容
+            if core_match:
+                core_match = self._simplify_theme(core_match)
                 theme_info['core_theme'] = core_match
 
-            # 提取视觉基调
-            if '视觉基调：' in analysis_result:
-                tone_match = analysis_result.split('视觉基调：')[1].split('\n')[0].strip()
+            # 提取视觉基调（支持中英文，包括**格式）
+            if '视觉基调：' in cleaned_result:
+                tone_match = cleaned_result.split('视觉基调：')[1].split('\n')[0].strip()
                 theme_info['visual_tone'] = tone_match
-            elif '视觉主题：' in analysis_result:
-                tone_match = analysis_result.split('视觉主题：')[1].split('\n')[0].strip()
+            elif '视觉主题：' in cleaned_result:
+                tone_match = cleaned_result.split('视觉主题：')[1].split('\n')[0].strip()
                 theme_info['visual_tone'] = tone_match
+            elif 'Overall Tone:' in cleaned_result:
+                tone_match = cleaned_result.split('Overall Tone:')[1].split('\n')[0].strip()
+                theme_info['visual_tone'] = tone_match
+            elif 'visual tone' in cleaned_result.lower():
+                match = re.search(r'(?:visual tone|色调)[:\s]+([^\n]+)', cleaned_result, re.IGNORECASE)
+                if match:
+                    theme_info['visual_tone'] = match.group(1).strip()
 
-            # 提取主题元素
-            if '主题元素：' in analysis_result:
-                elements_text = analysis_result.split('主题元素：')[1].split('\n')[0].strip()
-                # 解析元素列表（逗号或顿号分隔）
-                import re
+            # 提取主题元素（支持中英文，包括**格式）
+            if '主题元素：' in cleaned_result:
+                elements_text = cleaned_result.split('主题元素：')[1].split('\n')[0].strip()
                 elements = re.split(r'[，、,]', elements_text)
+                theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()]
+            elif 'Theme Elements:' in cleaned_result:
+                elements_text = cleaned_result.split('Theme Elements:')[1].split('\n')[0].strip()
+                elements = re.split(r'[,;]', elements_text)
                 theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()]
 
         except Exception as e:
@@ -6455,6 +7156,10 @@ class DocuMakerLiteV7:
             self.log("🎬 开始一键生成分镜")
             self.log("=" * 50)
             
+            # 每次运行都清除缓存，确保使用最新逻辑
+            self.cache_clear()
+            self.log("🗑️ 已清除历史缓存")
+            
             # 检查是否需要关闭Ollama以释放GPU资源给Whisper使用
             optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
             # 只有不使用大模型时才关闭Ollama
@@ -6600,888 +7305,509 @@ class DocuMakerLiteV7:
             cache_key_string = f"{audio_file_hash}_{full_text}_{content_type}_{prompt_type}"
             analysis_key = f"analysis_{hashlib.md5(cache_key_string.encode()).hexdigest()}"
 
-            # 智能计算分镜数量：基于语音片段数和内容复杂度
-            # 提前计算，确保在所有代码路径中都能使用
+            # 智能计算分镜数量（整改后 - 不做强制限制）
+            # 让大模型根据语义断句自由创建分镜
             def calculate_optimal_shot_count():
-                """根据语音片段计算最佳分镜数量"""
-                segment_count = len(segments)
-                total_duration = segments[-1].get("end", 0) if segments else 0
-                
-                # 基础规则：
-                # - 每个分镜平均3-6秒比较合适
-                # - 最少10个分镜，最多80个分镜
-                # - 根据内容密度调整
-                
-                avg_duration_per_shot = 4.0  # 每个分镜平均4秒
-                estimated_shots = int(total_duration / avg_duration_per_shot)
-                
-                # 根据片段数量微调
-                if segment_count < estimated_shots * 0.5:
-                    # 片段少但时长长，可能是停顿多
-                    estimated_shots = max(10, int(segment_count * 1.2))
-                elif segment_count > estimated_shots * 2:
-                    # 片段非常多，内容密集
-                    estimated_shots = min(80, segment_count)
-                
-                # 确保在合理范围内
-                optimal_count = max(10, min(80, estimated_shots))
-                
-                return optimal_count, segment_count, total_duration
+                """根据语音片段计算最佳分镜数量 - 整改后版本
+
+                关键改进：
+                1. 不做强制数量限制
+                2. 由大模型根据语义完整性自主判断
+                3. 返回 None 表示不限制，由大模型自由决定
+                """
+                # 不再计算推荐数量，完全让大模型决定
+                return None, 0, 0
             
             optimal_shot_count, segment_count, total_duration = calculate_optimal_shot_count()
-            self.log(f"   语音片段数: {segment_count}")
-            self.log(f"   音频总时长: {total_duration:.1f}秒")
-            self.log(f"   推荐分镜数: {optimal_shot_count}个")
+            self.log(f"   音频已识别，等待大模型分析...")
             
-            # 智能合并segments的函数 - 基于实际语音内容合并，非均匀分配
-            def merge_segments_smart(segments, target_count):
-                """智能合并segments以达到目标分镜数量
-                
-                关键原则：
-                1. 不使用均匀分配策略
-                2. 基于实际语音片段边界合并，保持原始时间戳
-                3. 确保合并后的时间戳精确对应原始音频
-                """
-                if len(segments) <= target_count:
-                    # 如果片段数已经小于等于目标数，直接返回
-                    return segments
-                
-                # 计算需要合并的组数
-                total_segments = len(segments)
-                
-                # 基于内容自适应的合并策略
-                # 不是简单的均匀分配，而是根据片段的实际时长和文本内容决定
-                merged = []
-                current_group = []
-                current_group_duration = 0
-                
-                # 计算目标平均时长（用于指导合并，而非强制均匀分配）
-                total_duration = segments[-1].get('end', 0) - segments[0].get('start', 0)
-                target_avg_duration = total_duration / target_count
-                
-                for i, segment in enumerate(segments):
-                    segment_duration = segment.get('end', 0) - segment.get('start', 0)
-                    segment_text = segment.get('text', '').strip()
-                    
-                    current_group.append(segment)
-                    current_group_duration += segment_duration
-                    
-                    # 决定是否创建新分镜的条件：
-                    # 1. 当前组时长达到或超过目标平均时长，且已有足够片段
-                    # 2. 文本包含完整句子（以句号、感叹号、问号结尾）
-                    # 3. 到达最后一个片段
-                    should_create_shot = False
-                    
-                    # 条件1：时长足够且不是第一个片段
-                    if current_group_duration >= target_avg_duration and len(current_group) >= 1:
-                        should_create_shot = True
-                    
-                    # 条件2：文本语义完整（以标点结尾）
-                    if segment_text and any(segment_text.endswith(p) for p in ['。', '！', '？', '.', '!', '?']):
-                        if len(current_group) >= 1:
-                            should_create_shot = True
-                    
-                    # 条件3：到达最后一个片段
-                    if i == len(segments) - 1:
-                        should_create_shot = True
-                    
-                    # 条件4：如果已经接近目标分镜数，提前结束当前组
-                    remaining_segments = len(segments) - i - 1
-                    remaining_shots = target_count - len(merged) - 1
-                    if remaining_shots > 0 and remaining_segments <= remaining_shots:
-                        should_create_shot = True
-                    
-                    if should_create_shot and current_group:
-                        # 合并时间和文本 - 使用原始片段的精确时间戳
-                        merged_segment = {
-                            'start': current_group[0].get('start', 0),
-                            'end': current_group[-1].get('end', 0),
-                            'text': ' '.join([s.get('text', '').strip() for s in current_group]),
-                            'id': len(merged)
-                        }
-                        merged.append(merged_segment)
-                        current_group = []
-                        current_group_duration = 0
-                
-                # 如果还有剩余的片段，合并到最后一个
-                if current_group and merged:
-                    merged[-1]['end'] = current_group[-1].get('end', 0)
-                    merged[-1]['text'] += ' ' + ' '.join([s.get('text', '').strip() for s in current_group])
-                elif current_group:
-                    merged.append({
-                        'start': current_group[0].get('start', 0),
-                        'end': current_group[-1].get('end', 0),
-                        'text': ' '.join([s.get('text', '').strip() for s in current_group]),
-                        'id': len(merged)
+            # 【关键修改】不再合并语音片段，直接使用原始segments
+            # 这样可以确保：
+            # 1. description 使用原始语音片段的完整句子
+            # 2. 时间戳精确对应原始语音片段
+            
+            # 直接从原始segments创建分镜列表（每个片段一个分镜）
+            original_shot_tasks = []
+            for seg in segments:
+                text = seg.get('text', '').strip()
+                start_time = seg.get('start', 0)
+                end_time = seg.get('end', 0)
+                if text and end_time > start_time:
+                    content_type = self.analyze_content_type(text)
+                    original_shot_tasks.append({
+                        'text': text,
+                        'start': start_time,
+                        'end': end_time,
+                        'content_type': content_type
                     })
-                
-                return merged
+            
+            self.log(f"   原始语音片段数: {len(original_shot_tasks)}个")
 
+            # 初始化theme_info
+            theme_info = {'core_theme': '', 'visual_tone': '', 'theme_elements': []}
+            user_custom_theme = ""
+            user_custom_tone = ""
+            
             # 检查缓存中是否有大模型分析结果
             cached_analysis = self.cache_get('analysis', analysis_key)
             if cached_analysis:
                 self.log("✅ 从缓存加载大模型分析结果")
                 self.log(f"   缓存键包含: 文本内容 + 内容类型({content_type}) + 提示词类型({prompt_type})")
                 analysis_result = cached_analysis
+                
+                # 从缓存中提取主题信息
+                theme_info = self.extract_theme_info(analysis_result)
+                
+                # 重要：对缓存中的主题再次进行简化处理（确保使用最新逻辑）
+                if theme_info.get('core_theme'):
+                    simplified_theme = self._simplify_theme(theme_info['core_theme'])
+                    if simplified_theme != theme_info['core_theme']:
+                        self.log(f"   🔄 主题已简化: {theme_info['core_theme']} → {simplified_theme}")
+                        theme_info['core_theme'] = simplified_theme
+                
+                user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+                user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+                
+                if not user_custom_theme and theme_info.get('core_theme'):
+                    self.log(f"🎯 核心主题: {theme_info['core_theme']}")
+                elif user_custom_theme:
+                    theme_info['core_theme'] = user_custom_theme
+                    self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
+                
+                if not user_custom_tone and theme_info.get('visual_tone'):
+                    self.log(f"🎨 视觉基调: {theme_info['visual_tone']}")
+                elif user_custom_tone:
+                    theme_info['visual_tone'] = user_custom_tone
+                    self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
+                
+                if theme_info.get('theme_elements'):
+                    self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
+                
+                self.log("✅ 主题提取完成，将直接使用原始语音片段创建分镜")
             else:
                 # 检查用户是否选择了大模型优化方式
                 optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
                 
-                # 使用大模型分析文章主要内容和中心思想（仅在选择了大模型优化时）
-                if OLLAMA_AVAILABLE and optimization_method == "本地大模型" and len(full_text) > 100:
+                # 【修复】动态检测Ollama服务是否可用，而不是仅依赖启动时的状态
+                if optimization_method == "本地大模型" and len(full_text) > 100:
+                    # 尝试动态导入和检测Ollama服务
+                    ollama_connected = False
                     try:
-                        self.update_task_progress("正在使用大模型分析文章内容...", 50)
-                        
-                        # 获取用户指定的模型
-                        user_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-                        if user_model == "脚本自带":
-                            user_model = "gemma3:4b"
-                        
-                        # 定义模型优先级列表（按稳定性和速度排序）
-                        # 格式: (模型名称, 参数量估算/GB, 描述)
-                        model_priority_list = [
-                            ("gemma3:4b", 4, "通用模型，推荐首选"),
-                            ("gemma3:1b", 1, "轻量级模型，速度最快"),
-                            ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
-                            ("qwen2.5:1.5b", 1.5, "轻量级模型"),
-                            ("phi3:mini", 2, "微软轻量级模型"),
-                            ("qwen3:4b", 4, "通用模型（部分显卡可能不稳定）"),
-                            ("qwen2.5:3b", 3, "阿里轻量级模型"),
-                            ("qwen2.5:7b", 7, "阿里标准模型"),
-                            ("llama3.2:3b", 3, "Meta轻量级模型"),
-                            ("llama3.2:1b", 1, "Meta超轻量级模型"),
-                            ("deepseek-r1:8b", 8, "深度思考模型"),
-                            ("mistral:7b", 7, "Mistral标准模型"),
-                            ("llama3:8b", 8, "Meta标准模型"),
-                            ("gemma2:9b", 9, "Google标准模型"),
-                            ("deepseek-r1:14b", 14, "深度思考大模型"),
-                            ("qwen2.5:14b", 14, "阿里大模型"),
-                            ("llama3.1:8b", 8, "Meta新版标准模型"),
-                            ("mistral-nemo:12b", 12, "Mistral大模型"),
-                        ]
-                        
-                        # 获取可用的模型列表
-                        global ollama_lock
-                        def get_available_models():
-                            """获取本地可用的Ollama模型列表"""
+                        import ollama
+                        # 尝试调用API检测服务是否响应
+                        import requests
+                        try:
+                            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                            if response.status_code == 200:
+                                global OLLAMA_AVAILABLE
+                                OLLAMA_AVAILABLE = True
+                                ollama_connected = True
+                                self.log("✅ 已连接到Ollama服务")
+                        except Exception as e:
+                            self.log(f"⚠️ Ollama服务未响应: {e}")
+                            # 尝试自动启动Ollama服务
+                            self.log("   尝试自动启动Ollama服务...")
                             try:
-                                with ollama_lock:
-                                    models_info = ollama.list()
-                                available = []
-                                if "models" in models_info:
-                                    for m in models_info["models"]:
-                                        model_name = m.get("name", m.get("model", ""))
-                                        if model_name:
-                                            available.append(model_name)
-                                return available
-                            except Exception as e:
-                                self.log(f"⚠️ 获取可用模型列表失败: {e}")
-                                return []
-                        
-                        available_models = get_available_models()
-                        
-                        # 构建候选模型列表（优先使用用户指定的模型，然后按大小排序）
-                        candidate_models = []
-                        
-                        # 首先添加用户指定的模型
-                        if user_model in available_models:
-                            candidate_models.append(user_model)
-                        
-                        # 然后按优先级添加其他可用模型（从小到大）
-                        for model_name, size, desc in model_priority_list:
-                            if model_name in available_models and model_name not in candidate_models:
-                                candidate_models.append(model_name)
-                        
-                        # 如果没有可用模型，使用默认列表
-                        if not candidate_models:
-                            candidate_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
-                            self.log("⚠️ 未检测到本地模型，使用默认候选列表")
-                        
-                        self.log(f"🤖 启动大模型分析...")
-                        self.log(f"   用户指定模型: {user_model}")
-                        self.log(f"   可用模型数: {len(available_models)}个")
-                        self.log(f"   候选模型数: {len(candidate_models)}个")
-                        self.log(f"   文本长度: {len(full_text)} 字符")
-                        self.log(f"   提示词类型: {prompt_type}")
-                        self.log(f"   内容类型: {content_type}")
-                        
-                        # 检查并显示自定义主题设置
-                        custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
-                        custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
-                        if custom_theme:
-                            self.log(f"   🎯 自定义核心主题: {custom_theme}")
-                        if custom_visual_tone:
-                            self.log(f"   🎨 自定义视觉基调: {custom_visual_tone}")
-                        if not custom_theme and not custom_visual_tone:
-                            self.log(f"   💡 提示: 可在高级设置中自定义主题和基调")
-                        
-                        # 使用线程池执行大模型调用
-                        import concurrent.futures
-                        import time
-                        
-                        def call_ollama_with_model(model_name):
-                            """使用指定模型调用Ollama"""
-                            global ollama_lock
-                            try:
-                                is_sd = prompt_type == "SD提示词"
-                                
-                                # 获取自定义主题和视觉基调
-                                custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
-                                custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
-                                
-                                # 获取风格设置
-                                selected_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
-                                
-                                # 准备自定义主题、视觉基调和风格设置的文本段
-                                custom_theme_section = f"\n用户指定的核心主题: {custom_theme}" if custom_theme else ""
-                                custom_visual_tone_section = f"\n用户指定的视觉基调: {custom_visual_tone}" if custom_visual_tone else ""
-                                selected_styles_section = f"\n用户选择的风格: {', '.join(selected_styles)}" if selected_styles else ""
-                                
-                                # 根据内容类型和提示词类型选择正确的模板
-                                if content_type == "语音新闻播报":
-                                    if is_sd:
-                                        template = PromptTemplates.get_template(
-                                            "voice_shot_analysis_sd",
-                                            text=full_text,
-                                            style_preset="新闻纪实风格",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                    else:
-                                        template = PromptTemplates.get_template(
-                                            "voice_shot_analysis_doubao",
-                                            text=full_text,
-                                            style_preset="新闻纪实风格",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                elif content_type == "语音科普知识":
-                                    if is_sd:
-                                        template = PromptTemplates.get_template(
-                                            "science_shot_analysis_sd",
-                                            text=full_text,
-                                            style_preset="科普科技风格",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                    else:
-                                        template = PromptTemplates.get_template(
-                                            "science_shot_analysis_doubao",
-                                            text=full_text,
-                                            style_preset="科普科技风格",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                else:  # 普通分镜
-                                    if is_sd:
-                                        template = PromptTemplates.get_template(
-                                            "shot_analysis_sd",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            text=full_text,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                    else:
-                                        template = PromptTemplates.get_template(
-                                            "shot_analysis_doubao",
-                                            segment_count=len(segments),
-                                            duration=segments[-1].get("end", 0) if segments else 0,
-                                            optimal_shots=optimal_shot_count,
-                                            text=full_text,
-                                            custom_theme_section=custom_theme_section,
-                                            custom_visual_tone_section=custom_visual_tone_section,
-                                            selected_styles_section=selected_styles_section
-                                        )
-                                
-                                # 如果用户指定了自定义主题和视觉基调，添加到system提示词中
-                                system_content = template["system"]
-                                if custom_theme or custom_visual_tone:
-                                    additional_instructions = "\n\n【用户自定义要求】"
-                                    if custom_theme:
-                                        additional_instructions += f"\n- 核心主题: {custom_theme}"
-                                    if custom_visual_tone:
-                                        additional_instructions += f"\n- 视觉基调: {custom_visual_tone}"
-                                    additional_instructions += "\n请严格按照用户指定的核心主题和视觉基调来生成分镜脚本！"
-                                    system_content += additional_instructions
-                                
-                                # 使用用户选择的优化方式
-                                optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
-                                
-                                # 根据用户选择的优化方式设置配置
-                                if optimization_method == "极速模式":
-                                    config = LLMConfig("极速模式")
-                                    task_complexity = "low"
-                                elif optimization_method == "质量优先":
-                                    config = LLMConfig("质量优先")
-                                    task_complexity = "high"
-                                elif optimization_method == "平衡模式":
-                                    config = LLMConfig("平衡模式")
-                                    task_complexity = "medium"
+                                import subprocess
+                                import os
+                                # 查找ollama可执行文件并启动
+                                ollama_path = None
+                                for path in [r"C:\Ollama\ollama.exe", r"C:\Program Files\Ollama\ollama.exe", 
+                                           os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
+                                           "ollama"]:
+                                    if os.path.exists(path) or path == "ollama":
+                                        ollama_path = path
+                                        break
+                                if ollama_path:
+                                    subprocess.Popen([ollama_path, "serve"], 
+                                                   stdout=subprocess.DEVNULL, 
+                                                   stderr=subprocess.DEVNULL,
+                                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                                    import time
+                                    time.sleep(3)  # 等待服务启动
+                                    # 再次尝试连接
+                                    try:
+                                        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                                        if response.status_code == 200:
+                                            OLLAMA_AVAILABLE = True
+                                            ollama_connected = True
+                                            self.log("✅ Ollama服务已启动并连接成功")
+                                    except:
+                                        self.log("❌ 无法启动Ollama服务")
                                 else:
-                                    # 默认使用平衡模式
-                                    config = LLMConfig("平衡模式")
-                                    task_complexity = "medium"
-                                
-                                # 调用Ollama API
-                                with ollama_lock:
+                                    self.log("❌ 未找到Ollama安装路径")
+                            except Exception as start_err:
+                                self.log(f"❌ 启动Ollama失败: {start_err}")
+                    except ImportError:
+                        self.log("❌ Ollama模块未安装，请运行: pip install ollama")
+                    
+                    # 只有连接成功后才使用大模型分析
+                    if ollama_connected and OLLAMA_AVAILABLE:
+                        try:
+                            self.update_task_progress("正在使用大模型分析文章内容...", 50)
+                            
+                            # 获取用户指定的模型
+                            user_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                            if user_model == "脚本自带":
+                                user_model = "gemma3:4b"
+                            
+                            # 定义模型优先级列表（按稳定性和速度排序）
+                            model_priority_list = [
+                                ("gemma3:4b", 4, "通用模型，推荐首选"),
+                                ("gemma3:1b", 1, "轻量级模型，速度最快"),
+                                ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
+                                ("qwen2.5:1.5b", 1.5, "轻量级模型"),
+                                ("phi3:mini", 2, "微软轻量级模型"),
+                                ("qwen3:4b", 4, "通用模型"),
+                                ("qwen2.5:3b", 3, "阿里轻量级模型"),
+                                ("llama3.2:3b", 3, "Meta轻量级模型"),
+                                ("llama3.2:1b", 1, "Meta超轻量级模型"),
+                                ("llama3", 8, "Meta通用模型"),
+                                ("llama3.1", 8, "Meta通用模型"),
+                                ("mistral", 7, "Mistral通用模型"),
+                                ("deepseek-r1:8b", 8, "DeepSeek推理模型"),
+                            ]
+                            
+                            # 获取可用的模型列表
+                            def get_available_models():
+                                """获取本地可用的Ollama模型列表"""
+                                try:
+                                    models_info = ollama.list()
+                                    available = []
+                                    if "models" in models_info:
+                                        for m in models_info["models"]:
+                                            model_name = m.get("name", m.get("model", ""))
+                                            if model_name:
+                                                available.append(model_name)
+                                    return available
+                                except Exception as e:
+                                    self.log(f"⚠️ 获取可用模型列表失败: {e}")
+                                    return []
+                            
+                            available_models = get_available_models()
+                            
+                            # 构建候选模型列表（优先使用用户指定的模型，然后按大小排序）
+                            candidate_models = []
+                            
+                            # 首先添加用户指定的模型
+                            if user_model in available_models:
+                                candidate_models.append(user_model)
+                            
+                            # 然后按优先级添加其他可用模型（从小到大）
+                            for model_name, size, desc in model_priority_list:
+                                if model_name in available_models and model_name not in candidate_models:
+                                    candidate_models.append(model_name)
+                            
+                            # 如果没有可用模型，使用默认列表
+                            if not candidate_models:
+                                candidate_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+                                self.log("⚠️ 未检测到本地模型，使用默认候选列表")
+                            
+                            self.log(f"🤖 启动大模型分析...")
+                            self.log(f"   用户指定模型: {user_model}")
+                            self.log(f"   可用模型数: {len(available_models)}个")
+                            self.log(f"   候选模型数: {len(candidate_models)}个")
+                            self.log(f"   文本长度: {len(full_text)} 字符")
+                            self.log(f"   提示词类型: {prompt_type}")
+                            self.log(f"   内容类型: {content_type}")
+                            
+                            # 检查并显示自定义主题设置
+                            custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+                            custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+                            if custom_theme:
+                                self.log(f"   🎯 自定义核心主题: {custom_theme}")
+                            if custom_visual_tone:
+                                self.log(f"   🎨 自定义视觉基调: {custom_visual_tone}")
+                            if not custom_theme and not custom_visual_tone:
+                                self.log(f"   💡 提示: 可在高级设置中自定义主题和基调")
+                            
+                            # 使用线程池执行大模型调用
+                            import concurrent.futures
+                            import time
+                            
+                            def call_ollama_with_model(model_name):
+                                """使用指定模型调用Ollama - 轻量级主题提取"""
+                                global ollama_lock
+                                try:
+                                    custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+                                    custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+                                    
+                                    if custom_theme or custom_visual_tone:
+                                        system_parts = [
+                                            "你是专业的视频内容分析专家。请从以下语音转录文本中提取关键信息，用于后续分镜生成。",
+                                            "",
+                                            "【任务】",
+                                            "只提取以下信息，不需要生成分镜脚本：",
+                                            "1. 核心主题（一句话概括文章主要内容）",
+                                            "2. 视觉基调（适合描述画面的关键词）",
+                                            "3. 主题元素（3-5个与主题相关的视觉元素关键词）",
+                                            "",
+                                            "【用户指定的核心主题】: " + custom_theme if custom_theme else "无",
+                                            "【用户指定的视觉基调】: " + custom_visual_tone if custom_visual_tone else "无",
+                                            "",
+                                            "请用以下格式输出：",
+                                            "【核心主题】：xxx",
+                                            "【视觉基调】：xxx",
+                                            "【主题元素】：xxx, xxx, xxx"
+                                        ]
+                                        system_content = "\n".join(system_parts)
+                                    else:
+                                        template = PromptTemplates.get_template("theme_extraction", text=full_text)
+                                        system_content = template["system"]
+                                    
                                     response = ollama.chat(
                                         model=model_name,
                                         messages=[
                                             {"role": "system", "content": system_content},
-                                            {"role": "user", "content": template["user"]}
+                                            {"role": "user", "content": f"语音转录文本：\n{full_text}"}
                                         ],
-                                        options=config.get_options(
-                                            num_predict=4000 if task_complexity == "high" else 3000,
-                                            num_ctx=8192 if task_complexity == "high" else 4096
-                                        )
+                                        options=self.current_llm_config.get_options(num_predict=512) if hasattr(self, 'current_llm_config') else {"temperature": 0.3, "top_p": 0.9, "num_predict": 512}
                                     )
-                                
-                                return response["message"]["content"].strip()
-                            except Exception as e:
-                                raise e
-                        
-                        # 首先检查Ollama服务是否运行
-                        self.log(f"   正在检查Ollama服务状态...")
-                        try:
-                            # 快速检查Ollama服务
-                            import urllib.request
-                            import urllib.error
-                            try:
-                                response = urllib.request.urlopen('http://localhost:11434/api/tags', timeout=3)
-                                self.log(f"   ✅ Ollama服务运行正常")
-                            except urllib.error.URLError as e:
-                                self.log(f"   ❌ Ollama服务未运行或无法连接: {e}")
-                                self.log(f"   建议: 请启动Ollama服务后再试")
-                                analysis_result = ""
-                                raise Exception("Ollama服务未运行")
-                        except Exception as e:
-                            self.log(f"   ⚠️ 无法检查Ollama服务状态: {e}")
-                        
-                        # 尝试调用模型，失败时自动切换
-                        analysis_result = ""
-                        current_model_index = 0
-                        max_retries = len(candidate_models)
-                        
-                        while current_model_index < max_retries and not analysis_result:
-                            current_model = candidate_models[current_model_index]
-                            
-                            self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
-                            
-                            try:
-                                with concurrent.futures.ThreadPoolExecutor() as executor:
-                                    future = executor.submit(call_ollama_with_model, current_model)
-                                    self.log(f"   等待模型响应中...")
-                                    self.log(f"   ⏱️  设置超时时间: 120秒")
                                     
-                                    start_time = time.time()
-                                    # 设置120秒超时，避免无限等待
-                                    analysis_result = future.result(timeout=120)
-                                    elapsed_time = time.time() - start_time
-                                    
-                                    if analysis_result:
-                                        self.log(f"✅ 模型 {current_model} 响应成功！")
-                                        self.log(f"   响应时间: {elapsed_time:.1f}秒")
-                                        self.log(f"   响应长度: {len(analysis_result)} 字符")
-                                        
-                                        # 如果成功使用的不是用户指定的模型，显示提醒
-                                        if current_model != user_model:
-                                            self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
-                                            self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
-                                        break
-                                    else:
-                                        self.log(f"⚠️ 模型 {current_model} 返回空结果")
-                                        current_model_index += 1
-                                        
-                            except concurrent.futures.TimeoutError:
-                                self.log(f"⚠️ 模型 {current_model} 响应超时（超过120秒）")
-                                self.log(f"   可能原因: 模型计算量大或GPU资源不足")
-                                current_model_index += 1
-                                
-                                if current_model_index < max_retries:
-                                    next_model = candidate_models[current_model_index]
-                                    self.log(f"   自动切换到下一个模型: {next_model}")
-                                    time.sleep(1)  # 超时后等待稍长时间再重试
-                            except Exception as e:
-                                error_msg = str(e).lower()
-                                self.log(f"⚠️ 模型 {current_model} 调用失败: {str(e)[:100]}")
-                                
-                                # 如果是连接错误，直接退出
-                                if "connection" in error_msg or "refused" in error_msg:
-                                    self.log(f"   ❌ Ollama服务连接失败，停止尝试")
-                                    break
-                                
-                                current_model_index += 1
-                                
-                                if current_model_index < max_retries:
-                                    next_model = candidate_models[current_model_index]
-                                    self.log(f"   自动切换到下一个模型: {next_model}")
-                                    time.sleep(0.5)  # 短暂延迟后重试
-                        
-                        # 如果所有模型都失败
-                        if not analysis_result:
-                            self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
-                            self.log(f"   候选模型列表: {', '.join(candidate_models)}")
-                            self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
-                            # 关闭Ollama释放GPU资源
-                            try:
-                                import subprocess
-                                subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
-                                import time
-                                time.sleep(1)
-                                self.log("🧹 Ollama已关闭，GPU资源已释放")
-                            except:
-                                pass
+                                    return response["message"]["content"].strip()
+                                except Exception as e:
+                                    raise e
+                            
+                            # 尝试调用模型，失败时自动切换
                             analysis_result = ""
-                        
-                        # 缓存分析结果（即使是空结果也缓存，避免重复失败）
-                        if analysis_result:
-                            self.cache_set('analysis', analysis_key, analysis_result)
-                            self.log("✅ 大模型分析结果已缓存")
-                        
-                        # 解析分析结果
-                        self.update_task_progress("正在解析分析结果...", 60)
-                        
-                        # 首先记录大模型返回的前500字符，用于调试
-                        self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
-                        
-                        # 使用新的智能解析函数提取完整分镜信息
-                        parsed_shots_result = self._parse_shot_analysis_result(analysis_result)
-                        
-                        # 兼容多种返回格式：可能是列表、分镜列表+主题信息字典，或None
-                        parsed_shots = []
-                        theme_info = {'core_theme': '', 'visual_tone': '', 'theme_elements': []}  # 初始化 theme_info
-                        if parsed_shots_result is None:
-                            parsed_shots = []
-                        elif isinstance(parsed_shots_result, list):
-                            parsed_shots = parsed_shots_result
-                        elif isinstance(parsed_shots_result, dict):
-                            if 'shots' in parsed_shots_result:
-                                parsed_shots = parsed_shots_result.get('shots', [])
-                            if 'theme_info' in parsed_shots_result:
-                                theme_info = parsed_shots_result.get('theme_info', theme_info)
-                        
-                        if parsed_shots:
-                            self.log(f"✅ 智能解析完成，共 {len(parsed_shots)} 个分镜")
-                            for idx, shot in enumerate(parsed_shots[:3], 1):  # 只显示前3个作为示例
-                                self.log(f"   分镜{idx}: {shot.get('dubbing', '')[:30]}...")
-                                if shot.get('visual_elements'):
-                                    self.log(f"      视觉元素: {shot['visual_elements'][:40]}...")
-                        else:
-                            self.log("⚠️ 智能解析失败，尝试备用解析方案...")
-                            parsed_shots = []
-                        
-                        # 兼容旧格式：如果没有解析到分镜，使用旧方法
-                        sentences = []
-                        if not parsed_shots:
-                            # 提取分镜脚本（支持多种关键词）
-                            keywords = ["分镜脚本：", "分镜脚本", "Storyboard Script:", "Storyboard:"]
-                            shots_keyword = None
-                            shots_part = None
+                            current_model_index = 0
+                            max_retries = len(candidate_models)
                             
-                            if analysis_result:
-                                for kw in keywords:
-                                    if kw in analysis_result:
-                                        shots_keyword = kw
-                                        shots_part = analysis_result.split(kw)[1]
-                                        break
-                            
-                            if shots_part:
-                                import re
+                            while current_model_index < max_retries and not analysis_result:
+                                current_model = candidate_models[current_model_index]
                                 
-                                # 改进的分镜解析逻辑 - 支持多种格式变体
-                                lines = [s.strip() for s in shots_part.split("\n") if s.strip()]
+                                self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
                                 
-                                self.log(f"🔍 分镜脚本部分共 {len(lines)} 行")
-                                
-                                i = 0
-                                current_shot_text = []
-                                shot_count = 0
-                                
-                                while i < len(lines):
-                                    line = lines[i]
-                                    
-                                    # 检查是否是新分镜开始（支持多种格式）
-                                    is_new_shot = False
-                                    if re.match(r'^\*?\*?\d+\.', line):
-                                        is_new_shot = True
-                                        shot_count += 1
-                                    
-                                    if is_new_shot:
-                                        # 保存之前的分镜文本
-                                        if current_shot_text:
-                                            shot_content = " ".join(current_shot_text)
-                                            shot_content = re.sub(r'\*\*.*?\*\*', '', shot_content)
-                                            shot_content = re.sub(r'\[.*?\]', '', shot_content)
-                                            shot_content = shot_content.strip()
-                                            if shot_content and len(shot_content) > 1:
-                                                sentences.append(shot_content)
-                                                self.log(f"   解析到分镜 {len(sentences)}: {shot_content[:50]}...")
-                                            current_shot_text = []
-                                        
-                                        # 提取当前行的配音内容
-                                        clean_line = re.sub(r'^\*?\*?\d+\.\s*', '', line)
-                                        
-                                        if '配音' in clean_line:
-                                            match = re.search(r'配音\s*[:：]\s*(.+)', clean_line)
-                                            if match:
-                                                current_shot_text.append(match.group(1).strip())
-                                            else:
-                                                clean_line = re.sub(r'\[.*?\]', '', clean_line)
-                                                clean_line = re.sub(r'配音\s*[:：]?\s*', '', clean_line)
-                                                if clean_line.strip():
-                                                    current_shot_text.append(clean_line.strip())
-                                        else:
-                                            clean_line = re.sub(r'\[.*?\]', '', clean_line)
-                                            if clean_line.strip():
-                                                current_shot_text.append(clean_line.strip())
-                                        
-                                        i += 1
-                                    
-                                    elif line.startswith("-") and '配音' in line:
-                                        match = re.search(r'配音\s*[:：]\s*(.+)', line)
-                                        if match:
-                                            current_shot_text.append(match.group(1).strip())
-                                        i += 1
-                                    
-                                    elif line.startswith("-") and ('画面提示词' in line or '负面提示词' in line):
-                                        i += 1
-                                    
-                                    else:
-                                        if current_shot_text:
-                                            clean_line = re.sub(r'\*\*.*?\*\*', '', line)
-                                            clean_line = re.sub(r'\[.*?\]', '', clean_line)
-                                            if clean_line.strip():
-                                                current_shot_text.append(clean_line.strip())
-                                        i += 1
-                                
-                                # 添加最后一个分镜
-                                if current_shot_text:
-                                    shot_content = " ".join(current_shot_text)
-                                    shot_content = re.sub(r'\*\*.*?\*\*', '', shot_content)
-                                    shot_content = re.sub(r'\[.*?\]', '', shot_content)
-                                    shot_content = shot_content.strip()
-                                    if shot_content and len(shot_content) > 1:
-                                        sentences.append(shot_content)
-                                        self.log(f"   解析到最后分镜 {len(sentences)}: {shot_content[:50]}...")
-                                
-                                self.log(f"✅ 解析完成，共 {len(sentences)} 个分镜")
-                            
-                            elif analysis_result and "断句结果：" in analysis_result:
-                                shots_part = analysis_result.split("断句结果：")[1]
-                                sentences = [s.strip() for s in shots_part.split("\n") if s.strip()]
-                        
-                        # 步骤3: 解析和校准分镜
-                        self.log("\n📍 步骤 3/4: 解析和校准分镜")
-
-                        # 提取主题信息（用于一致性验证）
-                        theme_info = self.extract_theme_info(analysis_result)
-                        if theme_info['core_theme']:
-                            self.log(f"🎯 核心主题: {theme_info['core_theme']}")
-                        if theme_info['visual_tone']:
-                            self.log(f"🎨 视觉基调: {theme_info['visual_tone']}")
-                        if theme_info['theme_elements']:
-                            self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
-
-                        # 如果大模型分析成功，使用分析结果生成分镜
-                        if sentences:
-                            self.update_task_progress("正在验证分镜数量...", 70)
-                            original_count = len(sentences)
-
-                            self.log(f"📊 AI生成 {original_count} 个分镜")
-                            
-                            # 只进行极端情况的处理
-                            if original_count < 3:
-                                # 太少，可能是解析问题，尝试多种备用解析方案
-                                self.log(f"⚠️ 分镜数量过少({original_count})，尝试备用解析方案...")
-                                import re
-                                
-                                # 备用方案1：直接从analysis_result中提取所有可能的句子
-                                fallback_sentences = []
-                                
-                                # 尝试匹配 "配音" 后面的内容
-                                dubbing_matches = re.findall(r'配音\s*[:：]\s*([^\n]+)', analysis_result)
-                                if dubbing_matches and len(dubbing_matches) >= 3:
-                                    fallback_sentences = [m.strip() for m in dubbing_matches if len(m.strip()) > 5]
-                                    self.log(f"   备用方案1：从'配音'标记提取到 {len(fallback_sentences)} 个分镜")
-                                
-                                # 备用方案2：按行分割，过滤掉元数据行
-                                if len(fallback_sentences) < 3:
-                                    all_lines = [s.strip() for s in analysis_result.split('\n') if s.strip()]
-                                    content_lines = []
-                                    for line in all_lines:
-                                        # 跳过元数据行
-                                        if any(keyword in line for keyword in ['核心主题', '视觉基调', '主题元素', '主要内容', '分镜脚本', '画面提示词', '负面提示词', '语义解析', '画面构思', '视觉元素']):
-                                            continue
-                                        # 跳过纯格式标记
-                                        if line.startswith('-') and not any(c.isalnum() for c in line):
-                                            continue
-                                        # 保留有实质内容的行
-                                        if len(line) > 10 and any(c.isalnum() for c in line):
-                                            # 清理格式
-                                            clean = re.sub(r'^\d+\.\s*', '', line)
-                                            clean = re.sub(r'\*\*.*?\*\*', '', clean)
-                                            clean = re.sub(r'\[.*?\]', '', clean)
-                                            clean = clean.strip()
-                                            if clean and len(clean) > 5:
-                                                content_lines.append(clean)
-                                    
-                                    if len(content_lines) >= 3:
-                                        fallback_sentences = content_lines
-                                        self.log(f"   备用方案2：从内容行提取到 {len(fallback_sentences)} 个分镜")
-                                
-                                # 备用方案3：按标点符号分割原文本
-                                if len(fallback_sentences) < 3:
-                                    fallback_sentences = re.split(r'[。！？]', full_text)
-                                    fallback_sentences = [s.strip() for s in fallback_sentences if len(s.strip()) > 5]
-                                    self.log(f"   备用方案3：从原文本分割得到 {len(fallback_sentences)} 个分镜")
-                                
-                                # 使用备用方案的结果
-                                if len(fallback_sentences) >= 3:
-                                    sentences = fallback_sentences[:80]
-                                    self.log(f"✅ 使用备用方案，共 {len(sentences)} 个分镜")
-                                else:
-                                    self.log(f"❌ 所有备用方案均失败，保留原始 {original_count} 个分镜")
-                            elif original_count > 150:
-                                # 太多，可能是格式问题，只保留前150个
-                                self.log(f"⚠️ 分镜数量过多({original_count})，保留前150个")
-                                sentences = sentences[:150]
-                            else:
-                                self.log(f"✅ 分镜数量合理，保留AI的原始分配")
-                            
-                            # 使用语音原始时间戳精确分配 - 严丝合缝匹配音频
-                            total_duration = segments[-1].get("end", 0) if segments else 0
-                            
-                            self.update_task_progress("正在创建分镜...", 80)
-                            
-                            # 【修改】使用原始语音片段创建分镜，而不是大模型返回的分镜
-                            # 这样保留原始片段的时间戳精度，同时通过create_new_shot中的optimize_prompt_with_ollama优化提示词
-                            self.log("📝 使用原始语音片段创建分镜（保留时间戳精度）")
-                            self.log(f"   共 {len(segments)} 个语音片段")
-                            
-                            # 使用多线程并行创建分镜以提高速度
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
-                            import threading
-                            
-                            import os
-                            max_workers = min(os.cpu_count() or 4, 8)
-                            self.log(f"   使用 {max_workers} 个线程并行创建分镜...")
-                            
-                            # 准备所有分镜数据
-                            shot_tasks = []
-                            for i, seg in enumerate(segments):
-                                text = seg.get('text', '').strip()
-                                if not text:
-                                    continue
-                                start_time = seg.get('start', 0)
-                                end_time = seg.get('end', 0)
-                                content_type = self.analyze_content_type(text)
-                                shot_tasks.append((len(shot_tasks), start_time, end_time, text, content_type))
-                            
-                            # 使用线程池并行创建分镜
-                            completed_count = 0
-                            shots_dict = {}
-                            lock = threading.Lock()
-                            
-                            # 获取主题信息
-                            core_theme = theme_info.get('core_theme', '')
-                            visual_tone = theme_info.get('visual_tone', '')
-                            
-                            def create_shot_task(task_data):
-                                idx, start_time, end_time, text, content_type = task_data
-                                shot = self.create_new_shot(
-                                    idx, start_time, end_time, text, content_type,
-                                    core_theme=core_theme,
-                                    visual_tone=visual_tone
-                                )
-                                return idx, shot
-                            
-                            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                                futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
-                                
-                                for future in as_completed(futures):
-                                    try:
-                                        idx, shot = future.result()
-                                        with lock:
-                                            if shot:
-                                                shots_dict[idx] = shot
-                                            completed_count += 1
-                                            if completed_count % 5 == 0 or completed_count == len(shot_tasks):
-                                                self.log(f"   正在创建分镜: {completed_count}/{len(shot_tasks)}")
-                                                progress = 50 + int(completed_count / len(shot_tasks) * 30) if len(shot_tasks) > 0 else 50
-                                                self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
-                                    except Exception as e:
-                                        self.log(f"   ⚠️ 创建分镜失败: {str(e)}")
-                            
-                            # 按索引排序
-                            shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
-                            self.log(f"✅ 成功创建 {len(shots)} 个分镜（基于原始语音片段，并行处理）")
-                            
-                            # 验证分镜主题一致性（如果大模型分析成功）
-                            if theme_info['core_theme']:
-                                is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
-                                if is_consistent:
-                                    self.log(f"✅ {consistency_msg}")
-                                else:
-                                    self.log(f"⚠️ {consistency_msg}")
-                                    self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
-                        else:
-                            # 如果大模型分析失败，使用原始语音片段创建分镜
-                            self.log("⚠️ 大模型分析失败，使用原始语音片段创建分镜")
-                            self.log(f"   共 {len(segments)} 个语音片段")
-                            
-                            shots = []
-                            for i, seg in enumerate(segments):
-                                text = seg.get('text', '').strip()
-                                if not text:
-                                    continue
-                                
-                                start_time = seg.get('start', 0)
-                                end_time = seg.get('end', 0)
-                                # 分析内容类型 - 由模型智能匹配
-                                content_type = self.analyze_content_type(text)
-                                
-                                shot = self.create_new_shot(
-                                    len(shots), start_time, end_time, text, content_type,
-                                    core_theme=theme_info.get('core_theme', ''),
-                                    visual_tone=theme_info.get('visual_tone', '')
-                                )
-                                shots.append(shot)
-                    except Exception as e:
-                        self.log(f"⚠️ 大模型分析失败: {e}，使用原始语音片段创建分镜")
-                        self.log(f"   共 {len(segments)} 个语音片段")
-                        
-                        # 使用多线程并行创建分镜
-                        from concurrent.futures import ThreadPoolExecutor, as_completed
-                        import threading
-                        
-                        import os
-                        max_workers = min(os.cpu_count() or 4, 8)
-                        
-                        shot_tasks = []
-                        for i, seg in enumerate(segments):
-                            text = seg.get('text', '').strip()
-                            if not text:
-                                continue
-                            start_time = seg.get('start', 0)
-                            end_time = seg.get('end', 0)
-                            content_type = self.analyze_content_type(text)
-                            shot_tasks.append((len(shot_tasks), start_time, end_time, text, content_type))
-                        
-                        completed_count = 0
-                        shots_dict = {}
-                        lock = threading.Lock()
-                        
-                        def create_shot_task(task_data):
-                            idx, start_time, end_time, text, content_type = task_data
-                            shot = self.create_new_shot(
-                                idx, start_time, end_time, text, content_type,
-                                core_theme='',
-                                visual_tone=''
-                            )
-                            return idx, shot
-                        
-                        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
-                            
-                            for future in as_completed(futures):
                                 try:
-                                    idx, shot = future.result()
-                                    with lock:
-                                        if shot:
-                                            shots_dict[idx] = shot
-                                        completed_count += 1
-                                except Exception as err:
-                                    self.log(f"   ⚠️ 创建分镜失败: {str(err)}")
+                                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                                        future = executor.submit(call_ollama_with_model, current_model)
+                                        self.log(f"   等待模型响应中...")
+                                        
+                                        start_time = time.time()
+                                        analysis_result = future.result()
+                                        elapsed_time = time.time() - start_time
+                                        
+                                        if analysis_result:
+                                            self.log(f"✅ 模型 {current_model} 响应成功！")
+                                            self.log(f"   响应时间: {elapsed_time:.1f}秒")
+                                            self.log(f"   响应长度: {len(analysis_result)} 字符")
+                                            
+                                            # 如果成功使用的不是用户指定的模型，显示提醒
+                                            if current_model != user_model:
+                                                self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
+                                                self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
+                                            break
+                                        else:
+                                            self.log(f"⚠️ 模型 {current_model} 返回空结果")
+                                            current_model_index += 1
+                                            
+                                except concurrent.futures.TimeoutError:
+                                    self.log(f"⚠️ 模型 {current_model} 响应超时（超过120秒）")
+                                    self.log(f"   可能原因: 模型计算量大或GPU资源不足")
+                                    current_model_index += 1
+                                    
+                                    if current_model_index < max_retries:
+                                        next_model = candidate_models[current_model_index]
+                                        self.log(f"   自动切换到下一个模型: {next_model}")
+                                        time.sleep(1)  # 超时后等待稍长时间再重试
+                                except Exception as e:
+                                    error_msg = str(e).lower()
+                                    self.log(f"⚠️ 模型 {current_model} 调用失败: {str(e)[:100]}")
+                                    
+                                    # 如果是连接错误，直接退出
+                                    if "connection" in error_msg or "refused" in error_msg:
+                                        self.log(f"   ❌ Ollama服务连接失败，停止尝试")
+                                        break
+                                    
+                                    current_model_index += 1
+                                    
+                                    if current_model_index < max_retries:
+                                        next_model = candidate_models[current_model_index]
+                                        self.log(f"   自动切换到下一个模型: {next_model}")
+                                        time.sleep(0.5)  # 短暂延迟后重试
+                            
+                            # 如果所有模型都失败
+                            if not analysis_result:
+                                self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
+                                self.log(f"   候选模型列表: {', '.join(candidate_models)}")
+                                self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
+                                # 关闭Ollama释放GPU资源
+                                try:
+                                    import subprocess
+                                    subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
+                                    import time
+                                    time.sleep(1)
+                                    self.log("🧹 Ollama已关闭，GPU资源已释放")
+                                except:
+                                    pass
+                                analysis_result = ""
+                            
+                            # 缓存分析结果（即使是空结果也缓存，避免重复失败）
+                            if analysis_result:
+                                self.cache_set('analysis', analysis_key, analysis_result)
+                                self.log("✅ 大模型分析结果已缓存")
+                            
+                            # 解析分析结果 - 只提取主题信息，不生成分镜
+                            self.update_task_progress("正在提取主题信息...", 60)
+                            
+                            # 首先记录大模型返回的内容
+                            self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
+                            
+                            # 直接从分析结果中提取主题信息
+                            theme_info = self.extract_theme_info(analysis_result)
+                            
+                            # 简化核心主题：提取关键词，去除描述性内容
+                            if theme_info.get('core_theme'):
+                                simplified_theme = self._simplify_theme(theme_info['core_theme'])
+                                if simplified_theme != theme_info['core_theme']:
+                                    self.log(f"   🔄 主题已简化: {theme_info['core_theme']} → {simplified_theme}")
+                                    theme_info['core_theme'] = simplified_theme
+                            
+                            # 如果用户没有设置自定义主题/基调，使用大模型提取的
+                            user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+                            user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+                            
+                            if not user_custom_theme and theme_info.get('core_theme'):
+                                self.log(f"🎯 核心主题: {theme_info['core_theme']}")
+                            elif user_custom_theme:
+                                theme_info['core_theme'] = user_custom_theme
+                                self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
+                            
+                            if not user_custom_tone and theme_info.get('visual_tone'):
+                                self.log(f"🎨 视觉基调: {theme_info['visual_tone']}")
+                            elif user_custom_tone:
+                                theme_info['visual_tone'] = user_custom_tone
+                                self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
+                            
+                            if theme_info.get('theme_elements'):
+                                self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
+                            
+                            # 不生成分镜列表，跳到步骤3直接使用原始语音片段
+                            self.log("✅ 主题提取完成，将直接使用原始语音片段创建分镜")
                         
-                        shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
-                        self.log(f"✅ 分镜创建完成，共 {len(shots)} 个")
+                        except Exception as e:
+                            self.log(f"   ⚠️ 大模型分析过程出错: {str(e)[:100]}")
+                            self.log("   将使用原始语音片段创建分镜")
+                            theme_info = {'core_theme': '', 'visual_tone': '', 'theme_elements': []}
+                            user_custom_theme = ""
+                            user_custom_tone = ""
+                
+                # 步骤3: 解析和校准分镜
+                self.log("\n📍 步骤 3/4: 解析和校准分镜")
+
+            # 如果theme_info还没有从步骤2获取，则重新提取
+            if not theme_info.get('core_theme') and not theme_info.get('visual_tone'):
+                theme_info = self.extract_theme_info(analysis_result) if analysis_result else theme_info
+            
+            # 最终简化主题（兜底处理）
+            if theme_info.get('core_theme'):
+                final_theme = self._simplify_theme(theme_info['core_theme'])
+                if final_theme != theme_info['core_theme']:
+                    theme_info['core_theme'] = final_theme
+            
+            # 显示主题信息
+            user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+            user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+            
+            display_theme = user_custom_theme if user_custom_theme else theme_info.get('core_theme', '')
+            display_tone = user_custom_tone if user_custom_tone else theme_info.get('visual_tone', '')
+            
+            if display_theme:
+                self.log(f"🎯 核心主题: {display_theme}")
+            if display_tone:
+                self.log(f"🎨 视觉基调: {display_tone}")
+            if theme_info.get('theme_elements'):
+                self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
+
+            # 直接使用原始语音片段创建分镜（跳过sentence列表）
+            self.log(f"📊 共 {len(original_shot_tasks)} 个原始语音片段")
+            
+            # 使用原始语音片段创建分镜
+            self.update_task_progress("正在创建分镜...", 80)
+            self.log(f"📝 直接使用原始语音片段创建分镜")
+            self.log(f"   共 {len(original_shot_tasks)} 个分镜")
+            
+            # 直接使用 original_shot_tasks（每个原始片段一个分镜）
+            shot_tasks = []
+            for i, task in enumerate(original_shot_tasks):
+                text = task['text']
+                content_type = task['content_type']
+                            
+                # 直接使用原始片段的时间戳
+                start_time = task['start']
+                end_time = task['end']
+                
+                shot_tasks.append((
+                    len(shot_tasks),
+                    start_time,
+                    end_time,
+                    text,
+                    content_type
+                ))
+            
+            # 使用线程池并行创建分镜
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import os
+            
+            # 优化：增加并发线程数以提高处理速度
+            cpu_count = os.cpu_count() or 4
+            thread_count = min(cpu_count * 4, 32)  # 增加并发上限以加速处理
+            
+            self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理")
+            
+            completed_count = 0
+            shots_dict = {}
+            lock = threading.Lock()
+            start_time = time.time()
+            
+            # 获取主题信息（优先使用用户自定义的）
+            core_theme = user_custom_theme if user_custom_theme else theme_info.get('core_theme', '')
+            visual_tone = user_custom_tone if user_custom_tone else theme_info.get('visual_tone', '')
+            theme_elements = theme_info.get('theme_elements', [])
+            
+            def create_shot_task(task_data):
+                idx, start_time, end_time, text, content_type = task_data
+                shot = self.create_new_shot(
+                    idx, start_time, end_time, text, content_type,
+                    core_theme=core_theme,
+                    visual_tone=visual_tone,
+                    theme_elements=theme_elements
+                )
+                return idx, shot
+            
+            with ThreadPoolExecutor(max_workers=thread_count) as executor:
+                futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
+                
+                for future in as_completed(futures):
+                    try:
+                        idx, shot = future.result()
+                        with lock:
+                            if shot:
+                                shots_dict[idx] = shot
+                            completed_count += 1
+                            if completed_count % 5 == 0 or completed_count == len(shot_tasks):
+                                elapsed = time.time() - start_time
+                                speed = completed_count / elapsed if elapsed > 0 else 0
+                                self.log(f"   📊 正在创建分镜: {completed_count}/{len(shot_tasks)} (速度: {speed:.1f}个/秒)")
+                                progress = 50 + int(completed_count / len(shot_tasks) * 30) if len(shot_tasks) > 0 else 50
+                                self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
+                    except Exception as e:
+                        self.log(f"   ⚠️ 创建分镜失败: {str(e)}")
+            
+            elapsed_time = time.time() - start_time
+            
+            # 按索引排序
+            shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
+            self.log(f"✅ 成功创建 {len(shots)} 个分镜（{thread_count}线程并行，耗时 {elapsed_time:.1f}秒，速度 {len(shots)/elapsed_time:.1f}个/秒）")
+
+            # 验证分镜主题一致性（如果大模型分析成功）
+            if theme_info.get('core_theme'):
+                is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
+                if is_consistent:
+                    self.log(f"✅ {consistency_msg}")
                 else:
-                    # 【修改】如果未选择大模型优化，或Ollama不可用，跳过分析直接使用原始片段
-                    if optimization_method != "本地大模型":
-                        self.log(f"📝 优化方式: {optimization_method}，跳过大模型分析")
-                    else:
-                        self.log("📝 Ollama不可用或文本太短，跳过大模型分析")
-                    self.log("📝 使用原始语音片段创建分镜")
-                    self.log(f"   共 {len(segments)} 个语音片段")
-                    
-                    shots = []
-                    segment_count = len(segments)
-                    
-                    # 使用多线程并行创建分镜以提高速度
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    import threading
-                    
-                    # 获取CPU核心数，设置为线程数
-                    import os
-                    max_workers = min(os.cpu_count() or 4, 8)  # 最多8个线程
-                    self.log(f"   使用 {max_workers} 个线程并行创建分镜...")
-                    
-                    # 准备所有分镜数据
-                    shot_tasks = []
-                    for i, seg in enumerate(segments):
-                        text = seg.get('text', '').strip()
-                        if not text:
-                            continue
-                        start_time = seg.get('start', 0)
-                        end_time = seg.get('end', 0)
-                        content_type = self.analyze_content_type(text)
-                        shot_tasks.append((len(shot_tasks), start_time, end_time, text, content_type))
-                    
-                    # 使用线程池并行创建分镜
-                    completed_count = 0
-                    shots_dict = {}  # 用字典存储，保持顺序
-                    lock = threading.Lock()
-                    
-                    def create_shot_task(task_data):
-                        idx, start_time, end_time, text, content_type = task_data
-                        # 创建一个独立的方法来处理
-                        shot = self.create_new_shot(
-                            idx, start_time, end_time, text, content_type,
-                            core_theme='',
-                            visual_tone=''
-                        )
-                        return idx, shot
-                    
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
-                        
-                        for future in as_completed(futures):
-                            try:
-                                idx, shot = future.result()
-                                with lock:
-                                    if shot:
-                                        shots_dict[idx] = shot
-                                    completed_count += 1
-                                    # 每完成5个打印一次进度（减少UI更新频率）
-                                    if completed_count % 5 == 0 or completed_count == len(shot_tasks):
-                                        self.log(f"   正在创建分镜: {completed_count}/{len(shot_tasks)}")
-                                        progress = 50 + int(completed_count / len(shot_tasks) * 30) if len(shot_tasks) > 0 else 50
-                                        self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
-                            except Exception as e:
-                                self.log(f"   ⚠️ 创建分镜失败: {str(e)}")
-                    
-                    # 按索引排序
-                    shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
-                    self.log(f"   ✅ 分镜创建完成，共 {len(shots)} 个")
+                    self.log(f"⚠️ {consistency_msg}")
+                    self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
             
             # 检查分镜是否为空
             if not shots:
@@ -7600,11 +7926,23 @@ class DocuMakerLiteV7:
             from PIL import Image
             from io import BytesIO
             
-            # 检查是否有分镜数据
+            # 检查是否有分镜数据，如果没有则尝试从文件加载
             if not self.shots_data:
-                self.log("❌ 没有分镜数据，无法生成图像")
-                self.update_task_progress("就绪")
-                return
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                if os.path.exists(shots_file):
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            self.shots_data = json.load(f)
+                        self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self.log("❌ 没有分镜数据，无法生成图像")
+                        self.update_task_progress("就绪")
+                        return
+                else:
+                    self.log("❌ 没有分镜数据，无法生成图像")
+                    self.update_task_progress("就绪")
+                    return
             
             # 更新进度
             self.update_task_progress("正在检查SD API连接...", 10)
@@ -7931,11 +8269,23 @@ class DocuMakerLiteV7:
                 self.log("❌ 任务已被取消")
                 return
             
-            # 检查是否有分镜数据
+            # 检查是否有分镜数据，如果没有则尝试从文件加载
             if not self.shots_data:
-                self.log("❌ 没有分镜数据，无法生成视频")
-                self.update_task_progress("就绪")
-                return
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                if os.path.exists(shots_file):
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            self.shots_data = json.load(f)
+                        self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self.log("❌ 没有分镜数据，无法生成视频")
+                        self.update_task_progress("就绪")
+                        return
+                else:
+                    self.log("❌ 没有分镜数据，无法生成视频")
+                    self.update_task_progress("就绪")
+                    return
             
             # 检查是否有音频文件
             if not self.audio_path:
@@ -8567,9 +8917,21 @@ class DocuMakerLiteV7:
             
             # 检查是否有分镜数据
             if not hasattr(self, 'shots_data') or not self.shots_data:
-                self.log("❌ 没有分镜数据，请先生成分镜脚本")
-                # 注意：不要在后台线程中调用messagebox，会导致界面卡住！
-                return
+                # 尝试从 shots_data.json 文件加载分镜数据
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                if os.path.exists(shots_file):
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            self.shots_data = json.load(f)
+                        self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self.log("❌ 没有分镜数据，请先生成分镜脚本")
+                        return
+                else:
+                    self.log("❌ 没有分镜数据，请先生成分镜脚本")
+                    # 注意：不要在后台线程中调用messagebox，会导致界面卡住！
+                    return
             
             self.log(f"   📊 当前有 {len(self.shots_data)} 个分镜")
             
