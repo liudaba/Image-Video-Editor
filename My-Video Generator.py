@@ -1628,6 +1628,9 @@ class DocuMakerLiteV7:
         self.MIN_SHOT_DURATION = DEFAULT_MIN_SHOT_DURATION
         self.whisper_model = None  # 缓存 Whisper 模型
         
+        # 全文上下文 - 用于大模型生成prompt时理解整篇内容
+        self.full_text = ""
+        
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
         self.sd_api_url_var = tk.StringVar(value="http://localhost:7860")
@@ -1756,9 +1759,9 @@ class DocuMakerLiteV7:
             time.sleep(1)
             self.check_sd_api_connection(silent=True)
             
-            # 发现可用的多模型
-            time.sleep(0.5)
-            self.discover_available_models()
+            # 移除启动时的Ollama连接尝试，改为在真正需要时再连接
+            # 这样可以节省启动时间和资源
+            # self.discover_available_models()  # 已禁用：启动时不尝试连接Ollama
         threading.Thread(target=delayed_system_check, daemon=True).start()
         
         # 预加载Whisper模型（延迟执行，让UI先加载）
@@ -2320,7 +2323,71 @@ class DocuMakerLiteV7:
 
     def update_model_list(self):
         """更新模型列表，自动检测本地已安装的Ollama模型"""
+        import time
+        
+        # 检查缓存（缓存5分钟）
+        cache_key = 'ollama_models_cache'
+        cache_time_key = 'ollama_models_cache_time'
+        if hasattr(self, cache_time_key):
+            cache_age = time.time() - getattr(self, cache_time_key)
+            cached_models = self.cache_get('system', cache_key)
+            if cached_models and cache_age < 300:  # 5分钟内有效
+                # 使用缓存的模型列表快速显示
+                self._display_model_list(cached_models)
+                return
+        
         # 清空现有模型按钮
+        for widget in self.model_dropdown_inner_frame.winfo_children():
+            widget.destroy()
+        
+        # 添加"脚本自带"选项（始终显示）
+        script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="脚本自带", command=lambda m="脚本自带": self.select_ollama_model(m), style="Medium.TButton")
+        script_model_btn.pack(fill=tk.X, pady=1, padx=5)
+        
+        # 先显示默认模型列表（快速响应）
+        default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
+        self._display_default_models(default_models)
+        
+        # 然后在后台异步尝试获取真实模型列表
+        def fetch_models_async():
+            try:
+                if not OLLAMA_AVAILABLE:
+                    return
+                
+                # 使用短超时
+                import requests
+                try:
+                    response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                    if response.status_code == 200:
+                        models_data = response.json()
+                        if "models" in models_data:
+                            model_names = []
+                            for model in models_data["models"]:
+                                name = model.get("name") or model.get("model", "")
+                                if name:
+                                    model_names.append(name)
+                            
+                            if model_names:
+                                # 缓存结果
+                                self.cache_set('system', cache_key, model_names)
+                                setattr(self, cache_time_key, time.time())
+                                
+                                # 更新显示
+                                def update_display():
+                                    self._display_model_list(model_names)
+                                self.root.after(0, update_display)
+                except:
+                    pass
+            except Exception as e:
+                pass
+        
+        # 异步执行
+        import threading
+        threading.Thread(target=fetch_models_async, daemon=True).start()
+    
+    def _display_model_list(self, model_names):
+        """显示模型列表到下拉菜单"""
+        # 清空现有模型按钮（保留第一个"脚本自带"按钮）
         for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
         
@@ -2328,158 +2395,54 @@ class DocuMakerLiteV7:
         script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="脚本自带", command=lambda m="脚本自带": self.select_ollama_model(m), style="Medium.TButton")
         script_model_btn.pack(fill=tk.X, pady=1, padx=5)
         
-        # 尝试获取本地已安装的Ollama模型
-        try:
-            if OLLAMA_AVAILABLE:
-                models = ollama.list()
-                # 尝试不同的键名来获取模型列表
-                if "models" in models:
-                    model_list = models["models"]
-                    model_names = []
-                    for model in model_list:
-                        # 尝试不同的键名来获取模型名称
-                        if "name" in model:
-                            model_names.append(model["name"])
-                        elif "model" in model:
-                            model_names.append(model["model"])
-                    
-                    if model_names:
-                        # 智能推荐模型
-                        recommended_models = []
-                        for model in model_names:
-                            if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
-                                recommended_models.append((model, True))
-                            else:
-                                recommended_models.append((model, False))
-                        
-                        # 先显示推荐模型
-                        for model, is_recommended in recommended_models:
-                            # 添加模型任务标注
-                            model_label = model
-                            if "qwen2.5:7b" in model:
-                                model_label = f"{model} (通用任务，推荐)"
-                            elif "qwen2.5:3b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
-                            elif "qwen3:8b" in model:
-                                model_label = f"{model} (通用任务，内容分析)"
-                            elif "qwen3:4b" in model:
-                                model_label = f"{model} (轻量级通用任务)"
-                            elif "qwen3-vl:4b" in model:
-                                model_label = f"{model} (视觉任务)"
-                            elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (推理任务，逻辑分析)"
-                            elif "gemma3:4b" in model:
-                                model_label = f"{model} (通用任务，提示词优化)"
-                            elif "gemma3:1b" in model:
-                                model_label = f"{model} (超轻量任务，极速响应)"
-                            elif "mistral" in model:
-                                model_label = f"{model} (通用任务，创意生成)"
-                            elif "llama3" in model:
-                                model_label = f"{model} (通用任务，长文本分析)"
-                            
-                            if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            else:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            btn.pack(fill=tk.X, pady=1, padx=5)
-                    else:
-                        # 如果没有模型，显示默认模型
-                        default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
-                        for model in default_models:
-                            # 添加模型任务标注
-                            model_label = model
-                            if "qwen2.5:7b" in model:
-                                model_label = f"{model} (通用任务，推荐)"
-                            elif "qwen2.5:3b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
-                            elif "gemma3:4b" in model:
-                                model_label = f"{model} (通用任务，提示词优化)"
-                            elif "gemma3:1b" in model:
-                                model_label = f"{model} (超轻量任务，极速响应)"
-                            elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (推理任务，逻辑分析)"
-                            elif "mistral" in model:
-                                model_label = f"{model} (通用任务，创意生成)"
-                            elif "llama3" in model:
-                                model_label = f"{model} (通用任务，长文本分析)"
-                            
-                            if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            else:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            btn.pack(fill=tk.X, pady=1, padx=5)
-                else:
-                    # 如果没有models键，显示默认模型
-                    default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
-                    for model in default_models:
-                        # 添加模型任务标注
-                        model_label = model
-                        if "qwen2.5:7b" in model:
-                            model_label = f"{model} (通用任务，推荐)"
-                        elif "qwen2.5:3b" in model:
-                            model_label = f"{model} (轻量级任务，速度优先)"
-                        elif "gemma3:4b" in model:
-                            model_label = f"{model} (通用任务，提示词优化)"
-                        elif "gemma3:1b" in model:
-                            model_label = f"{model} (超轻量任务，极速响应)"
-                        elif "deepseek-r1:8b" in model:
-                            model_label = f"{model} (推理任务，逻辑分析)"
-                        elif "mistral" in model:
-                            model_label = f"{model} (通用任务，创意生成)"
-                        elif "llama3" in model:
-                            model_label = f"{model} (通用任务，长文本分析)"
-                        
-                        btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                        btn.pack(fill=tk.X, pady=1, padx=5)
+        # 智能推荐模型
+        recommended_models = []
+        for model in model_names:
+            if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
+                recommended_models.append((model, True))
             else:
-                # 如果Ollama不可用，显示默认模型
-                default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
-                for model in default_models:
-                    # 添加模型任务标注
-                    model_label = model
-                    if "qwen2.5:7b" in model:
-                        model_label = f"{model} (通用任务，推荐)"
-                    elif "qwen2.5:3b" in model:
-                        model_label = f"{model} (轻量级任务，速度优先)"
-                    elif "gemma3:4b" in model:
-                        model_label = f"{model} (通用任务，提示词优化)"
-                    elif "gemma3:1b" in model:
-                        model_label = f"{model} (超轻量任务，极速响应)"
-                    elif "deepseek-r1:8b" in model:
-                        model_label = f"{model} (推理任务，逻辑分析)"
-                    elif "mistral" in model:
-                        model_label = f"{model} (通用任务，创意生成)"
-                    elif "llama3" in model:
-                        model_label = f"{model} (通用任务，长文本分析)"
-                    
-                    btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                    btn.pack(fill=tk.X, pady=1, padx=5)
-        except Exception as e:
-            error_msg = str(e)
-            status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
-            self.log(f"获取Ollama模型列表失败: {error_msg} (status code: {status_code})")
-            # 出错时显示默认模型
-            default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
-            for model in default_models:
-                # 添加模型任务标注
-                model_label = model
-                if "qwen2.5:7b" in model:
-                    model_label = f"{model} (通用任务，推荐)"
-                elif "qwen2.5:3b" in model:
-                    model_label = f"{model} (轻量级任务，速度优先)"
-                elif "gemma3:4b" in model:
-                    model_label = f"{model} (通用任务，提示词优化)"
-                elif "gemma3:1b" in model:
-                    model_label = f"{model} (超轻量任务，极速响应)"
-                elif "deepseek-r1:8b" in model:
-                    model_label = f"{model} (推理任务，逻辑分析)"
-                elif "mistral" in model:
-                    model_label = f"{model} (通用任务，创意生成)"
-                elif "llama3" in model:
-                    model_label = f"{model} (通用任务，长文本分析)"
-                
+                recommended_models.append((model, False))
+        
+        # 显示推荐模型
+        for model, is_recommended in recommended_models:
+            model_label = self._get_model_label(model)
+            if is_recommended:
                 btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                btn.pack(fill=tk.X, pady=1, padx=5)
+            else:
+                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+            btn.pack(fill=tk.X, pady=1, padx=5)
+    
+    def _display_default_models(self, default_models):
+        """显示默认模型列表"""
+        for model in default_models:
+            model_label = self._get_model_label(model)
+            btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+            btn.pack(fill=tk.X, pady=1, padx=5)
+    
+    def _get_model_label(self, model):
+        """获取模型标签"""
+        model_label = model
+        if "qwen2.5:7b" in model:
+            model_label = f"{model} (通用任务，推荐)"
+        elif "qwen2.5:3b" in model:
+            model_label = f"{model} (轻量级任务，速度优先)"
+        elif "qwen3:8b" in model:
+            model_label = f"{model} (通用任务，内容分析)"
+        elif "qwen3:4b" in model:
+            model_label = f"{model} (轻量级通用任务)"
+        elif "qwen3-vl:4b" in model:
+            model_label = f"{model} (视觉任务)"
+        elif "deepseek-r1:8b" in model:
+            model_label = f"{model} (推理任务，逻辑分析)"
+        elif "gemma3:4b" in model:
+            model_label = f"{model} (通用任务，提示词优化)"
+        elif "gemma3:1b" in model:
+            model_label = f"{model} (超轻量任务，极速响应)"
+        elif "mistral" in model:
+            model_label = f"{model} (通用任务，创意生成)"
+        elif "llama3" in model:
+            model_label = f"{model} (通用任务，长文本分析)"
+        return model_label
 
     def toggle_advanced_settings(self):
         """打开/关闭高级设置窗口"""
@@ -3996,9 +3959,17 @@ class DocuMakerLiteV7:
         prompt_parts.append(style)
         
         # 10. 质量标签 - 包含正向提示词
-        prompt_parts.extend([
-            "masterpiece, best quality, ultra detailed, photorealistic, cinematic lighting, dramatic mood, high contrast, detailed, 8k, high resolution, professional photography"
-        ])
+        # 检查是否有全文上下文
+        full_context = getattr(self, 'full_text', '')
+        if full_context and len(full_context) > 50:
+            # 有全文上下文时，添加纪录片风格的专业标签
+            prompt_parts.extend([
+                "documentary photography, cinematic still, war journalism, raw photo, film grain, shot on 35mm, 8k uhd, masterpiece, best quality, ultra detailed, photorealistic, cinematic lighting, dramatic mood, high detail, natural lighting, professional photography"
+            ])
+        else:
+            prompt_parts.extend([
+                "masterpiece, best quality, ultra detailed, photorealistic, cinematic lighting, dramatic mood, high contrast, detailed, 8k, high resolution, professional photography"
+            ])
         
         # 8. 合并并去重提示词
         # 人体相关词，仅在需要人物出镜时保留
@@ -6165,8 +6136,14 @@ class DocuMakerLiteV7:
         
         return shots
 
-    def optimize_prompt_with_ollama(self, prompt, sentence):
-        """使用Ollama大模型优化提示词"""
+    def optimize_prompt_with_ollama(self, prompt, sentence, full_context=None):
+        """使用Ollama大模型优化提示词
+        
+        Args:
+            prompt: 原始提示词
+            sentence: 当前分镜的配音文本
+            full_context: 完整的转录文本（可选），用于理解全文上下文后生成更准确的prompt
+        """
         import time
         import re
         
@@ -6176,7 +6153,17 @@ class DocuMakerLiteV7:
         
         prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
         
-        cache_key = f"{sentence}_{prompt_type}"
+        # 如果没有传入full_context，尝试从实例变量获取
+        if full_context is None:
+            full_context = getattr(self, 'full_text', '')
+        
+        # 缓存键加入全文上下文哈希，确保内容变化时重新生成
+        context_hash = ""
+        if full_context and len(full_context) > 50:
+            import hashlib
+            context_hash = hashlib.md5(full_context.encode()).hexdigest()[:8]
+        
+        cache_key = f"{sentence}_{prompt_type}_{context_hash}"
         cached_prompt = self.cache_get('prompts', cache_key)
         if cached_prompt:
             return cached_prompt
@@ -6230,21 +6217,39 @@ class DocuMakerLiteV7:
         try:
             is_sd = prompt_type == "SD提示词"
             
-            # 构建清晰简洁的指令
+            # 构建清晰简洁的指令 - 专业纪录片风格
             if is_sd:
-                system_prompt = """你是专业的SD提示词工程师。
+                # 根据是否有全文上下文选择不同的system prompt
+                if full_context and len(full_context) > 50:
+                    # 有全文上下文 - 简化版prompt，加快生成速度
+                    system_prompt = """你是一个纪录片画面提示词工程师。
 
-任务：将中文配音文本转换为简洁的英文SD提示词。
+任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
 
-严格规则（必须遵守）：
-1. 只输出英文tag，用英文逗号分隔，禁止任何中文
-2. 必须保留核心主体和动作
-3. 必须添加质量词：masterpiece, best quality
-4. 禁止添加解释、禁止添加引号、禁止换行
-5. 总长度控制在20-40个英文单词以内
-6. 直接输出提示词，不要有任何前缀文字"""
+规则：
+1. 开头：documentary photography, cinematic still, war journalism, raw photo
+2. 中间：根据配音内容生成具体场景描述
+3. 结尾：8k uhd, film grain, shot on 35mm
+4. 长度：20-40个单词
+5. 只输出英文tag，禁止中文"""
+                else:
+                    # 没有全文上下文 - 仅基于当前配音生成
+                    system_prompt = """你是一个纪录片画面提示词工程师。
 
-                user_prompt = f"配音文本：{sentence}\n\n直接输出英文提示词，严格遵守以上规则。"
+任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
+
+规则：
+1. 开头：documentary photography, cinematic still, war journalism, raw photo
+2. 中间：根据配音内容生成具体场景描述
+3. 结尾：8k uhd, film grain, shot on 35mm
+4. 长度：20-40个单词
+5. 只输出英文tag，禁止中文"""
+
+                if full_context and len(full_context) > 50:
+                    # 简化user_prompt，只保留关键信息
+                    user_prompt = f"上下文：{full_context[:500]}...\n配音：{sentence}\n生成纪录片风格英文提示词。"
+                else:
+                    user_prompt = f"配音：{sentence}\n生成纪录片风格英文提示词。"
                 
             else:
                 system_prompt = """你是专业的图像提示词工程师。
@@ -6288,16 +6293,19 @@ class DocuMakerLiteV7:
             
             global ollama_lock
             
+            import threading
+            thread_id = threading.get_ident() % 10000
+            
             for model in candidate_models:
                 try:
-                    self.log(f"   尝试使用模型: {model}")
+                    self.log(f"   [线程{thread_id}] 尝试模型: {model}")
                     response = ollama.chat(
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        options=config.get_options(num_predict=500)
+                        options=config.get_options(num_predict=150)
                     )
                     optimized_prompt = response["message"]["content"].strip()
                     
@@ -6305,20 +6313,20 @@ class DocuMakerLiteV7:
                     if is_refusal:
                         last_error = Exception(f"模型 {model} 拒绝生成内容")
                         optimized_prompt = None
-                        self.log(f"   ⚠️ 模型 {model} 拒绝生成内容，尝试下一个...")
+                        self.log(f"   [线程{thread_id}] ⚠️ 模型 {model} 拒绝内容")
                         continue
                     
                     if not optimized_prompt:
                         last_error = Exception(f"模型 {model} 返回空结果")
-                        self.log(f"   ⚠️ 模型 {model} 返回空结果，尝试下一个...")
+                        self.log(f"   [线程{thread_id}] ⚠️ 模型 {model} 空结果")
                         continue
                     
                     successfully_used_model = model
-                    self.log(f"   ✅ 使用模型: {model}")
+                    self.log(f"   [线程{thread_id}] ✅ 使用模型: {model}")
                     break
                 except Exception as e:
                     last_error = e
-                    self.log(f"   ⚠️ 模型 {model} 调用失败: {str(e)[:50]}")
+                    self.log(f"   [线程{thread_id}] ⚠️ 模型 {model} 调用失败: {str(e)[:50]}")
                     continue
             
             if not optimized_prompt:
@@ -6348,6 +6356,7 @@ class DocuMakerLiteV7:
                 prompt_lower = content_part.lower()
                 has_masterpiece = 'masterpiece' in prompt_lower
                 has_best_quality = 'best quality' in prompt_lower
+                has_doc_tag = 'documentary photography' in prompt_lower or 'cinematic still' in prompt_lower
                 
                 temp_prompt = content_part
                 if has_masterpiece:
@@ -6359,7 +6368,31 @@ class DocuMakerLiteV7:
                 temp_prompt = temp_prompt.strip()
                 
                 if temp_prompt:
-                    optimized_prompt = f"{temp_prompt}, masterpiece, best quality"
+                    # 当有全文上下文时，确保添加纪录片风格的专业标签
+                    if full_context and len(full_context) > 50:
+                        # 检查是否已包含纪录片风格标签开头
+                        if has_doc_tag:
+                            # 已经有了纪录片风格，直接添加质量参数
+                            # 确保有技术参数
+                            has_8k = '8k' in temp_prompt.lower()
+                            has_film_grain = 'film grain' in temp_prompt.lower()
+                            has_shot_35mm = 'shot on 35mm' in temp_prompt.lower()
+                            
+                            tech_parts = []
+                            if not has_8k:
+                                tech_parts.append("8k uhd")
+                            if not has_film_grain:
+                                tech_parts.append("film grain")
+                            if not has_shot_35mm:
+                                tech_parts.append("shot on 35mm")
+                            tech_parts.extend(["high detail", "natural lighting", "masterpiece", "best quality", "ultra detailed", "photorealistic"])
+                            
+                            optimized_prompt = f"{temp_prompt}, {', '.join(tech_parts)}"
+                        else:
+                            # 如果没有纪录片标签，强制添加专业标签（开头+场景+技术参数）
+                            optimized_prompt = f"documentary photography, cinematic still, war journalism, raw photo, {temp_prompt}, 8k uhd, high detail, film grain, natural lighting, shot on 35mm, masterpiece, best quality, ultra detailed, photorealistic"
+                    else:
+                        optimized_prompt = f"{temp_prompt}, masterpiece, best quality"
                 else:
                     optimized_prompt = prompt
                 
@@ -6382,7 +6415,7 @@ class DocuMakerLiteV7:
             duration = time.time() - start_time
             llm_optimizer.record_call(duration, True)
             
-            self.log(f"⚡ 优化完成 ({duration:.1f}s): {optimized_prompt[:50]}...")
+            self.log(f"⚡ [线程{thread_id}] 优化完成 ({duration:.1f}s): {optimized_prompt[:50]}...")
             
             self.cache_set('prompts', cache_key, optimized_prompt)
             
@@ -7270,6 +7303,10 @@ class DocuMakerLiteV7:
         import hashlib
         import gc  # 垃圾回收
         
+        # 设置Ollama并行处理数（允许更多并行请求）
+        os.environ['OLLAMA_NUM_PARALLEL'] = '8'
+        os.environ['OLLAMA_MAX_LOADED_MODELS'] = '2'
+        
         # 用于跟踪资源，确保清理
         resources_to_cleanup = []
         whisper_model_loaded = False  # 标记是否在本次调用中加载了模型
@@ -7326,6 +7363,8 @@ class DocuMakerLiteV7:
                 segments = cached_result.get('segments', [])
                 full_text = cached_result.get('full_text', "")
                 self.log(f"   识别片段数: {len(segments)}")
+                # 保存全文到实例变量，供后续生成prompt时使用
+                self.full_text = full_text
             else:
                 # 加载Whisper模型进行语音识别
                 self.log("🔊 正在加载Whisper模型...")
@@ -7413,6 +7452,8 @@ class DocuMakerLiteV7:
                 
                 # 收集完整文本用于大模型分析
                 full_text = "".join([segment.get("text", "").strip() for segment in segments])
+                # 保存全文到实例变量，供后续生成prompt时使用
+                self.full_text = full_text
                 
                 # 缓存分析结果
                 cache_data = {
@@ -7893,9 +7934,10 @@ class DocuMakerLiteV7:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             import os
             
-            # 优化：增加并发线程数以提高处理速度
+            # Ollama服务是单线程处理，减少线程数以避免无谓的等待
+            # CPU核心数的2倍，但不超过8个线程（因为Ollama只能串行处理）
             cpu_count = os.cpu_count() or 4
-            thread_count = min(cpu_count * 4, 32)  # 增加并发上限以加速处理
+            thread_count = min(cpu_count * 2, 8)
             
             self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理")
             
@@ -9506,13 +9548,18 @@ class DocuMakerLiteV7:
                 if 'api_url' in config:
                     self.sd_api_url_var.set(config['api_url'])
                 
-                # 加载大模型设置 - 默认使用脚本自带，避免大模型调用卡住
-                # 强制设置为"脚本自带"，用户需要手动开启才使用大模型
-                self.optimization_method_var.set("脚本自带")
+                # 加载大模型设置 - 恢复用户之前保存的设置
+                if 'optimization_method' in config and config['optimization_method']:
+                    self.optimization_method_var.set(config['optimization_method'])
+                else:
+                    self.optimization_method_var.set("脚本自带")
                     
-                # 加载Ollama模型设置 - 强制默认使用脚本自带
+                # 加载Ollama模型设置 - 恢复用户之前保存的设置
                 if hasattr(self, 'ollama_model_var'):
-                    self.ollama_model_var.set("脚本自带")
+                    if 'ollama_model' in config and config['ollama_model']:
+                        self.ollama_model_var.set(config['ollama_model'])
+                    else:
+                        self.ollama_model_var.set("脚本自带")
                     
                 if 'llm_config_preset' in config and config['llm_config_preset']:
                     preset = config['llm_config_preset']

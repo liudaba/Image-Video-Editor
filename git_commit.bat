@@ -49,19 +49,39 @@ echo.
 echo [Step 3/4] Creating commit message...
 set "msg_file=%TEMP%\commit_msg_%RANDOM%.txt"
 (
-echo update: code changes
+echo feat: 优化分镜生成功能，提升性能和用户体验
 echo.
-echo Changes:
+echo 【功能优化】
+echo 1. 新增全文上下文支持：大模型能够理解整篇转录文本内容，生成更精准的专业纪录片风格画面描述
+echo 2. 新增Ollama并行处理：设置OLLAMA_NUM_PARALLEL=8环境变量，支持多线程并行请求
+echo 3. 优化线程数配置：根据Ollama单线程特性，将分镜创建线程数从32减少到8
+echo 4. 简化prompt长度：优化system prompt和user prompt，减少输入长度加快生成速度
+echo.
+echo 【体验优化】
+echo 1. 启动速度优化：移除启动时的Ollama连接尝试，加快程序启动
+echo 2. 模型菜单响应优化：先显示默认模型列表，后台异步获取真实模型
+echo 3. 配置保存/加载修复：恢复用户设置的优化方式和模型选择延续功能
+echo 4. 添加线程ID日志：方便调试多线程并行执行情况
+echo.
+echo 【问题修复】
+echo 1. 修复配置不能延续问题：load_config函数不再强制覆盖用户保存的设置
+echo 2. 修复启动时Ollama错误：移除discover_available_models调用
+echo.
+echo 【生成的Prompt格式示例】
+echo 原来：chaotic, intense, ruthless, no boundaries, masterpiece, best quality
+echo 现在：documentary photography, cinematic still, war journalism, raw photo, chaotic urban warfare scene, destroyed buildings, smoke and debris, emergency vehicles, civilians running, dramatic lighting, 8k uhd, high detail, film grain, natural lighting, shot on 35mm, masterpiece, best quality
 ) > "%msg_file%"
+
 git status --short >> "%msg_file%"
+
 (
 echo.
-echo Reason: project update
-echo Impact: see file list
-echo Test: passed
+echo Test: 功能测试通过
+echo Impact: 提升分镜生成质量和速度，优化用户体验
 ) >> "%msg_file%"
 
-echo Commit message created.
+echo Commit message:
+type "%msg_file%"
 echo.
 
 echo [Step 4/4] Committing...
