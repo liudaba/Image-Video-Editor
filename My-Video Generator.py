@@ -89,6 +89,109 @@ ollama = None
 ollama_lock = threading.Lock()  # 全局锁，保护Ollama API调用
 requests = None
 PIL = None
+
+# ==================== 统一的 Ollama 模型调用函数 ====================
+def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None, num_predict=512, num_ctx=4096):
+    """
+    统一的 Ollama 模型调用函数 - 自动尝试多个模型，直到成功
+    
+    使用HTTP API直接调用，避免ollama库版本兼容性问题
+    """
+    global requests
+    
+    if requests is None:
+        try:
+            import requests
+        except ImportError:
+            if log_callback:
+                log_callback("⚠️ requests库未安装")
+            return None, None
+    
+    # 获取可用模型列表
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            models_info = response.json()
+            available_models = []
+            if "models" in models_info:
+                for m in models_info["models"]:
+                    model_name = m.get("name", m.get("model", ""))
+                    if model_name:
+                        available_models.append(model_name)
+        else:
+            if log_callback:
+                log_callback(f"⚠️ 获取模型列表失败: HTTP {response.status_code}")
+            return None, None
+    except Exception as e:
+        if log_callback:
+            log_callback(f"⚠️ 获取模型列表失败: {e}")
+        return None, None
+    
+    # 过滤出实际可用的模型
+    candidate_models = []
+    for model in model_list:
+        if model in available_models:
+            candidate_models.append(model)
+    
+    if not candidate_models:
+        if log_callback:
+            log_callback(f"⚠️ 模型列表 {model_list} 中没有可用的模型")
+        return None, None
+    
+    # 依次尝试每个模型
+    for model in candidate_models:
+        try:
+            if log_callback:
+                log_callback(f"   尝试模型: {model}")
+            
+            # 使用HTTP API直接调用
+            response = requests.post(
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9,
+                        "num_predict": num_predict,
+                        "num_ctx": num_ctx
+                    }
+                },
+                timeout=120
+            )
+            
+            if response.status_code != 200:
+                if log_callback:
+                    log_callback(f"   ⚠️ 模型 {model} HTTP错误: {response.status_code}")
+                continue
+            
+            result_data = response.json()
+            result = result_data.get("message", {}).get("content", "").strip()
+            
+            if not result:
+                if log_callback:
+                    log_callback(f"   ⚠️ 模型 {model} 返回空结果")
+                continue
+            
+            if log_callback:
+                log_callback(f"   ✅ 使用模型: {model}")
+            
+            return result, model
+            
+        except Exception as e:
+            error_msg = str(e)
+            if log_callback:
+                log_callback(f"   ⚠️ 模型 {model} 调用失败: {error_msg[:50]}")
+            continue
+    
+    if log_callback:
+        log_callback(f"❌ 所有模型调用失败")
+    return None, None
+
+# ==================== 提示词优化器 ====================
 Image = None
 ImageDraw = None
 ImageFont = None
@@ -2053,8 +2156,14 @@ class DocuMakerLiteV7:
         ollama_button = ttk.Button(ollama_frame_right, textvariable=self.ollama_model_var, command=self.toggle_model_dropdown, style="Medium.TButton")
         ollama_button.pack(fill=tk.X, padx=5, pady=2)
         
-        # 大模型下拉菜单框架
+        # 大模型下拉菜单框架 - 添加滚动条支持
         self.model_dropdown_frame = ttk.Frame(ollama_frame_right)
+        self.model_dropdown_canvas = tk.Canvas(self.model_dropdown_frame, height=200, highlightthickness=0, bg=self.panel_bg)
+        self.model_dropdown_scrollbar = ttk.Scrollbar(self.model_dropdown_frame, orient="vertical", command=self.model_dropdown_canvas.yview)
+        self.model_dropdown_inner_frame = ttk.Frame(self.model_dropdown_canvas)
+        
+        self.model_dropdown_canvas.configure(yscrollcommand=self.model_dropdown_scrollbar.set)
+        self.model_dropdown_inner_frame.bind("<Configure>", lambda e: self.model_dropdown_canvas.configure(scrollregion=self.model_dropdown_canvas.bbox("all")))
         
         # 大模型配置模式选择
         config_frame = ttk.Frame(model_section)
@@ -2212,11 +2321,11 @@ class DocuMakerLiteV7:
     def update_model_list(self):
         """更新模型列表，自动检测本地已安装的Ollama模型"""
         # 清空现有模型按钮
-        for widget in self.model_dropdown_frame.winfo_children():
+        for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
         
         # 添加"脚本自带"选项
-        script_model_btn = ttk.Button(self.model_dropdown_frame, text="脚本自带", command=lambda m="脚本自带": self.select_ollama_model(m), style="Medium.TButton")
+        script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="脚本自带", command=lambda m="脚本自带": self.select_ollama_model(m), style="Medium.TButton")
         script_model_btn.pack(fill=tk.X, pady=1, padx=5)
         
         # 尝试获取本地已安装的Ollama模型
@@ -2269,9 +2378,9 @@ class DocuMakerLiteV7:
                                 model_label = f"{model} (通用任务，长文本分析)"
                             
                             if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                             else:
-                                btn = ttk.Button(self.model_dropdown_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                             btn.pack(fill=tk.X, pady=1, padx=5)
                     else:
                         # 如果没有模型，显示默认模型
@@ -2295,9 +2404,9 @@ class DocuMakerLiteV7:
                                 model_label = f"{model} (通用任务，长文本分析)"
                             
                             if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                             else:
-                                btn = ttk.Button(self.model_dropdown_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                             btn.pack(fill=tk.X, pady=1, padx=5)
                 else:
                     # 如果没有models键，显示默认模型
@@ -2320,7 +2429,7 @@ class DocuMakerLiteV7:
                         elif "llama3" in model:
                             model_label = f"{model} (通用任务，长文本分析)"
                         
-                        btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                        btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                         btn.pack(fill=tk.X, pady=1, padx=5)
             else:
                 # 如果Ollama不可用，显示默认模型
@@ -2343,7 +2452,7 @@ class DocuMakerLiteV7:
                     elif "llama3" in model:
                         model_label = f"{model} (通用任务，长文本分析)"
                     
-                    btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                    btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                     btn.pack(fill=tk.X, pady=1, padx=5)
         except Exception as e:
             error_msg = str(e)
@@ -2369,7 +2478,7 @@ class DocuMakerLiteV7:
                 elif "llama3" in model:
                     model_label = f"{model} (通用任务，长文本分析)"
                 
-                btn = ttk.Button(self.model_dropdown_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                 btn.pack(fill=tk.X, pady=1, padx=5)
 
     def toggle_advanced_settings(self):
@@ -2400,12 +2509,22 @@ class DocuMakerLiteV7:
         else:
             # 每次打开下拉菜单前，先更新模型列表
             self.update_model_list()
+            # 重新创建Canvas内的窗口
+            self.model_dropdown_canvas.create_window((0, 0), window=self.model_dropdown_inner_frame, anchor="nw")
+            # 设置Canvas窗口宽度与Canvas一致
+            self.model_dropdown_inner_frame.update_idletasks()
+            self.model_dropdown_canvas.itemconfig(self.model_dropdown_canvas.find_withtag("all")[0] if self.model_dropdown_canvas.find_withtag("all") else None, width=self.model_dropdown_canvas.winfo_width())
+            # 显示下拉框和滚动条
             self.model_dropdown_frame.pack(fill=tk.X, pady=2)
+            self.model_dropdown_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            self.model_dropdown_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             self.model_dropdown_visible = True
     
     def select_ollama_model(self, model):
         """选择Ollama模型"""
         self.ollama_model_var.set(model)
+        self.model_dropdown_canvas.pack_forget()
+        self.model_dropdown_scrollbar.pack_forget()
         self.model_dropdown_frame.pack_forget()
         self.model_dropdown_visible = False
         self.log(f"✅ 已选择Ollama模型: {model}")
@@ -6159,6 +6278,7 @@ class DocuMakerLiteV7:
             
             optimized_prompt = None
             last_error = None
+            successfully_used_model = None
             
             refusal_patterns = [
                 "cannot provide", "can't provide", "cannot help", "can't help",
@@ -6170,6 +6290,7 @@ class DocuMakerLiteV7:
             
             for model in candidate_models:
                 try:
+                    self.log(f"   尝试使用模型: {model}")
                     response = ollama.chat(
                         model=model,
                         messages=[
@@ -6184,16 +6305,24 @@ class DocuMakerLiteV7:
                     if is_refusal:
                         last_error = Exception(f"模型 {model} 拒绝生成内容")
                         optimized_prompt = None
+                        self.log(f"   ⚠️ 模型 {model} 拒绝生成内容，尝试下一个...")
                         continue
                     
-                    self.log(f"   使用模型: {model}")
+                    if not optimized_prompt:
+                        last_error = Exception(f"模型 {model} 返回空结果")
+                        self.log(f"   ⚠️ 模型 {model} 返回空结果，尝试下一个...")
+                        continue
+                    
+                    successfully_used_model = model
+                    self.log(f"   ✅ 使用模型: {model}")
                     break
                 except Exception as e:
                     last_error = e
+                    self.log(f"   ⚠️ 模型 {model} 调用失败: {str(e)[:50]}")
                     continue
             
             if not optimized_prompt:
-                self.log(f"⚠️ Ollama调用失败: {last_error}")
+                self.log(f"❌ Ollama调用失败: {last_error}")
                 return prompt
             
             # 清理输出
@@ -7561,10 +7690,23 @@ class DocuMakerLiteV7:
                                             {"role": "system", "content": system_content},
                                             {"role": "user", "content": f"语音转录文本：\n{full_text}"}
                                         ],
-                                        options=self.current_llm_config.get_options(num_predict=512) if hasattr(self, 'current_llm_config') else {"temperature": 0.3, "top_p": 0.9, "num_predict": 512}
+                                        options=self.current_llm_config.get_options(
+                                            num_predict=1024,
+                                            num_ctx=4096
+                                        ) if hasattr(self, 'current_llm_config') else {"temperature": 0.3, "top_p": 0.9, "num_predict": 1024, "num_ctx": 4096}
                                     )
                                     
-                                    return response["message"]["content"].strip()
+                                    # 添加详细调试日志
+                                    raw_response = response
+                                    result_content = raw_response["message"]["content"].strip()
+                                    
+                                    # 调试：打印原始响应结构（ChatResponse是对象不是字典）
+                                    self.log(f"   🔍 调试: 响应类型: {type(raw_response)}")
+                                    
+                                    # 调试：打印模型返回的原始内容（截取前200字符）
+                                    self.log(f"   🔍 调试: 原始响应内容: {repr(result_content[:200])}")
+                                    
+                                    return result_content
                                 except Exception as e:
                                     raise e
                             
@@ -7591,6 +7733,7 @@ class DocuMakerLiteV7:
                                             self.log(f"✅ 模型 {current_model} 响应成功！")
                                             self.log(f"   响应时间: {elapsed_time:.1f}秒")
                                             self.log(f"   响应长度: {len(analysis_result)} 字符")
+                                            self.log(f"   响应内容预览: {analysis_result[:100]}...")
                                             
                                             # 如果成功使用的不是用户指定的模型，显示提醒
                                             if current_model != user_model:
@@ -7599,6 +7742,7 @@ class DocuMakerLiteV7:
                                             break
                                         else:
                                             self.log(f"⚠️ 模型 {current_model} 返回空结果")
+                                            self.log(f"   🔍 请检查上方的调试日志以了解详情")
                                             current_model_index += 1
                                             
                                 except concurrent.futures.TimeoutError:
