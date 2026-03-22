@@ -8493,7 +8493,7 @@ Now convert this:
         self.log("🎞️ 开始生成视频...")
         try:
             import os
-            from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip
+            from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip
             import numpy as np
             
             # 更新进度
