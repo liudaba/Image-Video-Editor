@@ -8373,8 +8373,11 @@ Now convert this:
                         
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
+                        # 记录请求开始时间
+                        import time
+                        request_start_time = time.time()
+                        
                         # 发送完整参数，确保SD WebUI使用正确的设置
-                        # 如果不发送这些参数，SD会使用默认或上次保存的设置，可能导致速度变慢
                         payload = {
                             "prompt": enhanced_prompt,
                             "negative_prompt": "",
@@ -8387,8 +8390,13 @@ Now convert this:
                             "batch_size": 1
                         }
                         
+                        self.log(f"📤 发送请求到SD WebUI...")
+                        
                         # 发送请求，增加超时时间
                         response = requests.post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=90)
+                        
+                        request_time = time.time() - request_start_time
+                        self.log(f"📥 收到响应，耗时: {request_time:.2f}秒")
                         
                         if response.status_code == 200:
                             # 处理响应
