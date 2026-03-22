@@ -8984,15 +8984,24 @@ Now convert this:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
+                # MoviePy 1.0.3 直接使用 clip.resize()
+                try:
+                    def get_scale(t):
+                        return 1.0 + 0.05 * (t / clip.duration)
+                    
+                    resized_clip = clip.resize(get_scale)
+                    self.log(f"✅ 使用clip.resize()方法")
+                    return resized_clip
+                except Exception as e:
+                    self.log(f"⚠️ clip.resize()失败: {e}")
+                
                 # MoviePy 2.x 使用 vfx 模块
                 try:
                     from moviepy.video import vfx
                     
-                    # 使用 vfx.resize 效果
                     def get_scale(t):
                         return 1.0 + 0.05 * (t / clip.duration)
                     
-                    # 应用resize效果
                     resized_clip = clip.fx(vfx.resize, get_scale)
                     self.log(f"✅ 使用vfx.resize方法")
                     return resized_clip
@@ -9004,7 +9013,6 @@ Now convert this:
                     def get_scale(t):
                         return 1.0 + 0.05 * (t / clip.duration)
                     
-                    # MoviePy 2.x: clip.fx(效果函数, 参数)
                     result = clip.fx(lambda c: c.resize(get_scale))
                     self.log(f"✅ 使用fx方法成功")
                     return result
