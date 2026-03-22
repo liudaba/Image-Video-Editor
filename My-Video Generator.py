@@ -8670,9 +8670,14 @@ Now convert this:
                     self.log("❌ 任务已被取消")
                     return
                 
-                # 获取用户设置的分辨率（用于视频输出）
-                target_width = self.width_var.get()
-                target_height = self.height_var.get()
+                # 获取用户设置的分辨率用于视频输出（默认与图片分辨率一致）
+                # 如果用户设置了视频分辨率则使用，否则使用图片分辨率
+                try:
+                    target_width = int(self.width_var.get()) if hasattr(self, 'width_var') and self.width_var.get() else None
+                    target_height = int(self.height_var.get()) if hasattr(self, 'height_var') and self.height_var.get() else None
+                except:
+                    target_width = None
+                    target_height = None
                 
                 # 修复：使用end-start计算实际duration，确保与时间戳一致
                 actual_duration = shot['end'] - shot['start']
@@ -8692,7 +8697,12 @@ Now convert this:
                             orig_img = Image.open(image_path)
                             orig_size = orig_img.size  # 保存原始尺寸
                             
-                            # 统一转换为1920x1080（保持比例，填充黑边）
+                            # 如果没有设置视频分辨率，则使用图片原始分辨率
+                            if target_width is None or target_height is None:
+                                target_width, target_height = orig_size
+                                self.log(f"ℹ️ 使用图片原始分辨率作为视频分辨率: {orig_size}")
+                            
+                            # 统一转换（保持比例，填充黑边）
                             img = self._resize_image_to_fit(orig_img, target_width, target_height)
                             clip = ImageClip(np.array(img)).with_duration(shot['duration'])
                             self.log(f"   分镜{i+1}: 图片={image_file}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
@@ -8713,7 +8723,12 @@ Now convert this:
                         orig_img = Image.open(image_path)
                         orig_size = orig_img.size  # 保存原始尺寸
                         
-                        # 统一转换为1920x1080（保持比例，填充黑边）
+                        # 如果没有设置视频分辨率，则使用图片原始分辨率
+                        if target_width is None or target_height is None:
+                            target_width, target_height = orig_size
+                            self.log(f"ℹ️ 使用图片原始分辨率作为视频分辨率: {orig_size}")
+                        
+                        # 统一转换（保持比例，填充黑边）
                         img = self._resize_image_to_fit(orig_img, target_width, target_height)
                         clip = ImageClip(np.array(img)).with_duration(shot['duration'])
                         self.log(f"   分镜{i+1}: 图片={shot['image_file']}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
