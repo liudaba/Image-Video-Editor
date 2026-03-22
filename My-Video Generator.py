@@ -9079,6 +9079,7 @@ Now convert this:
                     
                     result = clip.transform(scale_func)
                     self.log(f"✅ transform方法成功")
+                    self.log(f"⏱️ 缩放动画处理耗时约 {clip.duration * 30 * 0.01:.1f} 秒（逐帧处理）")
                     return result
                 except Exception as transform_error:
                     self.log(f"⚠️ transform方法也失败: {transform_error}")
