@@ -9042,7 +9042,20 @@ Now convert this:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # 使用transform实现动态缩放
+                # 尝试使用clip.resize()方法（更高效）
+                try:
+                    # 定义缩放函数：随时间从1.0缓慢增加到1.05
+                    def get_scale(t):
+                        return 1.0 + 0.05 * (t / clip.duration)
+                    
+                    # 使用MoviePy内置的resize方法
+                    resized_clip = clip.resize(get_scale)
+                    self.log(f"✅ 使用clip.resize()方法")
+                    return resized_clip
+                except Exception as resize_error:
+                    self.log(f"⚠️ clip.resize()失败: {resize_error}，使用transform方法")
+                
+                # 如果resize失败，使用transform方法（逐帧处理，较慢）
                 def scale_func(get_frame, t):
                     frame = get_frame(t)
                     from PIL import Image
