@@ -337,16 +337,16 @@ class LLMPerformanceOptimizer:
         if self.success_rate < 0.7:
             # 成功率低，降低复杂度
             base_config.apply_preset("平衡模式")
-            base_config.set_custom_param("num_predict", 1500)
+            base_config.set_custom_param("num_predict", 300)
         elif self.avg_response_time > 20:
             # 响应慢，使用极速模式
             base_config.apply_preset("极速模式")
         
         # 根据任务复杂度调整
         complexity_adjustments = {
-            "low": {"temperature": 0.3, "num_predict": 500},
-            "medium": {"temperature": 0.6, "num_predict": 2000},
-            "high": {"temperature": 0.7, "num_predict": 4000, "num_ctx": 8192}
+            "low": {"temperature": 0.3, "num_predict": 300},
+            "medium": {"temperature": 0.6, "num_predict": 500},
+            "high": {"temperature": 0.7, "num_predict": 800, "num_ctx": 8192}
         }
         
         if task_complexity in complexity_adjustments:
@@ -468,7 +468,7 @@ class MultiModelFusion:
                         {"role": "system", "content": prompt_template["system"]},
                         {"role": "user", "content": prompt_template["user"]}
                     ],
-                    options=config.get_options(num_predict=1500)
+                    options=config.get_options(num_predict=500)
                 )
                 
                 duration = _time.time() - start_time
@@ -1788,13 +1788,29 @@ class DocuMakerLiteV7:
                 device = "cpu"
                 self.log(f"🔄 预加载 Whisper {whisper_model_size} 模型 (CPU模式)...")
             
-            # 加载模型
-            self.whisper_model = whisper.load_model(whisper_model_size, device=device)
-            
-            if torch.cuda.is_available():
-                self.log(f"✅ Whisper {whisper_model_size} 模型预加载完成 (GPU)")
-            else:
-                self.log(f"✅ Whisper {whisper_model_size} 模型预加载完成 (CPU)")
+            # 加载模型 - 优先使用 faster-whisper
+            self._using_faster_whisper = False
+            try:
+                from faster_whisper import WhisperModel
+                model_size_map = {"tiny": "tiny", "base": "base", "small": "small", "medium": "medium", "large": "large-v2"}
+                fs_model_size = model_size_map.get(whisper_model_size, "medium")
+                
+                if torch.cuda.is_available():
+                    self.whisper_model = WhisperModel(fs_model_size, device="cuda", compute_type="float16")
+                    self.log(f"✅ Faster-Whisper {fs_model_size} 预加载完成 (GPU)")
+                else:
+                    self.whisper_model = WhisperModel(fs_model_size, device="cpu", compute_type="int8")
+                    self.log(f"✅ Faster-Whisper {fs_model_size} 预加载完成 (CPU)")
+                
+                self._using_faster_whisper = True
+            except Exception as e:
+                # 回退到原始 whisper，静默处理
+                self.whisper_model = whisper.load_model(whisper_model_size, device=device)
+                
+                if torch.cuda.is_available():
+                    self.log(f"✅ Whisper {whisper_model_size} 模型预加载完成 (GPU)")
+                else:
+                    self.log(f"✅ Whisper {whisper_model_size} 模型预加载完成 (CPU)")
                 
         except Exception as e:
             self.log(f"⚠️ Whisper模型预加载失败: {e}")
@@ -1980,15 +1996,50 @@ class DocuMakerLiteV7:
         # 绘图模型
         model_frame = ttk.Frame(section_frame)
         model_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(model_frame, text="模型:", width=12, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=5)
+        
+        # 模型选择标签和刷新按钮
+        model_label_frame = ttk.Frame(model_frame)
+        model_label_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Label(model_label_frame, text="模型:", width=12, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT)
+        
+        # 刷新模型列表按钮
+        def refresh_model_list():
+            sd_models = self.get_sd_models()
+            if sd_models:
+                model_display_list = ["不选择"] + [m['display'] for m in sd_models]
+                self.sd_model_list = sd_models
+                if hasattr(self, 'model_combo'):
+                    current_value = self.model_var.get() if hasattr(self, 'model_var') else "不选择"
+                    self.model_combo['values'] = model_display_list
+                    if current_value in model_display_list:
+                        self.model_var.set(current_value)
+                    else:
+                        self.model_var.set("不选择")
+                self.log(f"✅ 已刷新SD模型列表，共 {len(sd_models)} 个模型")
+            else:
+                self.log("⚠️ 无法获取SD模型列表，请检查SD API连接")
+        
+        refresh_btn = ttk.Button(model_label_frame, text="🔄", command=refresh_model_list, width=3, style="Small.TButton")
+        refresh_btn.pack(side=tk.LEFT, padx=2)
         
         # 如果变量不存在，则初始化（保持与已加载配置的一致性）
         if not hasattr(self, 'model_var') or self.model_var.get() == "":
             self.model_var = tk.StringVar(value="不选择")
         
-        models = ["不选择", "Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]
-        model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=models, state="readonly", font=("Microsoft YaHei", large_font_size))
-        model_combo.pack(fill=tk.X, padx=5, pady=2)
+        # 尝试获取SD模型列表，如果失败则使用默认列表
+        if not hasattr(self, 'sd_model_list'):
+            sd_models = self.get_sd_models()
+            if sd_models:
+                self.sd_model_list = sd_models
+                models = ["不选择"] + [m['display'] for m in sd_models]
+            else:
+                self.sd_model_list = []
+                models = ["不选择", "Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]
+        else:
+            models = ["不选择"] + [m['display'] for m in self.sd_model_list]
+        
+        self.model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=models, state="readonly", font=("Microsoft YaHei", large_font_size))
+        self.model_combo.pack(fill=tk.X, padx=5, pady=2)
         
         # 图片像素设置
         pixel_frame = ttk.Frame(section_frame)
@@ -2721,6 +2772,21 @@ class DocuMakerLiteV7:
                 if hasattr(self, 'sd_api_status_var') and hasattr(self, 'sd_api_status_label'):
                     self.sd_api_status_var.set("✅ 已连接")
                     self.sd_api_status_label.config(foreground="green")  # 连接态呈现绿色
+                
+                # 连接成功后自动刷新模型列表
+                sd_models = self.get_sd_models()
+                if sd_models:
+                    self.sd_model_list = sd_models
+                    if hasattr(self, 'model_combo'):
+                        model_display_list = ["不选择"] + [m['display'] for m in sd_models]
+                        current_value = self.model_var.get() if hasattr(self, 'model_var') else "不选择"
+                        self.model_combo['values'] = model_display_list
+                        if current_value in model_display_list:
+                            self.model_var.set(current_value)
+                        else:
+                            self.model_var.set("不选择")
+                    self.log(f"✅ 已加载SD模型列表，共 {len(sd_models)} 个模型")
+                
                 return True
             else:
                 # 连接失败
@@ -2752,6 +2818,60 @@ class DocuMakerLiteV7:
         
         # 清理可能的连接资源
         self.log("✅ SD API 连接已关闭")
+
+    def get_sd_current_options(self):
+        """获取SD软件当前的设置配置（不修改任何设置）"""
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
+        
+        try:
+            response = requests.get(f"{api_url}/sdapi/v1/options", timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                self.log(f"⚠️ 获取SD设置失败: HTTP {response.status_code}")
+                return None
+        except Exception as e:
+            self.log(f"⚠️ 获取SD设置异常: {e}")
+            return None
+
+    def get_sd_samplers(self):
+        """获取SD软件支持的采样器列表"""
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
+        
+        try:
+            response = requests.get(f"{api_url}/sdapi/v1/samplers", timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+        except Exception:
+            return None
+
+    def get_sd_models(self):
+        """获取SD软件中已安装的模型列表"""
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
+        
+        try:
+            response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=10)
+            if response.status_code == 200:
+                models = response.json()
+                model_list = []
+                for m in models:
+                    title = m.get('title', '')
+                    model_name = m.get('model_name', '')
+                    model_hash = m.get('hash', '')
+                    display_name = title if title else model_name
+                    model_list.append({
+                        'title': title,
+                        'model_name': model_name,
+                        'hash': model_hash,
+                        'display': display_name
+                    })
+                return model_list
+            else:
+                return None
+        except Exception:
+            return None
     
     def clean_text(self, text):
         """清洗和修正文本"""
@@ -3757,11 +3877,10 @@ class DocuMakerLiteV7:
         return result
     
     def _infer_visual_concept_from_dubbing(self, dubbing):
-        """使用大模型从配音内容智能推断画面构思 - 生成高质量视觉描述"""
+        """使用大模型从配音内容智能推断画面构思"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
-        # 检查是否配置了 Ollama
         if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
             return ""
         
@@ -3769,32 +3888,14 @@ class DocuMakerLiteV7:
             model = self.ollama_model_var.get()
             ollama_url = "http://localhost:11434"
             
-            prompt = f"""你是AI视频提示词工程师。请根据配音生成新闻纪录片风格视觉描述。
+            prompt = f"""根据配音生成纪录片风格英文提示词。
 
-【原则】
-1. 理解整篇主题：每个分镜都要服务于全文核心主题
-2. 忠实原文：配音说什么就表达什么
-3. 用词精准：选择恰到好处的词汇
-4. 主题一致性：所有分镜保持统一视觉基调
-5. 抽象概念可视化：用数据/图表/概念图
-6. 隐喻用"metaphor"：如"火药桶"→"powder keg metaphor"
-7. 区分胡塞(也门)和真主党(黎巴嫩)
-8. 不要假设参与者：说"海峡"不要"U.S. Navy"
-
-【禁止】
-- 过度具体化、推测结果、张冠李戴、提伤亡数字
-
-【示例】
-配音：最新消息 → "breaking news graphic, headline alert"
-配音：火药桶 → "powder keg metaphor, multiple flashpoints, tension escalating"
-配音：空袭 → "airstrike, explosions, smoke over area"
-配音：三死四伤 → "casualties evacuated, emergency medical response"
-配音：胡塞武装 → "Houthi fighters in Yemen, weapons display"
-配音：毒黑雨 → "toxic black rain, oil fire smoke mixing with rain"
+原则：忠实原文，抽象可视化，简洁精准
+禁止：过度具体化、推测结果、张冠李戴
 
 配音：{dubbing}
 
-生成（英文tag，用逗号分隔）："""
+输出格式：documentary photography, cinematic still, war journalism, raw photo, [描述], 8k uhd, high detail, film grain, natural lighting, shot on 35mm"""
             
             import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
@@ -3832,19 +3933,14 @@ class DocuMakerLiteV7:
             model = self.ollama_model_var.get()
             ollama_url = "http://localhost:11434"
             
-            prompt = f"""你是AI视频提示词工程师。请从配音文本提取视觉元素关键词。
+            prompt = f"""根据配音提取视觉元素关键词。
 
-【原则】
-1. 忠实原文：配音说什么就提取什么
-2. 信息少时用通用词：配音短时用"news graphic, headline"等
-3. 情感用相关词：如"解气"→"morale, satisfaction"
-
-【禁止】
-- 过度具体化、推测结果、张冠李戴
+原则：忠实原文，简洁精准
+禁止：过度具体化、推测结果
 
 配音：{dubbing}
 
-提取关键词（英文逗号分隔）："""
+输出（英文逗号分隔）："""
             
             import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
@@ -4129,397 +4225,119 @@ class DocuMakerLiteV7:
             return "主题相关场景，与内容匹配的视觉画面，符合语境的环境"
     
     def _extract_elements_from_dubbing(self, dubbing):
-        """从配音文本智能提取视觉元素 - 支持本地和大模型两种模式"""
+        """从配音文本智能提取视觉元素 - 大模型优先，本地作为fallback"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
-        # 优先尝试本地提取（不依赖大模型）
-        local_result = self._extract_elements_locally(dubbing)
-        if local_result:
-            return local_result
-        
-        # 检查是否配置了 Ollama，如果配置了则尝试大模型提取
-        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
-            # 没有配置大模型，返回空（已通过本地提取处理）
-            return ""
-        
-        try:
-            model = self.ollama_model_var.get()
-            ollama_url = "http://localhost:11434"
-            
-            prompt = f"""从以下配音文本中提取出能够用于图像生成的视觉元素关键词。
+        # 检查是否配置了 Ollama，如果有则优先使用大模型提取
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                ollama_url = "http://localhost:11434"
+                
+                prompt = f"""从以下配音文本中提取出能够用于图像生成的视觉元素关键词。
 要求：
-1. 提取具体的视觉对象、场景、人物、物品等（至少3-5个）
+1. 提取具体的视觉对象、场景、人物、物品等关键词
 2. 用英文逗号分隔每个关键词
 3. 只返回关键词，不要其他解释
+4. 如果配音是"雖然美方沒承認"这类简短的否认/确认类内容，提取"denial, no comment, official response"等
 
 配音文本：{dubbing}
 
 返回格式：关键词1, 关键词2, 关键词3"""
-            
-            import requests
-            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
-            response = requests.post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": config_options
-                },
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                visual_keywords = result.get('response', '').strip()
-                visual_keywords = visual_keywords.strip()
-                if visual_keywords:
-                    return visual_keywords
-            
-            return ""
-        except Exception as e:
-            return ""
-    
-    def _extract_elements_locally(self, dubbing):
-        """本地模式：从配音文本提取视觉元素（不依赖大模型）"""
-        import re
+                
+                import requests
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    f"{ollama_url}/api/generate",
+                    json={
+                        "model": model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": config_options
+                    },
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    visual_keywords = result.get('response', '').strip()
+                    visual_keywords = visual_keywords.strip()
+                    if visual_keywords:
+                        return visual_keywords
+            except Exception as e:
+                pass
         
-        if not dubbing:
-            return ""
-        
-        visual_keywords = []
-        
-        # 军事/战争相关关键词
-        military_mapping = {
-            '美军': 'US military, American soldiers, US army',
-            '伊朗': 'Iran, Iranian, Persia',
-            '革命卫队': 'Revolutionary Guard, IRGC, Iranian military',
-            '军队': 'military, armed forces, troops',
-            '部队': 'troops, military unit',
-            '战争': 'war, warfare, battlefield',
-            '冲突': 'conflict, clash, confrontation',
-            '战斗': 'battle, combat, fighting',
-            '导弹': 'missile, rocket, projectile',
-            '无人机': 'drone, UAV, unmanned aircraft',
-            '战斗机': 'fighter jet, aircraft, warplane',
-            '轰炸机': 'bomber, bombing aircraft',
-            '航母': 'aircraft carrier, warship',
-            '军舰': 'warship, naval vessel',
-            '海军': 'navy, naval forces',
-            '空军': 'air force, aviation',
-            '陆军': 'army, ground forces',
-            '武器': 'weapon, arms, armament',
-            '军事': 'military, armed, warfare',
-            '基地': 'military base, base',
-            '战场': 'battlefield, war zone, front line',
-            '进攻': 'attack, offensive, assault',
-            '防御': 'defense, defensive',
-            '轰炸': 'bombing, air strike, raid',
-            '摧毁': 'destroyed, devastated, ruin',
-            '爆炸': 'explosion, blast, detonation',
-            '伤亡': 'casualties, deaths, injuries',
-            '平民': 'civilians, civilians',
-            '难民': 'refugees, displaced people',
-            '国际': 'international, global',
-            '中东': 'Middle East, MENA region',
-        }
-        
-        # 合并所有关键词映射
-        keyword_mapping = dict(military_mapping)
-        keyword_mapping.update({
-            '黑洞': 'black hole, event horizon, accretion disk',
-            '宇宙': 'universe, cosmos, deep space',
-            '太空': 'outer space, celestial',
-            '星球': 'planet, celestial body',
-            '银河': 'milky way, galaxy',
-            '星系': 'galaxy, star system',
-            '恒星': 'star, sun',
-            '行星': 'planet',
-            '星云': 'nebula, cosmic dust',
-            'X射线': 'X-ray, radiation',
-            '光': 'light, rays, glow',
-            '热量': 'heat, thermal energy',
-            '温度': 'temperature, heat',
-            '攝氏度': 'Celsius degrees',
-            '數千萬': 'tens of millions',
-            '銀河系': 'Milky Way galaxy',
-            '中心': 'center, core',
-            '爆炸': 'explosion, blast',
-            '能量': 'energy, power',
-            '辐射': 'radiation',
-            '天体': 'celestial body, heavenly body',
-            '光年': 'light years',
-            '距离': 'distance',
-            '科学家': 'scientist, researcher',
-            '实验室': 'laboratory, research lab',
-            '仪器': 'instrument, device',
-            '观测': 'observation, telescope',
-            '研究': 'research, study',
-            '数据': 'data, statistics',
-            '屏幕': 'screen, monitor, display',
-            '图表': 'chart, graph',
-            '地图': 'map',
-            '地球': 'Earth, planet Earth',
-            '太阳': 'sun, solar',
-            '月亮': 'moon, lunar',
-            '火星': 'Mars',
-            '木星': 'Jupiter',
-            '土星': 'Saturn',
-            '城市': 'city, urban, cityscape',
-            '乡村': 'countryside, rural',
-            '山脉': 'mountain, mountain range',
-            '海洋': 'ocean, sea',
-            '河流': 'river',
-            '森林': 'forest, woods',
-            '云': 'cloud',
-            '天空': 'sky',
-            '建筑': 'building, architecture',
-            '房间': 'room, interior',
-            '办公室': 'office',
-            '教室': 'classroom',
-            '医院': 'hospital',
-            '餐厅': 'restaurant',
-            '商店': 'store, shop',
-            '街道': 'street, road',
-            '车辆': 'vehicle, car',
-            '飞机': 'aircraft, plane',
-            '船': 'ship, boat',
-            '人': 'person, people',
-            '男人': 'man',
-            '女人': 'woman',
-            '孩子': 'child',
-            '科学家': 'scientist',
-            '医生': 'doctor',
-            '老师': 'teacher',
-            '学生': 'student',
-            '工人': 'worker',
-            '农民': 'farmer',
-            '商人': 'businessman',
-            '官员': 'official',
-            '领袖': 'leader',
-            '动物': 'animal',
-            '鸟': 'bird',
-            '鱼': 'fish',
-            '狗': 'dog',
-            '猫': 'cat',
-            '马': 'horse',
-            '花': 'flower',
-            '树': 'tree',
-            '草': 'grass',
-            '石头': 'rock, stone',
-            '水': 'water',
-            '火': 'fire',
-            '雨': 'rain',
-            '雪': 'snow',
-            '风': 'wind',
-            '雷': 'thunder',
-            '闪电': 'lightning',
-            '山': 'mountain, hill',
-            '谷': 'valley',
-            '岛': 'island',
-            '湖': 'lake',
-            '海': 'sea, ocean',
-        })
-        
-        for chinese, english in keyword_mapping.items():
-            if chinese in dubbing:
-                for eng in english.split(', '):
-                    if eng.strip() not in visual_keywords:
-                        visual_keywords.append(eng.strip())
-        
-        if visual_keywords:
-            return ', '.join(visual_keywords[:5])
+        # 大模型不可用时，使用本地提取作为fallback
+        local_result = self._extract_elements_locally(dubbing)
+        if local_result:
+            return local_result
         
         return ""
     
+    def _extract_elements_locally(self, dubbing):
+        """本地模式：已弃用，现在完全依赖大模型提取视觉元素"""
+        return ""
+    
     def _translate_visual_concept(self, chinese_concept):
-        """将中文视觉概念转化为英文描述"""
-        # 常见视觉元素映射
-        translations = {
-            '战场': 'battlefield scene, war zone',
-            '军事分析师': 'military analyst, strategic advisor',
-            '新闻主持人': 'news anchor, presenter',
-            '废墟': 'ruins, destroyed buildings',
-            '城市': 'cityscape, urban environment',
-            '建筑': 'architecture, buildings',
-            '摧毁': 'destroyed, devastated',
-            '破败': 'dilapidated, ruined',
-            '抵抗组织': 'resistance fighters',
-            '士兵': 'soldiers, troops',
-            '装备': 'military equipment',
-            '武器': 'weapons, armaments',
-            '无人机': 'drone, UAV',
-            '导弹': 'missile, rocket',
-            '天空': 'sky, aerial view',
-            '记者': 'journalist, reporter',
-            '采访': 'interview scene',
-            '海军': 'naval forces, warships',
-            '空军': 'air force, aircraft',
-            '舰艇': 'warships, naval vessels',
-            '飞机': 'aircraft, military planes',
-            '基地': 'military base',
-            '港口': 'harbor, port',
-            'IRGC': 'Islamic Revolutionary Guard Corps',
-            '革命卫队': 'Revolutionary Guard troops',
-            '精锐': 'elite forces',
-            '螃蟹': 'crab, symbolic imagery',
-            '天平': 'balance scale, weighing scale',
-            '指挥中心': 'command center',
-            '屏幕': 'screens, monitors',
-            '地图': 'maps, tactical charts',
-            # 黑洞/宇宙相关
-            '黑洞': 'black hole, event horizon, cosmic phenomenon',
-            '宇宙': 'universe, cosmos, deep space',
-            '太空': 'outer space, celestial',
-            '星球': 'planet, celestial body',
-            '星空': 'starry sky, night sky',
-            '银河': 'milky way, galaxy',
-            '星体': 'celestial body, stellar object',
-            '天体': 'heavenly body, celestial object',
-            '行星': 'planet, orbiting body',
-            '恒星': 'star, sun',
-            '星系': 'galaxy, star system',
-            '引力': 'gravity, gravitational force',
-            '明亮吸积盘': 'bright accretion disk, glowing ring',
-            '天文照片': 'astronomical image, space photograph',
-            '科学研究': 'scientific research, laboratory',
-            '吸积盘': 'accretion disk, glowing disk',
-        }
-        
-        result = []
-        for cn, en in translations.items():
-            if cn in chinese_concept:
-                result.append(en)
-        
-        if result:
-            return ", ".join(result)
-        else:
-            # 如果没有匹配，返回空字符串而不是默认描述
+        """将中文视觉概念转化为英文描述 - 使用大模型"""
+        if not chinese_concept:
             return ""
+        
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                import requests
+                prompt = f"Translate the following Chinese visual concept to English keywords for AI image generation. Only return keywords, no explanation.\n\n{chinese_concept}"
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "options": config_options},
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json().get('response', '').strip()
+                    if result:
+                        return result
+            except Exception as e:
+                pass
+        
+        return ""
     
     def _get_scene_keywords_by_content(self, content_type, dubbing):
-        """根据配音内容智能获取场景关键词 - 无需调用大模型"""
+        """根据配音内容智能获取场景关键词 - 使用大模型"""
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
+        
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                import requests
+                prompt = f"""分析以下配音内容，提取适合的视觉场景关键词。
 
-        # 【整改新增】专业元素映射表 - 根据具体内容生成精确的提示词
-        professional_element_map = {
-            # 黑洞/宇宙主题专业元素
-            "黑洞": {
-                "core": ["black hole", "event horizon", "singularity"],
-                "effects": ["gravitational lensing", "accretion disk", "relativistic jets"],
-                "weight": 1.8
-            },
-            "克尔黑洞": {
-                "core": ["rotating Kerr black hole", "spinning black hole", "ergosphere"],
-                "effects": ["accretion disk", "relativistic beaming", "doppler shift"],
-                "weight": 2.0
-            },
-            "史瓦西": {
-                "core": ["Schwarzschild black hole", "non-rotating black hole"],
-                "effects": ["event horizon", "photon sphere", "schwarzschild radius"],
-                "weight": 2.0
-            },
-            "吸积盘": {
-                "core": ["accretion disk", "glowing disk", "circumstellar disk"],
-                "effects": ["hot plasma", "relativistic beaming", "doppler shift", "orange-red emission"],
-                "weight": 1.9
-            },
-            "人马座": {
-                "core": ["Sagittarius A*", "supermassive black hole", "galactic center"],
-                "effects": ["star cluster", "dense star field", "Milky Way core", "infrared emission"],
-                "weight": 2.0
-            },
-            "银河系": {
-                "core": ["Milky Way galaxy", "galactic spiral arm", "galactic disk"],
-                "effects": ["star field", "nebula", "cosmic dust", "spiral structure"],
-                "weight": 1.6
-            },
-            "恒星": {
-                "core": ["star", "dying star", "stellar surface"],
-                "effects": ["solar flare", "coronal mass ejection", "stellar wind", "nuclear fusion"],
-                "weight": 1.5
-            },
-            "星云": {
-                "core": ["nebula", "cosmic cloud", "emission nebula"],
-                "effects": ["ionized gas", "star formation", "cosmic dust", "colorful emission"],
-                "weight": 1.5
-            },
-            "宇宙": {
-                "core": ["deep space", "cosmos", "interstellar space"],
-                "effects": ["star field", "cosmic background", "dark matter visualization"],
-                "weight": 1.3
-            },
-            "宇宙深处": {
-                "core": ["deep space", "outer space", "cosmic void"],
-                "effects": ["distant galaxies", "cosmic background radiation", "darkness"],
-                "weight": 1.4
-            }
-        }
+配音文本：{dubbing}
+内容类型：{content_type if content_type else 'general'}
 
-        # 检查配音内容是否匹配专业元素
-        matched_elements = []
-        for keyword, element_info in professional_element_map.items():
-            if keyword in dubbing:
-                # 添加核心元素带权重
-                for elem in element_info["core"]:
-                    weight = element_info["weight"]
-                    matched_elements.append(f"{elem}({weight})")
-                # 添加效果元素
-                for elem in element_info["effects"][:2]:
-                    matched_elements.append(elem)
+要求：
+1. 输出与配音内容直接相关的场景关键词
+2. 用英文逗号分隔
+3. 只输出关键词，不要解释
 
-        # 如果匹配到专业元素，返回它们
-        if matched_elements:
-            return ", ".join(matched_elements)
-
-        # 脚本优化的场景关键词映射（无需调用大模型）
-        scene_keywords_map = {
-            '战争': 'war zone, battlefield, military conflict, ruins',
-            '军事': 'military base, command center, tactical operation, soldier',
-            '新闻': 'news studio, broadcast room, journalist, breaking news',
-            '科技': 'technology lab, research facility, innovation, digital',
-            '科学': 'laboratory, scientific research, experiment, data analysis',
-            '历史': 'historical site, ancient civilization, heritage, vintage',
-            '自然': 'nature landscape, wilderness, ecosystem, wildlife',
-            '经济': 'financial district, stock market, business center, economy',
-            '政治': 'government building, political summit, diplomatic, capital',
-            '教育': 'classroom, university, education, learning, students',
-            '健康': 'hospital, medical center, healthcare, wellness',
-            '旅游': 'tourist destination, scenic spot, adventure, journey',
-            '娱乐': 'entertainment venue, performance, show business, cinema',
-            '体育': 'stadium, sports arena, athletic competition, player',
-            '环境': 'environmental scene, pollution, conservation, nature',
-            '社会': 'urban environment, city life, society, community',
-            '文化': 'cultural heritage, museum, art gallery, tradition',
-            '国际': 'international affairs, global event, diplomatic scene',
-        }
-
-        # 从配音文本中匹配场景关键词
-        for key, keywords in scene_keywords_map.items():
-            if key in dubbing:
-                return keywords
-
-        # 根据内容类型返回默认场景关键词
-        if content_type:
-            content_type_keywords = {
-                'space': 'space station, astronaut, cosmic view, orbital',
-                'science': 'laboratory, research, experiment, scientific data',
-                'nature': 'nature landscape, wilderness, outdoor scene',
-                'history': 'historical site, vintage scene, period setting',
-                'technology': 'tech lab, innovation, digital interface, future',
-                'art': 'art studio, creative space, gallery, artistic',
-                'education': 'classroom, lecture hall, educational setting',
-                'business': 'office, corporate setting, business environment',
-                'health': 'hospital, medical facility, healthcare setting',
-                'travel': 'travel destination, scenic location, adventure',
-            }
-            if content_type in content_type_keywords:
-                return content_type_keywords[content_type]
-
-        # 默认返回
-        return "realistic scene, documentary style, photorealistic"
+返回格式：关键词1, 关键词2, 关键词3"""
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "options": config_options},
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json().get('response', '').strip()
+                    if result:
+                        return result
+            except Exception as e:
+                pass
+        
+        return ""
 
     def _get_custom_negative_prompt(self, content_type, dubbing):
         """【整改新增】根据内容类型和配音内容生成定制化负面提示词"""
@@ -4591,305 +4409,103 @@ class DocuMakerLiteV7:
         return ", ".join(all_negative)
     
     def _extract_core_entities(self, dubbing, content_type):
-        """从配音文本中提取核心实体，直接作为视觉主体
-        
-        这是最关键的步骤：确保配音文本说的什么，SD生成的图片就是什么
-        例如："伊朗革命卫队正式宣布" → "Iranian Revolutionary Guard, military announcement, official statement"
-        """
+        """从配音文本中提取核心实体 - 使用大模型"""
         if not dubbing:
             return ""
         
-        dubbing_clean = dubbing.strip()
-        entities = []
-        
-        # 国家/地区实体
-        country_mapping = {
-            '伊朗': 'Iran, Iranian', '美国': 'USA, American', '中国': 'China, Chinese',
-            '俄罗斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
-            '英国': 'UK, British', '法国': 'France, French', '德国': 'Germany, German',
-            '朝鲜': 'North Korea, Korean', '韩国': 'South Korea, Korean',
-            '乌克兰': 'Ukraine, Ukrainian', '欧洲': 'Europe, European',
-            '中东': 'Middle East', '亚洲': 'Asia, Asian',
-        }
-        
-        # 军事/安全机构实体
-        military_mapping = {
-            '革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
-            '伊朗革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
-            '美军': 'US military, American forces', '美军方': 'US military, Pentagon',
-            '军队': 'military, armed forces, troops', '部队': 'troops, military unit',
-            '海军': 'navy, naval forces', '空军': 'air force, aviation',
-            '陆军': 'army, ground forces', '导弹': 'missile, rocket',
-            '无人机': 'drone, UAV', '战斗机': 'fighter jet, aircraft',
-            '航母': 'aircraft carrier', '军舰': 'warship, naval vessel',
-            '武器': 'weapons, armaments', '军事': 'military, armed',
-            '国防部': 'Ministry of Defense, Pentagon', '五角大楼': 'Pentagon, US Defense Department',
-        }
-        
-        # 政治/组织实体
-        political_mapping = {
-            '政府': 'government, officials', '总统': 'president, head of state',
-            '总理': 'prime minister', '首相': 'prime minister',
-            '外交部': 'foreign ministry, diplomatic', '联合国': 'United Nations, UN',
-            '安理会': 'UN Security Council', '北约': 'NATO, NATO alliance',
-            '欧盟': 'European Union, EU', '国会': 'congress, parliament',
-            '议会': 'parliament, legislative', '政党': 'political party',
-            '官员': 'officials, authorities', '发言人': 'spokesperson, official spokesperson',
-        }
-        
-        # 事件/行动实体
-        event_mapping = {
-            '战争': 'war, warfare, conflict', '冲突': 'conflict, clash',
-            '战斗': 'battle, combat, fighting', '袭击': 'attack, strike, assault',
-            '爆炸': 'explosion, blast', '发射': 'launch, launch',
-            '试射': 'test, missile test', '军演': 'military exercise, drill',
-            '谈判': 'negotiation, talks', '会议': 'meeting, conference',
-            '声明': 'statement, announcement', '宣布': 'announcement, declare',
-            '签署': 'signing, agreement', '协议': 'agreement, deal, pact',
-            '制裁': 'sanctions, embargo', '援助': 'aid, assistance',
-        }
-        
-        # 地点/场景实体
-        location_mapping = {
-            '基地': 'base, military base', '机场': 'airport, air base',
-            '港口': 'port, harbor, naval base', '城市': 'city, urban',
-            '农村': 'rural, countryside', '山区': 'mountain, mountainous',
-            '沙漠': 'desert', '海边': 'coastal, seaside',
-            '海峡': 'strait, waterway', '油田': 'oil field, oil facility',
-            '核设施': 'nuclear facility', '工厂': 'factory, facility',
-            '大使馆': 'embassy', '领事馆': 'consulate',
-        }
-        
-        # 新闻/媒体相关
-        media_mapping = {
-            '新闻': 'news, news report, breaking news', '记者': 'journalist, reporter',
-            '主持人': 'anchor, presenter', '直播': 'live broadcast, livestream',
-            '报道': 'report, coverage', '采访': 'interview',
-            '发布会': 'press conference', '声明': 'official statement',
-        }
-        
-        # 通用开场/过渡词（需要结合主题）
-        generic_keywords = {
-            '今天': 'today, current events, breaking news',
-            '消息': 'news, information, report',
-            '全球': 'global, worldwide, international',
-            '牵动': 'impact, concern, attention',
-            '最新': 'latest, recent, breaking',
-            '关注': 'attention, focus, interest',
-            '热点': 'hot topic, trending, viral',
-            '重大': 'major, significant, important',
-            '紧急': 'urgent, emergency, breaking',
-            '刚刚': 'just happened, breaking, latest',
-            '最新消息': 'breaking news, latest update, recent development',
-            '据报道': 'according to reports, sources say',
-            '业内人士': 'industry sources, experts, insiders',
-        }
-        
-        # 按优先级匹配：军事 > 政治 > 事件 > 地点 > 国家 > 通用开场
-        all_mappings = [
-            (military_mapping, 'military'),
-            (political_mapping, 'political'),
-            (event_mapping, 'event'),
-            (location_mapping, 'location'),
-            (country_mapping, 'country'),
-            (media_mapping, 'media'),
-            (generic_keywords, 'generic'),
-        ]
-        
-        for mapping, mtype in all_mappings:
-            for cn_key, en_value in mapping.items():
-                if cn_key in dubbing_clean:
-                    entities.append(en_value)
-                    break
-        
-        # 内容类型补充
-        if content_type:
-            content_lower = content_type.lower()
-            if 'military' in content_lower:
-                entities.append('military scene, combat zone')
-            elif 'politics' in content_lower:
-                entities.append('political scene, government setting')
-            elif 'science' in content_lower:
-                entities.append('scientific scene, laboratory')
-        
-        if entities:
-            return ", ".join(entities)
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                import requests
+                prompt = f"""从以下配音文本中提取核心实体（国家、人物、组织、事件、地点等），生成适合AI图像生成的视觉关键词。
+
+配音文本：{dubbing}
+内容类型：{content_type if content_type else 'general'}
+
+要求：
+1. 提取配音中明确提到的实体
+2. 用英文逗号分隔
+3. 只输出关键词，不要解释
+
+返回格式：关键词1, 关键词2, 关键词3"""
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "options": config_options},
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json().get('response', '').strip()
+                    if result:
+                        return result
+            except Exception as e:
+                pass
         
         return ""
     
     def _intelligent_fuse_semantics(self, dubbing, core_theme, visual_tone, content_type):
-        """智能融合语义：核心主题 + 视觉基调 + 音频文本语义
-        
-        根据核心主题和视觉基调，结合当前音频片段的语义，
-        智能生成匹配的视觉元素提示词
-        重点：确保配音文本的核心内容能够直接体现在视觉提示词中
-        当配音文本太通用时，优先使用核心主题和视觉基调
-        """
+        """智能融合语义：完全依赖大模型"""
         if not dubbing:
             return ""
         
-        fused_elements = []
-        dubbing_lower = dubbing.lower()
-        
-        # 0. 【最重要】从配音文本中提取核心实体，直接作为视觉主体
-        core_entities = self._extract_core_entities(dubbing, content_type)
-        
-        # 如果没有提取到核心实体，使用核心主题作为备选
-        if not core_entities and core_theme:
-            core_entities = core_theme
-        
-        # 如果有核心实体或核心主题，添加到提示词
-        if core_entities:
-            fused_elements.append(core_entities)
-        
-        # 1. 基于核心主题，智能扩展视觉元素（如果还没有主题内容）
-        if core_theme and not core_entities:
-            theme_lower = core_theme.lower()
-            # 主题关键词映射到视觉元素
-            theme_to_visuals = {
-                '战争': 'war, battlefield, military, combat, destruction',
-                'peace': 'peaceful, calm, harmony, tranquility, dove',
-                '科技': 'technology, futuristic, digital, innovative, high-tech',
-                'science': 'scientific, laboratory, research, experiment, data',
-                '自然': 'nature, landscape, wilderness, environment, organic',
-                '历史': 'historical, ancient, vintage, classical, heritage',
-                '政治': 'political, government, diplomatic, official, ceremony',
-                '经济': 'economic, financial, business, commerce, trading',
-                '健康': 'healthcare, medical, wellness, hospital, medicine',
-                '旅行': 'travel, adventure, exploration, scenic, journey',
-                '太空': 'space, cosmos, galaxy, stars, planets, nebula',
-                '宇宙': 'space, cosmos, universe, celestial, cosmic',
-                '军事': 'military, armed forces, soldier, weapon, tactical',
-            }
-            for key, visual in theme_to_visuals.items():
-                if key in theme_lower:
-                    fused_elements.append(visual)
-                    break
-        
-        # 2. 基于视觉基调，添加氛围元素
-        if visual_tone:
-            tone_lower = visual_tone.lower()
-            tone_to_mood = {
-                '压抑': 'dark, somber, gloomy, oppressive, heavy atmosphere',
-                'dark': 'dark, shadowy, mysterious, dim lighting, moody',
-                '光明': 'bright, luminous, radiant, warm, illuminated',
-                'bright': 'bright, vibrant, colorful, vivid, energetic',
-                '激烈': 'intense, dramatic, dynamic, powerful, chaotic',
-                '平静': 'serene, peaceful, quiet, gentle, tranquil',
-                'cold': 'cold, icy, frozen, blue tones, winter',
-                '温暖': 'warm, cozy, golden hour, amber, sunset colors',
-                '科幻': 'sci-fi, futuristic, neon, holographic, cyberpunk',
-                '写实': 'realistic, documentary, authentic, natural, lifelike',
-                '电影': 'cinematic, film quality, dramatic, professional',
-                '梦幻': 'dreamlike, ethereal, surreal, fantastical, magical',
-            }
-            for key, mood in tone_to_mood.items():
-                if key in tone_lower:
-                    fused_elements.append(mood)
-                    break
-        
-        # 3. 基于音频文本语义，提取即时视觉元素
-        semantic_keywords = {
-            # 人物相关
-            ('人', '人物', '人们', '大家', '我们'): 'people, crowd, group of people',
-            ('主持人', '记者', '主播'): 'anchor, presenter, broadcaster at desk',
-            ('专家', '分析师', '学者'): 'expert, analyst, professional in office',
-            ('总统', '官员', '领导'): 'leader, official, authority figure',
-            ('医生', '护士', '医疗'): 'medical professional, healthcare worker',
-            ('科学家', '研究员'): 'scientist, researcher, in laboratory',
-            
-            # 场景相关
-            ('会议', '谈判', '会谈'): 'meeting room, conference, negotiation',
-            ('战场', '战争', '冲突'): 'battlefield, combat zone, war area',
-            ('城市', '街道', '建筑'): 'cityscape, urban street, architecture',
-            ('自然', '森林', '山'): 'nature, forest, mountain landscape',
-            ('海', '海洋', '船'): 'ocean, sea, marine, waterfront',
-            ('天空', '云', '飞行'): 'sky, clouds, aerial view, flying',
-            ('太空', '宇宙', '星球'): 'space, cosmos, planet, galaxy',
-            
-            # 物体/设备
-            ('飞机', '航空', '飞行'): 'aircraft, airplane, aviation',
-            ('导弹', '武器', '军事'): 'missile, weapon, military equipment',
-            ('屏幕', '显示器', '数据'): 'screen, monitor, data display',
-            ('图表', '数据', '分析'): 'chart, graph, data visualization',
-            
-            # 情感/氛围
-            ('紧张', '危机', '冲突'): 'tense, crisis, conflict, urgent',
-            ('希望', '胜利', '成功'): 'hopeful, victorious, success, achievement',
-            ('悲伤', '绝望', '失败'): 'sad, desperate, failure, gloom',
-            ('和平', '友好', '合作'): 'peaceful, friendly, cooperation, harmony',
-        }
-        
-        for keywords, visual in semantic_keywords.items():
-            if any(kw in dubbing for kw in keywords):
-                fused_elements.append(visual)
-                break
-        
-        # 4. 基于内容类型添加基础环境元素
-        if content_type:
-            content_lower = content_type.lower()
-            if 'space' in content_lower or '宇宙' in core_theme or '太空' in dubbing:
-                fused_elements.append('deep space, stars, cosmic background')
-            elif 'military' in content_lower or '战争' in dubbing:
-                fused_elements.append('military environment, tactical setting')
-            elif 'science' in content_type:
-                fused_elements.append('scientific environment, research setting')
-        
-        # 去重并组合
-        if fused_elements:
-            return ", ".join(fused_elements)
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                prompt = f"""分析以下配音文本的视觉语义，生成适合AI图像生成的关键词。
+
+配音文本：{dubbing}
+核心主题：{core_theme if core_theme else '无'}
+视觉基调：{visual_tone if visual_tone else '无'}
+内容类型：{content_type if content_type else 'general'}
+
+要求：
+1. 生成的关键词必须与配音文本内容直接相关
+2. 如果配音内容简短，只输出与配音直接相关的内容
+3. 用英文逗号分隔
+
+返回格式：关键词1, 关键词2, 关键词3"""
+                
+                import requests
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "options": config_options},
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json().get('response', '').strip()
+                    if result:
+                        return result
+            except Exception as e:
+                pass
         
         return ""
     
     def _get_fallback_elements_by_content_type(self, content_type):
-        """根据内容类型返回默认的视觉元素补充"""
+        """根据内容类型返回默认的视觉元素补充 - 使用大模型"""
         if not content_type:
-            return "realistic scene, documentary style, photorealistic"
+            return ""
         
-        content_type_lower = content_type.lower()
+        if hasattr(self, 'ollama_model_var') and self.ollama_model_var.get():
+            try:
+                model = self.ollama_model_var.get()
+                import requests
+                prompt = f"Generate visual scene keywords for content type: {content_type}. Use comma separated English keywords."
+                config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "options": config_options},
+                    timeout=30
+                )
+                if response.status_code == 200:
+                    result = response.json().get('response', '').strip()
+                    if result:
+                        return result
+            except Exception as e:
+                pass
         
-        # 太空/宇宙相关
-        if "space" in content_type_lower or "宇宙" in content_type:
-            return "cosmic environment, space scene, celestial bodies, stars, nebula, astronomical phenomenon"
-        
-        # 科学/科技相关
-        if "science" in content_type_lower or "科技" in content_type or "技术" in content_type:
-            return "scientific laboratory, technology setting, research environment, futuristic equipment"
-        
-        # 军事/战争相关
-        if "military" in content_type_lower or "战争" in content_type or "军事" in content_type:
-            return "military scene, combat environment, military equipment, war zone"
-        
-        # 自然/环境相关
-        if "nature" in content_type_lower or "自然" in content_type or "环境" in content_type:
-            return "natural environment, nature scene, outdoor setting, landscape"
-        
-        # 历史相关
-        if "history" in content_type_lower or "历史" in content_type or "古代" in content_type:
-            return "historical setting, ancient scene, cultural heritage, classical architecture"
-        
-        # 政治相关
-        if "politics" in content_type_lower or "政治" in content_type or "政府" in content_type:
-            return "political setting, government building, official venue, professional environment"
-        
-        # 商业/经济相关
-        if "business" in content_type_lower or "经济" in content_type or "商业" in content_type:
-            return "business environment, corporate setting, financial district, office scene"
-        
-        # 健康/医学相关
-        if "health" in content_type_lower or "健康" in content_type or "医学" in content_type or "医疗" in content_type:
-            return "medical setting, healthcare environment, clinical scene, hospital setting"
-        
-        # 艺术相关
-        if "art" in content_type_lower or "艺术" in content_type:
-            return "artistic scene, creative setting, artistic environment, cultural scene"
-        
-        # 旅行相关
-        if "travel" in content_type_lower or "旅行" in content_type or "旅游" in content_type:
-            return "travel scene, tourist location, scenic view, landscape photography"
-        
-        # 默认
-        return "realistic scene, documentary style, photorealistic environment"
+        return ""
     
     def _get_lighting_by_mood(self, dubbing):
         """根据情感基调获取光线描述（带权重）"""
@@ -6238,160 +5854,47 @@ class DocuMakerLiteV7:
         try:
             is_sd = prompt_type == "SD提示词"
             
-            # 构建清晰简洁的指令 - 专业纪录片风格
+            # 构建简洁的指令 - 优化长度加快速度
             if is_sd:
                 # 根据是否有全文上下文选择不同的system prompt
                 if full_context and len(full_context) > 50:
                     # 有全文上下文 - 简化版prompt，加快生成速度
-                    system_prompt = """你是专业的AI视频生成提示词工程师。
+                    system_prompt = """你是AI视频生成提示词工程师。
 
 任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
 
-【核心原则 - 必须遵守】
-1. 理解整篇主题思想：先理解全文核心主题，每个分镜都要服务于这个主题
-2. 忠实于原文语义：配音说什么就表达什么，不要过度推测结果
-3. 用词精准：选择恰到好处的词汇表达核心意思
-4. 主题一致性：所有分镜要保持统一的视觉基调和主题元素
-5. 信息少时保持通用：配音只有几个字时，用通用的新闻/数据画面，不要编造具体场景
-6. 情感可视化：表达情绪用相关画面（如"解气"→"观看新闻、满意表情"）
-7. 抽象概念用会议/简报：表达"升级"用"战略会议、简报"
-8. 官员说话用发布会：表达"官员说"用"press conference、briefing"
-9. 态势用"under siege"：表达"挨炸越来越多"用"under siege"而不是具体爆炸画面
-10. 隐喻可视化：比喻句用"metaphor visualization"（如"火药桶"→"powder keg metaphor"）
-11. 区分胡塞和真主党：胡塞在也门，真主党在黎巴嫩，不要混淆！
-12. 不要假设参与者：说"海峡"不要假设"美国海军"
+核心原则：
+1. 忠实原文：配音说什么就表达什么
+2. 视觉具体化：必须包含具体场景、视角、物体
+3. 人物正确：内坦亚胡=Israeli，特朗普=American
 
-【禁止的写法】
-- ❌ 过度具体化：生成具体的人物/场景/动作（如"油轮燃烧"、"船只沉没"、"导弹发射"）
-- ❌ 推测结果：配音说"要报复"，不能生成"导弹正在发射"
-- ❌ 配音信息少时编造：配音"最新消息"不要生成一堆具体场景
-- ❌ 堆砌元素：一个提示词混合多个视角
-- ❌ 重复内容：质量标签不要重复出现
-- ❌ 张冠李戴：不要把人物搞错（如内塔尼亚胡不是Elliott Abrams）
-- ❌ 不要提具体伤亡数字：说"三死四伤"不要生成"lying on the ground"
-- ❌ 胡塞≠真主党：胡塞是也门武装，真主党是黎巴嫩
-- ❌ 假设参与者：说"海峡"不要生成"U.S. Navy"
+禁止：纯抽象描述（如"escalating conflict"、"conflict escalation"）、重复质量标签
 
-【正确示例】
-配音：最新消息
-✅ "breaking news graphic, newsroom atmosphere, headline alert, media coverage in progress"
+正确示例：
+- 最新消息 → "breaking news graphic, newsroom, headline alert"
+- 战争冲突 → "aerial view of battlefield, explosions, smoke plumes, military aircraft"
+- 发布会 → "press conference room, officials at podium, military briefing"
+- 导弹发射 → "missile launch site, smoke trails, military facility"
+- 内坦亚胡 → "Israeli prime minister"（不是Iranian！）
 
-配音：彻底摧毁政权的味道
-✅ "regime collapse indicators, strategic defeat visualization, victory briefing, final offensive phase"
-
-配音：战场外溢已经失控
-✅ "conflict spillover map, regional escalation indicators, border instability visualization"
-
-配音：伊朗导弹砸到科威特炼油厂
-✅ "Kuwaiti refinery under attack, energy facility strike visualization"
-
-配音：巴林沙特阿联酋部分地区也被波及
-✅ "regional impact visualization, Gulf states affected areas, energy infrastructure map"
-
-配音：霍尔木兹海峡航运继续卡壳
-✅ "Strait of Hormuz shipping congestion, maritime traffic disruption, oil shipment blockage"
-
-配音：全球油价像做火箭一样往上窜
-✅ "oil price chart soaring, energy market surge graph, price skyrocketing visualization"
-
-配音：海湾能源设施挨炸越来越多
-✅ "multiple oil facility fires, coordinated attack aftermath, energy infrastructure under siege"
-
-配音：毒黑雨都出来了
-✅ "toxic black rain, oil fire smoke mixing with rain, apocalyptic atmosphere, environmental disaster"
-
-配音：联合国人道官员直呼危机雪上加霜
-✅ "UN humanitarian official at press conference, concerned expression, refugee statistics display, aid workers in field"
-
-配音：周边国家难民潮又起
-✅ "refugee columns fleeing, families with belongings, border crossing points, humanitarian crisis"
-
-配音：油价难民和扩散风险全炸锅
-✅ "composite crisis visualization, oil prices, refugee flows, conflict spread indicators"
-
-配音：全球其他热点被吸血资源和注意力全往这清洗
-✅ "global attention draining to Middle East, other conflicts neglected, resource reallocation"
-
-配音：接下来几天
-✅ "calendar overlay, upcoming dates marked, escalation timeline, strategic countdown"
-
-配音：如果伊朗再来一波大报复
-✅ "retaliation preparation, missile launchers positioning, coordinated attack warning"
-
-配音：以色列又精准斩首了三名伊朗军官
-✅ "targeted elimination operation, intelligence operation briefing, operational success visualization"
-
-配音：包括情报高官和革命卫队关键指挥官
-✅ "military command structure chart, intelligence officials, Revolutionary Guard leadership"
-
-配音：内坦亚胡直接放话
-✅ "prime minister statement, official press conference, national address broadcast"
-
-配音：黎巴嫩南部昨天又有以色列空袭
-✅ "Israeli airstrike on southern Lebanon, explosions in residential area, smoke over villages"
-
-配音：政府军三死四伤
-✅ "military casualties being evacuated, emergency medical response, field hospital scene, grim aftermath"
-
-配音：胡塞武装扬言如果再掺合进来
-✅ "Houthi fighters in Yemen, weapons display, threatening rhetoric, tribal gathering"
-
-配音：曼德海峡也可能封
-✅ "Bab al-Mandab Strait strategic waterway, naval threats, shipping lane vulnerability"
-
-配音：整个波斯湾现在就是火药桶
-✅ "Persian Gulf region map, powder keg metaphor visualization, multiple flashpoints, tension escalating, red zones"
-
-配音：伊朗政权现在连油浓缩和导弹生产能力都基本废了
-✅ "production capacity chart, nuclear facility status, military capability decline graph"
-
-配音：这话听着解气
-✅ "military personnel watching news feed, satisfied expressions, morale boost moment"
-
-配音：但也透着这场仗已经从教训升级成
-✅ "military strategy meeting, generals around table, escalation briefings, war room atmosphere"
-
-配音：58艘舰艇两天内全报销
-✅ "satellite imagery of destroyed naval fleet, port facility in ruins, burning wreckage"
-
-配音：还有现在全在海底了
-✅ "underwater scene of sunken vessels, destroyed ships on sea floor, submarine perspective"
-
-【格式要求】
-- 开头：documentary photography, cinematic still, war journalism, raw photo
-- 中间：核心语义表达（用抽象概念/数据可视化/概念图/情感画面）
-- 结尾：8k uhd, high detail, film grain, natural lighting, shot on 35mm
-- 只输出英文tag，禁止中文
-- 不要重复质量标签"""
+格式：documentary photography, cinematic still, war journalism, raw photo, [具体场景描述], 8k uhd, high detail, film grain, natural lighting, shot on 35mm
+只输出英文tag，禁止重复"""
                 else:
                     # 没有全文上下文 - 仅基于当前配音生成
-                    system_prompt = """你是专业的AI视频生成提示词工程师。
+                    system_prompt = """你是AI视频生成提示词工程师。
 
 任务：根据配音文本生成新闻纪录片风格的英文SD提示词。
 
-【核心原则】
-1. 理解整篇主题：先理解全文核心主题，每个分镜都要服务于这个主题
-2. 忠实原文：配音说什么就表达什么
-3. 用词精准：选择恰到好处的词汇
-4. 主题一致性：所有分镜保持统一视觉基调和主题元素
-5. 抽象概念可视化：用数据/图表/概念图
-6. 隐喻用"metaphor"：如"火药桶"→"powder keg metaphor"
-7. 区分胡塞(也门)和真主党(黎巴嫩)
-8. 不要假设参与者：说"海峡"不要"U.S. Navy"
+原则：忠实原文，视觉具体化，人物正确
+禁止：纯抽象描述、重复质量标签
 
-【禁止】
-- 过度具体化、推测结果、张冠李戴、提伤亡数字
+示例：
+- 最新消息 → "breaking news graphic, headline"
+- 战争 → "aerial view, explosions, smoke"
+- 发布会 → "press conference, podium"
 
-【示例】
-配音：火药桶 → "powder keg metaphor, multiple flashpoints, tension escalating, red zones"
-配音：空袭 → "airstrike, explosions, smoke over area"
-配音：三死四伤 → "casualties evacuated, emergency medical response, field hospital"
-
-【格式】
-- 开头：documentary photography, cinematic still, war journalism, raw photo
-- 中间：核心语义
-- 结尾：8k uhd, high detail, film grain, natural lighting, shot on 35mm
-- 只输出英文tag，禁止中文"""
+格式：documentary photography, cinematic still, war journalism, raw photo, [场景], 8k uhd, high detail, film grain, natural lighting, shot on 35mm
+只输出英文tag，禁止重复"""
 
                 if full_context and len(full_context) > 50:
                     # 简化user_prompt，只保留关键信息
@@ -6453,7 +5956,7 @@ class DocuMakerLiteV7:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        options=config.get_options(num_predict=150)
+                        options=config.get_options(num_predict=500)
                     )
                     optimized_prompt = response["message"]["content"].strip()
                     
@@ -6485,9 +5988,20 @@ class DocuMakerLiteV7:
             optimized_prompt = optimized_prompt.strip()
             
             if is_sd:
-                if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
-                    self.log(f"⚠️ 模型返回了中文，使用原始提示词")
-                    return prompt
+                # 检查是否包含中文
+                has_chinese = re.search(r'[\u4e00-\u9fff]', optimized_prompt)
+                if has_chinese:
+                    # 尝试提取英文部分
+                    english_only = re.sub(r'[\u4e00-\u9fff]', '', optimized_prompt)
+                    english_only = english_only.strip()
+                    # 如果提取后有英文内容，使用它
+                    if english_only and len(english_only) > 10:
+                        self.log(f"⚠️ 提取英文部分: {english_only[:50]}...")
+                        optimized_prompt = english_only
+                    else:
+                        # 如果没有有意义的英文，返回原始提示词
+                        self.log(f"⚠️ 模型返回中文，使用原始提示词")
+                        return prompt
                 
                 optimized_prompt = re.sub(r'^(Prompt|提示词|SD)[:\s]*', '', optimized_prompt, flags=re.IGNORECASE)
                 optimized_prompt = re.sub(r'^[\*\#\-\=\s]+', '', optimized_prompt)
@@ -6533,7 +6047,15 @@ class DocuMakerLiteV7:
                                 tech_parts.append("film grain")
                             if not has_shot_35mm:
                                 tech_parts.append("shot on 35mm")
-                            tech_parts.extend(["high detail", "natural lighting", "masterpiece", "best quality", "ultra detailed", "photorealistic"])
+                            
+                            # 去重：检查 temp_prompt 和 tech_parts 中是否已存在
+                            temp_lower = temp_prompt.lower()
+                            existing_lower = [p.lower() for p in tech_parts]
+                            new_tags = []
+                            for tag in ["high detail", "natural lighting", "masterpiece", "best quality", "ultra detailed", "photorealistic"]:
+                                if tag.lower() not in existing_lower and tag.lower() not in temp_lower:
+                                    new_tags.append(tag)
+                            tech_parts.extend(new_tags)
                             
                             optimized_prompt = f"{temp_prompt}, {', '.join(tech_parts)}"
                         else:
@@ -7542,13 +7064,33 @@ class DocuMakerLiteV7:
                         
                         # 使用用户选择的模型
                         whisper_model = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                        self.whisper_model = whisper.load_model(whisper_model, device=device)
-                        whisper_model_loaded = True  # 标记模型是在本次调用中加载的
                         
-                        if torch.cuda.is_available():
-                            self.log(f"✅ Whisper {whisper_model}模型加载成功 (GPU加速)")
-                        else:
-                            self.log(f"✅ Whisper {whisper_model}模型加载成功 (CPU模式)")
+                        # 优先尝试使用 faster-whisper
+                        self._using_faster_whisper = False
+                        try:
+                            from faster_whisper import WhisperModel
+                            # 映射模型名称到 faster-whisper
+                            model_size_map = {"tiny": "tiny", "base": "base", "small": "small", "medium": "medium", "large": "large-v2"}
+                            fs_model_size = model_size_map.get(whisper_model, "medium")
+                            
+                            if torch.cuda.is_available():
+                                self.whisper_model = WhisperModel(fs_model_size, device="cuda", compute_type="float16")
+                                self.log(f"✅ Faster-Whisper {fs_model_size} 模型加载成功 (GPU加速)")
+                            else:
+                                self.whisper_model = WhisperModel(fs_model_size, device="cpu", compute_type="int8")
+                                self.log(f"✅ Faster-Whisper {fs_model_size} 模型加载成功 (CPU模式)")
+                            
+                            self._using_faster_whisper = True
+                            whisper_model_loaded = True
+                        except Exception as e:
+                            # faster-whisper 失败，静默回退到原始 whisper
+                            self.whisper_model = whisper.load_model(whisper_model, device=device)
+                            whisper_model_loaded = True
+                            
+                            if torch.cuda.is_available():
+                                self.log(f"✅ Whisper {whisper_model}模型加载成功 (GPU加速)")
+                            else:
+                                self.log(f"✅ Whisper {whisper_model}模型加载成功 (CPU模式)")
                     except Exception as e:
                         self.log(f"⚠️ GPU加载失败，回退到CPU: {e}")
                         whisper_model = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
@@ -7567,14 +7109,31 @@ class DocuMakerLiteV7:
                     # 使用线程池添加超时控制
                     import concurrent.futures
                     
-                    def transcribe_with_timeout():
-                        return self.whisper_model.transcribe(
-                            self.audio_path, 
-                            language="zh", 
-                            word_timestamps=True, 
-                            fp16=False,
-                            verbose=False
-                        )
+                    # 检查是否使用 faster-whisper
+                    if hasattr(self, '_using_faster_whisper') and self._using_faster_whisper:
+                        def transcribe_with_timeout():
+                            segments_list = []
+                            for segment in self.whisper_model.transcribe(
+                                self.audio_path, 
+                                language="zh",
+                                word_timestamps=True,
+                                vad_filter=True
+                            ):
+                                segments_list.append({
+                                    "start": segment.start,
+                                    "end": segment.end,
+                                    "text": segment.text
+                                })
+                            return segments_list
+                    else:
+                        def transcribe_with_timeout():
+                            return self.whisper_model.transcribe(
+                                self.audio_path, 
+                                language="zh", 
+                                word_timestamps=True, 
+                                fp16=False,
+                                verbose=False
+                            )
                     
                     # 设置10分钟超时
                     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -7586,7 +7145,7 @@ class DocuMakerLiteV7:
                             self.update_task_progress("就绪")
                             return
                     
-                    segments = result.get("segments", [])
+                    segments = result if isinstance(result, list) else result.get("segments", [])
                     self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段")
                 except Exception as e:
                     self.log(f"❌ 语音识别失败: {e}")
@@ -8370,11 +7929,17 @@ class DocuMakerLiteV7:
                 
                 tasks.append((shot_id, enhanced_prompt, image_file, image_path, description))
             
-            # 如果用户选择了模型，尝试切换SD模型
+            # 获取SD软件当前设置（不修改任何设置）
+            current_sd_options = self.get_sd_current_options()
+            current_model = current_sd_options.get('sd_model_checkpoint', '未知') if current_sd_options else None
+            self.log(f"📋 SD当前模型: {current_model}")
+            
+            # 如果用户选择了模型且不是"不选择"，才进行切换
+            # 如果用户选择"不选择"，则尊重用户在SD软件中的设置
             if selected_model and selected_model != "不选择":
-                self.log(f"🎨 正在切换绘图模型: {selected_model}")
+                self.log(f"🎨 用户指定了模型: {selected_model}，正在切换...")
                 try:
-                    # 模型名称映射（从显示名称到SD模型文件名）
+                    # 模型名称映射（仅用于旧版硬编码列表的兼容，新获取的列表直接使用）
                     model_mapping = {
                         "Stable Diffusion 1.5": "v1-5-pruned-emaonly",
                         "SDXL 1.0": "sd_xl_base_1.0",
@@ -8383,23 +7948,33 @@ class DocuMakerLiteV7:
                         "DALL·E 3": "dall-e-3"
                     }
                     
-                    # 获取SD模型名称（如果映射中不存在，使用原名称）
+                    # 获取SD模型名称（如果映射中不存在，使用用户选择的名称）
                     sd_model_name = model_mapping.get(selected_model, selected_model)
                     
-                    # 先获取当前可用的模型列表
+                    # 获取当前可用的模型列表
                     models_response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=10)
                     if models_response.status_code == 200:
                         available_models = models_response.json()
                         model_titles = [m.get('title', '') for m in available_models]
                         model_names = [m.get('model_name', '') for m in available_models]
                         
-                        # 查找匹配的模型
+                        # 查找匹配的模型（优先精确匹配，其次模糊匹配）
                         target_model = None
+                        
+                        # 首先尝试精确匹配用户选择的名称
                         for model_info in available_models:
-                            if sd_model_name.lower() in model_info.get('title', '').lower() or \
-                               sd_model_name.lower() in model_info.get('model_name', '').lower():
+                            if selected_model.lower() == model_info.get('title', '').lower() or \
+                               selected_model.lower() == model_info.get('model_name', '').lower():
                                 target_model = model_info.get('title')
                                 break
+                        
+                        # 如果精确匹配失败，尝试模糊匹配
+                        if not target_model:
+                            for model_info in available_models:
+                                if sd_model_name.lower() in model_info.get('title', '').lower() or \
+                                   sd_model_name.lower() in model_info.get('model_name', '').lower():
+                                    target_model = model_info.get('title')
+                                    break
                         
                         if target_model:
                             # 切换模型
@@ -8416,14 +7991,16 @@ class DocuMakerLiteV7:
                             else:
                                 self.log(f"⚠️ 模型切换失败: HTTP {switch_response.status_code}")
                         else:
-                            self.log(f"⚠️ 未找到模型: {selected_model}，将使用当前模型")
+                            self.log(f"⚠️ 未找到模型: {selected_model}，将使用当前模型: {current_model}")
                             self.log(f"   可用模型: {', '.join(model_titles[:5])}...")
                     else:
                         self.log(f"⚠️ 无法获取模型列表: HTTP {models_response.status_code}")
                         
                 except Exception as e:
                     self.log(f"⚠️ 模型切换异常: {e}")
-                    self.log(f"   将继续使用当前模型")
+                    self.log(f"   将继续使用SD当前模型: {current_model}")
+            else:
+                self.log(f"✅ 尊重用户设置，使用SD当前模型: {current_model}")
             
             # 定义图像生成函数
             def generate_single_image(task):
@@ -8461,17 +8038,69 @@ class DocuMakerLiteV7:
                         
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
+                        # 使用SD软件当前的设置，只传递必要的参数
+                        # 保留用户在SD软件中的steps、cfg_scale、sampler_name等所有设置
                         payload = {
                             "prompt": enhanced_prompt,
                             "negative_prompt": "(worst quality, low quality:1.4), cartoon, anime, painting, illustration, ugly, deformed, blurry, disfigured, bad anatomy, extra limbs, watermark, text, signature, mutated hands",
-                            "steps": 25,
                             "width": gen_width,
                             "height": gen_height,
-                            "cfg_scale": 7.0,
-                            "sampler_name": "DPM++ 2M",
-                            "seed": -1,
-                            "batch_size": 1
                         }
+                        
+                        # 如果用户有自定义设置，则使用用户的设置
+                        # 否则使用SD软件当前的默认设置
+                        if current_sd_options:
+                            if 'steps' in current_sd_options:
+                                payload['steps'] = current_sd_options.get('steps', 25)
+                            if 'cfg_scale' in current_sd_options:
+                                payload['cfg_scale'] = current_sd_options.get('cfg_scale', 7.0)
+                            if 'sampler_name' in current_sd_options:
+                                payload['sampler_name'] = current_sd_options.get('sampler_name', 'DPM++ 2M')
+                            if 'seed' in current_sd_options:
+                                payload['seed'] = current_sd_options.get('seed', -1)
+                            if 'batch_size' in current_sd_options:
+                                payload['batch_size'] = current_sd_options.get('batch_size', 1)
+                            if 'eta' in current_sd_options:
+                                payload['eta'] = current_sd_options.get('eta', None)
+                            if 'subseed' in current_sd_options:
+                                payload['subseed'] = current_sd_options.get('subseed', -1)
+                            if 'subseed_strength' in current_sd_options:
+                                payload['subseed_strength'] = current_sd_options.get('subseed_strength', 0)
+                            if 'seed_resize_from_h' in current_sd_options:
+                                payload['seed_resize_from_h'] = current_sd_options.get('seed_resize_from_h', -1)
+                            if 'seed_resize_from_w' in current_sd_options:
+                                payload['seed_resize_from_w'] = current_sd_options.get('seed_resize_from_w', -1)
+                            if 'restore_faces' in current_sd_options:
+                                payload['restore_faces'] = current_sd_options.get('restore_faces', False)
+                            if 'tiling' in current_sd_options:
+                                payload['tiling'] = current_sd_options.get('tiling', False)
+                            if 'enable_hr' in current_sd_options:
+                                payload['enable_hr'] = current_sd_options.get('enable_hr', False)
+                            if 'denoising_strength' in current_sd_options:
+                                payload['denoising_strength'] = current_sd_options.get('denoising_strength', 0.75)
+                            if 'firstphase_width' in current_sd_options:
+                                payload['firstphase_width'] = current_sd_options.get('firstphase_width', 0)
+                            if 'firstphase_height' in current_sd_options:
+                                payload['firstphase_height'] = current_sd_options.get('firstphase_height', 0)
+                            if 'hr_scale' in current_sd_options:
+                                payload['hr_scale'] = current_sd_options.get('hr_scale', 2)
+                            if 'hr_upscaler' in current_sd_options:
+                                payload['hr_upscaler'] = current_sd_options.get('hr_upscaler', 'Latent')
+                            if 'hr_second_pass_steps' in current_sd_options:
+                                payload['hr_second_pass_steps'] = current_sd_options.get('hr_second_pass_steps', 0)
+                            if 'styles' in current_sd_options:
+                                payload['styles'] = current_sd_options.get('styles', [])
+                            if 'script_name' in current_sd_options and current_sd_options.get('script_name'):
+                                payload['script_name'] = current_sd_options.get('script_name')
+                                payload['script_args'] = current_sd_options.get('script_args', [])
+                        else:
+                            payload['steps'] = 25
+                            payload['cfg_scale'] = 7.0
+                            payload['sampler_name'] = 'DPM++ 2M'
+                            payload['seed'] = -1
+                            payload['batch_size'] = 1
+                        
+                        self.log(f"📊 使用SD设置: steps={payload.get('steps')}, cfg={payload.get('cfg_scale')}, sampler={payload.get('sampler_name')}")
                         
                         # 发送请求，增加超时时间
                         response = requests.post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=90)
