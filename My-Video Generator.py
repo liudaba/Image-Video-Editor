@@ -9037,40 +9037,33 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果 - MoviePy 2.x兼容"""
+        """应用单张画面的动画效果"""
         try:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # MoviePy 2.x 使用 imagefx
-                try:
-                    from moviepy.video import imagefx
-                    # 动态缩放效果
-                    def scale_effect(get_frame, t):
-                        frame = get_frame(t)
-                        from PIL import Image
-                        import numpy as np
-                        if isinstance(frame, np.ndarray):
-                            img = Image.fromarray(frame)
-                        else:
-                            img = frame
-                        # 缓慢放大
-                        scale = 1.0 + 0.05 * (t / clip.duration)
-                        new_w = int(img.width * scale)
-                        new_h = int(img.height * scale)
-                        resized = img.resize((new_w, new_h), Image.LANCZOS)
-                        # 居中裁剪或填充
-                        if new_w > img.width:
-                            left = (new_w - img.width) // 2
-                            top = (new_h - img.height) // 2
-                            resized = resized.crop(left, top, left + img.width, top + img.height)
-                        return np.array(resized)
-                    
-                    return clip.transform(scale_effect)
-                except Exception as e:
-                    self.log(f"⚠️ 缩放动画失败: {e}")
-                    return clip
+                # 使用transform实现动态缩放
+                def scale_func(get_frame, t):
+                    frame = get_frame(t)
+                    from PIL import Image
+                    import numpy as np
+                    if isinstance(frame, np.ndarray):
+                        img = Image.fromarray(frame)
+                    else:
+                        img = frame
+                    # 缓慢放大
+                    scale = 1.0 + 0.05 * (t / clip.duration)
+                    new_w = int(img.width * scale)
+                    new_h = int(img.height * scale)
+                    resized = img.resize((new_w, new_h), Image.LANCZOS)
+                    # 居中裁剪
+                    if new_w > img.width:
+                        left = (new_w - img.width) // 2
+                        top = (new_h - img.height) // 2
+                        resized = resized.crop((left, top, left + img.width, top + img.height))
+                    return np.array(resized)
                 
+                return clip.transform(scale_func)
             else:
                 return clip
                 
