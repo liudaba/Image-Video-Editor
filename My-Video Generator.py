@@ -1628,15 +1628,6 @@ class DocuMakerLiteV7:
         self.api_var = tk.StringVar(value="Stable Diffusion API")
         self.sd_api_url_var = tk.StringVar(value="http://localhost:7860")
         
-        # SD生图参数设置
-        self.sd_steps_var = tk.IntVar(value=25)
-        self.sd_cfg_var = tk.DoubleVar(value=7.0)
-        self.sd_sampler_var = tk.StringVar(value="DPM++ 2M")
-        self.sd_schedule_var = tk.StringVar(value="Automatic")
-        self.sd_vae_var = tk.StringVar(value="Automatic")
-        self.sd_seed_var = tk.StringVar(value="-1")
-        self.sd_negative_prompt_var = tk.StringVar(value="worst quality, low quality, cartoon, anime, painting, illustration, ugly, deformed, blurry, disfigured")
-        
         # 大模型设置 - 初始值为脚本自带，由load_config加载
         self.optimization_method_var = tk.StringVar(value="脚本自带")
         self.ollama_model_var = tk.StringVar(value="脚本自带")
@@ -2130,64 +2121,6 @@ class DocuMakerLiteV7:
         
         self.btn_disconnect_api = ttk.Button(btn_frame, text="🔌 断开连接", command=self.close_sd_api_connection, style="Medium.TButton")
         self.btn_disconnect_api.pack(side=tk.LEFT, padx=5, pady=2)
-        
-        # SD生图参数设置
-        sd_params_section = ttk.LabelFrame(adv_frame, text="🎨 SD 生图参数", padding=15)
-        sd_params_section.pack(fill=tk.X, pady=5)
-        
-        # Steps 步数
-        steps_frame = ttk.Frame(sd_params_section)
-        steps_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(steps_frame, text="采样步数 (Steps):", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        ttk.Entry(steps_frame, textvariable=self.sd_steps_var, font=('Microsoft YaHei', large_font_size), width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(steps_frame, text="推荐: 20-30", font=('Microsoft YaHei', 9), foreground="gray").pack(side=tk.LEFT, padx=5)
-        
-        # CFG Scale
-        cfg_frame = ttk.Frame(sd_params_section)
-        cfg_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(cfg_frame, text="CFG Scale:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        ttk.Entry(cfg_frame, textvariable=self.sd_cfg_var, font=('Microsoft YaHei', large_font_size), width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(cfg_frame, text="推荐: 5-9", font=('Microsoft YaHei', 9), foreground="gray").pack(side=tk.LEFT, padx=5)
-        
-        # Sampler 采样器
-        sampler_frame = ttk.Frame(sd_params_section)
-        sampler_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(sampler_frame, text="采样器 (Sampler):", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        sampler_combo = ttk.Combobox(sampler_frame, textvariable=self.sd_sampler_var, 
-                                      values=["DPM++ 2M", "DPM++ SDE", "Euler", "Euler a", "DDIM", "UniPC", "LCM"],
-                                      state="readonly", font=('Microsoft YaHei', large_font_size), width=15)
-        sampler_combo.pack(side=tk.LEFT, padx=5)
-        
-        # Seed 种子
-        seed_frame = ttk.Frame(sd_params_section)
-        seed_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(seed_frame, text="随机种子 (Seed):", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        ttk.Entry(seed_frame, textvariable=self.sd_seed_var, font=('Microsoft YaHei', large_font_size), width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Label(seed_frame, text="-1为随机", font=('Microsoft YaHei', 9), foreground="gray").pack(side=tk.LEFT, padx=5)
-        
-        # Negative Prompt
-        neg_frame = ttk.Frame(sd_params_section)
-        neg_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(neg_frame, text="负面提示词:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5, anchor='w')
-        ttk.Entry(neg_frame, textvariable=self.sd_negative_prompt_var, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Schedule Type 调度类型
-        schedule_frame = ttk.Frame(sd_params_section)
-        schedule_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(schedule_frame, text="调度类型:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        schedule_combo = ttk.Combobox(schedule_frame, textvariable=self.sd_schedule_var,
-                                      values=["Automatic", "Normal", "Simple", "DDIM", "Karras", "Exponential", "Polyexponential", "SGM Uniform"],
-                                      state="readonly", font=('Microsoft YaHei', large_font_size), width=18)
-        schedule_combo.pack(side=tk.LEFT, padx=5)
-        
-        # VAE 模型
-        vae_frame = ttk.Frame(sd_params_section)
-        vae_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(vae_frame, text="VAE 模型:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        vae_combo = ttk.Combobox(vae_frame, textvariable=self.sd_vae_var,
-                                  values=["Automatic", "vae-ft-mse-840000-ema-pruned", "vae-ft-ea-840000-ema-pruned", "vae-mse"],
-                                  state="readonly", font=('Microsoft YaHei', large_font_size), width=25)
-        vae_combo.pack(side=tk.LEFT, padx=5)
         
         # 4. 视频设置部分
         video_section = ttk.LabelFrame(adv_frame, text="🎬 视频设置", padding=15)
@@ -8440,36 +8373,13 @@ Now convert this:
                         
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
-                        # 获取用户设置的SD参数
-                        sd_steps = self.sd_steps_var.get() if hasattr(self, 'sd_steps_var') else 25
-                        sd_cfg = self.sd_cfg_var.get() if hasattr(self, 'sd_cfg_var') else 7.0
-                        sd_sampler = self.sd_sampler_var.get() if hasattr(self, 'sd_sampler_var') else "DPM++ 2M"
-                        sd_schedule = self.sd_schedule_var.get() if hasattr(self, 'sd_schedule_var') else "Automatic"
-                        sd_vae = self.sd_vae_var.get() if hasattr(self, 'sd_vae_var') else ""
-                        sd_seed = int(self.sd_seed_var.get()) if hasattr(self, 'sd_seed_var') and self.sd_seed_var.get() != "-1" else -1
-                        sd_negative = self.sd_negative_prompt_var.get() if hasattr(self, 'sd_negative_prompt_var') else "worst quality, low quality, cartoon, anime"
-                        
-                        self.log(f"   生成参数: steps={sd_steps}, cfg={sd_cfg}, sampler={sd_sampler}, schedule={sd_schedule}, seed={sd_seed}")
-                        
+                        # 只发送提示词和分辨率，让SD WebUI使用自己的设置
                         payload = {
                             "prompt": enhanced_prompt,
-                            "negative_prompt": sd_negative,
-                            "steps": sd_steps,
                             "width": gen_width,
                             "height": gen_height,
-                            "cfg_scale": sd_cfg,
-                            "sampler_name": sd_sampler,
-                            "seed": sd_seed,
                             "batch_size": 1
                         }
-                        
-                        # 添加调度类型
-                        if sd_schedule and sd_schedule != "Automatic":
-                            payload["schedule_type"] = sd_schedule
-                        
-                        # 添加VAE模型
-                        if sd_vae and sd_vae != "Automatic":
-                            payload["vae"] = sd_vae
                         
                         # 发送请求，增加超时时间
                         response = requests.post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=90)
@@ -9703,22 +9613,6 @@ Now convert this:
                 if 'api_url' in config:
                     self.sd_api_url_var.set(config['api_url'])
                 
-                # 加载SD生图参数设置
-                if 'sd_steps' in config:
-                    self.sd_steps_var.set(config['sd_steps'])
-                if 'sd_cfg' in config:
-                    self.sd_cfg_var.set(config['sd_cfg'])
-                if 'sd_sampler' in config:
-                    self.sd_sampler_var.set(config['sd_sampler'])
-                if 'sd_seed' in config:
-                    self.sd_seed_var.set(str(config['sd_seed']))
-                if 'sd_negative_prompt' in config:
-                    self.sd_negative_prompt_var.set(config['sd_negative_prompt'])
-                if 'sd_schedule' in config:
-                    self.sd_schedule_var.set(config['sd_schedule'])
-                if 'sd_vae' in config:
-                    self.sd_vae_var.set(config['sd_vae'])
-                
                 # 加载大模型设置 - 默认使用脚本自带，避免大模型调用卡住
                 # 强制设置为"脚本自带"，用户需要手动开启才使用大模型
                 self.optimization_method_var.set("脚本自带")
@@ -9802,13 +9696,6 @@ Now convert this:
                 'height': int(self.height_var.get()),
                 'api_type': self.api_var.get(),
                 'api_url': self.sd_api_url_var.get(),
-                'sd_steps': self.sd_steps_var.get() if hasattr(self, 'sd_steps_var') else 25,
-                'sd_cfg': self.sd_cfg_var.get() if hasattr(self, 'sd_cfg_var') else 7.0,
-                'sd_sampler': self.sd_sampler_var.get() if hasattr(self, 'sd_sampler_var') else 'DPM++ 2M',
-                'sd_schedule': self.sd_schedule_var.get() if hasattr(self, 'sd_schedule_var') else 'Automatic',
-                'sd_vae': self.sd_vae_var.get() if hasattr(self, 'sd_vae_var') else 'Automatic',
-                'sd_seed': self.sd_seed_var.get() if hasattr(self, 'sd_seed_var') else '-1',
-                'sd_negative_prompt': self.sd_negative_prompt_var.get() if hasattr(self, 'sd_negative_prompt_var') else '',
                 'optimization_method': self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else '脚本自带',
                 'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else '脚本自带',
                 'llm_config_preset': self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先',
