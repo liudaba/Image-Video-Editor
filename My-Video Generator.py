@@ -1379,10 +1379,6 @@ class PromptTemplates:
             "shot_analysis": cls.SHOT_ANALYSIS,
             "shot_analysis_sd": cls.SHOT_ANALYSIS_SD,
             "shot_analysis_doubao": cls.SHOT_ANALYSIS_DOUBAO,
-            "voice_shot_analysis_sd": cls.VOICE_SHOT_ANALYSIS_SD,
-            "voice_shot_analysis_doubao": cls.VOICE_SHOT_ANALYSIS_DOUBAO,
-            "science_shot_analysis_sd": cls.SCIENCE_SHOT_ANALYSIS_SD,
-            "science_shot_analysis_doubao": cls.SCIENCE_SHOT_ANALYSIS_DOUBAO,
             "style_description": cls.STYLE_DESCRIPTION,
             "quality_assessment": cls.QUALITY_ASSESSMENT,
             "theme_extraction": cls.THEME_EXTRACTION
