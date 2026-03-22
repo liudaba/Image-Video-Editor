@@ -2126,21 +2126,6 @@ class DocuMakerLiteV7:
         video_section = ttk.LabelFrame(adv_frame, text="🎬 视频设置", padding=15)
         video_section.pack(fill=tk.X, pady=5)
         
-        # 过渡模式设置
-        transition_frame = ttk.Frame(video_section)
-        transition_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(transition_frame, text="过渡模式:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
-        # 过渡模式下拉菜单
-        transition_frame_right = ttk.Frame(transition_frame)
-        transition_frame_right.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        transition_button = ttk.Button(transition_frame_right, textvariable=self.transition_var, command=self.toggle_transition_dropdown, style="Medium.TButton")
-        transition_button.pack(fill=tk.X, padx=5, pady=2)
-        
-        # 过渡模式下拉菜单框架
-        self.transition_dropdown_frame = ttk.Frame(transition_frame_right)
-        
         # 单张画面动画效果设置
         animation_frame = ttk.Frame(video_section)
         animation_frame.pack(fill=tk.X, pady=3)
@@ -8685,6 +8670,10 @@ Now convert this:
                     self.log("❌ 任务已被取消")
                     return
                 
+                # 获取用户设置的分辨率（用于视频输出）
+                target_width = self.width_var.get()
+                target_height = self.height_var.get()
+                
                 # 修复：使用end-start计算实际duration，确保与时间戳一致
                 actual_duration = shot['end'] - shot['start']
                 if abs(actual_duration - shot['duration']) > 0.001:
@@ -8698,14 +8687,15 @@ Now convert this:
                         image_file = self.image_map[expected_num]
                         image_path = os.path.join(self.images_dir, image_file)
                         if os.path.exists(image_path):
-                            # 修复：加载图片并统一尺寸，避免不同尺寸图片导致闪动
+                            # 加载原始图片
                             from PIL import Image
-                            img = Image.open(image_path)
+                            orig_img = Image.open(image_path)
+                            orig_size = orig_img.size  # 保存原始尺寸
+                            
                             # 统一转换为1920x1080（保持比例，填充黑边）
-                            target_width, target_height = 1920, 1080
-                            img = self._resize_image_to_fit(img, target_width, target_height)
+                            img = self._resize_image_to_fit(orig_img, target_width, target_height)
                             clip = ImageClip(np.array(img)).with_duration(shot['duration'])
-                            self.log(f"   分镜{i+1}: 图片={image_file}, duration={shot['duration']:.3f}s, 尺寸={img.size}")
+                            self.log(f"   分镜{i+1}: 图片={image_file}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
                             # 应用动画效果
                             if animation_type != "无":
                                 clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
@@ -8718,14 +8708,15 @@ Now convert this:
                     # 正常模式使用固定文件名
                     image_path = os.path.join(self.images_dir, shot['image_file'])
                     if os.path.exists(image_path):
-                        # 修复：加载图片并统一尺寸，避免不同尺寸图片导致闪动
+                        # 加载原始图片
                         from PIL import Image
-                        img = Image.open(image_path)
+                        orig_img = Image.open(image_path)
+                        orig_size = orig_img.size  # 保存原始尺寸
+                        
                         # 统一转换为1920x1080（保持比例，填充黑边）
-                        target_width, target_height = 1920, 1080
-                        img = self._resize_image_to_fit(img, target_width, target_height)
+                        img = self._resize_image_to_fit(orig_img, target_width, target_height)
                         clip = ImageClip(np.array(img)).with_duration(shot['duration'])
-                        self.log(f"   分镜{i+1}: 图片={shot['image_file']}, duration={shot['duration']:.3f}s, 尺寸={img.size}")
+                        self.log(f"   分镜{i+1}: 图片={shot['image_file']}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
                         # 应用动画效果
                         if animation_type != "无":
                             clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
@@ -8743,90 +8734,26 @@ Now convert this:
                 self.log("❌ 任务已被取消")
                 return
             
-            # 应用过渡效果
-            self.update_task_progress("正在应用过渡效果...", 60)
-            self.log("🔄 正在应用过渡效果...")
-            transition_type = self.transition_var.get() if hasattr(self, 'transition_var') else "硬切"
-            self.log(f"🎬 使用过渡模式: {transition_type}")
+            # 硬切拼接视频片段
+            self.update_task_progress("正在拼接视频片段...", 60)
+            self.log("🔄 正在拼接视频片段...")
             
             # 获取视频宽度和高度
-            width, height = 1920, 1080  # 默认1080p分辨率
+            width, height = 1920, 1080
             if clips:
-                # 从第一个片段获取分辨率
                 try:
                     first_clip = clips[0]
                     width, height = first_clip.size
                 except:
                     pass
             
-            # 过渡效果持续时间（秒）- 根据视频总时长动态调整
-            transition_duration = min(0.5, 348.520 / 100)  # 不超过总时长的1%
-            self.log(f"🎬 过渡效果持续时间: {transition_duration}秒")
-            
-            if transition_type == "硬切":
-                # 硬切：直接拼接，无过渡效果，时间最精准
-                self.log(f"🎬 应用硬切效果（时间最精准）")
-                if len(clips) > 1:
-                    final_clip = concatenate_videoclips(clips, method="chain")
-                else:
-                    final_clip = clips[0]
-                    
-            elif transition_type == "淡入淡出":
-                self.log(f"🎬 应用淡入淡出效果")
-                
-                # 兼容不同版本的MoviePy
-                try:
-                    from moviepy.video.fx import fadein, fadeout
-                    fade_available = True
-                except ImportError:
-                    fade_available = False
-                
-                if not fade_available:
-                    self.log(f"⚠️ 淡入淡出效果不可用，使用硬切")
-                    final_clip = concatenate_videoclips(clips, method="chain") if len(clips) > 1 else clips[0]
-                else:
-                    clips_with_fade = []
-                    for i, clip in enumerate(clips):
-                        if i == 0:
-                            faded_clip = clip.fx(fadein, transition_duration)
-                        elif i == len(clips) - 1:
-                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        else:
-                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        clips_with_fade.append(faded_clip)
-                    
-                    final_clip = concatenate_videoclips(clips_with_fade, method="chain") if len(clips_with_fade) > 1 else clips_with_fade[0]
-                    
-            elif transition_type == "交叉溶解":
-                self.log(f"🎬 应用交叉溶解效果")
-                
-                # 兼容不同版本的MoviePy
-                try:
-                    from moviepy.video.fx import fadein, fadeout
-                    fade_available = True
-                except ImportError:
-                    fade_available = False
-                
-                if not fade_available:
-                    self.log(f"⚠️ 交叉溶解效果不可用，使用硬切")
-                    final_clip = concatenate_videoclips(clips, method="chain") if len(clips) > 1 else clips[0]
-                else:
-                    clips_with_crossfade = []
-                    for i, clip in enumerate(clips):
-                        if i == 0:
-                            faded_clip = clip.fx(fadein, transition_duration)
-                        else:
-                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        clips_with_crossfade.append(faded_clip)
-                    
-                    final_clip = concatenate_videoclips(clips_with_crossfade, method="chain") if len(clips_with_crossfade) > 1 else clips_with_crossfade[0]
+            # 直接拼接所有片段（硬切）
+            if len(clips) > 1:
+                final_clip = concatenate_videoclips(clips, method="chain")
             else:
-                # 默认使用硬切
-                self.log(f"🎬 使用默认硬切效果")
-                if len(clips) > 1:
-                    final_clip = concatenate_videoclips(clips, method="chain")
-                else:
-                    final_clip = clips[0]
+                final_clip = clips[0]
+            
+            self.log(f"✅ 视频片段拼接完成，共 {len(clips)} 个片段")
             
             # 计算实际视频时长
             actual_video_duration = sum(clip.duration for clip in clips)
