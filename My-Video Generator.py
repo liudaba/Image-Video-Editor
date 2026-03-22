@@ -8373,11 +8373,17 @@ Now convert this:
                         
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
-                        # 发送提示词和分辨率，SD WebUI会使用自己的设置
+                        # 发送完整参数，确保SD WebUI使用正确的设置
+                        # 如果不发送这些参数，SD会使用默认或上次保存的设置，可能导致速度变慢
                         payload = {
                             "prompt": enhanced_prompt,
+                            "negative_prompt": "",
                             "width": gen_width,
                             "height": gen_height,
+                            "steps": 25,
+                            "cfg_scale": 7.0,
+                            "sampler_name": "DPM++ 2M",
+                            "seed": -1,
                             "batch_size": 1
                         }
                         
