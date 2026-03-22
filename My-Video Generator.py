@@ -8373,7 +8373,7 @@ Now convert this:
                         
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
-                        # 只发送提示词和分辨率，让SD WebUI使用自己的设置
+                        # 发送提示词和分辨率，SD WebUI会使用自己的设置
                         payload = {
                             "prompt": enhanced_prompt,
                             "width": gen_width,
