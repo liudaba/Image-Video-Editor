@@ -2337,6 +2337,25 @@ class DocuMakerLiteV7:
         """更新模型列表，自动检测本地已安装的Ollama模型"""
         global OLLAMA_AVAILABLE
         
+        # 模型信息字典：名称 -> (大小, 用途)
+        model_info = {
+            "qwen3:8b": ("5.2GB", "阿里通用模型，推荐首选"),
+            "qwen2.5:7b": ("4.7GB", "阿里通用模型，性能优秀"),
+            "gemma3:4b": ("3.3GB", "Google通用模型，推荐"),
+            "qwen3:4b": ("2.5GB", "阿里通用模型"),
+            "qwen3-vl:4b": ("3.3GB", "视觉模型，也可用于文本"),
+            "llama3.2:3b": ("2.0GB", "Meta轻量级模型"),
+            "deepseek-r1:8b": ("5.2GB", "推理模型，不推荐提示词"),
+            "gemma3:1b": ("815MB", "轻量级模型，速度快"),
+        }
+        
+        def get_model_label(model_name):
+            """获取模型显示标签（名称+大小+用途）"""
+            for key, (size, desc) in model_info.items():
+                if key in model_name:
+                    return f"{model_name} | {size} | {desc}"
+            return f"{model_name}"
+        
         # 清空现有模型按钮
         for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
@@ -6239,19 +6258,18 @@ class DocuMakerLiteV7:
         if not OLLAMA_AVAILABLE:
             return prompt
         
+        # 定义模型优先级列表（按能力和稳定性排序）
+        # 包含本地所有已安装的Ollama模型
+        # 推理模型(deepseek-r1)不适合提示词生成，优先使用通用模型
         model_priority_list = [
-            ("gemma3:4b", 4, "通用模型"),
-            ("gemma3:1b", 1, "轻量级模型"),
-            ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
-            ("qwen2.5:1.5b", 1.5, "轻量级模型"),
-            ("phi3:mini", 2, "微软轻量级模型"),
-            ("qwen3:4b", 4, "通用模型"),
-            ("qwen2.5:3b", 3, "阿里轻量级模型"),
+            ("qwen3:8b", 5, "阿里通用模型，推荐首选"),
+            ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
+            ("gemma3:4b", 4, "Google通用模型，推荐"),
+            ("qwen3:4b", 4, "阿里通用模型"),
+            ("qwen3-vl:4b", 4, "视觉模型，也可用于文本"),
             ("llama3.2:3b", 3, "Meta轻量级模型"),
-            ("llama3.2:1b", 1, "Meta超轻量级模型"),
-            ("llama3", 8, "Meta通用模型"),
-            ("mistral", 7, "Mistral通用模型"),
-            ("deepseek-r1:8b", 8, "DeepSeek推理模型"),
+            ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
+            ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
         ]
         
         def get_available_models():
@@ -7672,21 +7690,17 @@ Always add specific visual details!"""
                             if user_model == "脚本自带":
                                 user_model = "gemma3:4b"
                             
-                            # 定义模型优先级列表（按稳定性和速度排序）
+                            # 定义模型优先级列表（包含本地所有已安装的Ollama模型）
+                            # 按能力和稳定性排序，推理模型(deepseek-r1)不适合提示词生成
                             model_priority_list = [
-                                ("gemma3:4b", 4, "通用模型，推荐首选"),
-                                ("gemma3:1b", 1, "轻量级模型，速度最快"),
-                                ("qwen2.5:0.5b", 0.5, "超轻量级模型"),
-                                ("qwen2.5:1.5b", 1.5, "轻量级模型"),
-                                ("phi3:mini", 2, "微软轻量级模型"),
-                                ("qwen3:4b", 4, "通用模型"),
-                                ("qwen2.5:3b", 3, "阿里轻量级模型"),
+                                ("qwen3:8b", 5, "阿里通用模型，推荐首选"),
+                                ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
+                                ("gemma3:4b", 4, "Google通用模型，推荐"),
+                                ("qwen3:4b", 4, "阿里通用模型"),
+                                ("qwen3-vl:4b", 4, "视觉模型，也可用于文本"),
                                 ("llama3.2:3b", 3, "Meta轻量级模型"),
-                                ("llama3.2:1b", 1, "Meta超轻量级模型"),
-                                ("llama3", 8, "Meta通用模型"),
-                                ("llama3.1", 8, "Meta通用模型"),
-                                ("mistral", 7, "Mistral通用模型"),
-                                ("deepseek-r1:8b", 8, "DeepSeek推理模型"),
+                                ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
+                                ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
                             ]
                             
                             # 获取可用的模型列表
