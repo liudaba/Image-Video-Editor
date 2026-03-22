@@ -1632,6 +1632,8 @@ class DocuMakerLiteV7:
         self.sd_steps_var = tk.IntVar(value=25)
         self.sd_cfg_var = tk.DoubleVar(value=7.0)
         self.sd_sampler_var = tk.StringVar(value="DPM++ 2M")
+        self.sd_schedule_var = tk.StringVar(value="Automatic")
+        self.sd_vae_var = tk.StringVar(value="Automatic")
         self.sd_seed_var = tk.StringVar(value="-1")
         self.sd_negative_prompt_var = tk.StringVar(value="worst quality, low quality, cartoon, anime, painting, illustration, ugly, deformed, blurry, disfigured")
         
@@ -2168,6 +2170,24 @@ class DocuMakerLiteV7:
         neg_frame.pack(fill=tk.X, pady=3)
         ttk.Label(neg_frame, text="负面提示词:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5, anchor='w')
         ttk.Entry(neg_frame, textvariable=self.sd_negative_prompt_var, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Schedule Type 调度类型
+        schedule_frame = ttk.Frame(sd_params_section)
+        schedule_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(schedule_frame, text="调度类型:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        schedule_combo = ttk.Combobox(schedule_frame, textvariable=self.sd_schedule_var,
+                                      values=["Automatic", "Normal", "Simple", "DDIM", "Karras", "Exponential", "Polyexponential", "SGM Uniform"],
+                                      state="readonly", font=('Microsoft YaHei', large_font_size), width=18)
+        schedule_combo.pack(side=tk.LEFT, padx=5)
+        
+        # VAE 模型
+        vae_frame = ttk.Frame(sd_params_section)
+        vae_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(vae_frame, text="VAE 模型:", width=18, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        vae_combo = ttk.Combobox(vae_frame, textvariable=self.sd_vae_var,
+                                  values=["Automatic", "vae-ft-mse-840000-ema-pruned", "vae-ft-ea-840000-ema-pruned", "vae-mse"],
+                                  state="readonly", font=('Microsoft YaHei', large_font_size), width=25)
+        vae_combo.pack(side=tk.LEFT, padx=5)
         
         # 4. 视频设置部分
         video_section = ttk.LabelFrame(adv_frame, text="🎬 视频设置", padding=15)
@@ -8424,10 +8444,12 @@ Now convert this:
                         sd_steps = self.sd_steps_var.get() if hasattr(self, 'sd_steps_var') else 25
                         sd_cfg = self.sd_cfg_var.get() if hasattr(self, 'sd_cfg_var') else 7.0
                         sd_sampler = self.sd_sampler_var.get() if hasattr(self, 'sd_sampler_var') else "DPM++ 2M"
+                        sd_schedule = self.sd_schedule_var.get() if hasattr(self, 'sd_schedule_var') else "Automatic"
+                        sd_vae = self.sd_vae_var.get() if hasattr(self, 'sd_vae_var') else ""
                         sd_seed = int(self.sd_seed_var.get()) if hasattr(self, 'sd_seed_var') and self.sd_seed_var.get() != "-1" else -1
                         sd_negative = self.sd_negative_prompt_var.get() if hasattr(self, 'sd_negative_prompt_var') else "worst quality, low quality, cartoon, anime"
                         
-                        self.log(f"   生成参数: steps={sd_steps}, cfg={sd_cfg}, sampler={sd_sampler}, seed={sd_seed}")
+                        self.log(f"   生成参数: steps={sd_steps}, cfg={sd_cfg}, sampler={sd_sampler}, schedule={sd_schedule}, seed={sd_seed}")
                         
                         payload = {
                             "prompt": enhanced_prompt,
@@ -8440,6 +8462,14 @@ Now convert this:
                             "seed": sd_seed,
                             "batch_size": 1
                         }
+                        
+                        # 添加调度类型
+                        if sd_schedule and sd_schedule != "Automatic":
+                            payload["schedule_type"] = sd_schedule
+                        
+                        # 添加VAE模型
+                        if sd_vae and sd_vae != "Automatic":
+                            payload["vae"] = sd_vae
                         
                         # 发送请求，增加超时时间
                         response = requests.post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=90)
@@ -9684,6 +9714,10 @@ Now convert this:
                     self.sd_seed_var.set(str(config['sd_seed']))
                 if 'sd_negative_prompt' in config:
                     self.sd_negative_prompt_var.set(config['sd_negative_prompt'])
+                if 'sd_schedule' in config:
+                    self.sd_schedule_var.set(config['sd_schedule'])
+                if 'sd_vae' in config:
+                    self.sd_vae_var.set(config['sd_vae'])
                 
                 # 加载大模型设置 - 默认使用脚本自带，避免大模型调用卡住
                 # 强制设置为"脚本自带"，用户需要手动开启才使用大模型
@@ -9771,6 +9805,8 @@ Now convert this:
                 'sd_steps': self.sd_steps_var.get() if hasattr(self, 'sd_steps_var') else 25,
                 'sd_cfg': self.sd_cfg_var.get() if hasattr(self, 'sd_cfg_var') else 7.0,
                 'sd_sampler': self.sd_sampler_var.get() if hasattr(self, 'sd_sampler_var') else 'DPM++ 2M',
+                'sd_schedule': self.sd_schedule_var.get() if hasattr(self, 'sd_schedule_var') else 'Automatic',
+                'sd_vae': self.sd_vae_var.get() if hasattr(self, 'sd_vae_var') else 'Automatic',
                 'sd_seed': self.sd_seed_var.get() if hasattr(self, 'sd_seed_var') else '-1',
                 'sd_negative_prompt': self.sd_negative_prompt_var.get() if hasattr(self, 'sd_negative_prompt_var') else '',
                 'optimization_method': self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else '脚本自带',
