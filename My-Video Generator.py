@@ -9037,25 +9037,39 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果"""
+        """应用单张画面的动画效果 - MoviePy 2.x兼容"""
         try:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # 尝试使用clip.resize()方法（更高效）
+                # MoviePy 2.x 使用 vfx 模块
                 try:
-                    # 定义缩放函数：随时间从1.0缓慢增加到1.05
+                    from moviepy.video import vfx
+                    
+                    # 使用 vfx.resize 效果
                     def get_scale(t):
                         return 1.0 + 0.05 * (t / clip.duration)
                     
-                    # 使用MoviePy内置的resize方法
-                    resized_clip = clip.resize(get_scale)
-                    self.log(f"✅ 使用clip.resize()方法")
+                    # 应用resize效果
+                    resized_clip = clip.fx(vfx.resize, get_scale)
+                    self.log(f"✅ 使用vfx.resize方法")
                     return resized_clip
-                except Exception as resize_error:
-                    self.log(f"⚠️ clip.resize()失败: {resize_error}，使用transform方法")
+                except Exception as e:
+                    self.log(f"⚠️ vfx.resize失败: {e}")
                 
-                # 如果resize失败，使用transform方法（逐帧处理，较慢）
+                # 尝试使用clip.fx方法
+                try:
+                    def get_scale(t):
+                        return 1.0 + 0.05 * (t / clip.duration)
+                    
+                    # MoviePy 2.x: clip.fx(效果函数, 参数)
+                    result = clip.fx(lambda c: c.resize(get_scale))
+                    self.log(f"✅ 使用fx方法成功")
+                    return result
+                except Exception as fx_error:
+                    self.log(f"⚠️ fx方法失败: {fx_error}")
+                
+                # 最后尝试transform方法
                 try:
                     def scale_func(get_frame, t):
                         frame = get_frame(t)
@@ -9065,12 +9079,10 @@ Now convert this:
                             img = Image.fromarray(frame)
                         else:
                             img = frame
-                        # 缓慢放大
                         scale = 1.0 + 0.05 * (t / clip.duration)
                         new_w = int(img.width * scale)
                         new_h = int(img.height * scale)
                         resized = img.resize((new_w, new_h), Image.LANCZOS)
-                        # 居中裁剪
                         if new_w > img.width:
                             left = (new_w - img.width) // 2
                             top = (new_h - img.height) // 2
