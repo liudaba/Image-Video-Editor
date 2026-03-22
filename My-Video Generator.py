@@ -8240,7 +8240,7 @@ Now convert this:
                 self.log(f"   使用模型: SD默认模型")
             if selected_styles:
                 self.log(f"   风格预设: {', '.join(selected_styles)}")
-            self.log(f"   生成参数: steps=20, cfg=7.0, sampler=DPM++ 2M")
+            self.log(f"   生成参数: steps=25, cfg=7.0, sampler=DPM++ 2M")
             
             # 按分镜ID排序，确保顺序生成
             sorted_shots = sorted(self.shots_data, key=lambda x: x['id'])
@@ -9231,7 +9231,7 @@ Now convert this:
             traceback.print_exc()
     
     def check_and_prompt_direct_render(self):
-        """检查是否满足直接生成视频的条件，并提示用户"""
+        """检查是否满足直接生成视频的条件，并自动执行（跳过中间弹窗）"""
         try:
             # 延迟一点执行，确保视频生成完全完成
             import time
@@ -9264,39 +9264,20 @@ Now convert this:
             self.log(f"   ✓ 数量匹配: {images_match}")
             self.log("="*50 + "\n")
             
-            # 如果所有条件都满足，提示用户
+            # 如果所有条件都满足，直接执行生成视频（跳过中间弹窗）
             if has_audio and has_shots and has_images and images_match:
-                self.log("✅ 所有条件满足，可以执行直接生成视频！")
+                self.log("✅ 所有条件满足，自动执行直接生成视频...")
                 
-                # 在主线程中显示对话框
-                def show_prompt():
+                # 直接执行生成视频
+                def run_direct_render():
                     try:
-                        from tkinter import messagebox
-                        result = messagebox.askyesno(
-                            "跑图完成",
-                            f"🎉 跑图生成视频已完成！\n\n"
-                            f"检测到以下条件已满足：\n"
-                            f"✓ 音频已导入\n"
-                            f"✓ 分镜脚本数据 ({shots_count}个)\n"
-                            f"✓ 图片文件 ({image_count}张)\n"
-                            f"✓ 数量匹配\n\n"
-                            f"是否立即执行【直接生成视频】？\n\n"
-                            f"提示：直接生成视频将使用现有图片快速渲染，\n"
-                            f"不会重新生成图片，速度更快。",
-                            icon='info'
-                        )
-                        if result:
-                            self.log("🎬 用户选择执行直接生成视频...")
-                            self.direct_render_video()
-                        else:
-                            self.log("⏸️ 用户选择暂不执行直接生成视频")
-                            self.log("💡 提示：您可以随时点击【直接生成视频】按钮手动执行")
+                        self.direct_render_video()
                     except Exception as e:
-                        self.log(f"⚠️ 显示提示对话框失败: {e}")
+                        self.log(f"⚠️ 自动执行直接生成视频失败: {e}")
                 
-                # 在主线程中执行对话框
+                # 在主线程中执行
                 if hasattr(self, 'root') and self.root:
-                    self.root.after(100, show_prompt)
+                    self.root.after(100, run_direct_render)
             else:
                 # 有条件不满足，记录日志
                 if not has_audio:
@@ -9414,6 +9395,22 @@ Now convert this:
                     self.generate_video(skip_clear=True, use_original_resolution=True, skip_image_check=True)
                 finally:
                     self.task_running = False
+                
+                # 视频生成完成后，在主线程显示完成通知
+                def show_completion_notification():
+                    try:
+                        from tkinter import messagebox
+                        messagebox.showinfo(
+                            "🎉 任务完成",
+                            "视频生成已完成！\n\n您可以在输出文件夹中查看生成的视频文件。",
+                            icon='info'
+                        )
+                    except Exception as e:
+                        self.log(f"⚠️ 显示完成通知失败: {e}")
+                
+                # 在主线程中显示通知
+                if hasattr(self, 'root') and self.root:
+                    self.root.after(0, show_completion_notification)
             
             thread = threading.Thread(target=direct_render_worker, daemon=True)
             thread.start()
