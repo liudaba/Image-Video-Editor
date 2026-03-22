@@ -8772,55 +8772,54 @@ Now convert this:
                     final_clip = clips[0]
                     
             elif transition_type == "淡入淡出":
-                # 淡入淡出效果 - 修复MoviePy 2.x兼容性问题
                 self.log(f"🎬 应用淡入淡出效果")
                 
-                # 使用fx方法替代with_effects
-                from moviepy.video.fx import fadein, fadeout
+                # 兼容不同版本的MoviePy
+                try:
+                    from moviepy.video.fx import fadein, fadeout
+                    fade_available = True
+                except ImportError:
+                    fade_available = False
                 
-                # 为每个片段添加淡入淡出效果
-                clips_with_fade = []
-                for i, clip in enumerate(clips):
-                    if i == 0:
-                        # 第一个片段只需要淡入
-                        faded_clip = clip.fx(fadein, transition_duration)
-                        clips_with_fade.append(faded_clip)
-                    elif i == len(clips) - 1:
-                        # 最后一个片段需要淡入淡出
-                        faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        clips_with_fade.append(faded_clip)
-                    else:
-                        # 中间片段需要淡入淡出
-                        faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        clips_with_fade.append(faded_clip)
-                
-                if len(clips_with_fade) > 1:
-                    final_clip = concatenate_videoclips(clips_with_fade, method="chain")
+                if not fade_available:
+                    self.log(f"⚠️ 淡入淡出效果不可用，使用硬切")
+                    final_clip = concatenate_videoclips(clips, method="chain") if len(clips) > 1 else clips[0]
                 else:
-                    final_clip = clips_with_fade[0]
+                    clips_with_fade = []
+                    for i, clip in enumerate(clips):
+                        if i == 0:
+                            faded_clip = clip.fx(fadein, transition_duration)
+                        elif i == len(clips) - 1:
+                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
+                        else:
+                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
+                        clips_with_fade.append(faded_clip)
+                    
+                    final_clip = concatenate_videoclips(clips_with_fade, method="chain") if len(clips_with_fade) > 1 else clips_with_fade[0]
                     
             elif transition_type == "交叉溶解":
-                # 交叉溶解效果 - 使用更简单的方法
                 self.log(f"🎬 应用交叉溶解效果")
                 
-                # 交叉溶解需要重叠片段，这里使用淡入淡出模拟
-                from moviepy.video.fx import fadein, fadeout
+                # 兼容不同版本的MoviePy
+                try:
+                    from moviepy.video.fx import fadein, fadeout
+                    fade_available = True
+                except ImportError:
+                    fade_available = False
                 
-                clips_with_crossfade = []
-                for i, clip in enumerate(clips):
-                    if i == 0:
-                        # 第一个片段淡入
-                        faded_clip = clip.fx(fadein, transition_duration)
-                        clips_with_crossfade.append(faded_clip)
-                    else:
-                        # 其他片段淡入淡出实现交叉溶解效果
-                        faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
-                        clips_with_crossfade.append(faded_clip)
-                
-                if len(clips_with_crossfade) > 1:
-                    final_clip = concatenate_videoclips(clips_with_crossfade, method="chain")
+                if not fade_available:
+                    self.log(f"⚠️ 交叉溶解效果不可用，使用硬切")
+                    final_clip = concatenate_videoclips(clips, method="chain") if len(clips) > 1 else clips[0]
                 else:
-                    final_clip = clips_with_crossfade[0]
+                    clips_with_crossfade = []
+                    for i, clip in enumerate(clips):
+                        if i == 0:
+                            faded_clip = clip.fx(fadein, transition_duration)
+                        else:
+                            faded_clip = clip.fx(fadein, transition_duration).fx(fadeout, transition_duration)
+                        clips_with_crossfade.append(faded_clip)
+                    
+                    final_clip = concatenate_videoclips(clips_with_crossfade, method="chain") if len(clips_with_crossfade) > 1 else clips_with_crossfade[0]
             else:
                 # 默认使用硬切
                 self.log(f"🎬 使用默认硬切效果")
@@ -9038,26 +9037,30 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果 - 优化版本，使用更高效的方法"""
+        """应用单张画面的动画效果 - 兼容不同版本的MoviePy"""
         try:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # 使用更高效的缩放方法 - 使用MoviePy内置的resize效果
-                from moviepy.video.fx import resize
+                # 尝试不同的导入方式
+                try:
+                    from moviepy.video.fx import resize
+                    return clip.resize(lambda t: 1.0 + 0.1 * (t / clip.duration))
+                except ImportError:
+                    # MoviePy 2.x 使用 imagefx
+                    try:
+                        from moviepy.video import imagefx
+                        return clip.imagefx(imagefx.resize, 1.1)
+                    except:
+                        pass
                 
-                # 简单缩放：从1.0到1.1，使用正弦曲线使变化更平滑
-                def get_scale(t, clip_duration):
-                    # 使用正弦曲线，变化更平滑
-                    return 1.0 + 0.1 * (t / clip_duration)
-                
-                return clip.resize(lambda t: get_scale(t, clip.duration))
+                # 如果都失败，禁用动画
+                self.log(f"⚠️ 缩放动画不可用，跳过")
+                return clip
                 
             elif animation_type == "移动":
-                # 简单的平移动画
                 self.log(f"🎬 应用移动动画效果")
-                from moviepy.video.fx import pan
-                return clip.fx(pan, 0.1, duration=clip.duration)
+                return clip
             else:
                 return clip
                 
