@@ -6305,38 +6305,43 @@ class DocuMakerLiteV7:
             
             # 构建清晰简洁的指令
             if is_sd:
-                system_prompt = """You are a SD prompt engineer. Convert Chinese to English SD prompt ONLY.
+                system_prompt = """You are a professional SD prompt engineer. Your job is to convert Chinese text into high-quality English SD prompts.
 
-ABSOLUTE RULES:
-1. OUTPUT ENGLISH ONLY - NO CHINESE
-2. Use comma-separated English tags only
-3. Must include: documentary, photorealistic, cinematic
-4. Must include: masterpiece, best quality, ultra detailed, 8k
-5. NO explanations, NO quotes, NO newlines
-6. 30-60 English words
-7. Direct output only, no prefix
+STRICT RULES - MUST FOLLOW EXACTLY:
+1. Output ONLY English words, comma-separated, NO Chinese characters
+2. Must include quality tags: masterpiece, best quality, ultra detailed, 8k, photorealistic
+3. Must include style tags: documentary, cinematic, war photojournalism
+4. Must include lighting: cinematic lighting, dramatic light, high contrast
+5. Must include environment: destroyed buildings, smoke, fire, military equipment
+6. Must include shot type: close-up, wide angle, aerial drone footage
+7. NO explanations, NO quotes, NO newlines, NO intro text
+8. Exactly 30-60 English words
+9. Output ONLY the prompt, NOTHING else
 
-KEY PRINCIPLE: Convert ABSTRACT to SPECIFIC visual details!
+KEY: Convert abstract to concrete visual details!
+- "时间" → calendar display, date, clock, news broadcast
+- "战场" → battlefield, destroyed tanks, smoke, soldiers, ruins
+- "冲突" → military equipment, explosions, fire, troops
+- "多线" → multiple fronts, split screen, arrows
+- "内战" → rebel fighters, civilians fleeing, destroyed village
 
-Visual details to add:
-- Shot types: close-up shot, medium shot, wide angle, aerial drone footage, bird's eye view
-- Weather: overcast sky, gray sky, winter landscape, frozen, dusty, smoky
-- Environments: battlefield, destroyed buildings, rubble, mud, ruins
-- Military: tanks, soldiers, helicopters, missiles, explosions, fire
-- Lighting: dramatic lighting, dark ambient, neon highlight, orange-red glow
-- Style: war photojournalism, documentary news style, military briefing
+EXCELLENT OUTPUT EXAMPLES:
+INPUT: "2026年3月"
+OUTPUT: "close-up of digital calendar showing March 2026, breaking news broadcast graphics, world map with glowing red conflict zones, documentary news style"
 
-EXCELLENT EXAMPLES:
-- "2026年3月" → "close-up of digital calendar showing March 2026, breaking news broadcast graphics, world map with glowing red conflict zones, documentary news style"
-- "全球战场" → "world map projection with glowing red hotspots marking battlefields, war documentary, strategic military briefing style"
-- "三个方向" → "strategy map with three diverging red arrows from central point, dark tactical background, neon highlight"
-- "俄乌战场" → "Eastern front battlefield, destroyed tanks in frozen muddy field, winter landscape, smoke rising, gray overcast sky, war photojournalism"
-- "持续燃烧" → "aerial drone footage at night, multiple burning sites, orange-red glow against black sky, oil facility on fire, war zone devastation"
-- "内战" → "rebel fighters with rifles in destroyed village, civilians fleeing, dusty streets, abandoned vehicles, war documentary"
+INPUT: "全球战场"
+OUTPUT: "world map projection with glowing red hotspots marking battlefields, war documentary visualization, strategic military briefing style, dark background"
 
-Always add specific visual details!"""
+INPUT: "俄乌战场"
+OUTPUT: "Eastern front battlefield, destroyed Russian tanks in frozen muddy field, winter landscape, smoke rising from ruins, gray overcast sky, war photojournalism"
 
-                user_prompt = f"Text: {sentence}\n\nOutput English SD prompt with rich visual details."
+INPUT: "多线混战"
+OUTPUT: "multiple battlefronts burning simultaneously, urban warfare chaos, destroyed buildings with fire and thick smoke, military helicopters overhead, war correspondent footage"
+
+Now convert this:
+"""
+
+                user_prompt = f"Text: {sentence}\n\nOutput ONLY the English SD prompt, nothing else."
                 
             else:
                 system_prompt = """你是专业的图像提示词工程师。
