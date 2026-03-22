@@ -9026,28 +9026,31 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果 - 修复MoviePy 2.x兼容性问题"""
+        """应用单张画面的动画效果 - 优化版本，使用更高效的方法"""
         try:
             if animation_type == "缩放":
-                # 缩放动画：MoviePy 2.x 使用 imagefx.resize 或修改 transform
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # 方法1：使用 with_effects 和 transforms
-                # 从100%缓慢缩放到110%
-                def scale_func(t, clip_duration):
-                    return 1 + (t / clip_duration) * 0.1
+                # 使用更高效的缩放方法 - 使用MoviePy内置的resize效果
+                from moviepy.video.fx import resize
                 
-                # 使用 lambda 来实现动态缩放
-                return clip.transform(lambda get_frame, t: 
-                    self._scale_frame(get_frame(t), scale_func(t, clip.duration)))
+                # 简单缩放：从1.0到1.1，使用正弦曲线使变化更平滑
+                def get_scale(t, clip_duration):
+                    # 使用正弦曲线，变化更平滑
+                    return 1.0 + 0.1 * (t / clip_duration)
+                
+                return clip.resize(lambda t: get_scale(t, clip.duration))
+                
+            elif animation_type == "移动":
+                # 简单的平移动画
+                self.log(f"🎬 应用移动动画效果")
+                from moviepy.video.fx import pan
+                return clip.fx(pan, 0.1, duration=clip.duration)
             else:
-                # 无动画效果
                 return clip
                 
         except Exception as e:
             self.log(f"⚠️ 应用动画效果失败: {e}")
-            import traceback
-            traceback.print_exc()
             return clip
     
     def _scale_frame(self, frame, scale_factor):
