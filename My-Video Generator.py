@@ -9056,27 +9056,33 @@ Now convert this:
                     self.log(f"⚠️ clip.resize()失败: {resize_error}，使用transform方法")
                 
                 # 如果resize失败，使用transform方法（逐帧处理，较慢）
-                def scale_func(get_frame, t):
-                    frame = get_frame(t)
-                    from PIL import Image
-                    import numpy as np
-                    if isinstance(frame, np.ndarray):
-                        img = Image.fromarray(frame)
-                    else:
-                        img = frame
-                    # 缓慢放大
-                    scale = 1.0 + 0.05 * (t / clip.duration)
-                    new_w = int(img.width * scale)
-                    new_h = int(img.height * scale)
-                    resized = img.resize((new_w, new_h), Image.LANCZOS)
-                    # 居中裁剪
-                    if new_w > img.width:
-                        left = (new_w - img.width) // 2
-                        top = (new_h - img.height) // 2
-                        resized = resized.crop((left, top, left + img.width, top + img.height))
-                    return np.array(resized)
-                
-                return clip.transform(scale_func)
+                try:
+                    def scale_func(get_frame, t):
+                        frame = get_frame(t)
+                        from PIL import Image
+                        import numpy as np
+                        if isinstance(frame, np.ndarray):
+                            img = Image.fromarray(frame)
+                        else:
+                            img = frame
+                        # 缓慢放大
+                        scale = 1.0 + 0.05 * (t / clip.duration)
+                        new_w = int(img.width * scale)
+                        new_h = int(img.height * scale)
+                        resized = img.resize((new_w, new_h), Image.LANCZOS)
+                        # 居中裁剪
+                        if new_w > img.width:
+                            left = (new_w - img.width) // 2
+                            top = (new_h - img.height) // 2
+                            resized = resized.crop((left, top, left + img.width, top + img.height))
+                        return np.array(resized)
+                    
+                    result = clip.transform(scale_func)
+                    self.log(f"✅ transform方法成功")
+                    return result
+                except Exception as transform_error:
+                    self.log(f"⚠️ transform方法也失败: {transform_error}")
+                    return clip
             else:
                 return clip
                 
