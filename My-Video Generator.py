@@ -5,8 +5,8 @@ import json
 import threading
 import datetime
 import warnings
-import multiprocessing
 import sys
+import time
 
 # 添加src目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -443,15 +443,12 @@ class MultiModelFusion:
         if not models:
             return None
         
-        # 导入time模块
-        import time as _time
-        
         results = {}
         
         def call_single_model(model_name):
             """调用单个模型"""
             try:
-                start_time = _time.time()
+                start_time = time.time()
                 
                 # 根据模型特性选择配置
                 if "1b" in model_name or "tiny" in model_name:
@@ -471,7 +468,7 @@ class MultiModelFusion:
                     options=config.get_options(num_predict=1500)
                 )
                 
-                duration = _time.time() - start_time
+                duration = time.time() - start_time
                 result = response["message"]["content"].strip()
                 
                 return {
@@ -1407,35 +1404,30 @@ def lazy_import():
     global PERFORMANCE_MONITOR_AVAILABLE, psutil, GPUtil
     global OLLAMA_AVAILABLE, ollama
     global requests
-    global PIL, Image, ImageDraw, ImageFont, BytesIO
-    global time
-    global ThreadPoolExecutor
     
     try:
         # 尝试导入性能监控库
         try:
-            import psutil
-            import GPUtil
+            import psutil as _psutil
+            import GPUtil as _GPUtil
+            psutil = _psutil
+            GPUtil = _GPUtil
             PERFORMANCE_MONITOR_AVAILABLE = True
         except ImportError:
             pass
         
         # 尝试导入Ollama客户端
         try:
-            import ollama
+            import ollama as _ollama
+            ollama = _ollama
             OLLAMA_AVAILABLE = True
         except ImportError:
             pass
         
-        # 导入其他模块
-        import requests
-        from PIL import Image, ImageDraw, ImageFont
-        from io import BytesIO
-        import time
-        from concurrent.futures import ThreadPoolExecutor
+        # 导入 requests
+        import requests as _requests
+        requests = _requests
         
-        # 更新全局变量
-        globals().update(locals())
     except Exception as e:
         print(f"延迟导入模块失败: {e}")
 
@@ -1460,7 +1452,7 @@ class DocuMakerLiteV7:
         try:
             from ctypes import windll
             windll.shcore.SetProcessDpiAwareness(1)
-        except:
+        except Exception:
             pass
         
         # 配色方案
@@ -1669,7 +1661,7 @@ class DocuMakerLiteV7:
         self.task_lock = threading.Lock()
         self.resource_lock = threading.RLock()  # 用于保护共享资源的可重入锁
         self.task_executor = None
-        self.max_workers = min(multiprocessing.cpu_count() // 2, 4)
+        self.max_workers = min((os.cpu_count() or 4) // 2, 4)
         self.pause_event = threading.Event()
         self.pause_event.set()
         
@@ -1744,7 +1736,6 @@ class DocuMakerLiteV7:
         # 启动时运行系统检查（延迟执行，让UI先加载）
         def delayed_system_check():
             # 等待延迟导入完成
-            import time
             time.sleep(1)  # 等待Ollama模块加载完成
             
             self.system_check()
@@ -1758,7 +1749,6 @@ class DocuMakerLiteV7:
         
         # 预加载Whisper模型（延迟执行，让UI先加载）
         def preload_whisper():
-            import time
             time.sleep(2)  # 等待UI完全加载后再预加载
             self.preload_whisper_model()
         threading.Thread(target=preload_whisper, daemon=True).start()
@@ -1779,7 +1769,7 @@ class DocuMakerLiteV7:
                     OLLAMA_AVAILABLE = True
                     self.log("✅ Ollama服务已连接")
                     return
-            except:
+            except Exception:
                 pass
             
             # Ollama未运行，尝试自动启动
@@ -1796,7 +1786,6 @@ class DocuMakerLiteV7:
                                stdout=subprocess.DEVNULL, 
                                stderr=subprocess.DEVNULL,
                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                import time
                 time.sleep(3)
                 # 再次尝试连接
                 try:
@@ -1804,7 +1793,7 @@ class DocuMakerLiteV7:
                     if response.status_code == 200:
                         OLLAMA_AVAILABLE = True
                         self.log("✅ Ollama服务已启动并连接")
-                except:
+                except Exception:
                     self.log("⚠️ Ollama服务启动失败")
             else:
                 self.log("⚠️ 未找到Ollama安装")
@@ -1978,7 +1967,8 @@ class DocuMakerLiteV7:
             
             # 启动性能监控线程
             self.perf_monitor_running = True
-            threading.Thread(target=self.monitor_performance, daemon=True).start()
+            self.perf_monitor_thread = threading.Thread(target=self.monitor_performance, daemon=True)
+            self.perf_monitor_thread.start()
 
     def setup_advanced_panel_content(self, adv_frame):
         """创建风格设置的内容"""
@@ -2357,7 +2347,7 @@ class DocuMakerLiteV7:
             if response.status_code == 200:
                 OLLAMA_AVAILABLE = True
                 ollama_connected = True
-        except:
+        except Exception:
             # Ollama未运行，尝试自动启动
             try:
                 import subprocess
@@ -2374,7 +2364,6 @@ class DocuMakerLiteV7:
                                    stdout=subprocess.DEVNULL, 
                                    stderr=subprocess.DEVNULL,
                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                    import time
                     time.sleep(3)
                     # 再次尝试连接
                     try:
@@ -2382,9 +2371,9 @@ class DocuMakerLiteV7:
                         if response.status_code == 200:
                             OLLAMA_AVAILABLE = True
                             ollama_connected = True
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 pass
         
         # 尝试获取本地已安装的Ollama模型
@@ -6279,7 +6268,6 @@ class DocuMakerLiteV7:
 
     def optimize_prompt_with_ollama(self, prompt, sentence):
         """使用Ollama大模型优化提示词"""
-        import time
         import re
         
         user_model = self.ollama_model_var.get()
@@ -6320,7 +6308,7 @@ class DocuMakerLiteV7:
                         if model_name:
                             available.append(model_name)
                 return available
-            except:
+            except Exception:
                 return []
         
         available_models = get_available_models()
@@ -6805,7 +6793,7 @@ Now convert this:
                 module = __import__(dep.replace("Pillow", "PIL"))
                 current_version = getattr(module, "__version__", "未知版本")
                 self.log(f"   📌 当前版本: {current_version}")
-            except:
+            except Exception:
                 current_version = "未安装"
                 self.log(f"   📌 当前状态: {current_version}")
             
@@ -6967,15 +6955,19 @@ Now convert this:
                         gpu_memory_total = 0
                         gpu_memory_percent = 0
                     
-                    # 更新UI
-                    if hasattr(self, 'cpu_label'):
-                        self.cpu_label.config(text=f"{cpu_usage:.1f}%")
-                    if hasattr(self, 'memory_label'):
-                        self.memory_label.config(text=f"{memory_usage:.1f}%")
-                    if hasattr(self, 'gpu_label'):
-                        self.gpu_label.config(text=f"{gpu_memory_percent:.1f}%")
-                    if hasattr(self, 'memory_detail_label'):
-                        self.memory_detail_label.config(text=f"{memory_used} MB / {memory_total} MB")
+                    # 更新UI（捕获 tkinter 组件已销毁的异常）
+                    try:
+                        if hasattr(self, 'cpu_label') and self.cpu_label.winfo_exists():
+                            self.cpu_label.config(text=f"{cpu_usage:.1f}%")
+                        if hasattr(self, 'memory_label') and self.memory_label.winfo_exists():
+                            self.memory_label.config(text=f"{memory_usage:.1f}%")
+                        if hasattr(self, 'gpu_label') and self.gpu_label.winfo_exists():
+                            self.gpu_label.config(text=f"{gpu_memory_percent:.1f}%")
+                        if hasattr(self, 'memory_detail_label') and self.memory_detail_label.winfo_exists():
+                            self.memory_detail_label.config(text=f"{memory_used} MB / {memory_total} MB")
+                    except tk.TclError:
+                        # 组件已被销毁，退出循环
+                        break
                 time.sleep(2)
         except Exception as e:
             pass
@@ -7050,7 +7042,6 @@ Now convert this:
         """定期清理过期缓存"""
         while True:
             try:
-                import time
                 time.sleep(self.cache_config['cleanup_interval'])
                 current_time = time.time()
                 evicted = 0
@@ -7088,7 +7079,6 @@ Now convert this:
         
         # 检查是否过期
         if isinstance(item, dict) and 'timestamp' in item and 'value' in item:
-            import time
             if time.time() - item['timestamp'] > self.cache_config['expiry_time']:
                 del self.cache_system[category][key]
                 self.cache_stats['misses'] += 1
@@ -7112,7 +7102,6 @@ Now convert this:
             self._cleanup_oldest_cache()
         
         # 添加时间戳
-        import time
         self.cache_system[category][key] = {
             'value': value,
             'timestamp': time.time()
@@ -7343,6 +7332,11 @@ Now convert this:
             if hasattr(self, 'perf_monitor_running'):
                 self.perf_monitor_running = False
                 self.log("🔄 性能监控已停止")
+                # 等待监控线程退出（最多等待3秒）
+                if hasattr(self, 'perf_monitor_thread') and self.perf_monitor_thread.is_alive():
+                    self.perf_monitor_thread.join(timeout=3)
+                    if self.perf_monitor_thread.is_alive():
+                        self.log("⚠️ 性能监控线程未能在3秒内退出")
             
             # 取消待处理的resize定时器
             if hasattr(self, 'resize_timer') and self.resize_timer:
@@ -7390,7 +7384,7 @@ Now convert this:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     self.log("✅ GPU内存已释放")
-            except:
+            except Exception:
                 pass
             
             self.log("✅ 资源清理完成")
@@ -7402,7 +7396,7 @@ Now convert this:
             # 即使出错也要尝试销毁窗口
             try:
                 self.root.destroy()
-            except:
+            except Exception:
                 pass
     
     def system_check(self):
@@ -7422,7 +7416,10 @@ Now convert this:
         import numpy as np
         import hashlib
         import gc
-        import time
+        
+        # 初始化变量，防止 NameError
+        analysis_result = ""
+        theme_info = {}
         
         # 用于跟踪资源，确保清理
         resources_to_cleanup = []
@@ -7456,13 +7453,21 @@ Now convert this:
                 self.log("🧹 检查GPU资源状态...")
                 try:
                     import subprocess
-                    result = subprocess.run(['tasklist'], capture_output=True, text=True)
-                    if 'ollama.exe' in result.stdout:
-                        self.log("⚠️ 检测到Ollama进程占用GPU，正在关闭以释放资源...")
-                        subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
-                        import time
-                        time.sleep(2)
-                        self.log("✅ Ollama已关闭，GPU资源已释放")
+                    # 跨平台进程检测和终止
+                    if os.name == 'nt':  # Windows
+                        result = subprocess.run(['tasklist'], capture_output=True, text=True)
+                        if 'ollama.exe' in result.stdout:
+                            self.log("⚠️ 检测到Ollama进程占用GPU，正在关闭以释放资源...")
+                            subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
+                            time.sleep(2)
+                            self.log("✅ Ollama已关闭，GPU资源已释放")
+                    else:  # Linux/macOS
+                        result = subprocess.run(['pgrep', '-f', 'ollama'], capture_output=True, text=True)
+                        if result.stdout.strip():
+                            self.log("⚠️ 检测到Ollama进程占用GPU，正在关闭以释放资源...")
+                            subprocess.run(['pkill', '-f', 'ollama'], capture_output=True)
+                            time.sleep(2)
+                            self.log("✅ Ollama已关闭，GPU资源已释放")
                 except Exception as e:
                     pass
             
@@ -7712,7 +7717,6 @@ Now convert this:
                                                    stdout=subprocess.DEVNULL, 
                                                    stderr=subprocess.DEVNULL,
                                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                                    import time
                                     time.sleep(3)  # 等待服务启动
                                     # 再次尝试连接
                                     try:
@@ -7721,7 +7725,7 @@ Now convert this:
                                             OLLAMA_AVAILABLE = True
                                             ollama_connected = True
                                             self.log("✅ Ollama服务已启动并连接成功")
-                                    except:
+                                    except Exception:
                                         self.log("❌ 无法启动Ollama服务")
                                 else:
                                     self.log("❌ 未找到Ollama安装路径")
@@ -7808,7 +7812,6 @@ Now convert this:
                             
                             # 使用线程池执行大模型调用
                             import concurrent.futures
-                            import time
                             
                             def call_ollama_with_model(model_name):
                                 """使用指定模型调用Ollama - 轻量级主题提取"""
@@ -7931,14 +7934,16 @@ Now convert this:
                                 self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
                                 self.log(f"   候选模型列表: {', '.join(candidate_models)}")
                                 self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
-                                # 关闭Ollama释放GPU资源
+                                # 关闭Ollama释放GPU资源（跨平台）
                                 try:
                                     import subprocess
-                                    subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
-                                    import time
+                                    if os.name == 'nt':  # Windows
+                                        subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
+                                    else:  # Linux/macOS
+                                        subprocess.run(['pkill', '-f', 'ollama'], capture_output=True)
                                     time.sleep(1)
                                     self.log("🧹 Ollama已关闭，GPU资源已释放")
-                                except:
+                                except Exception:
                                     pass
                                 analysis_result = ""
                             
@@ -8419,7 +8424,6 @@ Now convert this:
                         self.log(f"🖼️ 生图分辨率: {gen_width}x{gen_height}")
                         
                         # 记录请求开始时间
-                        import time
                         request_start_time = time.time()
                         
                         # 发送完整参数，确保SD WebUI使用正确的设置
@@ -8465,7 +8469,6 @@ Now convert this:
                         self.log(f"⚠️ Stable Diffusion API调用失败 (尝试 {retry+1}/{max_retries}): {e}")
                         if retry < max_retries - 1:
                             self.log(f"⏳ 等待 {retry_delay} 秒后重试...")
-                            import time
                             time.sleep(retry_delay)
                         else:
                             self.log("❌ 系统拒绝生成图像，因为Stable Diffusion API不可用")
@@ -8498,7 +8501,6 @@ Now convert this:
                     if not result:
                         self.log(f"❌ 任务 {i+1} 失败: {image_file}")
                     # 生成一张图片后短暂休息
-                    import time
                     time.sleep(0.3)
                 generated_count = sum(results)
                 failed_count = len(results) - generated_count
@@ -8907,9 +8909,9 @@ Now convert this:
                     final_clip.write_videofile(
                         output_path,
                         fps=30,
-                        codec='libx264',
+                        codec='h264_nvenc',
                         audio_codec='aac',
-                        preset='veryfast',
+                        preset='p4',
                         logger=None
                     )
                 else:
@@ -8957,7 +8959,7 @@ Now convert this:
             try:
                 import gc
                 gc.collect()
-            except:
+            except Exception:
                 pass
     
     def import_audio(self):
