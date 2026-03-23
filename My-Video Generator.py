@@ -300,22 +300,24 @@ class LLMPerformanceOptimizer:
         self.max_history = 10
         self.avg_response_time = 0
         self.success_rate = 1.0
+        self._lock = threading.Lock()  # 线程安全锁
         
     def record_call(self, duration, success, token_count=0):
         """记录调用性能"""
-        self.call_history.append({
-            "duration": duration,
-            "success": success,
-            "token_count": token_count,
-            "timestamp": datetime.datetime.now()
-        })
-        
-        # 保持历史记录在限制范围内
-        if len(self.call_history) > self.max_history:
-            self.call_history.pop(0)
-        
-        # 更新统计
-        self._update_stats()
+        with self._lock:
+            self.call_history.append({
+                "duration": duration,
+                "success": success,
+                "token_count": token_count,
+                "timestamp": datetime.datetime.now()
+            })
+            
+            # 保持历史记录在限制范围内
+            if len(self.call_history) > self.max_history:
+                self.call_history.pop(0)
+            
+            # 更新统计
+            self._update_stats()
     
     def _update_stats(self):
         """更新性能统计"""
@@ -7279,8 +7281,14 @@ Now convert this:
     def shutdown_thread_pool(self):
         """关闭线程池"""
         if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=False)
-            self.log("✅ 线程池已关闭")
+            try:
+                # 等待当前任务完成，最多等待5秒
+                self.executor.shutdown(wait=True, cancel_futures=False)
+                self.log("✅ 线程池已关闭")
+            except TypeError:
+                # Python 3.8 及以下版本不支持 cancel_futures 参数
+                self.executor.shutdown(wait=True)
+                self.log("✅ 线程池已关闭")
 
     def pause_task(self):
         """暂停当前任务"""
@@ -8935,11 +8943,23 @@ Now convert this:
             
             # 释放资源
             self.log("🔄 释放资源...")
-            # 清理视频片段
+            # 清理视频片段（安全关闭，避免重复关闭错误）
             for clip in clips:
-                clip.close()
-            final_clip.close()
-            audio.close()
+                try:
+                    if hasattr(clip, 'close'):
+                        clip.close()
+                except Exception:
+                    pass
+            try:
+                if hasattr(final_clip, 'close'):
+                    final_clip.close()
+            except Exception:
+                pass
+            try:
+                if hasattr(audio, 'close'):
+                    audio.close()
+            except Exception:
+                pass
             
             # 清理内存
             import gc
