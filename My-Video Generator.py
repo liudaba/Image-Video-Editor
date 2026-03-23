@@ -8732,14 +8732,9 @@ Now convert this:
                     self.log("❌ 任务已被取消")
                     return
                 
-                # 获取用户设置的分辨率用于视频输出（默认与图片分辨率一致）
-                # 如果用户设置了视频分辨率则使用，否则使用图片分辨率
-                try:
-                    target_width = int(self.width_var.get()) if hasattr(self, 'width_var') and self.width_var.get() else None
-                    target_height = int(self.height_var.get()) if hasattr(self, 'height_var') and self.height_var.get() else None
-                except:
-                    target_width = None
-                    target_height = None
+                # 图片文件夹模式：使用图片原始分辨率（不使用任何用户设置）
+                target_width = None
+                target_height = None
                 
                 # 修复：使用end-start计算实际duration，确保与时间戳一致
                 actual_duration = shot['end'] - shot['start']
@@ -8768,9 +8763,9 @@ Now convert this:
                             img = self._resize_image_to_fit(orig_img, target_width, target_height)
                             clip = ImageClip(np.array(img)).with_duration(shot['duration'])
                             self.log(f"   分镜{i+1}: 图片={image_file}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
-                            # 应用动画效果
+                            # 应用动画效果（预渲染）
                             if animation_type != "无":
-                                clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
+                                clip = self.apply_animation_effect_prerender(clip)
                             clips.append(clip)
                         else:
                             self.log(f"⚠️ 图像文件不存在: {image_path}")
@@ -8794,9 +8789,9 @@ Now convert this:
                         img = self._resize_image_to_fit(orig_img, target_width, target_height)
                         clip = ImageClip(np.array(img)).with_duration(shot['duration'])
                         self.log(f"   分镜{i+1}: 图片={shot['image_file']}, duration={shot['duration']:.3f}s, 原图尺寸={orig_size}, 视频尺寸={img.size}")
-                        # 应用动画效果
+                        # 应用动画效果（预渲染）
                         if animation_type != "无":
-                            clip = self.apply_animation_effect(clip, animation_type, 1920, 1080)
+                            clip = self.apply_animation_effect_prerender(clip)
                         clips.append(clip)
                     else:
                         self.log(f"⚠️ 图像文件不存在: {image_path}")
@@ -8815,14 +8810,36 @@ Now convert this:
             self.update_task_progress("正在拼接视频片段...", 60)
             self.log("🔄 正在拼接视频片段...")
             
-            # 获取视频宽度和高度
-            width, height = 1920, 1080
-            if clips:
-                try:
-                    first_clip = clips[0]
-                    width, height = first_clip.size
-                except:
-                    pass
+            # 计算实际视频时长
+            actual_video_duration = sum(clip.duration for clip in clips)
+            self.log(f"📊 片段总时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
+            
+            # 修复：验证视频时长与音频时长是否匹配
+            self.log(f"📊 视频时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
+            
+            # 处理视频与音频时长差异 - 在拼接前调整最后一个片段
+            duration_diff = abs(actual_video_duration - audio_duration)
+            if duration_diff > 0.001:
+                self.log(f"🔄 视频时长({actual_video_duration:.3f}s)与音频时长({audio_duration:.3f}s)差异: {duration_diff:.3f}s")
+                if actual_video_duration < audio_duration:
+                    # 视频比音频短：延长最后一个片段
+                    self.log("   视频比音频短，将延长最后一帧以匹配音频")
+                    extra_duration = audio_duration - actual_video_duration
+                    last_clip = clips[-1]
+                    # 创建延长后的最后一个片段
+                    extended_last_clip = last_clip.with_duration(last_clip.duration + extra_duration)
+                    clips[-1] = extended_last_clip
+                    actual_video_duration = audio_duration
+                else:
+                    # 视频比音频长：截断最后一个片段
+                    self.log("   视频比音频长，将截断视频以匹配音频")
+                    excess_duration = actual_video_duration - audio_duration
+                    last_clip = clips[-1]
+                    new_last_duration = last_clip.duration - excess_duration
+                    if new_last_duration > 0:
+                        truncated_last_clip = last_clip.with_duration(new_last_duration)
+                        clips[-1] = truncated_last_clip
+                    actual_video_duration = audio_duration
             
             # 直接拼接所有片段（硬切）
             if len(clips) > 1:
@@ -8832,65 +8849,22 @@ Now convert this:
             
             self.log(f"✅ 视频片段拼接完成，共 {len(clips)} 个片段")
             
-            # 计算实际视频时长
-            actual_video_duration = sum(clip.duration for clip in clips)
-            self.log(f"📊 片段总时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
-            
-            # 修复：验证视频时长与音频时长是否匹配
-            self.log(f"📊 视频时长: {actual_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
+            # 验证最终时长
+            final_video_duration = final_clip.duration
+            self.log(f"🔍 最终验证 - 视频时长: {final_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s, 差异: {abs(final_video_duration - audio_duration):.6f}s")
             
             # 添加音频
             self.update_task_progress("正在添加音频...", 70)
-            # 修复：确保视频时长与音频时长精确匹配，实现音画同步
-            # 获取拼接后的实际视频时长
-            final_video_duration = final_clip.duration
-            self.log(f"📊 拼接后视频时长: {final_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s")
-            
-            duration_diff = abs(final_video_duration - audio_duration)
-            if duration_diff > 0.001:  # 更严格的阈值 1ms
-                self.log(f"🔄 视频时长({final_video_duration:.3f}s)与音频时长({audio_duration:.3f}s)差异: {duration_diff:.3f}s")
-                if final_video_duration > audio_duration:
-                    self.log("   视频比音频长，将截断视频以匹配音频")
-                else:
-                    self.log("   视频比音频短，将延长最后一帧以匹配音频")
-                # 使用音频时长作为最终时长，确保音画同步
-                final_clip = final_clip.with_duration(audio_duration)
-                final_video_duration = audio_duration
-            else:
-                self.log(f"✅ 视频时长与音频时长已精确匹配: {audio_duration:.3f}s")
-            
-            # 再次验证最终时长
-            self.log(f"🔍 最终验证 - 视频时长: {final_video_duration:.3f}s, 音频时长: {audio_duration:.3f}s, 差异: {abs(final_video_duration - audio_duration):.6f}s")
-            
             final_clip = final_clip.with_audio(audio)
             
             # 设置视频分辨率
             self.update_task_progress("正在设置视频分辨率...", 80)
             if use_original_resolution and clips:
-                # 使用第一个图片的原始分辨率
-                from PIL import Image
-                if hasattr(self, 'image_map') and self.image_map:
-                    # 直接渲染模式，使用图片映射
-                    first_image_file = self.image_map[1]  # 第一个图片（序号1）
-                    first_image_path = os.path.join(self.images_dir, first_image_file)
-                else:
-                    # 正常模式，使用分镜数据中的文件名
-                    first_image_path = os.path.join(self.images_dir, self.shots_data[0]['image_file'])
-                
-                if os.path.exists(first_image_path):
-                    img = Image.open(first_image_path)
-                    width, height = img.size
-                    self.log(f"📐 使用原始图片分辨率: {width}x{height}")
-                else:
-                    # 如果第一个图片不存在，使用默认分辨率
-                    width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
-                    height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+                pass
             else:
-                # 使用用户设置的分辨率
                 width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
                 height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
-                # moviepy 2.x 使用 scale 方法
-                final_clip = final_clip.scale(width=width, height=height)
+                self.log(f"📐 使用设置分辨率: {width}x{height}")
             
             # 输出路径
             output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
@@ -8932,12 +8906,10 @@ Now convert this:
                     final_clip.write_videofile(
                         output_path,
                         fps=30,
-                        codec='h264_nvenc',
-                        bitrate='5000k',
+                        codec='libx264',
                         audio_codec='aac',
-                        preset='fast',
-                        threads=self.max_workers,
-                        logger=None  # 减少moviepy输出
+                        preset='veryfast',
+                        logger=None
                     )
                 else:
                     self.log("⚡ 正在使用CPU渲染视频...")
@@ -8945,11 +8917,9 @@ Now convert this:
                         output_path,
                         fps=30,
                         codec='libx264',
-                        bitrate='5000k',
                         audio_codec='aac',
-                        preset='fast',
-                        threads=self.max_workers,
-                        logger=None  # 减少moviepy输出
+                        preset='veryfast',
+                        logger=None
                     )
             except Exception as e:
                 self.log(f"⚠️ 视频渲染失败: {e}")
@@ -9041,78 +9011,77 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果 - MoviePy 2.x兼容"""
+        """应用单张画面的动画效果"""
         try:
             if animation_type == "缩放":
                 self.log(f"🎬 应用缩放动画效果")
                 
-                # MoviePy 1.0.3 直接使用 clip.resize()
-                try:
-                    def get_scale(t):
-                        return 1.0 + 0.05 * (t / clip.duration)
-                    
-                    resized_clip = clip.resize(get_scale)
-                    self.log(f"✅ 使用clip.resize()方法")
-                    return resized_clip
-                except Exception as e:
-                    self.log(f"⚠️ clip.resize()失败: {e}")
+                # 使用transform方法
+                def scale_func(get_frame, t):
+                    frame = get_frame(t)
+                    from PIL import Image
+                    import numpy as np
+                    if isinstance(frame, np.ndarray):
+                        img = Image.fromarray(frame)
+                    else:
+                        img = frame
+                    scale = 1.0 + 0.05 * (t / clip.duration)
+                    new_w = int(img.width * scale)
+                    new_h = int(img.height * scale)
+                    resized = img.resize((new_w, new_h), Image.LANCZOS)
+                    if new_w > img.width:
+                        left = (new_w - img.width) // 2
+                        top = (new_h - img.height) // 2
+                        resized = resized.crop((left, top, left + img.width, top + img.height))
+                    return np.array(resized)
                 
-                # MoviePy 2.x 使用 vfx 模块
-                try:
-                    from moviepy.video import vfx
-                    
-                    def get_scale(t):
-                        return 1.0 + 0.05 * (t / clip.duration)
-                    
-                    resized_clip = clip.fx(vfx.resize, get_scale)
-                    self.log(f"✅ 使用vfx.resize方法")
-                    return resized_clip
-                except Exception as e:
-                    self.log(f"⚠️ vfx.resize失败: {e}")
-                
-                # 尝试使用clip.fx方法
-                try:
-                    def get_scale(t):
-                        return 1.0 + 0.05 * (t / clip.duration)
-                    
-                    result = clip.fx(lambda c: c.resize(get_scale))
-                    self.log(f"✅ 使用fx方法成功")
-                    return result
-                except Exception as fx_error:
-                    self.log(f"⚠️ fx方法失败: {fx_error}")
-                
-                # 最后尝试transform方法
-                try:
-                    def scale_func(get_frame, t):
-                        frame = get_frame(t)
-                        from PIL import Image
-                        import numpy as np
-                        if isinstance(frame, np.ndarray):
-                            img = Image.fromarray(frame)
-                        else:
-                            img = frame
-                        scale = 1.0 + 0.05 * (t / clip.duration)
-                        new_w = int(img.width * scale)
-                        new_h = int(img.height * scale)
-                        resized = img.resize((new_w, new_h), Image.LANCZOS)
-                        if new_w > img.width:
-                            left = (new_w - img.width) // 2
-                            top = (new_h - img.height) // 2
-                            resized = resized.crop((left, top, left + img.width, top + img.height))
-                        return np.array(resized)
-                    
-                    result = clip.transform(scale_func)
-                    self.log(f"✅ transform方法成功")
-                    self.log(f"⏱️ 缩放动画处理耗时约 {clip.duration * 30 * 0.01:.1f} 秒（逐帧处理）")
-                    return result
-                except Exception as transform_error:
-                    self.log(f"⚠️ transform方法也失败: {transform_error}")
-                    return clip
+                result = clip.transform(scale_func)
+                self.log(f"✅ 缩放动画应用成功")
+                return result
             else:
                 return clip
                 
         except Exception as e:
             self.log(f"⚠️ 应用动画效果失败: {e}")
+            return clip
+    
+    def apply_animation_effect_prerender(self, clip):
+        """预渲染缩放动画效果 - 在生成时直接渲染帧序列"""
+        try:
+            import numpy as np
+            from PIL import Image
+            from moviepy import ImageSequenceClip
+            
+            frames = []
+            fps = 30
+            num_frames = int(clip.duration * fps)
+            w, h = clip.size
+            
+            for frame_idx in range(num_frames):
+                t = frame_idx / fps
+                frame = clip.get_frame(t)
+                
+                if isinstance(frame, np.ndarray):
+                    img = Image.fromarray(frame)
+                else:
+                    img = frame
+                
+                scale = 1.0 + 0.05 * (t / clip.duration)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                resized = img.resize((new_w, new_h), Image.LANCZOS)
+                
+                if new_w > w:
+                    left = (new_w - w) // 2
+                    top = (new_h - h) // 2
+                    resized = resized.crop((left, top, left + w, top + h))
+                
+                frames.append(np.array(resized))
+            
+            animated_clip = ImageSequenceClip(frames, fps=fps)
+            return animated_clip
+        except Exception as e:
+            self.log(f"⚠️ 预渲染动画效果失败: {e}")
             return clip
     
     def _scale_frame(self, frame, scale_factor):
@@ -9283,8 +9252,6 @@ Now convert this:
                 finally:
                     # 任务完成后重置状态
                     self.task_running = False
-                    # 检查是否可以执行直接生成视频
-                    self.check_and_prompt_direct_render()
             
             # 使用更高优先级的线程
             thread = threading.Thread(target=render_video_worker, daemon=True)
