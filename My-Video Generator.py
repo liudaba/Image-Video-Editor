@@ -196,7 +196,6 @@ Image = None
 ImageDraw = None
 ImageFont = None
 BytesIO = None
-time = None
 ThreadPoolExecutor = None
 
 # 全局实例
