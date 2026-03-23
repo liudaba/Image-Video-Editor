@@ -8212,30 +8212,6 @@ Now convert this:
                     self.log("🧹 Whisper模型已卸载，内存已释放")
                 except Exception as e:
                     self.log(f"⚠️ 卸载Whisper模型失败: {e}")
-            
-        except Exception as e:
-            self.log(f"❌ 分镜生成失败: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            # 修复：完善资源清理机制
-            try:
-                # 如果模型是在本次调用中加载的，释放模型内存
-                if whisper_model_loaded and self.whisper_model is not None:
-                    self.log("🔄 释放Whisper模型内存...")
-                    import torch
-                    del self.whisper_model
-                    self.whisper_model = None
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    self.log("✅ Whisper模型内存已释放")
-                
-                # 强制垃圾回收
-                import gc
-                gc.collect()
-                self.log("✅ 内存清理完成")
-            except Exception as cleanup_error:
-                self.log(f"⚠️ 资源清理时出错: {cleanup_error}")
     
     def generate_images(self):
         """生成图像"""
