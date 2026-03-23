@@ -7421,7 +7421,8 @@ Now convert this:
         import whisper
         import numpy as np
         import hashlib
-        import gc  # 垃圾回收
+        import gc
+        import time
         
         # 用于跟踪资源，确保清理
         resources_to_cleanup = []
