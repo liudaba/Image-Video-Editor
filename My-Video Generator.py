@@ -2644,16 +2644,69 @@ class DocuMakerLiteV7:
             self.style_dropdown_visible = True
     
     def update_task_progress(self, message, progress=None):
-        """更新任务进度"""
-        if hasattr(self, 'lbl_progress'):
-            self.lbl_progress.config(text=message)
-        if hasattr(self, 'progress_var') and progress is not None:
-            self.progress_var.set(progress)
+        """更新任务进度 - 确保线程安全"""
+        def _update():
+            try:
+                if hasattr(self, 'lbl_progress'):
+                    self.lbl_progress.config(text=message)
+                if hasattr(self, 'progress_var') and progress is not None:
+                    self.progress_var.set(progress)
+            except Exception:
+                pass
+        
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, _update)
+        else:
+            _update()
     
     def update_task_status(self, status):
         """更新任务状态"""
         if hasattr(self, 'task_status_var'):
             self.task_status_var.set(status)
+    
+    def _get_ollama_options_for_model(self, model_name):
+        """根据模型大小获取合适的Ollama参数"""
+        model_lower = model_name.lower()
+        
+        # 有问题的模型黑名单（API调用返回空结果）
+        if 'qwen3:4b' in model_lower:
+            self.log(f"   ⚠️ 模型 {model_name} 存在已知问题，将使用备用参数")
+            # 返回最小参数尝试
+            return {
+                "temperature": 0.1,
+                "top_p": 0.5,
+                "num_predict": 256,
+                "num_ctx": 1024
+            }
+        
+        # 小模型列表（不支持大上下文）
+        small_models = ['4b', '3b', '2b', '1b']
+        
+        # 检测是否为小模型
+        is_small_model = any(size in model_lower for size in small_models)
+        
+        if is_small_model:
+            # 小模型使用较小上下文
+            return {
+                "temperature": 0.3,
+                "top_p": 0.9,
+                "num_predict": 512,
+                "num_ctx": 2048
+            }
+        else:
+            # 大模型使用完整配置
+            if hasattr(self, 'current_llm_config'):
+                return self.current_llm_config.get_options(
+                    num_predict=1024,
+                    num_ctx=4096
+                )
+            else:
+                return {
+                    "temperature": 0.3,
+                    "top_p": 0.9,
+                    "num_predict": 1024,
+                    "num_ctx": 4096
+                }
     
     def get_selected_styles(self):
         """获取用户选择的风格预设"""
@@ -3772,7 +3825,7 @@ class DocuMakerLiteV7:
             "start": float(start_dec),
             "end": float(end_dec),
             "duration": float(duration_dec),
-            "description": sentence,
+            "description": cleaned_sentence,
             "prompt_en": optimized_prompt,
             "image_file": f"shot_{shot_id+1:02d}.png",
             "content_type": content_type,
@@ -7385,9 +7438,15 @@ Now convert this:
             self.log("🎬 开始一键生成分镜")
             self.log("=" * 50)
             
-            # 每次运行都清除缓存，确保使用最新逻辑
-            self.cache_clear()
-            self.log("🗑️ 已清除历史缓存")
+            # 只在用户强制要求时清除缓存，否则复用缓存加快速度
+            force_clear = getattr(self, '_force_clear_cache', False)
+            if force_clear:
+                self.cache_clear()
+                self.log("🗑️ 已强制清除历史缓存")
+                self._force_clear_cache = False
+            else:
+                cache_stats = self.get_cache_stats()
+                self.log(f"📦 缓存状态: {cache_stats['hits']}命中, {cache_stats['misses']}未命中")
             
             # 检查是否需要关闭Ollama以释放GPU资源给Whisper使用
             optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
@@ -7780,16 +7839,16 @@ Now convert this:
                                         template = PromptTemplates.get_template("theme_extraction", text=full_text)
                                         system_content = template["system"]
                                     
+                                    # 根据模型大小调整参数（qwen3:4b等小模型不支持大上下文）
+                                    model_options = self._get_ollama_options_for_model(model_name)
+                                    
                                     response = ollama.chat(
                                         model=model_name,
                                         messages=[
                                             {"role": "system", "content": system_content},
                                             {"role": "user", "content": f"语音转录文本：\n{full_text}"}
                                         ],
-                                        options=self.current_llm_config.get_options(
-                                            num_predict=1024,
-                                            num_ctx=4096
-                                        ) if hasattr(self, 'current_llm_config') else {"temperature": 0.3, "top_p": 0.9, "num_predict": 1024, "num_ctx": 4096}
+                                        options=model_options
                                     )
                                     
                                     # 添加详细调试日志
@@ -8114,11 +8173,13 @@ Now convert this:
                         self.txt_script.delete(1.0, tk.END)
                         self.txt_script.insert(tk.END, "# 分镜脚本\n\n")
                         for i, shot in enumerate(shots):
+                            corrected_description = shot.get('description', '')
+                            if corrected_description and hasattr(self, 'clean_text'):
+                                corrected_description = self.clean_text(corrected_description)
                             self.txt_script.insert(tk.END, f"## 分镜 {i+1}\n")
                             self.txt_script.insert(tk.END, f"时间: {shot['start']:.2f}s - {shot['end']:.2f}s (时长: {shot['duration']:.2f}s)\n")
-                            self.txt_script.insert(tk.END, f"内容: {shot['description']}\n")
+                            self.txt_script.insert(tk.END, f"内容: {corrected_description}\n")
                             self.txt_script.insert(tk.END, f"提示词: {shot['prompt_en'][:100]}...\n\n")
-                        # 显示弹窗提示
                         messagebox.showinfo("成功", f"分镜脚本生成完成，共生成 {len(shots)} 个分镜")
                     except Exception as e:
                         self.log(f"❌ 更新脚本区域失败: {e}")
@@ -8132,6 +8193,25 @@ Now convert this:
             
             # 更新进度为完成
             self.update_task_progress("分镜生成完成", 100)
+        
+        except Exception as e:
+            self.log(f"❌ 生成分镜失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.update_task_progress("生成失败", 0)
+            return []
+        finally:
+            # 释放Whisper模型内存
+            if whisper_model_loaded and hasattr(self, 'whisper_model') and self.whisper_model:
+                try:
+                    del self.whisper_model
+                    self.whisper_model = None
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    self.log("🧹 Whisper模型已卸载，内存已释放")
+                except Exception as e:
+                    self.log(f"⚠️ 卸载Whisper模型失败: {e}")
             
         except Exception as e:
             self.log(f"❌ 分镜生成失败: {e}")
@@ -8173,6 +8253,9 @@ Now convert this:
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
                             self.shots_data = json.load(f)
+                        for shot in self.shots_data:
+                            if 'description' in shot and shot['description']:
+                                shot['description'] = self.clean_text(shot['description'])
                         self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self.log(f"❌ 加载分镜数据失败: {e}")
@@ -8526,6 +8609,9 @@ Now convert this:
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
                             self.shots_data = json.load(f)
+                        for shot in self.shots_data:
+                            if 'description' in shot and shot['description']:
+                                shot['description'] = self.clean_text(shot['description'])
                         self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self.log(f"❌ 加载分镜数据失败: {e}")
@@ -9191,6 +9277,9 @@ Now convert this:
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
                             self.shots_data = json.load(f)
+                        for shot in self.shots_data:
+                            if 'description' in shot and shot['description']:
+                                shot['description'] = self.clean_text(shot['description'])
                         self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self.log(f"❌ 加载分镜数据失败: {e}")
@@ -9315,6 +9404,9 @@ Now convert this:
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
                             self.shots_data = json.load(f)
+                        for shot in self.shots_data:
+                            if 'description' in shot and shot['description']:
+                                shot['description'] = self.clean_text(shot['description'])
                         self.log(f"📂 从文件加载了分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self.log(f"⚠️ 加载分镜数据失败: {e}")
