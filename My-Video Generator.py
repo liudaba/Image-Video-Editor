@@ -9010,41 +9010,6 @@ Now convert this:
             import traceback
             traceback.print_exc()
     
-    def apply_animation_effect(self, clip, animation_type, width, height):
-        """应用单张画面的动画效果"""
-        try:
-            if animation_type == "缩放":
-                self.log(f"🎬 应用缩放动画效果")
-                
-                # 使用transform方法
-                def scale_func(get_frame, t):
-                    frame = get_frame(t)
-                    from PIL import Image
-                    import numpy as np
-                    if isinstance(frame, np.ndarray):
-                        img = Image.fromarray(frame)
-                    else:
-                        img = frame
-                    scale = 1.0 + 0.05 * (t / clip.duration)
-                    new_w = int(img.width * scale)
-                    new_h = int(img.height * scale)
-                    resized = img.resize((new_w, new_h), Image.LANCZOS)
-                    if new_w > img.width:
-                        left = (new_w - img.width) // 2
-                        top = (new_h - img.height) // 2
-                        resized = resized.crop((left, top, left + img.width, top + img.height))
-                    return np.array(resized)
-                
-                result = clip.transform(scale_func)
-                self.log(f"✅ 缩放动画应用成功")
-                return result
-            else:
-                return clip
-                
-        except Exception as e:
-            self.log(f"⚠️ 应用动画效果失败: {e}")
-            return clip
-    
     def apply_animation_effect_prerender(self, clip):
         """预渲染缩放动画效果 - 在生成时直接渲染帧序列"""
         try:
@@ -9083,43 +9048,6 @@ Now convert this:
         except Exception as e:
             self.log(f"⚠️ 预渲染动画效果失败: {e}")
             return clip
-    
-    def _scale_frame(self, frame, scale_factor):
-        """缩放单个帧 - 修复居中计算错误"""
-        try:
-            from PIL import Image
-            import numpy as np
-            
-            # 将 numpy array 转回 PIL Image
-            if isinstance(frame, np.ndarray):
-                img = Image.fromarray(frame)
-            else:
-                img = frame
-            
-            # 获取原始尺寸
-            w, h = img.size
-            
-            # 计算新尺寸
-            new_w = int(w * scale_factor)
-            new_h = int(h * scale_factor)
-            
-            # 缩放图片
-            resized = img.resize((new_w, new_h), Image.LANCZOS)
-            
-            # 如果放大，创建与原始尺寸相同的画布并居中粘贴缩放后的图片
-            if scale_factor > 1:
-                # 创建与原始尺寸相同的画布（保持输出尺寸一致）
-                new_img = Image.new('RGB', (w, h), (0, 0, 0))
-                # 计算居中粘贴位置（缩放后的图片比画布大，取中间部分）
-                paste_x = (w - new_w) // 2
-                paste_y = (h - new_h) // 2
-                new_img.paste(resized, (paste_x, paste_y))
-                return np.array(new_img)
-            else:
-                return np.array(resized)
-        except Exception as e:
-            self.log(f"⚠️ 缩放帧失败: {e}")
-            return frame
 
     def _resize_image_to_fit(self, img, target_width, target_height):
         """将图片缩放到目标尺寸，保持比例，不足部分填充黑边"""
@@ -9261,68 +9189,6 @@ Now convert this:
             self.log(f"❌ 渲染视频线程启动失败: {e}")
             import traceback
             traceback.print_exc()
-    
-    def check_and_prompt_direct_render(self):
-        """检查是否满足直接生成视频的条件，并自动执行（跳过中间弹窗）"""
-        try:
-            # 延迟一点执行，确保视频生成完全完成
-            import time
-            time.sleep(1)
-            
-            # 检查条件1: 音频已导入
-            has_audio = self.audio_path and os.path.exists(self.audio_path)
-            
-            # 检查条件2: 有分镜脚本数据
-            has_shots = hasattr(self, 'shots_data') and self.shots_data and len(self.shots_data) > 0
-            
-            # 检查条件3: 文件夹内有图片
-            has_images = False
-            image_count = 0
-            if os.path.exists(self.images_dir):
-                image_files = [f for f in os.listdir(self.images_dir) if f.endswith('.png') or f.endswith('.jpg')]
-                image_count = len(image_files)
-                has_images = image_count > 0
-            
-            # 检查条件4: 图片数量与分镜数量匹配
-            shots_count = len(self.shots_data) if has_shots else 0
-            images_match = has_images and image_count == shots_count
-            
-            # 记录检查结果
-            self.log("\n" + "="*50)
-            self.log("📋 检查直接生成视频条件:")
-            self.log(f"   ✓ 音频已导入: {has_audio}")
-            self.log(f"   ✓ 分镜脚本数据: {has_shots} ({shots_count}个分镜)")
-            self.log(f"   ✓ 图片文件: {has_images} ({image_count}张图片)")
-            self.log(f"   ✓ 数量匹配: {images_match}")
-            self.log("="*50 + "\n")
-            
-            # 如果所有条件都满足，直接执行生成视频（跳过中间弹窗）
-            if has_audio and has_shots and has_images and images_match:
-                self.log("✅ 所有条件满足，自动执行直接生成视频...")
-                
-                # 直接执行生成视频
-                def run_direct_render():
-                    try:
-                        self.direct_render_video()
-                    except Exception as e:
-                        self.log(f"⚠️ 自动执行直接生成视频失败: {e}")
-                
-                # 在主线程中执行
-                if hasattr(self, 'root') and self.root:
-                    self.root.after(100, run_direct_render)
-            else:
-                # 有条件不满足，记录日志
-                if not has_audio:
-                    self.log("⚠️ 缺少音频文件，无法执行直接生成视频")
-                if not has_shots:
-                    self.log("⚠️ 缺少分镜脚本数据，无法执行直接生成视频")
-                if not has_images:
-                    self.log("⚠️ 缺少图片文件，无法执行直接生成视频")
-                if has_shots and has_images and not images_match:
-                    self.log(f"⚠️ 图片数量({image_count})与分镜数量({shots_count})不匹配，无法执行直接生成视频")
-                    
-        except Exception as e:
-            self.log(f"⚠️ 检查直接生成视频条件时出错: {e}")
     
     def direct_render_video(self):
         """直接渲染视频"""
