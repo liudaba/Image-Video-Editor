@@ -912,19 +912,27 @@ class PromptTemplates:
 
     # 轻量级主题提取模板 - 仅提取核心主题和视觉基调，不生成分镜
     THEME_EXTRACTION = {
-        "system": """你是专业的视频内容分析专家。请从以下语音转录文本中提取关键词，用于后续分镜生成。
+        "system": """你是专业的视频内容分析专家。请通篇理解整篇语音转录文本，完成以下任务：
 
-【重要】你必须直接返回关键词，不需要任何解释或描述。
+【核心任务】
+1. 通篇阅读理解整篇内容，不要遗漏任何信息
+2. 准确把握文章的核心主题思想
+3. 确定整体的视觉基调与氛围（纪实、新闻报道、电影级、科幻等）
 
-请用以下严格格式输出（只输出这些内容，不要有任何其他文字）：
-【核心主题】：关键词1, 关键词2, 关键词3（最多5个关键词，用逗号分隔）
-【视觉基调】：关键词1, 关键词2（最多3个关键词）
-【主题元素】：关键词1, 关键词2, 关键词3, 关键词4, 关键词5（最多5个关键词）
+【输出格式】
 
-示例：
-【核心主题】：战争, 军事, 伊朗, 美国, 冲突
-【视觉基调】：紧张, 纪实, 电影级
-【主题元素】：战场, 军队, 导弹, 硝烟, 废墟""",
+请严格按照以下格式输出（只输出这些内容，不要有任何其他文字）：
+
+【核心主题】：{一句话概括文章的中心思想}
+
+【视觉基调】：{描述适合本文章的视觉风格}
+
+【主题元素】：{3-5个与核心主题最相关的视觉关键词}
+
+示例输出格式：
+【核心主题】：国际局势与民生经济分析，关注中东冲突和国内油价调控
+【视觉基调】：纪实、新闻报道
+【主题元素】：地图、新闻发布会、数据图表、油价""",
         "user_template": "语音转录文本：\n{text}"
     }
     
@@ -1621,9 +1629,9 @@ class DocuMakerLiteV7:
         self.api_var = tk.StringVar(value="Stable Diffusion API")
         self.sd_api_url_var = tk.StringVar(value="http://localhost:7860")
         
-        # 大模型设置 - 初始值为脚本自带，由load_config加载
-        self.optimization_method_var = tk.StringVar(value="脚本自带")
-        self.ollama_model_var = tk.StringVar(value="脚本自带")
+        # 大模型设置 - 初始值为本地大模型
+        self.optimization_method_var = tk.StringVar(value="本地大模型")
+        self.ollama_model_var = tk.StringVar(value="")
         self.model_dropdown_visible = False
         
         # 大模型高级配置 - 初始值为质量优先，由load_config加载
@@ -2196,7 +2204,7 @@ class DocuMakerLiteV7:
         opt_combo = ttk.Combobox(
             opt_frame,
             textvariable=self.optimization_method_var,
-            values=["脚本自带", "本地大模型", "脚本优化"],
+            values=["本地大模型"],
             state="readonly",
             style="Config.TCombobox",
             height=10
@@ -2336,8 +2344,8 @@ class DocuMakerLiteV7:
         for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
         
-        # 添加"脚本自带"选项
-        script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="脚本自带", command=lambda m="脚本自带": self.select_ollama_model(m), style="Medium.TButton")
+        # 添加"本地大模型"选项
+        script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="本地大模型", command=lambda m="本地大模型": self.select_ollama_model(m), style="Medium.TButton")
         script_model_btn.pack(fill=tk.X, pady=1, padx=5)
         
         # 【修改】自动检测并启动Ollama服务
@@ -2709,32 +2717,12 @@ class DocuMakerLiteV7:
     
     def generate_style_description(self, style):
         """使用Ollama模型生成详细的风格描述"""
-        # 检查优化方式
-        optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
-        
-        # 如果优化方式是"脚本自带"或"脚本优化"，使用默认风格描述
-        if optimization_method in ["脚本自带", "脚本优化"]:
-            default_styles = {
-                "电影感": "电影级别的视觉效果，高对比度，逼真的色彩，专业的灯光设置，清晰的画面细节",
-                "纪录片风": "真实自然的拍摄风格，手持摄像效果，自然光线，真实的色彩还原，细节丰富",
-                "赛博朋克": "霓虹灯效果，高楼大厦，未来感，科技感，暗色背景，鲜艳的色彩对比",
-                "写实摄影": "真实的光影效果，自然的色彩，清晰的细节，专业的构图，逼真的质感",
-                "皮克斯": "卡通风格，明亮的色彩，圆润的线条，温馨的氛围，细节丰富",
-                "达芬奇": "文艺复兴风格，古典绘画效果，柔和的光线，丰富的细节，优雅的构图",
-                "油画": "油画质感，丰富的色彩层次，细腻的笔触，古典的氛围，艺术感强烈",
-                "多巴胺": "鲜艳的色彩，高饱和度，充满活力，对比强烈，视觉冲击力强",
-                "黑白线条": "黑白对比，清晰的线条，简约的构图，艺术感强烈，表现力丰富",
-                "吉卜力": "日本动画风格，温馨的氛围，细腻的画面，丰富的色彩，充满想象力",
-                "梵高": "后印象派风格，强烈的色彩，独特的笔触，情感丰富，艺术感强烈",
-                "日式动漫": "日本动漫风格，明亮的色彩，细腻的线条，生动的表情，充满活力",
-                "水彩": "水彩画质感，透明的色彩，柔和的过渡，自然的笔触，清新的氛围"
-            }
-            return default_styles.get(style, "")
-        
         # 检查Ollama模型设置
         model = self.ollama_model_var.get()
-        if model == "脚本自带":
-            # 对于"脚本自带"选项，使用默认风格描述
+        
+        # 检查Ollama是否可用
+        if not OLLAMA_AVAILABLE:
+            # 返回默认风格
             default_styles = {
                 "电影感": "电影级别的视觉效果，高对比度，逼真的色彩，专业的灯光设置，清晰的画面细节",
                 "纪录片风": "真实自然的拍摄风格，手持摄像效果，自然光线，真实的色彩还原，细节丰富",
@@ -2751,10 +2739,6 @@ class DocuMakerLiteV7:
                 "水彩": "水彩画质感，透明的色彩，柔和的过渡，自然的笔触，清新的氛围"
             }
             return default_styles.get(style, "")
-        
-        # 对于其他模型，检查Ollama是否可用
-        if not OLLAMA_AVAILABLE:
-            return None
         
         # 检查缓存
         cache_key = f"style_{style}_{model}"
@@ -2803,7 +2787,7 @@ class DocuMakerLiteV7:
         width = self.width_var.get() if hasattr(self, 'width_var') else "1920"
         height = self.height_var.get() if hasattr(self, 'height_var') else "1080"
         prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
-        optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+        optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
         
         # 收集风格设置
         selected_styles = []
@@ -2893,504 +2877,16 @@ class DocuMakerLiteV7:
         self.log("✅ SD API 连接已关闭")
     
     def clean_text(self, text):
-        """清洗和修正文本"""
-        # 繁简转换映射 - 更完整的映射
-        traditional_to_simplified = {
-            # 常用繁体转简体
-            "一個": "一个",
-            "德黑蘭": "德黑兰",
-            "防空警報": "防空警报",
-            "已經": "已经",
-            "消失": "消失",
-            "整整": "整整",
-            "一周": "一周",
-            "聽起來": "听起来",
-            "透著": "透着",
-            "一種": "一种",
-            "沙啞": "沙哑",
-            "尸体": "尸体",
-            "站在": "站在",
-            "這個": "这个",
-            "節點": "节点",
-            "往回看": "往回看",
-            "距離": "距离",
-            "美國": "美国",
-            "對": "对",
-            "對著": "对着",
-            "伊朗": "伊朗",
-            "發動": "发动",
-            "那場": "那场",
-            "外科手術式": "外科手术式",
-            "打擊": "打击",
-            "過去": "过去",
-            "七天": "七天",
-            "禮拜": "星期",
-            "世界": "世界",
-            "像是": "像是",
-            "被": "被",
-            "應聲聲": "应声",
-            "拽進": "拖入",
-            "了": "了",
-            "充滿": "充满",
-            "不確定性": "不确定性",
-            "的": "的",
-            "新紀元": "新纪元",
-            "這": "这",
-            "這一周": "这一周",
-            "這幾天": "这几天",
-            "這也": "这也",
-            "這裡": "这里",
-            "可不": "可不",
-            "只是": "只是",
-            "簡單": "简单",
-            "局部": "局部",
-            "衝突": "冲突",
-            "升級": "升级",
-            "更": "更",
-            "一場": "一场",
-            "震動": "震动",
-            "全球": "全球",
-            "地緣政治": "地缘政治",
-            "根基": "根基",
-            "深層": "深层",
-            "地震": "地震",
-            "現代戰爭": "现代战争",
-            "那種": "那种",
-            "冷酷": "冷酷",
-            "精準": "精准",
-            "被展現的淋漓盡致": "展现得淋漓尽致",
-            "美軍": "美军",
-            "盟友": "盟友",
-            "動用了": "动用了",
-            "高超音速武器": "高超音速武器",
-            "密集": "密集",
-            "無人機群": "无人机群",
-            "境內": "境内",
-            "指揮中書": "指挥中心",
-            "雷達陣地": "雷达阵地",
-            "那些": "那些",
-            "被盯著很久的": "被盯了很久的",
-            "和研發設施": "核研发设施",
-            "一輪又一輪的": "一轮又一轮的",
-            "一輪": "一轮",
-            "定點清除": "定点清除",
-            "看著": "看着",
-            "畫面裡": "画面里",
-            "導彈": "导弹",
-            "瞬間穿透": "瞬间穿透",
-            "加固延體": "加固建筑",
-            "不得不": "不得不",
-            "感嘆": "感叹",
-            "技術代差": "技术代差",
-            "帶來的": "带来的",
-            "壓迫感": "压迫感",
-            "可預想中": "可预想中",
-            "瞬間瓦解": "瞬间瓦解",
-            "並沒有發生": "并没有发生",
-            "權力核心": "权力核心",
-            "迅速轉入地下": "迅速转入地下",
-            "即便": "即便",
-            "斷網斷電": "断网断电",
-            "廢墟上": "废墟上",
-            "強硬的聲音": "强硬的声音",
-            "依然": "依然",
-            "通過": "通过",
-            "衛星信號": "卫星信号",
-            "清晰的傳遍了": "清晰地传遍了",
-            "波斯灣": "波斯湾",
-            "每一個角落": "每一个角落",
-            "其實": "其实",
-            "證明了": "证明了",
-            "一個挺殘酷的真理": "一个挺残酷的真理",
-            "挺殘酷": "挺残酷",
-            "炸毀": "炸毁",
-            "一座橋": "一座桥",
-            "只需要": "只需要",
-            "幾秒鐘": "几秒钟",
-            "幾天": "几天",
-            "但要": "但要",
-            "摧毀": "摧毁",
-            "一個政權的意志": "一个政权的意志",
-            "政權": "政权",
-            "恐怕得": "恐怕得",
-            "經歷": "经历",
-            "一場通向深淵的漫長對峙": "一场通向深渊的漫长对峙",
-            "漫長": "漫长",
-            "戰火": "战火",
-            "在前方燒著": "在前方燃烧",
-            "全球經濟": "全球经济",
-            "也跟著帶來了": "也随之引发了",
-            "一場叫做": "一场叫做",
-            "霍爾木茲恐懼": "霍尔木兹恐惧",
-            "急性病": "急性病",
-            "雖說": "虽说",
-            "美軍第五艦隊": "美军第五舰队",
-            "第五艦队": "第五舰队",
-            "一直想清楚": "一直想开辟",
-            "一條安全航道": "一条安全航道",
-            "但海面下散布的水雷": "但海面下散布的水雷",
-            "神出鬼沒的": "神出鬼没的",
-            "自殺式快艇": "自杀式快艇",
-            "還是": "还是",
-            "讓": "让",
-            "保險公司": "保险公司",
-            "把這一代的保費": "把这一区域的保费",
-            "這一代": "这一代",
-            "保費": "保费",
-            "提到了": "提到了",
-            "天文數字": "天文数字",
-            "數字": "数字",
-            "短短一周": "短短一周",
-            "國際油價": "国际油价",
-            "就像拖江的野馬": "就像脱缰的野马",
-            "在100美元大關": "在100美元大关",
-            "大關": "大关",
-            "來回橫衝直撞": "来回横冲直撞",
-            "咱們普通人": "咱们普通人",
-            "可能對": "可能对",
-            "紅大的政治敘事": "宏大的政治叙事",
-            "宏大": "宏大",
-            "敘事": "叙事",
-            "沒那麼敏感": "没那么敏感",
-            "可當": "可当",
-            "加油站的架目表": "加油站的价目表",
-            "架目表": "价目表",
-            "跳到": "跳到",
-            "一個讓人心驚肉跳的數字": "一个让人心惊肉跳的数字",
-            "心驚肉跳": "心惊肉跳",
-            "當超市裡的進口貨": "当超市里的进口货",
-            "進口貨": "进口货",
-            "因為": "因为",
-            "航運中斷": "航运中断",
-            "航運": "航运",
-            "而斷貨時": "而断货时",
-            "斷貨": "断货",
-            "戰爭的含義": "战争的含义",
-            "就真的穿透了國境線": "就真的穿透了国境线",
-            "國境線": "国境线",
-            "直接爬上了每個家庭的餐桌": "直接影响到了每个家庭的生活",
-            "同時": "同时",
-            "華盛頓的日子": "华盛顿的日子",
-            "華盛頓": "华盛顿",
-            "也並不太平": "也并不太平",
-            "白宮最初想把這次行動": "白宫最初想把这次行动",
-            "白宮": "白宫",
-            "這次行動": "这次行动",
-            "包裝成": "包装成",
-            "一次短促且必要的懲罰": "一次短促且必要的惩罚",
-            "短促": "短促",
-            "懲罰": "惩罚",
-            "可結果呢": "可结果呢",
-            "到了第七天": "到了第七天",
-            "反戰浪潮": "反战浪潮",
-            "開始在美國各大城市蔓延": "开始在美国各大城市蔓延",
-            "開始": "开始",
-            "美國": "美国",
-            "納稅人們": "纳税人",
-            "納稅人": "纳税人",
-            "開始著想": "开始思考",
-            "在全球經濟這麼不穩定的當下": "在全球经济这么不稳定的当下",
-            "全球經濟": "全球经济",
-            "這麼": "这么",
-            "不穩定": "不稳定",
-            "當下": "当下",
-            "再往中東這個泥沼裡跳去": "再往中东这个泥潭里陷进去",
-            "中東": "中东",
-            "泥沼": "泥潭",
-            "裡": "里",
-            "國際社會被划分成了兩半": "国际社会被分成了两半",
-            "國際社會": "国际社会",
-            "兩半": "两半",
-            "一邊是緊緊跟隨的盟友": "一边是紧紧跟随的盟友",
-            "一邊": "一边",
-            "緊緊跟隨": "紧紧跟随",
-            "另一邊則是以中俄為代表": "另一边则是以中俄为代表",
-            "另一邊": "另一边",
-            "中俄": "中俄",
-            "呼籲坐下來談的冷靜力量": "呼吁坐下来谈判的冷静力量",
-            "呼籲": "呼吁",
-            "坐下來": "坐下来",
-            "冷靜": "冷静",
-            "這種撕裂感": "这种撕裂感",
-            "這種": "这种",
-            "撕裂感": "撕裂感",
-            "讓二戰以來建立的那套國際秩序": "让二战以来建立的那套国际秩序",
-            "二戰": "二战",
-            "以來": "以来",
-            "國際秩序": "国际秩序",
-            "顯得特別脆弱": "显得特别脆弱",
-            "顯得": "显得",
-            "特別": "特别",
-            "脆弱": "脆弱",
-            "就像一張隨時會崩斷的舊王": "就像一张随时会崩断的旧网",
-            "一張": "一张",
-            "隨時": "随时",
-            "崩斷": "崩断",
-            "舊王": "旧网",
-            "現在這精心動魄的第一個七天": "现在这惊心动魄的第一个七天",
-            "現在": "现在",
-            "精心動魄": "惊心动魄",
-            "第一個": "第一个",
-            "總算要熬過去了": "总算要熬过去了",
-            "總算": "总算",
-            "熬過去": "熬过去",
-            "可世界卻站在了": "可世界却站在了",
-            "世界": "世界",
-            "卻": "却",
-            "最危險的十字路口": "最危险的十字路口",
-            "最危險": "最危险",
-            "十字路口": "十字路口",
-            "誰也說不准": "谁也说不准",
-            "誰也": "谁也",
-            "說不准": "说不准",
-            "下周等來的是河潭的曙光": "下周迎来的是和解的曙光",
-            "下周": "下周",
-            "等來": "迎来",
-            "河潭": "和解",
-            "曙光": "曙光",
-            "還是衝突滑向大規模地面站的深淵": "还是冲突滑向大规模地面战的深渊",
-            "還是": "还是",
-            "大規模": "大规模",
-            "地面站": "地面战",
-            "深淵": "深渊",
-            "廢墟上的煙塵": "废墟上的烟尘",
-            "廢墟": "废墟",
-            "煙塵": "烟尘",
-            "還沒散盡": "还没散尽",
-            "還沒": "还没",
-            "散盡": "散尽",
-            "但那些關於河潭與發展的舊共識": "但那些关于和解与发展的旧共识",
-            "那些": "那些",
-            "關於": "关于",
-            "河潭與發展": "和解与发展",
-            "舊共識": "旧共识",
-            "早就在爆炸聲中變得面目全非了": "早就在爆炸声中变得面目全非了",
-            "早在": "早在",
-            "爆炸聲": "爆炸声",
-            "變得": "变得",
-            "面目全非": "面目全非",
-            "歷史往往就在這種不經意間": "历史往往就在这种不经意间",
-            "歷史": "历史",
-            "往往": "往往",
-            "不經意間": "不经意间",
-            "轉了個大彎": "转了个大弯",
-            "轉了": "转了",
-            "大彎": "大弯",
-            "而我們這一代人正秉持細致的": "而我们这一代人正屏息凝神地",
-            "而": "而",
-            "我們": "我们",
-            "這一代人": "这一代人",
-            "正": "正",
-            "秉持細致的": "屏息凝神地",
-            "坐在這輛失控的賽道上": "坐在这辆失控的列车上",
-            "坐在": "坐在",
-            "這輛": "这辆",
-            "失控": "失控",
-            "賽道": "列车",
-            "看著窗外飛逝而過的未知": "看着窗外飞逝而过的未知",
-            "窗外": "窗外",
-            "飛逝而過": "飞逝而过",
-            "未知": "未知",
-            "還有": "还有",
-            "行動": "行动",
-            "著想": "思考",
-            "這麼": "这么",
-            "則是": "则是",
-            "為": "为",
-            "這種": "这种",
-            "與發展": "与发展",
-            "這輛": "这辆",
-            "泥沼": "泥潭",
-            "裡": "里",
-            "這": "这",
-            "麼": "么",
-            "輛": "辆",
-            "種": "种"
-        }
+        """简单清洗文本 - 去除多余空白字符"""
+        if not text:
+            return ""
         
-        # 修正常见错别字
-        corrections = {
-            # 常见错别字
-            "島煤彈": "小行星",
-            "肥水星": "水星",
-            "塔里太陽平均": "距离太阳平均",
-            "踩": "约",
-            "四轉": "自转",
-            "射石度": "摄氏度",
-            "內河": "内核",
-            "鐵哥的": "铁球",
-            "坑坑挖挖": "坑坑洼洼",
-            "撕後": "结束",
-            "皮胎": "基地",
-            "拽進": "拖入",
-            "脈斷貨": "断货",
-            "泥潭": "局势",
-            "賽車": "列车",
-            "沙啞": "沙哑",
-            "節點": "节点",
-            "外科手術式": "外科手术式",
-            "定點清除": "定点清除",
-            "可預想": "可预想",
-            "瞬間瓦解": "瞬间瓦解",
-            "權力核心": "权力核心",
-            "斷網斷電": "断网断电",
-            "廢墟": "废墟",
-            "強硬": "强硬",
-            "衛星信號": "卫星信号",
-            "波斯灣": "波斯湾",
-            "霍爾木茲": "霍尔木兹",
-            "急性病": "急性病",
-            "艦隊": "舰队",
-            "航道": "航道",
-            "水雷": "水雷",
-            "神出鬼沒": "神出鬼没",
-            "自殺式快艇": "自杀式快艇",
-            "保險公司": "保险公司",
-            "保費": "保费",
-            "天文數字": "天文数字",
-            "油價": "油价",
-            "拖江": "脱缰",
-            "野馬": "野马",
-            "大關": "大关",
-            "橫衝直撞": "横冲直撞",
-            "紅大": "宏大",
-            "敘事": "叙事",
-            "加油站": "加油站",
-            "架目表": "价目表",
-            "心驚肉跳": "心惊肉跳",
-            "航運": "航运",
-            "國境線": "国境线",
-            "華盛頓": "华盛顿",
-            "白宮": "白宫",
-            "短促": "短促",
-            "懲罰": "惩罚",
-            "反戰浪潮": "反战浪潮",
-            "納稅人": "纳税人",
-            "中東": "中东",
-            "國際社會": "国际社会",
-            "裂成": "裂成",
-            "盟友": "盟友",
-            "中俄": "中俄",
-            "呼籲": "呼吁",
-            "撕裂感": "撕裂感",
-            "二戰": "二战",
-            "國際秩序": "国际秩序",
-            "舊王": "旧网",
-            "精心動魄": "惊心动魄",
-            "熬過去": "熬过去",
-            "河潭": "和解",
-            "衝突": "冲突",
-            "大規模地面戰": "大规模地面战",
-            "深淵": "深渊",
-            "煙塵": "烟尘",
-            "散進": "散去",
-            "河潭與發展": "和解与发展",
-            "舊共識": "旧共识",
-            "面目全非": "面目全非",
-            "轉了個大彎": "转了个大弯",
-            "秉持悉凝神": "屏息凝神",
-            "失控": "失控",
-            "列車": "列车",
-            "飛遲而過": "飞驰而过",
-            "未知": "未知",
-            "應聲聲": "应声",
-            "指揮中書": "指挥中心",
-            "加固延體": "加固建筑",
-            "泥沼": "泥潭",
-            "地面站": "地面战",
-            "賽道": "列车",
-            "聽起來透著一種沙啞的尸体": "听起来透着一种沙哑的感觉",
-            "應聲聲拽進": "瞬间拖入",
-            "被展現的淋漓盡致": "展现得淋漓尽致",
-            "被盯著很久的和研發設施": "被盯了很久的核研发设施",
-            "加固延體": "加固建筑",
-            "清晰的傳遍了": "清晰地传遍了",
-            "戰火在前方燒著": "战火在前方燃烧",
-            "也跟著帶來了": "也随之引发了",
-            "一直想清楚": "一直想开辟",
-            "神出鬼沒的": "神出鬼没的",
-            "把這一代的保費": "把这一区域的保费",
-            "拖江的野馬": "脱缰的野马",
-            "紅大的政治敘事": "宏大的政治叙事",
-            "加油站的架目表": "加油站的价目表",
-            "直接爬上了每個家庭的餐桌": "直接影响到了每个家庭的生活",
-            "白宮最初想把這次行動": "白宫最初想把这次行动",
-            "納稅人們開始著想": "纳税人开始思考",
-            "再往中東這個泥沼裡跳去": "再往中东这个泥潭里陷进去",
-            "國際社會被划分成了兩半": "国际社会被分成了两半",
-            "呼籲坐下來談的冷靜力量": "呼吁坐下来谈判的冷静力量",
-            "讓二戰以來建立的那套國際秩序": "让二战以来建立的那套国际秩序",
-            "就像一張隨時會崩斷的舊王": "就像一张随时会崩断的旧网",
-            "現在這精心動魄的第一個七天": "现在这惊心动魄的第一个七天",
-            "可世界卻站在了": "可世界却站在了",
-            "誰也說不准下周等來的是河潭的曙光": "谁也说不准下周迎来的是和解的曙光",
-            "還是衝突滑向大規模地面站的深淵": "还是冲突滑向大规模地面战的深渊",
-            "但那些關於河潭與發展的舊共識": "但那些关于和解与发展的旧共识",
-            "早就在爆炸聲中變得面目全非了": "早就在爆炸声中变得面目全非了",
-            "歷史往往就在這種不經意間": "历史往往就在这种不经意间",
-            "而我們這一代人正秉持細致的": "而我们这一代人正屏息凝神地",
-            "坐在這輛失控的賽道上": "坐在这辆失控的列车上",
-            "看著窗外飛逝而過的未知": "看着窗外飞逝而过的未知"
-        }
-        
-        # 应用繁简转换
-        for traditional, simplified in traditional_to_simplified.items():
-            text = text.replace(traditional, simplified)
-        
-        # 应用错别字修正
-        for wrong, correct in corrections.items():
-            text = text.replace(wrong, correct)
-        
-        # 修正语句不通顺的地方
-        text = text.replace("听起来透着一种沙哑的尸体", "听起来透着一种沙哑的感觉")
-        text = text.replace("世界像是被应声拖入了一个充满不确定性的新纪元", "世界像是被瞬间拖入了一个充满不确定性的新纪元")
-        text = text.replace("对著伊朗境内的指挥中心、雷达阵地", "对着伊朗境内的指挥中心、雷达阵地")
-        text = text.replace("还有那些被盯了很久的核研发设施", "还有那些被盯了很久的核研发设施")
-        text = text.replace("看着画面里那些被导弹瞬间穿透的加固建筑", "看着画面里那些被导弹瞬间穿透的加固建筑")
-        text = text.replace("德黑兰的权力核心迅速转入地下。", "德黑兰的权力核心迅速转入地下。")
-        text = text.replace("即便在断网断电的废墟上", "即便在断网断电的废墟上")
-        text = text.replace("那些强硬的声音依然通过卫星信号清晰地传遍了波斯湾的每一个角落", "那些强硬的声音依然通过卫星信号清晰地传遍了波斯湾的每一个角落")
-        text = text.replace("这几天其实证明了一个挺残酷的真理", "这几天其实证明了一个挺残酷的真理")
-        text = text.replace("炸毁一座桥只需要几秒钟", "炸毁一座桥只需要几秒钟")
-        text = text.replace("但要摧毁一个政权的意志恐怕得经历一场通向深渊的漫长对峙", "但要摧毁一个政权的意志恐怕得经历一场通向深渊的漫长对峙")
-        text = text.replace("战火在前方燃烧", "战火在前方燃烧")
-        text = text.replace("全球经济也随之引发了一场叫做霍尔木兹恐惧的急性病", "全球经济也随之引发了一场叫做霍尔木兹恐惧的急性病")
-        text = text.replace("虽说美军第五舰队一直想开辟一条安全航道", "虽说美军第五舰队一直想开辟一条安全航道")
-        text = text.replace("但海面下散布的水雷和那些神出鬼没的自杀式快艇", "但海面下散布的水雷和那些神出鬼没的自杀式快艇")
-        text = text.replace("还是让保险公司把这一区域的保费提到了天文数字", "还是让保险公司把这一区域的保费提到了天文数字")
-        text = text.replace("短短一周，国际油价就像脱缰的野马在100美元大关来回横冲直撞", "短短一周，国际油价就像脱缰的野马在100美元大关来回横冲直撞")
-        text = text.replace("咱们普通人可能对宏大的政治叙事没那么敏感", "咱们普通人可能对宏大的政治叙事没那么敏感")
-        text = text.replace("可当加油站的价目表跳到一个让人心惊肉跳的数字", "可当加油站的价目表跳到一个让人心惊肉跳的数字")
-        text = text.replace("当超市里的进口货因为航运中断而断货时", "当超市里的进口货因为航运中断而断货时")
-        text = text.replace("战争的含义就真的穿透了国境线，直接影响到了每个家庭的生活", "战争的含义就真的穿透了国境线，直接影响到了每个家庭的生活")
-        text = text.replace("同时，华盛顿的日子也并不太平", "同时，华盛顿的日子也并不太平")
-        text = text.replace("白宫最初想把这次行动包装成一次短促且必要的惩罚", "白宫最初想把这次行动包装成一次短促且必要的惩罚")
-        text = text.replace("到了第七天，反战浪潮开始在美国各大城市蔓延", "到了第七天，反战浪潮开始在美国各大城市蔓延")
-        text = text.replace("纳税人开始思考在全球经济这么不稳定的当下", "纳税人开始思考在全球经济这么不稳定的当下")
-        text = text.replace("再往中东这个泥潭里陷进去", "再往中东这个泥潭里陷进去")
-        text = text.replace("这也证明了国际社会被分成了两半", "这也证明了国际社会被分成了两半")
-        text = text.replace("一边是紧紧跟随的盟友，另一边则是以中俄为代表", "一边是紧紧跟随的盟友，另一边则是以中俄为代表")
-        text = text.replace("呼吁坐下来谈判的冷静力量", "呼吁坐下来谈判的冷静力量")
-        text = text.replace("这种撕裂感让二战以来建立的那套国际秩序显得特别脆弱", "这种撕裂感让二战以来建立的那套国际秩序显得特别脆弱")
-        text = text.replace("就像一张随时会崩断的旧网", "就像一张随时会崩断的旧网")
-        text = text.replace("现在这惊心动魄的第一个七天总算要熬过去了", "现在这惊心动魄的第一个七天总算要熬过去了")
-        text = text.replace("可世界却站在了最危险的十字路口", "可世界却站在了最危险的十字路口")
-        text = text.replace("谁也说不准下周迎来的是和解的曙光", "谁也说不准下周迎来的是和解的曙光")
-        text = text.replace("还是冲突滑向大规模地面战的深渊", "还是冲突滑向大规模地面战的深渊")
-        text = text.replace("废墟上的烟尘还没散尽", "废墟上的烟尘还没散尽")
-        text = text.replace("但那些关于和解与发展的旧共识早就在爆炸声中变得面目全非了", "但那些关于和解与发展的旧共识早就在爆炸声中变得面目全非了")
-        text = text.replace("历史往往就在这种不经意间转了个大弯", "历史往往就在这种不经意间转了个大弯")
-        text = text.replace("而我们这一代人正屏息凝神地坐在这辆失控的列车上看着窗外飞逝而过的未知", "而我们这一代人正屏息凝神地坐在这辆失控的列车上看着窗外飞逝而过的未知")
-        
-        # 修正科学数据
-        # 水星温度修正
-        text = text.replace("白天能飆到427射石度", "白天能达到427摄氏度")
-        text = text.replace("晚上瞬間跌到1703射石度", "晚上会骤降至-173摄氏度")
-        
-        # 修正单位表述
-        text = text.replace("天文單位", "天文单位")
+        import re
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
         
         return text
+    
     
     def analyze_content_type(self, sentence):
         """分析内容类型 - 增强版，包含更多军事和政治相关词汇"""
@@ -3765,6 +3261,9 @@ class DocuMakerLiteV7:
         # 优先使用大模型生成的提示词（如果可用）
         if llm_prompt:
             prompt_en = llm_prompt
+        elif hasattr(self, '_pregenerated_prompts') and shot_id in self._pregenerated_prompts and self._pregenerated_prompts.get(shot_id):
+            # 使用步骤2预生成的提示词
+            prompt_en = self._pregenerated_prompts[shot_id]
         else:
             # 根据提示词类型生成相应的提示词
             if prompt_type == "SD提示词":
@@ -3773,31 +3272,17 @@ class DocuMakerLiteV7:
                 prompt_en = self._generate_doubao_prompt(description_parts, content_type, shot_id)
         
         # 根据优化方式选择不同的优化策略
-        optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
-        
-        # 检查并规范化优化方式
-        if not optimization_method or optimization_method not in ["脚本自带", "本地大模型", "脚本优化"]:
-            optimization_method = "脚本自带"
+        optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
         
         # 添加日志记录当前使用的优化方式
         if not hasattr(self, '_last_optimization_method') or self._last_optimization_method != optimization_method:
             self.log(f"🎯 当前优化方式: {optimization_method}")
             self._last_optimization_method = optimization_method
         
-        # 仅在"本地大模型"模式下评估质量
+        # 简化处理：直接使用生成的提示词，跳过额外的优化和质量评估
+        # 因为 _generate_sd_prompt/_generate_doubao_prompt 已经由大模型生成
         prompt_quality = 0.0
-        if optimization_method == "本地大模型":
-            # 使用Ollama大模型优化提示词
-            optimized_prompt = self.optimize_prompt_with_ollama(prompt_en, description_parts['dubbing'])
-            prompt_quality = self.evaluate_prompt_quality(optimized_prompt, description_parts['dubbing'], content_type)
-        elif optimization_method == "脚本优化":
-            # "脚本优化"模式：直接使用 _generate_sd_prompt 或 _generate_doubao_prompt 生成的结果
-            # 不再调用 _enhance_prompt_with_details，避免重复生成
-            # 因为 _generate_*_prompt 函数已经包含了完整的生成逻辑
-            optimized_prompt = prompt_en
-        else:
-            # "脚本自带" - 直接使用原始提示词
-            optimized_prompt = prompt_en
+        optimized_prompt = prompt_en
         
         # 修复：使用Decimal进行高精度时间戳计算，确保duration = end - start
         from decimal import Decimal, ROUND_HALF_UP
@@ -3879,13 +3364,13 @@ class DocuMakerLiteV7:
         
         # 如果没有提取到visual_concept，尝试从dubbing智能推断（仅在大模型模式下）
         if not result['visual_concept'] and result['dubbing']:
-            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
             if optimization_method == "本地大模型":
                 result['visual_concept'] = self._infer_visual_concept_from_dubbing(result['dubbing'])
         
         # 如果没有提取到visual_elements，尝试从dubbing智能推断（仅在大模型模式下）
         if not result['visual_elements'] and result['dubbing']:
-            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
             if optimization_method == "本地大模型":
                 result['visual_elements'] = self._infer_visual_elements_from_dubbing(result['dubbing'])
         
@@ -3987,285 +3472,134 @@ class DocuMakerLiteV7:
         except Exception as e:
             return ""
     
-    def _generate_sd_prompt(self, description_parts, content_type, shot_id):
-        """生成SD提示词 - 根据分镜的独特内容"""
-        import re
-        
-        prompt_parts = []
-        
-        # 1. 主体内容 - 基于画面构思和视觉元素
-        if description_parts['visual_concept']:
-            # 将中文画面构思翻译/转化为英文视觉描述
-            visual_desc = self._translate_visual_concept(description_parts['visual_concept'])
-            prompt_parts.append(visual_desc)
-        elif description_parts.get('dubbing'):
-            # 如果没有画面构思，从配音文本推断（仅在大模型模式下）
-            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
-            # 无论哪种模式，都尝试从配音文本推断视觉概念
-            if optimization_method == "本地大模型":
-                inferred_concept = self._infer_visual_concept_from_dubbing(description_parts['dubbing'])
-                if inferred_concept:
-                    translated_concept = self._translate_visual_concept(inferred_concept)
-                    if translated_concept:
-                        prompt_parts.append(translated_concept)
-            else:
-                # 脚本自带/脚本优化模式也尝试提取
-                inferred_concept = self._infer_visual_concept_from_dubbing(description_parts['dubbing'])
-                if inferred_concept:
-                    translated_concept = self._translate_visual_concept(inferred_concept)
-                    if translated_concept:
-                        prompt_parts.append(translated_concept)
-        
-        # 2. 基于内容类型的场景设定
-        scene_keywords = self._get_scene_keywords_by_content(content_type, description_parts['dubbing'])
-        if scene_keywords:
-            prompt_parts.append(scene_keywords)
-        
-        # 3. 智能融合：核心主题 + 视觉基调 + 音频语义
-        semantic_elements = self._intelligent_fuse_semantics(
-            description_parts.get('dubbing', ''),
-            description_parts.get('custom_theme', ''),
-            description_parts.get('custom_visual_tone', ''),
-            content_type
-        )
-        if semantic_elements:
-            prompt_parts.append(semantic_elements)
-        
-        # 4. 视觉元素
-        # 无论哪种模式，都尝试从配音文本提取视觉元素
-        extracted_elements = self._extract_elements_from_dubbing(description_parts.get('dubbing', ''))
-        if extracted_elements:
-            translated_elements = self._translate_visual_concept(extracted_elements)
-            if translated_elements:
-                prompt_parts.append(translated_elements)
-        elif description_parts.get('theme_elements'):
-            # 使用大模型分析得到的主题元素
-            elements_list = description_parts['theme_elements']
-            if isinstance(elements_list, list):
-                elements_str = ', '.join(elements_list[:5])  # 限制最多5个元素
-            else:
-                elements_str = str(elements_list)
-            translated_elements = self._translate_visual_concept(elements_str)
-            if translated_elements:
-                prompt_parts.append(translated_elements)
-        elif description_parts.get('visual_elements'):
-            # 如果大模型没提取到，使用配置中的visual_elements
-            elements = self._translate_visual_concept(description_parts['visual_elements'])
-            if elements:
-                prompt_parts.append(elements)
-        else:
-            # 如果都没有，根据内容类型添加fallback
-            fallback_elements = self._get_fallback_elements_by_content_type(content_type)
-            if fallback_elements:
-                prompt_parts.append(fallback_elements)
-        
-        # 5. 自定义核心主题（如果有）
-        if description_parts.get('custom_theme'):
-            theme = description_parts['custom_theme']
-            # 检查是否包含中文字符
-            has_chinese = any('\u4e00' <= c <= '\u9fff' for c in theme)
-            if has_chinese:
-                theme_translation = self._translate_visual_concept(theme)
-                if theme_translation:
-                    prompt_parts.append(theme_translation)
-            else:
-                # 如果是英文，直接使用
-                prompt_parts.append(theme)
-        
-        # 6. 自定义视觉基调（如果有）
-        if description_parts.get('custom_visual_tone'):
-            tone = description_parts['custom_visual_tone']
-            # 检查是否包含中文字符
-            has_chinese = any('\u4e00' <= c <= '\u9fff' for c in tone)
-            if has_chinese:
-                tone_translation = self._translate_visual_concept(tone)
-                if tone_translation:
-                    prompt_parts.append(tone_translation)
-            else:
-                # 如果是英文，直接使用
-                prompt_parts.append(tone)
-        
-        # 7. 光线和氛围 - 根据情感基调
-        lighting = self._get_lighting_by_mood(description_parts['dubbing'])
-        prompt_parts.append(lighting)
-        
-        # 8. 构图和视角 - 根据shot_id轮换，增加多样性
-        composition = self._get_composition_by_shot_id(shot_id)
-        prompt_parts.append(composition)
-        
-        # 9. 艺术风格
-        style = self._get_art_style(content_type, description_parts.get('style', ''))
-        prompt_parts.append(style)
-        
-        # 10. 质量标签 - 包含正向提示词
-        prompt_parts.extend([
-            "masterpiece, best quality, ultra detailed, photorealistic, cinematic lighting, dramatic mood, high contrast, detailed, 8k, high resolution, professional photography"
-        ])
-        
-        # 8. 合并并去重提示词
-        # 人体相关词，仅在需要人物出镜时保留
-        is_person_scene = any(word in description_parts.get('dubbing', '') for word in ['人', '人物', '人物', '主持人', '记者', '医生', '科学家', '总统', '官员', '人物'])
-        
-        all_prompt_parts = []
-        seen = set()
-        
-        # 需要过滤的词（仅在非人物场景时过滤）
-        person_only_tags = [
-            'detailed skin texture', 'realistic pupils', 'soft skin', 
-            'skin pores', 'eye detail', 'facial features', 'wrinkles',
-            'beautiful face', 'pretty face', 'ugly face'
-        ]
-        
-        for part in prompt_parts:
-            if not part:
-                continue
-            # 按逗号分隔每个tag
-            tags = [t.strip() for t in part.split(',')]
-            for tag in tags:
-                # 提取tag的基础词（去除权重）
-                base_tag = tag.strip().lower()
-                original_tag = tag.strip()
-                for suffix in ['(1.0)', '(1.1)', '(1.2)', '(1.3)', '(1.4)', '(1.5)', '(1.6)', '(1.7)', '(1.8)', '(1.9)', '(2.0)']:
-                    base_tag = base_tag.replace(suffix, '')
-                    original_tag = original_tag.replace(suffix, '')
-                base_tag = base_tag.strip()
-                original_tag = original_tag.strip()
-                
-                # 过滤人体相关词（非人物场景）
-                if not is_person_scene:
-                    if any(pt in base_tag for pt in person_only_tags):
-                        continue
-                
-                # 如果没出现过，添加
-                if base_tag and base_tag not in seen:
-                    seen.add(base_tag)
-                    # 恢复原始权重格式
-                    weight_match = tag.strip()
-                    if '(' in weight_match and ')' in weight_match:
-                        all_prompt_parts.append(tag.strip())
-                    else:
-                        all_prompt_parts.append(original_tag)
-        
-        return ", ".join(all_prompt_parts)
-    
     def _generate_doubao_prompt(self, description_parts, content_type, shot_id):
-        """生成豆包提示词 - 直接从配音文本生成，不依赖画面构思"""
-        import re
+        """生成豆包提示词 - 完全由大模型主导"""
         
         dubbing = description_parts['dubbing']
-        prompt_parts = []
         
-        # 1. 场景类型 - 基于内容类型和配音内容
-        scene_type = self._get_scene_type_zh(content_type, dubbing)
-        prompt_parts.append(scene_type)
-        
-        # 2. 主体描述 - 直接从配音文本智能生成（不再依赖visual_concept）
-        subject_desc = self._generate_subject_from_dubbing(dubbing, content_type)
-        if subject_desc:
-            prompt_parts.append(f"画面主体：{subject_desc}")
-        
-        # 3. 视觉元素 - 直接从配音文本提取关键词
-        visual_elements = self._extract_elements_from_dubbing(dubbing)
-        if visual_elements:
-            prompt_parts.append(f"视觉元素：{visual_elements}")
-        
-        # 4. 光线氛围
-        lighting_zh = self._get_lighting_zh(dubbing)
-        prompt_parts.append(lighting_zh)
-        
-        # 5. 构图视角
-        composition_zh = self._get_composition_zh(shot_id)
-        prompt_parts.append(composition_zh)
-        
-        # 6. 艺术风格
-        style_zh = self._get_art_style_zh(content_type)
-        prompt_parts.append(style_zh)
-        
-        # 7. 技术要求
-        prompt_parts.extend([
-            "高清画质，细节丰富",
-            "专业摄影效果，电影级画面"
-        ])
-        
-        return "，".join([p for p in prompt_parts if p])
-    
-    def _generate_subject_from_dubbing(self, dubbing, content_type):
-        """从配音文本直接生成主体描述 - 智能语义分析版"""
-        
-        # 1. 军事冲突场景（最优先）
-        if "military" in content_type or any(w in dubbing for w in ["战争", "冲突", "军事", "战斗", "战略", "战术", "武器", "军队", "部队"]):
-            if any(w in dubbing for w in ["伊朗", "美国", "以色列", "敌方", "对手", "盟军", "联军"]):
-                return "军事指挥中心，战略分析场景，军事地图与战术屏幕，严肃氛围"
-            elif any(w in dubbing for w in ["硬碰硬", "对抗", "较量", "冲突", "交锋", "激战"]):
-                return "军事对峙场景，双方力量对比，紧张氛围，对峙局面"
-            elif any(w in dubbing for w in ["家底", "实力", "力量", "资源", "储备", "战力"]):
-                return "军事力量展示，装备与人员，战争潜力，军事实力"
-            elif any(w in dubbing for w in ["局势", "局勢", "战局", "戰局", "形势", "形勢", "格局", "态势", "態勢"]):
-                return "战争局势图，战略态势展示，战场形势分析"
-            elif any(w in dubbing for w in ["更迭", "变化", "變化", "转变", "轉變", "转折", "演变", "演變"]):
-                return "战争进程演变，局势变化过程，历史转折时刻"
-            else:
-                return "现代战争场景，军事冲突环境，战场氛围"
-        
-        # 2. 政治外交场景
-        if any(w in dubbing for w in ["政治", "外交", "国际", "政府", "国家", "政权", "议会", "选举", "谈判", "协议", "制裁", "局势", "格局"]):
-            if any(w in dubbing for w in ["更迭", "变化", "转变", "转折", "演变", "动荡", "危机"]):
-                return "政治局势演变，权力更迭过程，历史转折时刻"
-            elif any(w in dubbing for w in ["几周", "时间", "短期", "即将", "很快", "马上"]):
-                return "时间流逝象征，历史进程加速，紧迫时刻"
-            else:
-                return "国际政治场景，外交谈判环境，政治舞台"
-        
-        # 3. 时间/进程场景
-        if any(w in dubbing for w in ["几周", "时间", "短期", "即将", "很快", "马上", "倒计时", "紧迫", "加速"]):
-            return "时间流逝象征，历史进程，紧迫时刻，倒计时氛围"
-        
-        # 4. 抽象概念场景（用于"局势更迭"这类抽象描述）
-        if any(w in dubbing for w in ["局势", "形势", "格局", "态势", "局面", "状况"]):
-            if any(w in dubbing for w in ["更迭", "变化", "转变", "转折", "演变", "变革", "动荡"]):
-                return "局势演变可视化，权力转移象征，历史转折点"
-            else:
-                return "复杂局势展示，多方力量博弈，战略格局"
-        
-        # 5. 默认场景（不再返回空洞的"纪实摄影场景"）
-        # 根据语义推断一个合理的场景
-        if len(dubbing) < 10:
-            return "特写镜头，细节展示，微观视角"
-        elif any(w in dubbing for w in ["大", "宏观", "整体", "全局", "全面"]):
-            return "宏观视角，全景展示，大局观"
-        elif any(w in dubbing for w in ["小", "细节", "局部", "具体", "个别"]):
-            return "特写镜头，细节展示，微观视角"
-        else:
-            return "主题相关场景，与内容匹配的视觉画面，符合语境的环境"
-    
-    def _extract_elements_from_dubbing(self, dubbing):
-        """从配音文本智能提取视觉元素 - 支持本地和大模型两种模式"""
-        if not dubbing or len(dubbing.strip()) < 2:
-            return ""
-        
-        # 优先尝试本地提取（不依赖大模型）
-        local_result = self._extract_elements_locally(dubbing)
-        if local_result:
-            return local_result
-        
-        # 检查是否配置了 Ollama，如果配置了则尝试大模型提取
+        # 检查大模型是否可用
         if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
-            # 没有配置大模型，返回空（已通过本地提取处理）
-            return ""
+            self.log("❌ 错误：豆包提示词需要大模型支持，请先在设置中选择 Ollama 模型")
+            raise Exception("大模型不可用：豆包提示词需要 Ollama 模型支持，请在设置中选择模型后重试")
         
+        # 获取核心主题信息
+        core_theme = description_parts.get('custom_theme', '')
+        
+        # 使用大模型生成提示词
+        prompt = self._generate_prompt_with_llm(dubbing, content_type, prompt_type="豆包", core_theme=core_theme)
+        return prompt
+    
+    def _generate_sd_prompt(self, description_parts, content_type, shot_id):
+        """生成SD提示词 - 完全由大模型主导"""
+        
+        dubbing = description_parts['dubbing']
+        
+        # 检查大模型是否可用
+        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+            self.log("❌ 错误：SD提示词需要大模型支持，请先在设置中选择 Ollama 模型")
+            raise Exception("大模型不可用：SD提示词需要 Ollama 模型支持，请在设置中选择模型后重试")
+        
+        # 获取核心主题信息
+        core_theme = description_parts.get('custom_theme', '')
+        
+        # 使用大模型生成提示词
+        prompt = self._generate_prompt_with_llm(dubbing, content_type, prompt_type="SD", core_theme=core_theme)
+        return prompt
+    
+    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme=""):
+        """使用大模型生成提示词 - 先理解中心主题，再为每个分镜生成描述"""
         try:
             model = self.ollama_model_var.get()
             ollama_url = "http://localhost:11434"
             
-            prompt = f"""从以下配音文本中提取出能够用于图像生成的视觉元素关键词。
-要求：
-1. 提取具体的视觉对象、场景、人物、物品等（至少3-5个）
-2. 用英文逗号分隔每个关键词
-3. 只返回关键词，不要其他解释
+            self.log(f"   [_generate_prompt_with_llm] 开始生成，模型: {model}")
+            
+            # 构建主题上下文
+            theme_context = f"\n整篇脚本的核心主题：{core_theme}" if core_theme else ""
+            
+            if prompt_type == "豆包":
+                prompt = f"""你是一个专业的AI视频画面策划助手。你的任务是：
+1. 先理解整篇脚本的中心主题和视觉基调
+2. 然后根据当前分镜的配音内容，结合主题生成贴切的视觉描述
+
+{theme_context}
+
+当前分镜的配音内容：{dubbing}
+当前分镜的内容类型：{content_type}
+
+请按以下要求生成图像提示词：
+1. 先思考：这个分镜的内容如何体现整篇脚本的核心主题？
+2. 生成的视觉描述必须与核心主题保持一致，同时准确反映当前配音的具体内容
+3. 包含场景、主体、氛围、艺术风格等元素
+4. 使用英文，用逗号分隔
+5. 不要添加配音中没有提到的元素
+6. 保持简洁专业
+
+返回格式：只返回一个完整的英文提示词"""
+            else:
+                prompt = f"""You are a professional AI video visual planning assistant. Your task is:
+1. First understand the core theme and visual tone of the entire script
+2. Then generate suitable visual descriptions based on the current shot's dubbing content, combined with the theme
+
+{theme_context}
+
+Current shot's dubbing content: {dubbing}
+Current shot's content type: {content_type}
+
+Please generate an image prompt according to the following requirements:
+1. Think first: How does this shot's content reflect the core theme of the entire script?
+2. The generated visual description must be consistent with the core theme, while accurately reflecting the specific content of the current dubbing
+3. Include scene, subject, atmosphere, art style and other elements
+4. Use English, separate with commas
+5. Do not add elements not mentioned in the dubbing
+6. Keep it concise and professional
+
+Return format: Only return one complete English prompt"""
+            
+            import requests
+            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3, "num_predict": 256}
+            response = requests.post(
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": config_options
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                generated_prompt = result.get('response', '').strip()
+                if generated_prompt:
+                    return generated_prompt
+            
+            raise Exception("大模型返回为空")
+            
+        except Exception as e:
+            self.log(f"❌ 大模型生成提示词失败: {str(e)}")
+            raise Exception(f"大模型生成提示词失败: {str(e)}")
+    
+    def _extract_elements_from_dubbing(self, dubbing):
+        """从配音文本智能提取视觉元素 - 完全由大模型主导"""
+        if not dubbing or len(dubbing.strip()) < 2:
+            return ""
+        
+        # 检查大模型是否可用
+        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+            return ""
+        
+        # 使用大模型进行语义分析和场景判断
+        try:
+            model = self.ollama_model_var.get()
+            ollama_url = "http://localhost:11434"
+            
+            prompt = f"""从以下配音文本中提取视觉元素关键词。
 
 配音文本：{dubbing}
 
-返回格式：关键词1, 关键词2, 关键词3"""
+请直接返回3-5个与内容相关的英文视觉关键词，用逗号分隔。只返回关键词。"""
             
             import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
@@ -4283,165 +3617,12 @@ class DocuMakerLiteV7:
             if response.status_code == 200:
                 result = response.json()
                 visual_keywords = result.get('response', '').strip()
-                visual_keywords = visual_keywords.strip()
                 if visual_keywords:
                     return visual_keywords
             
             return ""
         except Exception as e:
             return ""
-    
-    def _extract_elements_locally(self, dubbing):
-        """本地模式：从配音文本提取视觉元素（不依赖大模型）"""
-        import re
-        
-        if not dubbing:
-            return ""
-        
-        visual_keywords = []
-        
-        # 军事/战争相关关键词
-        military_mapping = {
-            '美军': 'US military, American soldiers, US army',
-            '伊朗': 'Iran, Iranian, Persia',
-            '革命卫队': 'Revolutionary Guard, IRGC, Iranian military',
-            '军队': 'military, armed forces, troops',
-            '部队': 'troops, military unit',
-            '战争': 'war, warfare, battlefield',
-            '冲突': 'conflict, clash, confrontation',
-            '战斗': 'battle, combat, fighting',
-            '导弹': 'missile, rocket, projectile',
-            '无人机': 'drone, UAV, unmanned aircraft',
-            '战斗机': 'fighter jet, aircraft, warplane',
-            '轰炸机': 'bomber, bombing aircraft',
-            '航母': 'aircraft carrier, warship',
-            '军舰': 'warship, naval vessel',
-            '海军': 'navy, naval forces',
-            '空军': 'air force, aviation',
-            '陆军': 'army, ground forces',
-            '武器': 'weapon, arms, armament',
-            '军事': 'military, armed, warfare',
-            '基地': 'military base, base',
-            '战场': 'battlefield, war zone, front line',
-            '进攻': 'attack, offensive, assault',
-            '防御': 'defense, defensive',
-            '轰炸': 'bombing, air strike, raid',
-            '摧毁': 'destroyed, devastated, ruin',
-            '爆炸': 'explosion, blast, detonation',
-            '伤亡': 'casualties, deaths, injuries',
-            '平民': 'civilians, civilians',
-            '难民': 'refugees, displaced people',
-            '国际': 'international, global',
-            '中东': 'Middle East, MENA region',
-        }
-        
-        # 合并所有关键词映射
-        keyword_mapping = dict(military_mapping)
-        keyword_mapping.update({
-            '黑洞': 'black hole, event horizon, accretion disk',
-            '宇宙': 'universe, cosmos, deep space',
-            '太空': 'outer space, celestial',
-            '星球': 'planet, celestial body',
-            '银河': 'milky way, galaxy',
-            '星系': 'galaxy, star system',
-            '恒星': 'star, sun',
-            '行星': 'planet',
-            '星云': 'nebula, cosmic dust',
-            'X射线': 'X-ray, radiation',
-            '光': 'light, rays, glow',
-            '热量': 'heat, thermal energy',
-            '温度': 'temperature, heat',
-            '攝氏度': 'Celsius degrees',
-            '數千萬': 'tens of millions',
-            '銀河系': 'Milky Way galaxy',
-            '中心': 'center, core',
-            '爆炸': 'explosion, blast',
-            '能量': 'energy, power',
-            '辐射': 'radiation',
-            '天体': 'celestial body, heavenly body',
-            '光年': 'light years',
-            '距离': 'distance',
-            '科学家': 'scientist, researcher',
-            '实验室': 'laboratory, research lab',
-            '仪器': 'instrument, device',
-            '观测': 'observation, telescope',
-            '研究': 'research, study',
-            '数据': 'data, statistics',
-            '屏幕': 'screen, monitor, display',
-            '图表': 'chart, graph',
-            '地图': 'map',
-            '地球': 'Earth, planet Earth',
-            '太阳': 'sun, solar',
-            '月亮': 'moon, lunar',
-            '火星': 'Mars',
-            '木星': 'Jupiter',
-            '土星': 'Saturn',
-            '城市': 'city, urban, cityscape',
-            '乡村': 'countryside, rural',
-            '山脉': 'mountain, mountain range',
-            '海洋': 'ocean, sea',
-            '河流': 'river',
-            '森林': 'forest, woods',
-            '云': 'cloud',
-            '天空': 'sky',
-            '建筑': 'building, architecture',
-            '房间': 'room, interior',
-            '办公室': 'office',
-            '教室': 'classroom',
-            '医院': 'hospital',
-            '餐厅': 'restaurant',
-            '商店': 'store, shop',
-            '街道': 'street, road',
-            '车辆': 'vehicle, car',
-            '飞机': 'aircraft, plane',
-            '船': 'ship, boat',
-            '人': 'person, people',
-            '男人': 'man',
-            '女人': 'woman',
-            '孩子': 'child',
-            '科学家': 'scientist',
-            '医生': 'doctor',
-            '老师': 'teacher',
-            '学生': 'student',
-            '工人': 'worker',
-            '农民': 'farmer',
-            '商人': 'businessman',
-            '官员': 'official',
-            '领袖': 'leader',
-            '动物': 'animal',
-            '鸟': 'bird',
-            '鱼': 'fish',
-            '狗': 'dog',
-            '猫': 'cat',
-            '马': 'horse',
-            '花': 'flower',
-            '树': 'tree',
-            '草': 'grass',
-            '石头': 'rock, stone',
-            '水': 'water',
-            '火': 'fire',
-            '雨': 'rain',
-            '雪': 'snow',
-            '风': 'wind',
-            '雷': 'thunder',
-            '闪电': 'lightning',
-            '山': 'mountain, hill',
-            '谷': 'valley',
-            '岛': 'island',
-            '湖': 'lake',
-            '海': 'sea, ocean',
-        })
-        
-        for chinese, english in keyword_mapping.items():
-            if chinese in dubbing:
-                for eng in english.split(', '):
-                    if eng.strip() not in visual_keywords:
-                        visual_keywords.append(eng.strip())
-        
-        if visual_keywords:
-            return ', '.join(visual_keywords[:5])
-        
-        return ""
     
     def _translate_visual_concept(self, chinese_concept):
         """将中文视觉概念转化为英文描述"""
@@ -6271,10 +5452,6 @@ class DocuMakerLiteV7:
         """使用Ollama大模型优化提示词"""
         import re
         
-        user_model = self.ollama_model_var.get()
-        if user_model == "脚本自带":
-            return prompt
-        
         prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
         
         cache_key = f"{sentence}_{prompt_type}"
@@ -6384,7 +5561,7 @@ Now convert this:
 
                 user_prompt = f"配音文本：{sentence}\n\n直接输出中文提示词，严格遵守以上规则。"
             
-            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "平衡模式"
+            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
             
             if optimization_method == "极速模式":
                 task_complexity = "low"
@@ -6624,51 +5801,43 @@ Now convert this:
             return theme_info
 
         try:
-            # 清理analysis_result中的**标记，避免解析问题
             import re
-            cleaned_result = analysis_result.replace('**', '')
+            # 清理各种格式标记
+            cleaned_result = analysis_result.replace('**', '').replace('【', '').replace('】', '')
+            cleaned_result = cleaned_result.replace('*', '')
 
-            # 提取核心主题（支持中英文，包括**格式）
-            if '核心主题：' in cleaned_result:
-                core_match = cleaned_result.split('核心主题：')[1].split('\n')[0].strip()
-            elif '中心思想：' in cleaned_result:
-                core_match = cleaned_result.split('中心思想：')[1].split('\n')[0].strip()
+            # 提取核心主题（支持有冒号和无冒号的情况）
+            if '核心主题' in cleaned_result:
+                try:
+                    core_match = cleaned_result.split('核心主题')[1].split('\n')[0]
+                    core_match = core_match.replace('：', '').replace(':', '').strip()
+                except:
+                    core_match = ""
+            elif '中心思想' in cleaned_result:
+                core_match = cleaned_result.split('中心思想')[1].split('\n')[0].strip()
             elif 'Core Theme:' in cleaned_result:
                 core_match = cleaned_result.split('Core Theme:')[1].split('\n')[0].strip()
-            elif 'core theme' in cleaned_result.lower():
-                match = re.search(r'(?:core theme|主题)[:\s]+([^\n]+)', cleaned_result, re.IGNORECASE)
-                if match:
-                    core_match = match.group(1).strip()
-                else:
-                    core_match = ""
             else:
                 core_match = ""
             
-            # 简化核心主题：提取关键词，去除描述性内容
             if core_match:
                 core_match = self._simplify_theme(core_match)
                 theme_info['core_theme'] = core_match
 
-            # 提取视觉基调（支持中英文，包括**格式）
-            if '视觉基调：' in cleaned_result:
-                tone_match = cleaned_result.split('视觉基调：')[1].split('\n')[0].strip()
+            # 提取视觉基调
+            if '视觉基调' in cleaned_result:
+                tone_match = cleaned_result.split('视觉基调')[1].split('\n')[0].replace('：', '').replace(':', '').strip()
                 theme_info['visual_tone'] = tone_match
-            elif '视觉主题：' in cleaned_result:
-                tone_match = cleaned_result.split('视觉主题：')[1].split('\n')[0].strip()
-                theme_info['visual_tone'] = tone_match
-            elif 'Overall Tone:' in cleaned_result:
-                tone_match = cleaned_result.split('Overall Tone:')[1].split('\n')[0].strip()
-                theme_info['visual_tone'] = tone_match
-            elif 'visual tone' in cleaned_result.lower():
-                match = re.search(r'(?:visual tone|色调)[:\s]+([^\n]+)', cleaned_result, re.IGNORECASE)
-                if match:
-                    theme_info['visual_tone'] = match.group(1).strip()
 
-            # 提取主题元素（支持中英文，包括**格式）
-            if '主题元素：' in cleaned_result:
-                elements_text = cleaned_result.split('主题元素：')[1].split('\n')[0].strip()
-                elements = re.split(r'[，、,]', elements_text)
-                theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()]
+            # 提取主题元素
+            if '主题元素' in cleaned_result:
+                try:
+                    elements_text = cleaned_result.split('主题元素')[1].split('\n')[0]
+                    elements_text = elements_text.replace('：', '').replace(':', '').strip()
+                    elements = re.split(r'[，、,\n]', elements_text)
+                    theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()][:5]
+                except:
+                    theme_info['theme_elements'] = []
             elif 'Theme Elements:' in cleaned_result:
                 elements_text = cleaned_result.split('Theme Elements:')[1].split('\n')[0].strip()
                 elements = re.split(r'[,;]', elements_text)
@@ -7391,8 +6560,8 @@ Now convert this:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     self.log("✅ GPU内存已释放")
-            except Exception:
-                pass
+            except Exception as e:
+                self.log(f"警告: GPU内存释放失败 - {e}")
             
             self.log("✅ 资源清理完成")
             
@@ -7454,14 +6623,15 @@ Now convert this:
                 self.log(f"📦 缓存状态: {cache_stats['hits']}命中, {cache_stats['misses']}未命中")
             
             # 检查是否需要关闭Ollama以释放GPU资源给Whisper使用
-            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+            optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
             # 只有不使用大模型时才关闭Ollama
             if optimization_method not in ["本地大模型"]:
                 self.log("🧹 检查GPU资源状态...")
                 try:
                     import subprocess
+                    import platform
                     # 跨平台进程检测和终止
-                    if os.name == 'nt':  # Windows
+                    if platform.system() == 'Windows':  # Windows
                         result = subprocess.run(['tasklist'], capture_output=True, text=True)
                         if 'ollama.exe' in result.stdout:
                             self.log("⚠️ 检测到Ollama进程占用GPU，正在关闭以释放资源...")
@@ -7687,7 +6857,7 @@ Now convert this:
                 self.log("✅ 主题提取完成，将直接使用原始语音片段创建分镜")
             else:
                 # 检查用户是否选择了大模型优化方式
-                optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "脚本自带"
+                optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else "本地大模型"
                 
                 # 【修复】动态检测Ollama服务是否可用，而不是仅依赖启动时的状态
                 if optimization_method == "本地大模型" and len(full_text) > 100:
@@ -7748,8 +6918,6 @@ Now convert this:
                             
                             # 获取用户指定的模型
                             user_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-                            if user_model == "脚本自带":
-                                user_model = "gemma3:4b"
                             
                             # 定义模型优先级列表（包含本地所有已安装的Ollama模型）
                             # 按能力和稳定性排序，推理模型(deepseek-r1)不适合提示词生成
@@ -8004,6 +7172,82 @@ Now convert this:
                             user_custom_theme = ""
                             user_custom_tone = ""
                 
+                # 预先为所有分镜生成提示词（避免步骤3中32线程同时调用大模型导致超时）
+                # 仅在"本地大模型"模式下执行
+                self.log("   [诊断] 到达预生成代码段")
+                optimization_method = self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else ""
+                self.log(f"   [诊断] optimization_method: {optimization_method}")
+                
+                # 检查是否选择了有效的优化模式
+                if optimization_method != "本地大模型":
+                    self.log("❌ 错误：当前模式需要大模型支持，请选择'本地大模型'模式")
+                    return
+                
+                self.log(f"   [诊断] 开始预生成循环，original_shot_tasks 数量: {len(original_shot_tasks)}")
+                
+                pregenerated_prompts = {}
+                
+                self.log("\n🎨 预先为所有分镜生成提示词...")
+                self.log(f"   [诊断] original_shot_tasks 数量: {len(original_shot_tasks)}")
+                self.log(f"   [诊断] theme_info: {theme_info}")
+                
+                if not original_shot_tasks:
+                    self.log("   ⚠️ 没有原始分镜数据")
+                
+                failed_count = 0
+                self.log(f"   开始为 {len(original_shot_tasks)} 个分镜生成提示词...")
+                
+                # 记录开始时间，用于诊断
+                start_time = time.time()
+                
+                # 使用多线程并行生成提示词
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                import os
+                
+                cpu_count = os.cpu_count() or 4
+                thread_count = min(cpu_count, 4)  # 限制并发数为4，避免Ollama过载
+                
+                self.log(f"   使用 {thread_count} 个线程并行生成提示词...")
+                
+                def generate_single_prompt(task_data):
+                    idx, task = task_data
+                    dubbing = task.get('text', '')
+                    if dubbing:
+                        prompt = self._generate_prompt_with_llm(
+                            dubbing, 
+                            content_type="", 
+                            prompt_type="豆包",
+                            core_theme=theme_info.get('core_theme', '')
+                        )
+                        return idx, prompt
+                    return idx, ""
+                
+                with ThreadPoolExecutor(max_workers=thread_count) as executor:
+                    futures = {executor.submit(generate_single_prompt, (idx, task)): idx 
+                              for idx, task in enumerate(original_shot_tasks)}
+                    
+                    completed = 0
+                    for future in as_completed(futures):
+                        try:
+                            idx, prompt = future.result()
+                            pregenerated_prompts[idx] = prompt
+                            completed += 1
+                            if completed % 5 == 0:
+                                elapsed = time.time() - start_time
+                                self.log(f"   已生成 {completed}/{len(original_shot_tasks)} 个提示词 (耗时: {elapsed:.1f}秒)")
+                        except Exception as e:
+                            failed_count += 1
+                            self.log(f"   ❌ 提示词生成失败: {str(e)[:50]}")
+                
+                if failed_count > 0:
+                    self.log(f"❌ 错误: {failed_count} 个提示词生成失败，任务终止")
+                    return
+                
+                self.log(f"✅ 提示词预生成完成 ({len(pregenerated_prompts)} 个)")
+                
+                # 存储预生成的提示词供后续使用
+                self._pregenerated_prompts = pregenerated_prompts
+                
                 # 步骤3: 解析和校准分镜
                 self.log("\n📍 步骤 3/4: 解析和校准分镜")
 
@@ -8043,7 +7287,7 @@ Now convert this:
             shot_tasks = []
             for i, task in enumerate(original_shot_tasks):
                 text = task['text']
-                content_type = task['content_type']
+                shot_content_type = task.get('content_type', 'general')
                             
                 # 直接使用原始片段的时间戳
                 start_time = task['start']
@@ -8054,7 +7298,7 @@ Now convert this:
                     start_time,
                     end_time,
                     text,
-                    content_type
+                    shot_content_type
                 ))
             
             # 使用线程池并行创建分镜
@@ -8854,8 +8098,11 @@ Now convert this:
             # 直接拼接所有片段（硬切）
             if len(clips) > 1:
                 final_clip = concatenate_videoclips(clips, method="chain")
-            else:
+            elif len(clips) == 1:
                 final_clip = clips[0]
+            else:
+                self.log("错误：没有可用的视频片段")
+                return
             
             self.log(f"✅ 视频片段拼接完成，共 {len(clips)} 个片段")
             
@@ -8933,7 +8180,23 @@ Now convert this:
                     )
             except Exception as e:
                 self.log(f"⚠️ 视频渲染失败: {e}")
-                raise
+                if use_gpu:
+                    self.log("🔄 尝试使用CPU回退编码...")
+                    try:
+                        final_clip.write_videofile(
+                            output_path,
+                            fps=30,
+                            codec='libx264',
+                            audio_codec='aac',
+                            preset='veryfast',
+                            logger=None
+                        )
+                        self.log("✅ CPU回退编码成功")
+                    except Exception as e2:
+                        self.log(f"❌ CPU回退编码也失败: {e2}")
+                        raise
+                else:
+                    raise
             
             # 更新进度为完成
             self.update_task_progress("视频生成完成", 100)
@@ -9550,13 +8813,12 @@ Now convert this:
                 if 'api_url' in config:
                     self.sd_api_url_var.set(config['api_url'])
                 
-                # 加载大模型设置 - 默认使用脚本自带，避免大模型调用卡住
-                # 强制设置为"脚本自带"，用户需要手动开启才使用大模型
-                self.optimization_method_var.set("脚本自带")
+                # 加载大模型设置 - 默认使用本地大模型
+                self.optimization_method_var.set("本地大模型")
                     
-                # 加载Ollama模型设置 - 强制默认使用脚本自带
+                # 加载Ollama模型设置 - 默认使用gemma3:4b
                 if hasattr(self, 'ollama_model_var'):
-                    self.ollama_model_var.set("脚本自带")
+                    self.ollama_model_var.set("gemma3:4b")
                     
                 if 'llm_config_preset' in config and config['llm_config_preset']:
                     preset = config['llm_config_preset']
@@ -9633,8 +8895,8 @@ Now convert this:
                 'height': int(self.height_var.get()),
                 'api_type': self.api_var.get(),
                 'api_url': self.sd_api_url_var.get(),
-                'optimization_method': self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else '脚本自带',
-                'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else '脚本自带',
+                'optimization_method': self.optimization_method_var.get() if hasattr(self, 'optimization_method_var') else '本地大模型',
+                'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b',
                 'llm_config_preset': self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先',
                 'whisper_model': self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium',
                 'transition': self.transition_var.get(),
