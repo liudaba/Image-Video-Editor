@@ -1002,6 +1002,7 @@ class DocuMakerLiteV7:
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
         self.sd_api_url_var = tk.StringVar(value="http://localhost:7860")
+        self.sd_api_status_var = tk.StringVar(value="❌ 未连接")  # SD API 连接状态（提前初始化）
         
         # 大模型设置
         self.ollama_model_var = tk.StringVar(value="")
@@ -2283,10 +2284,16 @@ class DocuMakerLiteV7:
             response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=5)
             if response.status_code == 200:
                 self.log("✅ SD API 连接成功！")
-                if hasattr(self, 'sd_api_status_var') and hasattr(self, 'sd_api_status_label'):
+                
+                # 更新状态变量（即使 label 还不存在也要更新，这样面板打开时能显示正确状态）
+                if hasattr(self, 'sd_api_status_var'):
+                    self.sd_api_status_var.set("✅ 已连接")
+                
+                # 更新 UI 显示（如果 label 已存在）
+                if hasattr(self, 'sd_api_status_label'):
                     def update_ui():
-                        self.sd_api_status_var.set("✅ 已连接")
-                        self.sd_api_status_label.config(foreground="green")
+                        if hasattr(self, 'sd_api_status_label'):
+                            self.sd_api_status_label.config(foreground="green")
                     if hasattr(self, 'root') and self.root:
                         self.root.after(0, update_ui)
                 
@@ -2297,19 +2304,31 @@ class DocuMakerLiteV7:
                 return True
             else:
                 self.log(f"❌ SD API 连接失败: 状态码 {response.status_code}")
-                if hasattr(self, 'sd_api_status_var') and hasattr(self, 'sd_api_status_label'):
+                
+                # 更新状态变量
+                if hasattr(self, 'sd_api_status_var'):
+                    self.sd_api_status_var.set("❌ 未连接")
+                
+                # 更新 UI 显示
+                if hasattr(self, 'sd_api_status_label'):
                     def update_ui():
-                        self.sd_api_status_var.set("❌ 未连接")
-                        self.sd_api_status_label.config(foreground="red")
+                        if hasattr(self, 'sd_api_status_label'):
+                            self.sd_api_status_label.config(foreground="red")
                     if hasattr(self, 'root') and self.root:
                         self.root.after(0, update_ui)
                 return False
         except Exception as e:
             self.log(f"❌ SD API 连接异常: {str(e)}")
-            if hasattr(self, 'sd_api_status_var') and hasattr(self, 'sd_api_status_label'):
+            
+            # 更新状态变量
+            if hasattr(self, 'sd_api_status_var'):
+                self.sd_api_status_var.set("❌ 未连接")
+            
+            # 更新 UI 显示
+            if hasattr(self, 'sd_api_status_label'):
                 def update_ui():
-                    self.sd_api_status_var.set("❌ 未连接")
-                    self.sd_api_status_label.config(foreground="red")
+                    if hasattr(self, 'sd_api_status_label'):
+                        self.sd_api_status_label.config(foreground="red")
                 if hasattr(self, 'root') and self.root:
                     self.root.after(0, update_ui)
             return False
@@ -7572,10 +7591,19 @@ Now convert this:
             # 步骤7: 创建视频片段
             self.update_task_progress("正在创建视频片段...", 45)
             clips = []
+            total_shots = len(self.shots_data)
+            processed_shots = 0
             
             for shot in self.shots_data:
                 if check_cancelled():
                     return
+                
+                processed_shots += 1
+                
+                # 更新进度（45% - 55% 范围）
+                progress = 45 + int((processed_shots / total_shots) * 10)
+                if processed_shots % 10 == 0 or processed_shots == total_shots:  # 每10个分镜更新一次，避免频繁更新
+                    self.update_task_progress(f"正在创建视频片段 ({processed_shots}/{total_shots})...", progress)
                 
                 image_path = os.path.join(self.images_dir, shot['image_file'])
                 if os.path.exists(image_path):
@@ -7596,12 +7624,13 @@ Now convert this:
                     # 创建视频片段
                     clip = ImageClip(np.array(img)).with_duration(shot_duration)
                     
-                    # 应用动画效果（注意：必须在 set_start 之前调用）
+                    # 应用动画效果（注意：必须在设置起始时间之前调用）
                     if animation_type != "无":
                         clip = self.apply_animation_effect_prerender(clip)
                     
-                    # 精确定位到时间轴位置（必须在动画之后设置）
-                    clip = clip.set_start(shot['start'])
+                    # 精确定位到时间轴位置
+                    # 使用 with_start 方法（兼容 ImageClip 和 ImageSequenceClip）
+                    clip = clip.with_start(shot['start'])
                     
                     clips.append(clip)
                 else:
@@ -7639,6 +7668,7 @@ Now convert this:
             
             # 检测GPU加速
             use_gpu = False
+            gpu_preset = "p4"  # GPU 编码器预设（质量优先）
             try:
                 import torch
                 import subprocess
@@ -7646,22 +7676,25 @@ Now convert this:
                     result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
                     if 'h264_nvenc' in result.stdout:
                         use_gpu = True
-                        self.log("⚡ 使用GPU加速渲染")
+                        self.log(f"⚡ 使用GPU加速渲染 (h264_nvenc)")
+                        self.log(f"   📊 编码器预设: preset='{gpu_preset}' (质量优先)")
             except Exception:
                 pass
             
             if not use_gpu:
-                self.log("🖥️ 使用CPU渲染")
+                self.log("🖥️ 使用CPU渲染 (libx264, preset='veryfast')")
             
             # 渲染视频
             try:
                 if use_gpu:
-                    final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset='p4', logger=None)
+                    # 使用 p4 预设（质量优先），适合高质量输出
+                    final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset=gpu_preset, logger=None)
                 else:
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
             except Exception as e:
                 if use_gpu:
                     self.log(f"⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
+                    self.log("🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
                 else:
                     raise
@@ -7759,7 +7792,7 @@ Now convert this:
         """预渲染缩放动画效果 - 在生成时直接渲染帧序列
         
         注意：此函数返回新片段，会丢失原片段的 start 属性
-              调用方必须在调用此函数后重新设置 set_start()
+              调用方必须在调用此函数后重新设置 with_start()
         """
         try:
             import numpy as np
@@ -7998,131 +8031,124 @@ Now convert this:
             traceback.print_exc()
     
     def direct_render_video(self):
-        """直接渲染视频"""
-        try:
-            self.log("🎞️ 开始直接渲染视频...")
-            
-            # 检查1: 是否已导入音频
-            if not self.audio_path or not os.path.exists(self.audio_path):
-                self.log("❌ 错误: 请先导入音频文件")
-                import tkinter as tk
-                from tkinter import messagebox
-                root = self.root if hasattr(self, 'root') else None
-                if root:
-                    root.after(0, lambda: messagebox.showerror("缺少音频", "请先导入音频文件"))
-                return
-            
-            # 检查2: 是否存在分镜脚本数据，如果没有尝试从文件加载
-            if not hasattr(self, 'shots_data') or not self.shots_data:
-                # 尝试从文件加载分镜数据
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    try:
-                        with open(shots_file, 'r', encoding='utf-8') as f:
-                            self.shots_data = json.load(f)
-                        for shot in self.shots_data:
-                            if 'description' in shot and shot['description']:
-                                shot['description'] = self.clean_text(shot['description'])
-                        self.log(f"📂 从文件加载了分镜数据: {len(self.shots_data)} 个分镜")
-                    except Exception as e:
-                        self.log(f"⚠️ 加载分镜数据失败: {e}")
-                        self.shots_data = []
-            
-            # 再次检查分镜数据
-            if not hasattr(self, 'shots_data') or not self.shots_data:
-                self.log("❌ 错误: 没有分镜脚本数据，无法将图片与音频时间戳对应")
-                import tkinter as tk
-                from tkinter import messagebox
-                root = self.root if hasattr(self, 'root') else None
-                if root:
-                    root.after(0, lambda: messagebox.showerror("缺少分镜脚本", "请先生成分镜脚本"))
-                return
-            
-            # 检查3: 是否有图片文件夹
-            if not os.path.exists(self.images_dir):
-                self.log("❌ 错误: 图片文件夹不存在")
-                return
-            
-            # 获取图片文件 (.png 或 .jpg)
-            image_files = [f for f in os.listdir(self.images_dir) if f.endswith('.png') or f.endswith('.jpg')]
-            if not image_files:
-                self.log("❌ 错误: 没有找到图片文件")
-                return
-            
-            self.log(f"📁 找到 {len(image_files)} 个图片文件")
-            
-            # 提取图片序号并创建映射
-            import re
-            def extract_number(filename):
-                match = re.search(r'\d+', filename)
-                return int(match.group()) if match else None
-            
-            # 创建图片序号映射
-            image_map = {}
-            for img_file in image_files:
-                num = extract_number(img_file)
-                if num:
-                    image_map[num] = img_file
-            
-            # 检查4: 图片数量是否与分镜脚本数量一致
-            expected_shots = len(self.shots_data)
-            if len(image_map) != expected_shots:
-                warning_msg = f"⚠️ 警告: 有效图片数量({len(image_map)})与分镜脚本数量({expected_shots})不一致！\n请确保每个分镜都有对应的图片，且图片文件名包含正确的序号。"
-                self.log(warning_msg)
-                import tkinter as tk
-                from tkinter import messagebox
-                root = self.root if hasattr(self, 'root') else None
-                if root:
-                    root.after(0, lambda: messagebox.showwarning("数量不匹配", warning_msg))
-            
-            # 检查5: 确保所有分镜都有对应的图片
-            missing_shots = []
-            for i, shot in enumerate(self.shots_data):
-                expected_num = i + 1
-                if expected_num not in image_map:
-                    missing_shots.append(expected_num)
-            
-            if missing_shots:
-                error_msg = f"❌ 错误: 缺少以下序号的图片: {', '.join(map(str, missing_shots))}\n请确保图片文件名包含正确的序号。"
-                self.log(error_msg)
-                import tkinter as tk
-                from tkinter import messagebox
-                root = self.root if hasattr(self, 'root') else None
-                if root:
-                    root.after(0, lambda: messagebox.showerror("缺少图片", error_msg))
-                return
-            
-            # 直接调用视频生成（跳过清除步骤和图片检查）
-            def direct_render_worker():
+        """直接渲染视频 - 所有检查和渲染都在后台线程执行，避免阻塞 UI"""
+        
+        # 快速预检查（仅检查关键变量是否存在，不进行 IO 操作）
+        if not self.audio_path:
+            self.log("❌ 错误: 请先导入音频文件")
+            messagebox.showerror("缺少音频", "请先导入音频文件")
+            return
+        
+        # 启动后台线程执行完整流程
+        def direct_render_worker():
+            try:
+                self.log("🎞️ 开始直接渲染视频...")
                 self.task_running = True
                 self.pause_event.set()
-                try:
-                    self.generate_video(skip_clear=True, use_original_resolution=True, skip_image_check=True)
-                finally:
-                    self.task_running = False
                 
-                # 视频生成完成后，在主线程显示完成通知
-                def show_completion_notification():
+                # === 所有检查都在后台线程执行 ===
+                
+                # 检查1: 音频文件是否存在
+                if not self.audio_path or not os.path.exists(self.audio_path):
+                    self.log("❌ 错误: 音频文件不存在")
+                    self.root.after(0, lambda: messagebox.showerror("缺少音频", "请先导入音频文件"))
+                    return
+                
+                # 检查2: 是否存在分镜脚本数据
+                if not hasattr(self, 'shots_data') or not self.shots_data:
+                    shots_file = os.path.join(self.output_dir, "shots_data.json")
+                    if os.path.exists(shots_file):
+                        try:
+                            with open(shots_file, 'r', encoding='utf-8') as f:
+                                self.shots_data = json.load(f)
+                            for shot in self.shots_data:
+                                if 'description' in shot and shot['description']:
+                                    shot['description'] = self.clean_text(shot['description'])
+                            self.log(f"📂 从文件加载了分镜数据: {len(self.shots_data)} 个分镜")
+                        except Exception as e:
+                            self.log(f"⚠️ 加载分镜数据失败: {e}")
+                            self.shots_data = []
+                
+                if not hasattr(self, 'shots_data') or not self.shots_data:
+                    self.log("❌ 错误: 没有分镜脚本数据")
+                    self.root.after(0, lambda: messagebox.showerror("缺少分镜脚本", "请先生成分镜脚本"))
+                    return
+                
+                # 检查3: 图片文件夹
+                if not os.path.exists(self.images_dir):
+                    self.log("❌ 错误: 图片文件夹不存在")
+                    self.root.after(0, lambda: messagebox.showerror("错误", "图片文件夹不存在"))
+                    return
+                
+                # 检查4: 获取图片文件并创建映射
+                import re
+                image_files = [f for f in os.listdir(self.images_dir) if f.endswith('.png') or f.endswith('.jpg')]
+                if not image_files:
+                    self.log("❌ 错误: 没有找到图片文件")
+                    self.root.after(0, lambda: messagebox.showerror("错误", "没有找到图片文件"))
+                    return
+                
+                self.log(f"📁 找到 {len(image_files)} 个图片文件")
+                
+                # 创建图片序号映射
+                def extract_number(filename):
+                    match = re.search(r'\d+', filename)
+                    return int(match.group()) if match else None
+                
+                image_map = {}
+                for img_file in image_files:
+                    num = extract_number(img_file)
+                    if num:
+                        image_map[num] = img_file
+                
+                # 检查5: 图片数量是否与分镜脚本数量一致
+                expected_shots = len(self.shots_data)
+                if len(image_map) != expected_shots:
+                    self.log(f"⚠️ 警告: 图片数量({len(image_map)})与分镜数量({expected_shots})不一致")
+                
+                # 检查6: 确保所有分镜都有对应的图片
+                missing_shots = []
+                for i, shot in enumerate(self.shots_data):
+                    expected_num = i + 1
+                    if expected_num not in image_map:
+                        missing_shots.append(expected_num)
+                
+                if missing_shots:
+                    error_msg = f"❌ 缺少图片序号: {', '.join(map(str, missing_shots[:10]))}"
+                    if len(missing_shots) > 10:
+                        error_msg += f" ... 共 {len(missing_shots)} 个"
+                    self.log(error_msg)
+                    self.root.after(0, lambda: messagebox.showerror("缺少图片", error_msg))
+                    return
+                
+                # === 执行视频生成 ===
+                self.generate_video(skip_clear=True, use_original_resolution=True, skip_image_check=True)
+                
+            except Exception as e:
+                self.log(f"❌ 直接渲染视频失败: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.task_running = False
+                
+                # 视频生成完成后显示通知
+                def show_completion():
                     try:
-                        from tkinter import messagebox
                         messagebox.showinfo(
                             "🎉 任务完成",
                             "视频生成已完成！\n\n您可以在输出文件夹中查看生成的视频文件。",
                             icon='info'
                         )
-                    except Exception as e:
-                        self.log(f"⚠️ 显示完成通知失败: {e}")
+                    except Exception:
+                        pass
                 
-                # 在主线程中显示通知
                 if hasattr(self, 'root') and self.root:
-                    self.root.after(0, show_completion_notification)
-            
-            thread = threading.Thread(target=direct_render_worker, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.log(f"❌ 直接渲染视频失败: {e}")
-            import traceback
-            traceback.print_exc()
+                    self.root.after(0, show_completion)
+        
+        # 启动后台线程
+        thread = threading.Thread(target=direct_render_worker, daemon=True)
+        thread.start()
+        self.log("✅ 渲染任务已启动，请在后台查看进度...")
     
     def generate_shots_threaded(self):
         """线程化生成分镜 - 修复线程安全问题"""
