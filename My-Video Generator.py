@@ -7508,23 +7508,32 @@ Now convert this:
             audio = AudioFileClip(self.audio_path)
             audio_duration = audio.duration
             
-            # 校准时间轴
-            self.update_task_progress("正在校准时间轴...", 35)
+            # 验证时间轴（只显示信息，不修改原始时间戳）
+            self.update_task_progress("正在验证时间轴...", 35)
             total_shots_duration = 0
             for shot in self.shots_data:
                 expected_duration = shot['end'] - shot['start']
                 shot['duration'] = expected_duration
                 total_shots_duration += expected_duration
             
-            self.log(f"📊 音频: {audio_duration:.2f}s, 分镜: {total_shots_duration:.2f}s")
+            self.log(f"📊 音频时长: {audio_duration:.2f}s, 分镜总时长: {total_shots_duration:.2f}s")
             
-            # 如果时长差异超过10ms，调整分镜时长
-            if abs(total_shots_duration - audio_duration) > 0.01:
-                ratio = audio_duration / total_shots_duration
-                for shot in self.shots_data:
-                    shot['duration'] *= ratio
-                    shot['end'] = shot['start'] + shot['duration']
-                self.log(f"✅ 时间轴已校准")
+            # 计算时间间隔和重叠
+            total_gaps = 0
+            total_overlap = 0
+            for i in range(1, len(self.shots_data)):
+                gap = self.shots_data[i]['start'] - self.shots_data[i-1]['end']
+                if gap > 0.05:
+                    total_gaps += gap
+                elif gap < 0:
+                    total_overlap += abs(gap)
+            
+            if total_gaps > 0:
+                self.log(f"   ⏱️ 时间间隔: {total_gaps:.2f}s")
+            if total_overlap > 0:
+                self.log(f"   ⚠️ 时间重叠: {total_overlap:.2f}s")
+            
+            self.log("   📍 保持原始语音时间戳，确保音画同步")
             
             if check_cancelled():
                 return
@@ -7540,14 +7549,22 @@ Now convert this:
             width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
             height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
             
-            # 检测是否有时间间隔
+            # 检测是否有时间间隔或重叠
+            # 始终使用精确定位模式，保持语音时间戳不变
+            # 这样可以确保图片显示时间与语音片段精确对应
             has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
                           for i in range(1, len(self.shots_data)))
+            has_overlap = any(self.shots_data[i]['start'] < self.shots_data[i-1]['end'] 
+                             for i in range(1, len(self.shots_data)))
             
             if has_gaps:
                 self.log("   ⚠️ 检测到时间间隔，使用精确定位模式")
+            elif has_overlap:
+                self.log("   ⚠️ 检测到时间重叠，使用精确定位模式")
             else:
-                self.log("   ✅ 时间戳连续，使用拼接模式")
+                self.log("   ✅ 时间戳连续，使用精确定位模式")
+            
+            self.log("   📍 保持原始语音时间戳，确保音画同步")
             
             if check_cancelled():
                 return
@@ -7568,16 +7585,23 @@ Now convert this:
                     # 调整图片尺寸
                     img = self._resize_image_to_fit(orig_img, width, height)
                     
+                    # 计算图片显示时长（基于原始语音片段时间戳）
+                    shot_duration = shot['end'] - shot['start']
+                    
+                    # 边界检查：时长无效时跳过此片段
+                    if shot_duration <= 0:
+                        self.log(f"⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
+                        continue
+                    
                     # 创建视频片段
-                    clip = ImageClip(np.array(img)).with_duration(shot['duration'])
+                    clip = ImageClip(np.array(img)).with_duration(shot_duration)
                     
-                    # 有时间间隔时使用set_start定位
-                    if has_gaps:
-                        clip = clip.set_start(shot['start'])
-                    
-                    # 应用动画效果
+                    # 应用动画效果（注意：必须在 set_start 之前调用）
                     if animation_type != "无":
                         clip = self.apply_animation_effect_prerender(clip)
+                    
+                    # 精确定位到时间轴位置（必须在动画之后设置）
+                    clip = clip.set_start(shot['start'])
                     
                     clips.append(clip)
                 else:
@@ -7596,26 +7620,9 @@ Now convert this:
             # 步骤8: 合成视频片段
             self.update_task_progress("正在合成视频...", 50)
             
-            if has_gaps:
-                # 有时间间隔：使用 CompositeVideoClip 精确定位
-                background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
-                final_clip = CompositeVideoClip([background] + clips, size=(width, height))
-            else:
-                # 无时间间隔：使用 concatenate_videoclips 拼接
-                final_clip = concatenate_videoclips(clips, method="chain") if len(clips) > 1 else clips[0]
-                
-                # 处理时长差异
-                video_duration = final_clip.duration
-                if video_duration < audio_duration:
-                    # 延长最后一帧
-                    clips[-1] = clips[-1].with_duration(clips[-1].duration + (audio_duration - video_duration))
-                    final_clip = concatenate_videoclips(clips, method="chain")
-                elif video_duration > audio_duration:
-                    # 截断最后一帧
-                    new_duration = clips[-1].duration - (video_duration - audio_duration)
-                    if new_duration > 0:
-                        clips[-1] = clips[-1].with_duration(new_duration)
-                        final_clip = concatenate_videoclips(clips, method="chain")
+            # 始终使用 CompositeVideoClip 精确定位，保持音画同步
+            background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
+            final_clip = CompositeVideoClip([background] + clips, size=(width, height))
             
             self.log(f"✅ 视频片段合成完成: {len(clips)} 个")
             
@@ -7749,15 +7756,27 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect_prerender(self, clip):
-        """预渲染缩放动画效果 - 在生成时直接渲染帧序列"""
+        """预渲染缩放动画效果 - 在生成时直接渲染帧序列
+        
+        注意：此函数返回新片段，会丢失原片段的 start 属性
+              调用方必须在调用此函数后重新设置 set_start()
+        """
         try:
             import numpy as np
             from PIL import Image
             from moviepy import ImageSequenceClip
             
+            # 保存原始时长
+            original_duration = clip.duration
+            
+            # 边界检查：时长无效时直接返回原片段
+            if not original_duration or original_duration <= 0:
+                self.log("⚠️ 动画片段时长无效，跳过动画效果")
+                return clip
+            
             frames = []
             fps = 30
-            num_frames = int(clip.duration * fps)
+            num_frames = max(1, int(original_duration * fps))  # 至少1帧
             w, h = clip.size
             
             for frame_idx in range(num_frames):
@@ -7769,11 +7788,13 @@ Now convert this:
                 else:
                     img = frame
                 
-                scale = 1.0 + 0.05 * (t / clip.duration)
+                # 缩放：从 1.0 到 1.05 的缓慢放大效果
+                scale = 1.0 + 0.05 * (t / original_duration)
                 new_w = int(w * scale)
                 new_h = int(h * scale)
                 resized = img.resize((new_w, new_h), Image.LANCZOS)
                 
+                # 裁剪回原始尺寸（居中裁剪）
                 if new_w > w:
                     left = (new_w - w) // 2
                     top = (new_h - h) // 2
@@ -7781,7 +7802,14 @@ Now convert this:
                 
                 frames.append(np.array(resized))
             
+            # 创建新片段，确保时长与原始一致
             animated_clip = ImageSequenceClip(frames, fps=fps)
+            
+            # 验证时长
+            if abs(animated_clip.duration - original_duration) > 0.01:
+                # 如果时长有偏差，强制设置为原始时长
+                animated_clip = animated_clip.with_duration(original_duration)
+            
             return animated_clip
         except Exception as e:
             self.log(f"⚠️ 预渲染动画效果失败: {e}")
