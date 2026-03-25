@@ -628,18 +628,26 @@ class PromptTemplates:
 - 只输出英文关键词，逗号分隔
 - 描述可拍摄的画面
 - 不要输出解释、标题、标注
+- 必须将用户提供的"核心主题"和"视觉基调"融入提示词
 
 {style_instruction}
+{theme_instruction}
 
 【示例】
 配音："中东战事升级"
-输出：Middle Eastern war zone, destroyed buildings with smoke, military tanks on desert road, fighter jets overhead, dramatic sunset lighting, news photography, 4K realistic, cinematic
+核心主题：战争反思
+视觉基调：冷色调，沉重深刻
+输出：Middle Eastern war zone, destroyed buildings with smoke, military tanks on desert road, fighter jets overhead, cold blue tones, somber atmosphere, war documentary style, news photography, 4K realistic
 
 配音："科学家发现新黑洞"
-输出：Space telescope control room, scientists examining data screens, cosmic imagery on displays, astronomical charts, research facility interior, professional photography, high detail, sharp focus
+核心主题：宇宙探索
+视觉基调：神秘，科技感
+输出：Space telescope control room, scientists examining data screens, cosmic imagery on displays, mysterious deep space elements, high-tech atmosphere, professional photography, high detail, sharp focus
 
 配音："幸福的一家人"
-输出：Happy Asian family, warm home interior, soft natural lighting, candid moment, lifestyle photography, 4K, high detail
+核心主题：家庭温情
+视觉基调：温暖，明亮
+输出：Happy Asian family, warm home interior, soft golden natural lighting, candid moment, warm and bright atmosphere, lifestyle photography, 4K, high detail
 
 【必加标签】realistic, 4K, high detail""",
         
@@ -656,18 +664,26 @@ class PromptTemplates:
 - 只输出中文关键词，逗号分隔
 - 描述可拍摄的画面
 - 不要输出解释、标题、标注
+- 必须将用户提供的"核心主题"和"视觉基调"融入提示词
 
 {style_instruction}
+{theme_instruction}
 
 【示例】
 配音："中东战事升级"
-输出：中东战区，冒着浓烟的废墟建筑，沙漠公路上的坦克，头顶的战斗机，戏剧性日落光线，新闻摄影风格，高清画质，电影感
+核心主题：战争反思
+视觉基调：冷色调，沉重深刻
+输出：中东战区，冒着浓烟的废墟建筑，沙漠公路上的坦克，头顶的战斗机，冷色调画面，沉重深刻的氛围，战地纪录片风格，新闻摄影风格，高清画质
 
 配音："科学家发现新黑洞"
-输出：太空望远镜控制室，科学家查看数据屏幕，显示屏上的宇宙图像，天文图表，科研机构内部，专业摄影，高细节，锐利对焦
+核心主题：宇宙探索
+视觉基调：神秘，科技感
+输出：太空望远镜控制室，科学家查看数据屏幕，显示屏上的宇宙图像，神秘的深空元素，高科技氛围，专业摄影，高细节，锐利对焦
 
 配音："幸福的一家人"
-输出：幸福的亚洲家庭，温馨的家居环境，柔和自然光，抓拍瞬间，生活摄影风格，高清画质，细节丰富
+核心主题：家庭温情
+视觉基调：温暖，明亮
+输出：幸福的亚洲家庭，温馨的家居环境，温暖明亮的自然光，抓拍瞬间，生活摄影风格，高清画质，细节丰富
 
 【必加标签】真实感，高清画质，细节丰富""",
         
@@ -704,35 +720,63 @@ class PromptTemplates:
         
         template = templates[template_type]
         
-        # 处理风格指令
-        visual_style = kwargs.get("visual_style", "")
-        is_sd = template_type == "shot_prompt_sd"
+        # 只有 shot_prompt 模板需要处理 style_instruction 和 theme_instruction
+        is_shot_prompt = template_type in ["shot_prompt_sd", "shot_prompt_doubao"]
         
-        if visual_style and visual_style.strip():
-            # 用户预设了风格，强制使用该风格
-            if is_sd:
+        if is_shot_prompt:
+            # 处理风格指令
+            visual_style = kwargs.get("visual_style", "")
+            is_sd = template_type == "shot_prompt_sd"
+            
+            if visual_style and visual_style.strip():
+                # 用户预设了风格，强制使用该风格
                 style_instruction = f"""【重要：必须使用用户预设的风格】
 用户预设的视觉风格：{visual_style}
 你必须严格按照此风格生成提示词，禁止自行更改或添加其他风格。"""
             else:
-                style_instruction = f"""【重要：必须使用用户预设的风格】
-用户预设的视觉风格：{visual_style}
-你必须严格按照此风格生成提示词，禁止自行更改或添加其他风格。"""
+                # 用户未预设风格，让模型自主选择
+                style_instruction = """【风格选择】
+根据内容自主选择合适的视觉风格（如电影感、新闻纪实、艺术摄影、商业摄影等）。"""
+            
+            # 处理主题指令（核心主题 + 视觉基调）
+            core_theme = kwargs.get("core_theme", "")
+            visual_tone = kwargs.get("visual_tone", "")
+            
+            if (core_theme and core_theme != "未指定") or (visual_tone and visual_tone.strip()):
+                # 用户设置了主题或基调，生成指令
+                theme_parts = []
+                if core_theme and core_theme != "未指定":
+                    theme_parts.append(f"核心主题：{core_theme}")
+                if visual_tone and visual_tone.strip():
+                    theme_parts.append(f"视觉基调：{visual_tone}")
+                
+                theme_text = "，".join(theme_parts)
+                theme_instruction = f"""【重要：必须融入以下元素】
+{theme_text}
+你生成的提示词必须体现以上主题和基调，将其转化为具体的视觉元素。"""
+            else:
+                # 用户未设置，不需要额外指令
+                theme_instruction = ""
+            
+            # 格式化 system prompt（同时处理两个占位符）
+            system_content = template["system"].format(
+                style_instruction=style_instruction,
+                theme_instruction=theme_instruction
+            )
+            
+            # 构建 user prompt
+            dubbing = kwargs.get("dubbing", "")
+            user_content = f"""配音：{dubbing}
+
+输出提示词："""
         else:
-            # 用户未预设风格，让模型自主选择
-            if is_sd:
-                style_instruction = """【风格选择】
-根据内容自主选择合适的视觉风格（如电影感、新闻纪实、艺术摄影、商业摄影等）。"""
-            else:
-                style_instruction = """【风格选择】
-根据内容自主选择合适的视觉风格（如电影感、新闻纪实、艺术摄影、商业摄影等）。"""
-        
-        # 格式化 system prompt
-        system_content = template["system"].format(style_instruction=style_instruction)
+            # theme_analysis 模板，直接使用原模板
+            system_content = template["system"]
+            user_content = template["user_template"].format(**kwargs)
         
         return {
             "system": system_content,
-            "user": template["user_template"].format(**kwargs) if kwargs else template["user_template"]
+            "user": user_content
         }
 
 
@@ -1329,18 +1373,17 @@ class DocuMakerLiteV7:
         # 默认模型列表（当 SD API 未连接时使用）
         self._default_models = ["使用当前模型", "Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3"]
         
-        # 尝试从 SD API 获取可用模型
-        sd_models = self._get_sd_models_from_api()
-        if sd_models:
-            models = ["使用当前模型"] + sd_models
-        else:
-            models = self._default_models
+        # 先使用默认列表快速显示窗口，避免阻塞
+        models = self._default_models
         
         model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=models, state="readonly", font=("Microsoft YaHei", large_font_size))
         model_combo.pack(fill=tk.X, padx=5, pady=2)
         
         # 保存下拉菜单引用，以便后续更新
         self.model_combo = model_combo
+        
+        # 异步获取 SD 模型列表（不阻塞 UI）
+        self._async_update_sd_models()
         
         # 图片像素设置
         pixel_frame = ttk.Frame(section_frame)
@@ -2163,6 +2206,8 @@ class DocuMakerLiteV7:
         width = self.width_var.get() if hasattr(self, 'width_var') else "1920"
         height = self.height_var.get() if hasattr(self, 'height_var') else "1080"
         prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
+        custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+        custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
         
         # 收集风格设置
         selected_styles = []
@@ -2176,6 +2221,10 @@ class DocuMakerLiteV7:
         confirm_msg += f"模型: {model}\n"
         confirm_msg += f"提示词类型: {prompt_type}\n"
         confirm_msg += f"图片尺寸: {width}x{height}\n"
+        if custom_theme:
+            confirm_msg += f"核心主题: {custom_theme}\n"
+        if custom_tone:
+            confirm_msg += f"视觉基调: {custom_tone}\n"
         if selected_styles:
             confirm_msg += f"风格预设: {', '.join(selected_styles)}\n"
         else:
@@ -2188,6 +2237,10 @@ class DocuMakerLiteV7:
         if confirmed:
             # 应用设置
             msg = f"设置已应用:\n模型: {model}\n提示词类型: {prompt_type}\n尺寸: {width}x{height}"
+            if custom_theme:
+                msg += f"\n核心主题: {custom_theme}"
+            if custom_tone:
+                msg += f"\n视觉基调: {custom_tone}"
             self.log(msg)
             # 保存配置
             self.save_config()
@@ -2286,6 +2339,29 @@ class DocuMakerLiteV7:
         except Exception as e:
             pass  # 静默失败，使用默认列表
         return []
+    
+    def _async_update_sd_models(self):
+        """异步获取并更新 SD 模型列表（不阻塞 UI）"""
+        def _fetch_and_update():
+            try:
+                sd_models = self._get_sd_models_from_api()
+                if sd_models and hasattr(self, 'model_combo'):
+                    # 在主线程中更新 UI
+                    def update_ui():
+                        try:
+                            models = ["使用当前模型"] + sd_models
+                            self.model_combo['values'] = models
+                        except Exception:
+                            pass
+                    if hasattr(self, 'root') and self.root:
+                        self.root.after(0, update_ui)
+            except Exception:
+                pass  # 静默失败
+        
+        # 在后台线程中执行
+        import threading
+        thread = threading.Thread(target=_fetch_and_update, daemon=True)
+        thread.start()
     
     def _update_model_dropdown(self):
         """更新模型下拉菜单（在 SD API 连接成功后调用）"""
@@ -5644,15 +5720,22 @@ Now convert this:
             'evictions': 0,
             'size': 0
         }
+        # 缓存清理线程控制标志
+        self.cache_cleanup_running = True
         # 启动缓存清理线程
         threading.Thread(target=self.cache_cleanup, daemon=True).start()
         self.log("✅ 缓存系统初始化完成")
     
     def cache_cleanup(self):
         """定期清理过期缓存"""
-        while True:
+        while getattr(self, 'cache_cleanup_running', True):
             try:
                 time.sleep(self.cache_config['cleanup_interval'])
+                
+                # 检查是否应该退出
+                if not getattr(self, 'cache_cleanup_running', True):
+                    break
+                    
                 current_time = time.time()
                 evicted = 0
                 
@@ -5674,6 +5757,9 @@ Now convert this:
                     self.cache_stats['size'] = sum(len(items) for items in self.cache_system.values())
                     self.log(f"🔄 缓存清理完成，移除了 {evicted} 个过期项")
             except Exception as e:
+                # 检查是否因为关闭导致的异常
+                if not getattr(self, 'cache_cleanup_running', True):
+                    break
                 self.log(f"⚠️ 缓存清理失败: {e}")
     
     def cache_get(self, category, key):
@@ -5943,80 +6029,107 @@ Now convert this:
                 self.process_task_queue()
 
     def on_close(self):
-        """关闭窗口时的处理 - 增强版，确保内存完全释放"""
+        """关闭窗口时的处理 - 增强版，确保快速退出"""
         try:
             self.log("🔄 正在关闭程序，清理资源...")
             
-            # 停止性能监控线程
-            if hasattr(self, 'perf_monitor_running'):
-                self.perf_monitor_running = False
-                self.log("🔄 性能监控已停止")
-                # 等待监控线程退出（最多等待3秒）
-                if hasattr(self, 'perf_monitor_thread') and self.perf_monitor_thread.is_alive():
-                    self.perf_monitor_thread.join(timeout=3)
-                    if self.perf_monitor_thread.is_alive():
-                        self.log("⚠️ 性能监控线程未能在3秒内退出")
+            # 1. 立即停止所有后台线程标志
+            self.perf_monitor_running = False
+            self.cache_cleanup_running = False
+            self.task_running = False
             
-            # 取消待处理的resize定时器
-            if hasattr(self, 'resize_timer') and self.resize_timer:
-                self.root.after_cancel(self.resize_timer)
-                self.resize_timer = None
+            # 2. 取消所有 tkinter after 定时器
+            try:
+                if hasattr(self, 'resize_timer') and self.resize_timer:
+                    self.root.after_cancel(self.resize_timer)
+                    self.resize_timer = None
+            except Exception:
+                pass
             
-            # 保存配置
-            self.save_config()
+            # 3. 保存配置（快速保存，不阻塞）
+            try:
+                self.save_config()
+            except Exception:
+                pass
             
-            # 关闭线程池
-            self.shutdown_thread_pool()
+            # 4. 停止所有活动任务
+            try:
+                with self.task_lock:
+                    self.task_paused = False
+                    self.pause_event.set()  # 唤醒可能暂停的任务
+                    self.task_queue.clear()
+                    self.current_task = None
+            except Exception:
+                pass
             
-            # 停止所有活动任务
-            with self.task_lock:
-                self.task_running = False
-                self.task_paused = False
-                self.task_queue.clear()
-                self.current_task = None
+            # 5. 快速关闭线程池（不等待）
+            try:
+                if hasattr(self, 'executor'):
+                    # 使用 cancel_futures=True 取消未开始的任务
+                    try:
+                        self.executor.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        # Python 3.8 及以下版本
+                        self.executor.shutdown(wait=False)
+            except Exception:
+                pass
             
-            # 释放Whisper模型内存
+            # 6. 释放 Whisper 模型内存（异步，不阻塞）
             if self.whisper_model is not None:
-                self.log("🔄 释放Whisper模型内存...")
                 try:
                     import torch
                     del self.whisper_model
                     self.whisper_model = None
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                except Exception as e:
-                    print(f"释放Whisper模型失败: {e}")
+                except Exception:
+                    pass
             
-            # 清理缓存数据
-            if hasattr(self, 'shots_data'):
-                self.shots_data = []
-            if hasattr(self, 'cache_system'):
-                self.cache_system = {}
+            # 7. 清理缓存数据
+            self.shots_data = []
+            self.cache_system = {}
             
-            # 强制垃圾回收
+            # 8. 强制垃圾回收
             import gc
             gc.collect()
             
-            # 再次清理CUDA缓存
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    self.log("✅ GPU内存已释放")
-            except Exception as e:
-                self.log(f"警告: GPU内存释放失败 - {e}")
+            self.log("✅ 资源清理完成，正在退出...")
             
-            self.log("✅ 资源清理完成")
-            
-            # 销毁窗口
+            # 9. 销毁窗口
             self.root.destroy()
+            
         except Exception as e:
             print(f"关闭窗口时出错: {e}")
-            # 即使出错也要尝试销毁窗口
             try:
                 self.root.destroy()
             except Exception:
                 pass
+        
+        # 10. 释放控制台窗口（如果在 pythonw 模式下创建）
+        try:
+            # 检查是否在 pythonw 模式下运行或创建了控制台
+            if hasattr(sys, 'executable') and 'pythonw' in sys.executable.lower():
+                # 关闭标准输出和错误输出
+                if sys.stdout and hasattr(sys.stdout, 'close'):
+                    try:
+                        sys.stdout.close()
+                    except Exception:
+                        pass
+                if sys.stderr and hasattr(sys.stderr, 'close'):
+                    try:
+                        sys.stderr.close()
+                    except Exception:
+                        pass
+                # 释放控制台窗口
+                import ctypes
+                ctypes.windll.kernel32.FreeConsole()
+        except Exception:
+            pass
+        
+        # 11. 强制退出进程（确保不残留）
+        # 使用 os._exit 而不是 sys.exit，跳过剩余的清理代码
+        import os
+        os._exit(0)
     
     def system_check(self):
         """系统检查"""
@@ -6585,8 +6698,16 @@ Now convert this:
                                 'scene_suggestions': '',
                                 'emotional_tone': ''
                             }
-                            user_custom_theme = ""
-                            user_custom_tone = ""
+                            # 即使大模型分析失败，也要保留用户设置的主题和基调
+                            user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
+                            user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
+                            # 将用户设置应用到 theme_info
+                            if user_custom_theme:
+                                theme_info['core_theme'] = user_custom_theme
+                                self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
+                            if user_custom_tone:
+                                theme_info['visual_tone'] = user_custom_tone
+                                self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
             
             # 预先为所有分镜生成提示词（无论是否有缓存都要执行）
             pregenerated_prompts = {}
