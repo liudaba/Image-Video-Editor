@@ -12,6 +12,35 @@ import time
 # 添加src目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+# 导入增强版内容识别模块
+try:
+    from video_generator.enhanced_content_recognition import (
+        get_enhanced_recognizer, 
+        EnhancedContentRecognizer,
+        COUNTRY_MAPPING,
+        REGION_MAPPING,
+        CITY_MAPPING,
+        ORGANIZATION_MAPPING,
+        MILITARY_MAPPING,
+        CONTENT_TYPE_KEYWORDS
+    )
+    ENHANCED_RECOGNITION_AVAILABLE = True
+except ImportError:
+    ENHANCED_RECOGNITION_AVAILABLE = False
+    print("⚠️ 增强版内容识别模块未找到，使用内置识别")
+
+# 导入 ARV 提示词模板模块（混合模式）
+try:
+    from video_generator.prompts_arv import (
+        ARVPromptTemplates,
+        PRESET_PROMPTS,
+        quick_generate_arv_prompt
+    )
+    ARV_PROMPTS_AVAILABLE = True
+except ImportError:
+    ARV_PROMPTS_AVAILABLE = False
+    print("⚠️ ARV提示词模板模块未找到，使用大模型生成所有提示词")
+
 # 检测是否在 pythonw 环境下运行（无控制台窗口）
 # pythonw.exe 不会创建控制台，sys.stdout/stderr 为 None
 # 这会导致依赖控制台输出的库（如Whisper）抛出 'NoneType' object has no attribute 'write' 错误
@@ -594,7 +623,58 @@ class PromptTemplates:
     2. 大模型负责：通篇分析、纠正错别字、捋清语义、确定主题基调、生成优化的提示词
     3. 不限制大模型的创作方式，让它根据内容自主发挥
     4. 输出必须是纯粹的提示词，不含任何解释性文字
+    5. 统一视觉风格：电影纪实风格，4K画质，真实感
     """
+    
+    # 统一的视觉风格基础标签
+    UNIFIED_STYLE_BASE = {
+        "sd": "documentary photography, news footage style, realistic, 4K, high detail, sharp focus, cinematic lighting",
+        "doubao": "纪录片风格，新闻摄影，真实感，高清画质，细节丰富，电影级光影"
+    }
+    
+    # 内容类型对应的视觉风格
+    CONTENT_TYPE_STYLE = {
+        "military": {
+            "sd": "war zone, military environment, combat documentary, tactical scene",
+            "doubao": "战区环境，军事场景，战争纪实，战术画面"
+        },
+        "politics": {
+            "sd": "government building, political scene, diplomatic setting, official venue",
+            "doubao": "政府建筑，政治场景，外交场合，官方场所"
+        },
+        "space": {
+            "sd": "deep space, cosmic scene, astronomical visualization, celestial bodies",
+            "doubao": "深空场景，宇宙画面，天文可视化，天体图像"
+        },
+        "science": {
+            "sd": "scientific environment, laboratory, research setting, technology",
+            "doubao": "科学环境，实验室，研究场所，科技感"
+        },
+        "nature": {
+            "sd": "natural landscape, outdoor scene, environment, wildlife",
+            "doubao": "自然风光，户外场景，环境画面，野生动物"
+        },
+        "history": {
+            "sd": "historical setting, period scene, cultural heritage, classical",
+            "doubao": "历史场景，时代画面，文化遗产，古典风格"
+        },
+        "technology": {
+            "sd": "high-tech, futuristic, digital, innovation, technology",
+            "doubao": "高科技，未来感，数字化，创新，科技感"
+        },
+        "business": {
+            "sd": "business environment, corporate setting, financial district, office scene",
+            "doubao": "商业环境，企业场景，金融区，办公画面"
+        },
+        "economy": {
+            "sd": "economic scene, financial market, trading floor, business district",
+            "doubao": "经济场景，金融市场，交易大厅，商业区"
+        },
+        "general": {
+            "sd": "documentary style, news photography, realistic scene",
+            "doubao": "纪录片风格，新闻摄影，真实场景"
+        }
+    }
     
     # 主题分析模板 - 智能识别内容类型，针对性分析
     THEME_ANALYSIS = {
@@ -605,7 +685,7 @@ class PromptTemplates:
 【输出要求】严格按此格式，不要输出其他内容：
 
 【内容类型】：(选一个)
-【核心主题】：(一句话)
+【核心主题】：(一句话，简洁明了)
 【情感基调】：(严肃/紧张/轻松/温馨/激昂)
 【视觉风格】：(推荐风格)
 【核心元素】：(5-8个关键词)
@@ -629,6 +709,7 @@ class PromptTemplates:
 - 描述可拍摄的画面
 - 不要输出解释、标题、标注
 - 必须将用户提供的"核心主题"和"视觉基调"融入提示词
+- 统一使用电影纪实风格，确保画面风格一致
 
 {style_instruction}
 {theme_instruction}
@@ -637,19 +718,19 @@ class PromptTemplates:
 配音："中东战事升级"
 核心主题：战争反思
 视觉基调：冷色调，沉重深刻
-输出：Middle Eastern war zone, destroyed buildings with smoke, military tanks on desert road, fighter jets overhead, cold blue tones, somber atmosphere, war documentary style, news photography, 4K realistic
+输出：Middle Eastern war zone, destroyed buildings with smoke, military tanks on desert road, fighter jets overhead, cold blue tones, somber atmosphere, war documentary style, news photography, realistic, 4K, high detail
 
 配音："科学家发现新黑洞"
 核心主题：宇宙探索
 视觉基调：神秘，科技感
-输出：Space telescope control room, scientists examining data screens, cosmic imagery on displays, mysterious deep space elements, high-tech atmosphere, professional photography, high detail, sharp focus
+输出：Space telescope control room, scientists examining data screens, cosmic imagery on displays, mysterious deep space elements, high-tech atmosphere, professional photography, realistic, 4K, high detail, sharp focus
 
 配音："幸福的一家人"
 核心主题：家庭温情
 视觉基调：温暖，明亮
-输出：Happy Asian family, warm home interior, soft golden natural lighting, candid moment, warm and bright atmosphere, lifestyle photography, 4K, high detail
+输出：Happy Asian family, warm home interior, soft golden natural lighting, candid moment, warm and bright atmosphere, lifestyle photography, realistic, 4K, high detail
 
-【必加标签】realistic, 4K, high detail""",
+【必加标签】documentary photography, realistic, 4K, high detail""",
         
         "user_template": """配音：{dubbing}
 
@@ -665,6 +746,7 @@ class PromptTemplates:
 - 描述可拍摄的画面
 - 不要输出解释、标题、标注
 - 必须将用户提供的"核心主题"和"视觉基调"融入提示词
+- 统一使用电影纪实风格，确保画面风格一致
 
 {style_instruction}
 {theme_instruction}
@@ -673,19 +755,19 @@ class PromptTemplates:
 配音："中东战事升级"
 核心主题：战争反思
 视觉基调：冷色调，沉重深刻
-输出：中东战区，冒着浓烟的废墟建筑，沙漠公路上的坦克，头顶的战斗机，冷色调画面，沉重深刻的氛围，战地纪录片风格，新闻摄影风格，高清画质
+输出：中东战区，冒着浓烟的废墟建筑，沙漠公路上的坦克，头顶的战斗机，冷色调画面，沉重深刻的氛围，战地纪录片风格，新闻摄影风格，真实感，高清画质，细节丰富
 
 配音："科学家发现新黑洞"
 核心主题：宇宙探索
 视觉基调：神秘，科技感
-输出：太空望远镜控制室，科学家查看数据屏幕，显示屏上的宇宙图像，神秘的深空元素，高科技氛围，专业摄影，高细节，锐利对焦
+输出：太空望远镜控制室，科学家查看数据屏幕，显示屏上的宇宙图像，神秘的深空元素，高科技氛围，专业摄影，真实感，高清画质，细节丰富
 
 配音："幸福的一家人"
 核心主题：家庭温情
 视觉基调：温暖，明亮
-输出：幸福的亚洲家庭，温馨的家居环境，温暖明亮的自然光，抓拍瞬间，生活摄影风格，高清画质，细节丰富
+输出：幸福的亚洲家庭，温馨的家居环境，温暖明亮的自然光，抓拍瞬间，生活摄影风格，真实感，高清画质，细节丰富
 
-【必加标签】真实感，高清画质，细节丰富""",
+【必加标签】纪录片风格，真实感，高清画质，细节丰富""",
         
         "user_template": """配音：{dubbing}
 
@@ -2425,82 +2507,96 @@ class DocuMakerLiteV7:
     
     
     def analyze_content_type(self, sentence):
-        """分析内容类型 - 增强版，包含更多军事和政治相关词汇"""
+        """分析内容类型 - 增强版，使用增强版内容识别模块"""
+        # 优先使用增强版识别器
+        if ENHANCED_RECOGNITION_AVAILABLE:
+            try:
+                recognizer = get_enhanced_recognizer()
+                content_type, visual_style = recognizer.detect_content_type(sentence)
+                return content_type
+            except Exception as e:
+                self.log(f"⚠️ 增强版识别失败，使用内置识别: {e}")
+        
+        # 回退到内置识别逻辑
         # 内容类型关键词及其权重
         content_types = {
             "military": {
-                "keywords": ["战争", "军事", "军队", "士兵", "武器", "导弹", "飞机", "战斗机", "轰炸", "打击",
-                            "防空", "警报", "冲突", "战斗", "作战", "袭击", "攻击", "防御", "伤亡", "尸体",
-                            "战略", "战术", "军事基地", "军营", "战区", "前线", "后勤", "装备",
+                "keywords": ["战争", "戰爭", "军事", "軍事", "军队", "軍隊", "士兵", "武器", "导弹", "導彈",
+                            "飞机", "飛機", "战斗机", "戰鬥機", "轰炸", "轟炸", "打击", "打擊", "防空", "警报", "警報",
+                            "冲突", "衝突", "战斗", "戰鬥", "作战", "作戰", "袭击", "襲擊", "攻击", "攻擊", "防御", "防禦",
+                            "伤亡", "傷亡", "尸体", "屍體", "战略", "戰略", "战术", "戰術", "军事基地", "軍事基地",
+                            "战区", "戰區", "前线", "前線", "后勤", "後勤", "装备", "裝備", "无人机", "無人機",
                             # 添加国家和地缘政治相关词汇
-                            "伊朗", "美国", "以色列", "中东", "波斯湾", "霍尔木兹", "德黑兰",
-                            "美军", "以军", "伊斯兰", "革命卫队", "IRGC", "核设施",
+                            "伊朗", "美国", "美國", "以色列", "中东", "中東", "波斯湾", "波斯灣", "霍尔木兹", "霍爾木茲", "德黑兰", "德黑蘭",
+                            "美军", "美軍", "以军", "以軍", "伊军", "伊軍", "伊斯兰", "伊斯蘭", "革命卫队", "革命衛隊", "IRGC", "核设施", "核設施",
                             # 添加作战相关词汇
-                            "无人机", "空袭", "地面战", "海军", "空军", "陆军", "航母", "舰队",
-                            "水雷", "快艇", "雷达", "指挥中心", "核研发", "加固建筑",
+                            "无人机", "無人機", "空袭", "空襲", "地面战", "地面戰", "海军", "海軍", "空军", "空軍", "陆军", "陸軍", "航母", "舰队", "艦隊",
+                            "水雷", "快艇", "雷达", "雷達", "指挥中心", "指揮中心", "核研发", "核研發", "加固建筑", "加固建築",
                             # 添加战争影响词汇
-                            "油价", "航运", "保险", "保费", "断网", "断电", "废墟", "烟尘",
+                            "油价", "油價", "航运", "航運", "保险", "保險", "保费", "保費", "断网", "斷網", "断电", "斷電", "废墟", "廢墟", "烟尘", "煙塵",
                             # 添加局势相关词汇（用于上下文理解）
                             "局势", "局勢", "战局", "戰局", "形势", "形勢", "格局", "态势", "態勢", "局面",
                             # 添加抵抗、战斗相关词汇
-                            "抵抗", "反抗", "抗战", "战斗", "作战", "战争", "戰爭", "戰爭", "战事", "战况",
+                            "抵抗", "反抗", "抗战", "抗戰", "战事", "戰事", "战况", "戰況",
                             # 添加力量、实力相关词汇
-                            "实力", "實力", "力量", "战力", "战斗力", "武装", "武器", "装备", "部队", "军队",
+                            "实力", "實力", "力量", "战力", "戰力", "战斗力", "戰鬥力", "武装", "武裝", "部队", "部隊",
                             # 添加时间、变化相关词汇
-                            "时间", "期间", "时期", "阶段", "过程", "变化", "變化", "转变", "轉變", "发展"],
+                            "期间", "時期", "时期", "階段", "阶段", "过程", "過程", "变化", "變化", "转变", "轉變", "发展", "發展"],
                 "weight": 1.0
             },
             "politics": {
-                "keywords": ["政治", "政府", "国家", "总统", "领导人", "外交", "国际", "政策", "政权", "议会",
-                            "选举", "党派", "官员", "制裁", "谈判", "协议", "条约", "声明", "抗议", "游行",
+                "keywords": ["政治", "政府", "国家", "國家", "总统", "總統", "领导人", "領導人", "外交", "国际", "國際", "政策", "政权", "政權", "议会", "議會",
+                            "选举", "選舉", "党派", "黨派", "官员", "官員", "制裁", "谈判", "談判", "协议", "協議", "条约", "條約", "声明", "聲明", "抗议", "抗議", "游行", "遊行",
                             # 添加更多政治相关词汇
-                            "白宫", "华盛顿", "反战", "纳税人", "国际社会", "盟友", "中俄", "谈判",
-                            "国际秩序", "共识", "和解", "发展", "历史",
+                            "白宫", "白宮", "华盛顿", "華盛頓", "反战", "反戰", "纳税人", "納稅人", "国际社会", "國際社會", "盟友", "中俄", "谈判", "談判",
+                            "国际秩序", "國際秩序", "共识", "共識", "和解", "发展", "發展", "历史", "歷史",
                             # 添加局势相关词汇
                             "局势", "局勢", "形势", "形勢", "格局", "态势", "態勢", "局面", "变动", "變動", "更迭", "变化", "變化"],
                 "weight": 0.95
             },
             "space": {
-                "keywords": ["太空", "宇宙", "星球", "行星", "恒星", "卫星", "轨道", "引力", "黑洞", "星云", 
-                            "水星", "金星", "地球", "火星", "木星", "土星", "天王星", "海王星", 
-                            "太阳系", "银河系", "天文单位", "公转", "自转", "日心", "地心", 
-                            "陨石", "彗星", "小行星", "空间站", "宇航员"],
+                "keywords": ["太空", "宇宙", "星球", "行星", "恒星", "恆星", "卫星", "衛星", "轨道", "軌道", "引力",
+                            "黑洞", "星云", "星雲", "水星", "金星", "地球", "火星", "木星", "土星", "天王星", "海王星", 
+                            "太阳系", "太陽系", "银河系", "銀河系", "天文单位", "公转", "公轉", "自转", "自轉", 
+                            "日心", "地心", "陨石", "隕石", "彗星", "小行星", "空间站", "空間站", "宇航员", "宇航員"],
                 "weight": 1.0
             },
             "science": {
-                "keywords": ["科学", "研究", "实验", "理论", "数据", "分析", "发现", "技术", "原理", "规律"],
+                "keywords": ["科学", "科學", "研究", "实验", "實驗", "理论", "理論", "数据", "數據", "分析", "发现", "發現", "技术", "技術", "原理", "规律", "規律"],
                 "weight": 0.9
             },
             "nature": {
-                "keywords": ["自然", "环境", "生态", "气候", "动物", "植物", "地形", "地貌", "水文", "地质"],
+                "keywords": ["自然", "环境", "環境", "生态", "生態", "气候", "氣候", "动物", "動物", "植物",
+                            "地形", "地貌", "水文", "地质", "地質"],
                 "weight": 0.8
             },
             "history": {
-                "keywords": ["历史", "古代", "文明", "文化", "传统", "遗迹", "考古", "文物", "朝代", "事件"],
+                "keywords": ["历史", "歷史", "古代", "文明", "文化", "传统", "傳統", "遗迹", "遺跡", "考古", "文物", "朝代", "事件"],
                 "weight": 0.8
             },
             "technology": {
-                "keywords": ["科技", "技术", "发明", "创新", "人工智能", "计算机", "网络", "数码", "自动化", "机器人"],
+                "keywords": ["科技", "技术", "技術", "发明", "發明", "创新", "創新", "人工智能", "计算机", "計算機",
+                            "网络", "網絡", "数码", "數碼", "自动化", "自動化", "机器人", "機器人"],
                 "weight": 0.9
             },
             "art": {
-                "keywords": ["艺术", "绘画", "音乐", "文学", "电影", "戏剧", "雕塑", "建筑", "设计", "创意"],
+                "keywords": ["艺术", "藝術", "绘画", "繪畫", "音乐", "音樂", "文学", "文學", "电影", "電影", "戏剧", "戲劇", "雕塑", "建筑", "建築", "设计", "設計", "创意", "創意"],
                 "weight": 0.7
             },
             "education": {
-                "keywords": ["教育", "学习", "知识", "培训", "课程", "学校", "教师", "学生", "教材", "考试"],
+                "keywords": ["教育", "学习", "學習", "知识", "知識", "培训", "培訓", "课程", "課程", "学校", "學校", "教师", "教師", "学生", "學生", "教材", "考试", "考試"],
                 "weight": 0.7
             },
             "business": {
-                "keywords": ["商业", "经济", "市场", "企业", "金融", "贸易", "管理", "营销", "创业", "投资"],
+                "keywords": ["商业", "商業", "经济", "經濟", "市场", "市場", "企业", "企業", "金融", "贸易", "貿易", "管理", "营销", "營銷", "创业", "創業", "投资", "投資"],
                 "weight": 0.7
             },
             "health": {
-                "keywords": ["健康", "医疗", "疾病", "治疗", "预防", "营养", "运动", "心理", "生理", "医药"],
+                "keywords": ["健康", "医疗", "醫療", "疾病", "治疗", "治療", "预防", "預防", "营养", "營養", "运动", "運動", "心理", "生理", "医药", "醫藥"],
                 "weight": 0.8
             },
             "travel": {
-                "keywords": ["旅行", "旅游", "景点", "风景", "城市", "乡村", "文化", "体验", "探索", "冒险"],
+                "keywords": ["旅行", "旅游", "旅遊", "景点", "景點", "风景", "風景", "城市", "乡村", "鄉村", "文化", "体验", "體驗", "探索", "冒险", "冒險"],
                 "weight": 0.7
             }
         }
@@ -2604,6 +2700,84 @@ class DocuMakerLiteV7:
                 return True
         
         return False
+
+    def merge_short_shots(self, shots, min_duration=1.5, max_merge_count=3):
+        """合并时长过短的分镜
+        
+        Args:
+            shots: 分镜列表
+            min_duration: 最小分镜时长（秒），低于此值的分镜将被合并
+            max_merge_count: 最大合并数量，避免一次合并太多分镜
+        
+        Returns:
+            合并后的分镜列表
+        """
+        if not shots:
+            return shots
+        
+        merged_shots = []
+        i = 0
+        merge_count = 0
+        
+        while i < len(shots):
+            current_shot = shots[i].copy()
+            
+            # 检查当前分镜是否过短
+            if current_shot.get('duration', 0) < min_duration:
+                # 尝试与后面的分镜合并
+                merged_content = [current_shot.get('description', '')]
+                merged_prompts = [current_shot.get('prompt_en', '')]
+                total_duration = current_shot.get('duration', 0)
+                merge_start = i
+                
+                # 查找可以合并的后续分镜
+                j = i + 1
+                while j < len(shots) and j - merge_start < max_merge_count:
+                    next_shot = shots[j]
+                    # 只合并相邻的短分镜
+                    if next_shot.get('duration', 0) < min_duration:
+                        merged_content.append(next_shot.get('description', ''))
+                        merged_prompts.append(next_shot.get('prompt_en', ''))
+                        total_duration += next_shot.get('duration', 0)
+                        j += 1
+                    else:
+                        break
+                
+                # 如果合并后时长足够，执行合并
+                if j > i + 1 and total_duration >= min_duration * 0.8:
+                    # 创建合并后的分镜
+                    merged_shot = current_shot.copy()
+                    merged_shot['description'] = ' '.join(merged_content)
+                    # 使用最后一个分镜的提示词（通常是最完整的）
+                    merged_shot['prompt_en'] = merged_prompts[-1] if merged_prompts else current_shot.get('prompt_en', '')
+                    # 关键：保持时间戳连续性，确保音画同步
+                    merged_shot['start'] = shots[merge_start].get('start', current_shot.get('start', 0))  # 保留第一个分镜的start
+                    merged_shot['end'] = shots[j-1].get('end', current_shot.get('end', 0))  # 使用最后一个分镜的end
+                    merged_shot['duration'] = merged_shot['end'] - merged_shot['start']  # 重新计算duration确保一致性
+                    merged_shot['merged_from'] = list(range(merge_start, j))
+                    
+                    merged_shots.append(merged_shot)
+                    merge_count += 1
+                    self.log(f"   🔗 合并分镜 {merge_start+1}-{j}（时间: {merged_shot['start']:.2f}s-{merged_shot['end']:.2f}s，时长: {merged_shot['duration']:.2f}s）")
+                    i = j  # 跳过已合并的分镜
+                else:
+                    # 不合并，保留原分镜
+                    merged_shots.append(current_shot)
+                    i += 1
+            else:
+                # 分镜时长足够，保留原分镜
+                merged_shots.append(current_shot)
+                i += 1
+        
+        # 重新编号分镜ID
+        for idx, shot in enumerate(merged_shots):
+            shot['id'] = idx
+            shot['image_file'] = f"shot_{idx+1:02d}.png"
+        
+        if merge_count > 0:
+            self.log(f"   ✅ 已合并 {merge_count} 组短分镜，最终分镜数: {len(merged_shots)}")
+        
+        return merged_shots
 
     def _parse_shot_analysis_result(self, analysis_result):
         """
@@ -2833,7 +3007,11 @@ class DocuMakerLiteV7:
             "image_file": f"shot_{shot_id+1:02d}.png",
             "content_type": content_type,
             "semantic_weight": self.calculate_semantic_weight(description_parts['dubbing']),
-            "prompt_quality": prompt_quality
+            "prompt_quality": prompt_quality,
+            # 新增：核心主题和视觉基调字段
+            "core_theme": effective_theme if effective_theme else "",
+            "visual_tone": effective_visual_tone if effective_visual_tone else "",
+            "theme_elements": theme_elements if theme_elements else []
         }
         
         # 如果是SD提示词模式，使用定制化的反向提示词
@@ -3026,15 +3204,77 @@ class DocuMakerLiteV7:
         )
         return prompt
     
+    def _get_preset_prompt_key(self, content_type: str, dubbing: str) -> str:
+        """判断是否可以使用预设模板，返回预设模板的key，否则返回空字符串
+        
+        混合模式逻辑：
+        1. 根据内容类型和配音内容匹配预设模板
+        2. 标准场景使用预设模板（速度快）
+        3. 复杂场景返回空字符串，由大模型生成
+        
+        Args:
+            content_type: 内容类型
+            dubbing: 配音文本
+            
+        Returns:
+            预设模板的key，如 "war_scene"、"space_scene" 等；空字符串表示需要大模型生成
+        """
+        if not ARV_PROMPTS_AVAILABLE:
+            return ""
+        
+        # 内容类型到预设模板的映射
+        type_to_preset = {
+            "military": ["war_scene", "military_base", "missile_launch"],
+            "war": ["war_scene", "military_base"],
+            "space": ["space_scene"],
+            "science": ["technology_lab"],
+            "technology": ["technology_lab"],
+            "politics": ["government_meeting", "diplomatic_scene"],
+            "news": ["news_broadcast"],
+            "economy": ["economic_scene"],
+        }
+        
+        # 关键词到预设模板的直接映射（优先级最高）
+        keyword_to_preset = {
+            # 战争/军事
+            "战场": "war_scene", "战斗": "war_scene", "战争": "war_scene",
+            "爆炸": "war_scene", "轰炸": "war_scene", "导弹": "missile_launch",
+            "军事基地": "military_base", "军营": "military_base",
+            # 太空/科学
+            "黑洞": "space_scene", "宇宙": "space_scene", "太空": "space_scene",
+            "银河": "space_scene", "星云": "space_scene", "恒星": "space_scene",
+            "实验室": "technology_lab", "科研": "technology_lab",
+            # 政治/新闻
+            "新闻": "news_broadcast", "直播": "news_broadcast",
+            "会议": "government_meeting", "谈判": "diplomatic_scene",
+            "外交": "diplomatic_scene", "峰会": "diplomatic_scene",
+            # 经济
+            "经济": "economic_scene", "金融": "economic_scene", "股市": "economic_scene",
+        }
+        
+        # 1. 首先检查关键词直接匹配（最高优先级）
+        for keyword, preset_key in keyword_to_preset.items():
+            if keyword in dubbing:
+                # 验证预设模板是否存在
+                if preset_key in PRESET_PROMPTS:
+                    return preset_key
+        
+        # 2. 根据内容类型匹配
+        content_type_lower = (content_type or "").lower()
+        for type_key, preset_keys in type_to_preset.items():
+            if type_key in content_type_lower:
+                # 返回第一个匹配的预设模板
+                for preset_key in preset_keys:
+                    if preset_key in PRESET_PROMPTS:
+                        return preset_key
+        
+        # 3. 无法匹配，返回空字符串，由大模型生成
+        return ""
+    
     def _generate_sd_prompt(self, description_parts, content_type, shot_id):
-        """生成SD提示词 - 使用新模板"""
+        """生成SD提示词 - 使用混合模式：预设模板优先，大模型兜底"""
         
         dubbing = description_parts['dubbing']
-        
-        # 检查大模型是否可用
-        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
-            self.log("❌ 错误：SD提示词需要大模型支持，请先在设置中选择 Ollama 模型")
-            raise Exception("大模型不可用：SD提示词需要 Ollama 模型支持，请在设置中选择模型后重试")
         
         # 获取完整的主题信息（包含新增字段）
         core_theme = description_parts.get('custom_theme', '')
@@ -3043,6 +3283,34 @@ class DocuMakerLiteV7:
         content_type = description_parts.get('content_type', content_type)  # 优先使用传入的类型
         visual_style = description_parts.get('visual_style', '')
         scene_suggestions = description_parts.get('scene_suggestions', '')
+        
+        # ===== 混合模式：优先使用预设模板，提升速度 =====
+        preset_key = self._get_preset_prompt_key(content_type, dubbing)
+        
+        if preset_key and ARV_PROMPTS_AVAILABLE:
+            # 使用预设模板（速度快，< 0.1秒）
+            preset_prompt = PRESET_PROMPTS.get(preset_key, "")
+            if preset_prompt:
+                self.log(f"⚡ 使用预设模板 [{preset_key}] 生成提示词")
+                # 根据配音内容微调预设模板
+                try:
+                    enhanced_prompt = ARVPromptTemplates.generate_prompt(
+                        dubbing, content_type, core_theme, visual_tone
+                    )
+                    # 如果增强版生成成功，优先使用
+                    if enhanced_prompt and len(enhanced_prompt) > 50:
+                        return enhanced_prompt
+                except Exception:
+                    pass  # 增强版失败，使用原始预设
+                return preset_prompt
+        
+        # ===== 复杂场景：使用大模型生成提示词 =====
+        # 检查大模型是否可用
+        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+            self.log("❌ 错误：SD提示词需要大模型支持，请先在设置中选择 Ollama 模型")
+            raise Exception("大模型不可用：SD提示词需要 Ollama 模型支持，请在设置中选择模型后重试")
+        
+        self.log(f"🤖 使用大模型生成提示词（复杂场景）")
         
         # 使用大模型生成提示词
         prompt = self._generate_prompt_with_llm(
@@ -3355,6 +3623,11 @@ class DocuMakerLiteV7:
         
         这是最关键的步骤：确保配音文本说的什么，SD生成的图片就是什么
         例如："伊朗革命卫队正式宣布" → "Iranian Revolutionary Guard, military announcement, official statement"
+        
+        增强版：使用增强版内容识别模块，支持：
+        1. 更准确的国家/地点识别（如"厄立特里亚"不再是"俄罗斯"）
+        2. 上下文引用解析（如"那里"能关联到前面提到的国家）
+        3. 更完整的实体映射
         """
         if not dubbing:
             return ""
@@ -3362,70 +3635,121 @@ class DocuMakerLiteV7:
         dubbing_clean = dubbing.strip()
         entities = []
         
-        # 国家/地区实体
+        # 优先使用增强版识别器
+        if ENHANCED_RECOGNITION_AVAILABLE:
+            try:
+                recognizer = get_enhanced_recognizer()
+                # 更新上下文（用于处理"那里"等引用）
+                recognizer.update_context(dubbing_clean)
+                
+                # 识别实体
+                recognized = recognizer.identify_entities(dubbing_clean)
+                
+                # 添加上下文引用（最重要，如"那里"→朝鲜）
+                if recognized['context_references']:
+                    for cn_name, en_value in recognized['context_references']:
+                        entities.append(f"in {en_value.split(',')[0]}")
+                
+                # 添加国家
+                if recognized['countries']:
+                    entities.extend(recognized['countries'][:2])
+                
+                # 添加组织
+                if recognized['organizations']:
+                    entities.extend(recognized['organizations'][:2])
+                
+                # 添加军事相关
+                if recognized['military']:
+                    entities.extend(recognized['military'][:3])
+                
+                # 添加城市
+                if recognized['cities']:
+                    entities.extend(recognized['cities'][:2])
+                
+                # 添加地区
+                if recognized['regions']:
+                    entities.extend(recognized['regions'][:1])
+                
+                if entities:
+                    return ", ".join(entities)
+                
+            except Exception as e:
+                self.log(f"⚠️ 增强版实体识别失败，使用内置识别: {e}")
+        
+        # 回退到内置识别逻辑
+        # 国家/地区实体 - 扩展版本，包含更多国家和常见误识别纠正
         country_mapping = {
-            '伊朗': 'Iran, Iranian', '美国': 'USA, American', '中国': 'China, Chinese',
-            '俄罗斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
-            '英国': 'UK, British', '法国': 'France, French', '德国': 'Germany, German',
-            '朝鲜': 'North Korea, Korean', '韩国': 'South Korea, Korean',
-            '乌克兰': 'Ukraine, Ukrainian', '欧洲': 'Europe, European',
-            '中东': 'Middle East', '亚洲': 'Asia, Asian',
+            '伊朗': 'Iran, Iranian', '美国': 'USA, American', '美國': 'USA, American', '中国': 'China, Chinese', '中國': 'China, Chinese',
+            '俄罗斯': 'Russia, Russian', '俄羅斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
+            '英国': 'UK, British', '英國': 'UK, British', '法国': 'France, French', '法國': 'France, French', '德国': 'Germany, German', '德國': 'Germany, German',
+            '朝鲜': 'North Korea, Korean', '朝鮮': 'North Korea, Korean', '北韩': 'North Korea, Korean', '北韓': 'North Korea, Korean',
+            '韩国': 'South Korea, Korean', '韓國': 'South Korea, Korean', '南韩': 'South Korea, Korean', '南韓': 'South Korea, Korean',
+            '乌克兰': 'Ukraine, Ukrainian', '烏克蘭': 'Ukraine, Ukrainian', '欧洲': 'Europe, European', '歐洲': 'Europe, European',
+            '中东': 'Middle East', '中東': 'Middle East', '亚洲': 'Asia, Asian', '亞洲': 'Asia, Asian',
+            # 新增：非洲国家（修复"厄立特里亚"被误识别的问题）
+            '厄立特里亚': 'Eritrea, Eritrean', '厄利垂亞': 'Eritrea, Eritrean', '俄利特里亞': 'Eritrea, Eritrean',
+            '埃塞俄比亚': 'Ethiopia, Ethiopian', '埃塞俄比亞': 'Ethiopia, Ethiopian', '衣索比亞': 'Ethiopia, Ethiopian',
+            '索马里': 'Somalia, Somali', '索馬里': 'Somalia, Somali',
+            '苏丹': 'Sudan, Sudanese', '蘇丹': 'Sudan, Sudanese',
+            '南非': 'South Africa, South African',
+            '埃及': 'Egypt, Egyptian',
         }
         
         # 军事/安全机构实体
         military_mapping = {
             '革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+            '革命衛隊': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
             '伊朗革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
-            '美军': 'US military, American forces', '美军方': 'US military, Pentagon',
-            '军队': 'military, armed forces, troops', '部队': 'troops, military unit',
-            '海军': 'navy, naval forces', '空军': 'air force, aviation',
-            '陆军': 'army, ground forces', '导弹': 'missile, rocket',
-            '无人机': 'drone, UAV', '战斗机': 'fighter jet, aircraft',
-            '航母': 'aircraft carrier', '军舰': 'warship, naval vessel',
-            '武器': 'weapons, armaments', '军事': 'military, armed',
-            '国防部': 'Ministry of Defense, Pentagon', '五角大楼': 'Pentagon, US Defense Department',
+            '美军': 'US military, American forces', '美軍': 'US military, American forces', '美军方': 'US military, Pentagon',
+            '军队': 'military, armed forces, troops', '軍隊': 'military, armed forces, troops', '部队': 'troops, military unit', '部隊': 'troops, military unit',
+            '海军': 'navy, naval forces', '海軍': 'navy, naval forces', '空军': 'air force, aviation', '空軍': 'air force, aviation',
+            '陆军': 'army, ground forces', '陸軍': 'army, ground forces', '导弹': 'missile, rocket', '導彈': 'missile, rocket',
+            '无人机': 'drone, UAV', '無人機': 'drone, UAV', '战斗机': 'fighter jet, aircraft', '戰鬥機': 'fighter jet, aircraft',
+            '航母': 'aircraft carrier', '军舰': 'warship, naval vessel', '軍艦': 'warship, naval vessel',
+            '武器': 'weapons, armaments', '军事': 'military, armed', '軍事': 'military, armed',
+            '国防部': 'Ministry of Defense, Pentagon', '國防部': 'Ministry of Defense, Pentagon', '五角大楼': 'Pentagon, US Defense Department', '五角大樓': 'Pentagon, US Defense Department',
         }
         
         # 政治/组织实体
         political_mapping = {
-            '政府': 'government, officials', '总统': 'president, head of state',
-            '总理': 'prime minister', '首相': 'prime minister',
-            '外交部': 'foreign ministry, diplomatic', '联合国': 'United Nations, UN',
-            '安理会': 'UN Security Council', '北约': 'NATO, NATO alliance',
-            '欧盟': 'European Union, EU', '国会': 'congress, parliament',
-            '议会': 'parliament, legislative', '政党': 'political party',
-            '官员': 'officials, authorities', '发言人': 'spokesperson, official spokesperson',
+            '政府': 'government, officials', '总统': 'president, head of state', '總統': 'president, head of state',
+            '总理': 'prime minister', '總理': 'prime minister', '首相': 'prime minister',
+            '外交部': 'foreign ministry, diplomatic', '联合国': 'United Nations, UN', '聯合國': 'United Nations, UN',
+            '安理会': 'UN Security Council', '安理會': 'UN Security Council', '北约': 'NATO, NATO alliance', '北約': 'NATO, NATO alliance',
+            '欧盟': 'European Union, EU', '歐盟': 'European Union, EU', '国会': 'congress, parliament', '國會': 'congress, parliament',
+            '议会': 'parliament, legislative', '議會': 'parliament, legislative', '政党': 'political party', '政黨': 'political party',
+            '官员': 'officials, authorities', '官員': 'officials, authorities', '发言人': 'spokesperson, official spokesperson', '發言人': 'spokesperson, official spokesperson',
         }
         
         # 事件/行动实体
         event_mapping = {
-            '战争': 'war, warfare, conflict', '冲突': 'conflict, clash',
-            '战斗': 'battle, combat, fighting', '袭击': 'attack, strike, assault',
-            '爆炸': 'explosion, blast', '发射': 'launch, launch',
-            '试射': 'test, missile test', '军演': 'military exercise, drill',
-            '谈判': 'negotiation, talks', '会议': 'meeting, conference',
-            '声明': 'statement, announcement', '宣布': 'announcement, declare',
-            '签署': 'signing, agreement', '协议': 'agreement, deal, pact',
+            '战争': 'war, warfare, conflict', '戰爭': 'war, warfare, conflict', '冲突': 'conflict, clash', '衝突': 'conflict, clash',
+            '战斗': 'battle, combat, fighting', '戰鬥': 'battle, combat, fighting', '袭击': 'attack, strike, assault', '襲擊': 'attack, strike, assault',
+            '爆炸': 'explosion, blast', '发射': 'launch', '發射': 'launch',
+            '试射': 'test, missile test', '試射': 'test, missile test', '军演': 'military exercise, drill', '軍演': 'military exercise, drill',
+            '谈判': 'negotiation, talks', '談判': 'negotiation, talks', '会议': 'meeting, conference', '會議': 'meeting, conference',
+            '声明': 'statement, announcement', '聲明': 'statement, announcement', '宣布': 'announcement, declare',
+            '签署': 'signing, agreement', '簽署': 'signing, agreement', '协议': 'agreement, deal, pact', '協議': 'agreement, deal, pact',
             '制裁': 'sanctions, embargo', '援助': 'aid, assistance',
         }
         
         # 地点/场景实体
         location_mapping = {
-            '基地': 'base, military base', '机场': 'airport, air base',
+            '基地': 'base, military base', '机场': 'airport, air base', '機場': 'airport, air base',
             '港口': 'port, harbor, naval base', '城市': 'city, urban',
-            '农村': 'rural, countryside', '山区': 'mountain, mountainous',
-            '沙漠': 'desert', '海边': 'coastal, seaside',
-            '海峡': 'strait, waterway', '油田': 'oil field, oil facility',
-            '核设施': 'nuclear facility', '工厂': 'factory, facility',
-            '大使馆': 'embassy', '领事馆': 'consulate',
+            '农村': 'rural, countryside', '農村': 'rural, countryside', '山区': 'mountain, mountainous', '山區': 'mountain, mountainous',
+            '沙漠': 'desert', '海边': 'coastal, seaside', '海邊': 'coastal, seaside',
+            '海峡': 'strait, waterway', '海峽': 'strait, waterway', '油田': 'oil field, oil facility',
+            '核设施': 'nuclear facility', '核設施': 'nuclear facility', '工厂': 'factory, facility', '工廠': 'factory, facility',
+            '大使馆': 'embassy', '大使館': 'embassy', '领事馆': 'consulate', '領事館': 'consulate',
         }
         
         # 新闻/媒体相关
         media_mapping = {
-            '新闻': 'news, news report, breaking news', '记者': 'journalist, reporter',
+            '新闻': 'news, news report, breaking news', '新聞': 'news, news report, breaking news', '记者': 'journalist, reporter', '記者': 'journalist, reporter',
             '主持人': 'anchor, presenter', '直播': 'live broadcast, livestream',
-            '报道': 'report, coverage', '采访': 'interview',
-            '发布会': 'press conference', '声明': 'official statement',
+            '报道': 'report, coverage', '報道': 'report, coverage', '采访': 'interview', '採訪': 'interview',
+            '发布会': 'press conference', '發布會': 'press conference', '声明': 'official statement', '聲明': 'official statement',
         }
         
         # 通用开场/过渡词（需要结合主题）
@@ -3433,16 +3757,16 @@ class DocuMakerLiteV7:
             '今天': 'today, current events, breaking news',
             '消息': 'news, information, report',
             '全球': 'global, worldwide, international',
-            '牵动': 'impact, concern, attention',
+            '牵动': 'impact, concern, attention', '牽動': 'impact, concern, attention',
             '最新': 'latest, recent, breaking',
-            '关注': 'attention, focus, interest',
-            '热点': 'hot topic, trending, viral',
+            '关注': 'attention, focus, interest', '關注': 'attention, focus, interest',
+            '热点': 'hot topic, trending, viral', '熱點': 'hot topic, trending, viral',
             '重大': 'major, significant, important',
-            '紧急': 'urgent, emergency, breaking',
-            '刚刚': 'just happened, breaking, latest',
+            '紧急': 'urgent, emergency, breaking', '緊急': 'urgent, emergency, breaking',
+            '刚刚': 'just happened, breaking, latest', '剛剛': 'just happened, breaking, latest',
             '最新消息': 'breaking news, latest update, recent development',
-            '据报道': 'according to reports, sources say',
-            '业内人士': 'industry sources, experts, insiders',
+            '据报道': 'according to reports, sources say', '據報道': 'according to reports, sources say',
+            '业内人士': 'industry sources, experts, insiders', '業內人士': 'industry sources, experts, insiders',
         }
         
         # 按优先级匹配：军事 > 政治 > 事件 > 地点 > 国家 > 通用开场
@@ -6938,6 +7262,11 @@ Now convert this:
             # 按索引排序
             shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
             self.log(f"✅ 成功创建 {len(shots)} 个分镜（{thread_count}线程并行，耗时 {elapsed_time:.1f}秒，速度 {len(shots)/elapsed_time:.1f}个/秒）")
+
+            # 合并时长过短的分镜（低于1.5秒）
+            self.log("🔍 检查并合并短分镜...")
+            shots = self.merge_short_shots(shots, min_duration=1.5)
+            self.log(f"   📊 最终分镜数: {len(shots)} 个")
 
             # 验证分镜主题一致性（如果大模型分析成功）
             if theme_info.get('core_theme'):
