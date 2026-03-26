@@ -1779,7 +1779,6 @@ class DocuMakerLiteV7:
             "qwen2.5:7b": ("4.7GB", "阿里通用模型，性能优秀"),
             "gemma3:4b": ("3.3GB", "Google通用模型，推荐"),
             "qwen3:4b": ("2.5GB", "阿里通用模型"),
-            "qwen3-vl:4b": ("3.3GB", "视觉模型，也可用于文本"),
             "llama3.2:3b": ("2.0GB", "Meta轻量级模型"),
             "deepseek-r1:8b": ("5.2GB", "推理模型，不推荐提示词"),
             "gemma3:1b": ("815MB", "轻量级模型，速度快"),
@@ -1873,8 +1872,6 @@ class DocuMakerLiteV7:
                                 model_label = f"{model} (通用任务，内容分析)"
                             elif "qwen3:4b" in model:
                                 model_label = f"{model} (轻量级通用任务)"
-                            elif "qwen3-vl:4b" in model:
-                                model_label = f"{model} (视觉任务)"
                             elif "deepseek-r1:8b" in model:
                                 model_label = f"{model} (推理任务，逻辑分析)"
                             elif "gemma3:4b" in model:
@@ -5263,7 +5260,6 @@ class DocuMakerLiteV7:
             ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
             ("gemma3:4b", 4, "Google通用模型，推荐"),
             ("qwen3:4b", 4, "阿里通用模型"),
-            ("qwen3-vl:4b", 4, "视觉模型，也可用于文本"),
             ("llama3.2:3b", 3, "Meta轻量级模型"),
             ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
             ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
@@ -6791,7 +6787,6 @@ Now convert this:
                                 ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
                                 ("gemma3:4b", 4, "Google通用模型，推荐"),
                                 ("qwen3:4b", 4, "阿里通用模型"),
-                                ("qwen3-vl:4b", 4, "视觉模型，也可用于文本"),
                                 ("llama3.2:3b", 3, "Meta轻量级模型"),
                                 ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
                                 ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
