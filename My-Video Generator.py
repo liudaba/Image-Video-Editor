@@ -3294,7 +3294,7 @@ class DocuMakerLiteV7:
         return ""
 
     def _generate_arv_prompt(self, description_parts, content_type, shot_id):
-        """生成ARV绝对写实风格提示词 - 使用ARV优化模块"""
+        """生成ARV绝对写实风格提示词 - 使用ARV优化模块，必要时切换大模型"""
 
         if not ARV_OPTIMIZATION_AVAILABLE:
             self.log("⚠️ ARV优化模块不可用，切换到SD提示词")
@@ -3307,6 +3307,10 @@ class DocuMakerLiteV7:
         try:
             if not self.arv_prompter:
                 self.arv_prompter = get_arv_prompter()
+
+            if not self.arv_prompter.has_semantic_match(dubbing, core_theme):
+                self.log(f"🔄 ARV关键词未匹配，自动切换到大模型生成")
+                return self._generate_sd_prompt(description_parts, content_type, shot_id)
 
             shot_data = {
                 'content_type': content_type,
@@ -3576,6 +3580,8 @@ class DocuMakerLiteV7:
             # 根据提示词类型选择模板
             if prompt_type == "SD提示词":
                 template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
+            elif prompt_type == "ARV写实提示词":
+                return ""  # ARV模式不需要预生成，会在create_new_shot中单独处理
             else:
                 # 豆包提示词使用中文模板
                 template = PromptTemplates.get_template("shot_prompt_doubao", **template_params)

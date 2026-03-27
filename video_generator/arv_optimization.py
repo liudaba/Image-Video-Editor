@@ -52,64 +52,124 @@ class AbsoluteRealisticPrompts:
     ARV_QUALITY_TAGS = {
         "base": "masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, sharp focus, 8K resolution, professional photography, documentary style",
         "lighting": "cinematic lighting, natural lighting, volumetric light, realistic shadows, high contrast, HDR photography, studio lighting",
-        "photography": "35mm lens, shallow depth of field, bokeh, professional camera, telephoto lens, wide angle, macro photography, time-lapse",
-        "texture": "skin texture, fabric texture, metal texture, surface details, material rendering, realistic materials, fine details",
-        "color": "accurate colors, natural color grading, cinematic color grading, color correction, realistic tones"
     }
 
     CONTENT_ARV_PROMPTS = {
+        "general": {
+            "base": "documentary scene, real-life situation",
+            "atmosphere": "realistic atmosphere",
+            "lighting": "natural lighting"
+        },
         "military": {
-            "base": "military documentary, war zone, combat scene, tactical operation, battlefield realism",
-            "elements": "military equipment, soldiers, tanks, military vehicles, combat gear, tactical uniforms",
-            "atmosphere": "tense atmosphere, dramatic combat, war photography style, battlefield documentary",
-            "lighting": "dramatic lighting, battlefield shadows, combat illumination, war zone lighting"
+            "base": "war zone, battlefield, combat scene",
+            "atmosphere": "tense atmosphere, dramatic combat, war documentary",
+            "lighting": "dramatic lighting, combat shadows"
         },
         "politics": {
-            "base": "political documentary, government building, diplomatic scene, political setting",
-            "elements": "official venues, government architecture, diplomatic environment, political figures",
-            "atmosphere": "formal atmosphere, serious tone, political documentary style, official photography",
-            "lighting": "professional lighting, government venue lighting, documentary illumination"
+            "base": "government building, diplomatic scene",
+            "atmosphere": "formal atmosphere, serious tone",
+            "lighting": "professional lighting"
         },
         "science": {
-            "base": "scientific documentary, laboratory scene, research environment, technology visualization",
-            "elements": "scientific equipment, lab instruments, research facilities, technological devices",
-            "atmosphere": "professional atmosphere, scientific precision, research documentary style",
-            "lighting": "laboratory lighting, clean lighting, technical illumination, scientific photography"
+            "base": "laboratory, research facility, tech scene",
+            "atmosphere": "scientific precision, professional atmosphere",
+            "lighting": "clean laboratory lighting"
         },
         "space": {
-            "base": "space documentary, cosmic scene, astronomical visualization, deep space photography",
-            "elements": "planets, stars, nebulae, galaxies, spacecraft, satellites, telescopes",
-            "atmosphere": "mysterious atmosphere, cosmic scale, space documentary style, astronomical photography",
-            "lighting": "celestial lighting, cosmic illumination, space lighting, astronomical rendering"
+            "base": "cosmic scene, deep space, astronomical view",
+            "atmosphere": "mysterious atmosphere, cosmic scale",
+            "lighting": "celestial lighting"
         },
         "nature": {
-            "base": "nature documentary, landscape photography, wildlife documentary, environmental scene",
-            "elements": "natural landscapes, wildlife, forests, mountains, rivers, oceans, wildlife habitats",
-            "atmosphere": "natural atmosphere, serene environment, nature documentary style, wildlife photography",
-            "lighting": "natural sunlight, golden hour lighting, environmental lighting, nature photography"
+            "base": "natural landscape, wildlife habitat",
+            "atmosphere": "natural atmosphere, serene environment",
+            "lighting": "natural sunlight, golden hour"
         },
         "technology": {
-            "base": "technology documentary, high-tech scene, innovation visualization, future technology",
-            "elements": "digital devices, futuristic equipment, innovation centers, tech facilities",
-            "atmosphere": "modern atmosphere, cutting-edge tone, technology documentary style, tech photography",
-            "lighting": "modern lighting, technological illumination, innovation lighting, tech documentary"
+            "base": "high-tech scene, innovation center",
+            "atmosphere": "modern atmosphere, cutting-edge tone",
+            "lighting": "technological illumination"
         },
         "business": {
-            "base": "business documentary, corporate scene, financial district, business environment",
-            "elements": "office buildings, corporate interiors, financial venues, business facilities",
-            "atmosphere": "professional atmosphere, business tone, corporate documentary style, business photography",
-            "lighting": "professional lighting, office lighting, corporate illumination, business photography"
+            "base": "office, corporate scene, financial district",
+            "atmosphere": "professional atmosphere",
+            "lighting": "office lighting"
+        },
+        "economy": {
+            "base": "stock market, trading floor, financial scene",
+            "atmosphere": "market tension, financial pressure",
+            "lighting": "screen glow, indoor lighting"
         },
         "history": {
-            "base": "historical documentary, period scene, historical setting, cultural heritage",
-            "elements": "historical architecture, period costumes, ancient sites, cultural artifacts",
-            "atmosphere": "historical atmosphere, period authenticity, historical documentary style, heritage photography",
-            "lighting": "period-accurate lighting, historical illumination, documentary lighting, heritage photography"
+            "base": "historical site, period scene, heritage location",
+            "atmosphere": "historical atmosphere, period authenticity",
+            "lighting": "period lighting"
         }
+    }
+
+    SEMANTIC_MAPPINGS = {
+        '中东': 'Middle Eastern region, Levant area, Persian Gulf',
+        '城市': 'urban cityscape, city buildings, metropolitan area',
+        '街道': 'city street, urban road, street scene',
+        '战场': 'battlefield, war zone, combat area, front line',
+        '油田': 'oil field, petroleum facility, drilling platform',
+        '工厂': 'factory, manufacturing plant, industrial facility',
+        '医院': 'hospital, medical facility, emergency room',
+        '市场': 'marketplace, commercial center, trading hub',
+        '港口': 'port, harbor, shipping terminal, dock',
+        '海峡': 'strait, channel, maritime route',
+        '实验室': 'laboratory, research facility, scientific lab',
+        '沙漠': 'desert, arid landscape, sand dunes',
+        '山区': 'mountain, mountainous region, alpine area',
+        '芯片': 'semiconductor chips, microchips, integrated circuits',
+        '医疗': 'medical equipment, healthcare supplies, medical devices',
+        '石油': 'petroleum, crude oil, oil products',
+        '坦克': 'tanks, military tanks, armored vehicles',
+        '飞机': 'aircraft, airplanes, fighter jets',
+        '船只': 'ships, vessels, cargo ships',
+        '导弹': 'missiles, ballistic missiles',
+        '设备': 'equipment, machinery, devices',
+        '生产线': 'production line, assembly line',
+        '供应链': 'supply chain, logistics network',
+        '战斗': 'combat, battle, fighting, military engagement',
+        '轰炸': 'airstrike, bombing, aerial attack',
+        '爆炸': 'explosion, blast, detonation',
+        '瘫痪': 'paralysis, shutdown, disabled system',
+        '生产': 'production, manufacturing, industrial output',
+        '短缺': 'shortage, scarcity, lack, insufficient supply',
+        '运输': 'transportation, logistics, cargo movement',
+        '航运': 'shipping, maritime transport, sea freight',
+        '恐慌': 'panic, chaos, fear, hysteria',
+        '上涨': 'rising, increasing, surging, price increase',
+        '下跌': 'falling, declining, dropping, price decrease',
+        '燃烧': 'burning, on fire, flames, blazing',
+        '倒塌': 'collapsed, ruined, destroyed, rubble',
+        '混乱': 'chaos, disorder, confusion, turmoil',
+        '紧张': 'tense atmosphere, tension, nervous mood',
+        '危机': 'crisis, emergency, critical situation',
+        '危险': 'dangerous, hazardous, peril, risk',
+        '沉重': 'heavy atmosphere, somber mood, grave',
+        '绝望': 'desperate, hopeless, despair',
+        '希望': 'hopeful, optimistic, positive',
+        '早晨': 'morning, sunrise, early morning light',
+        '中午': 'midday, noon, bright daylight',
+        '夜晚': 'night, nighttime, moonlight',
+        '深夜': 'late night, deep night, midnight',
+        '全景': 'wide shot, panoramic view, establishing shot',
+        '特写': 'close-up, detailed shot, macro view',
+        '中景': 'medium shot, waist-up framing',
     }
 
     def __init__(self):
         self.continuity_manager = SceneContinuityManager()
+
+    def has_semantic_match(self, text, core_theme):
+        """检测是否有语义匹配 - 优先检查配音文本"""
+        for key in self.SEMANTIC_MAPPINGS.keys():
+            if key in text:
+                return True
+
+        return False
 
     def analyze_semantic_structure(self, text, core_theme, visual_tone):
         """深度语义分析"""
@@ -118,78 +178,18 @@ class AbsoluteRealisticPrompts:
         atmosphere = []
         camera_direction = []
 
-        text_lower = text.lower()
-
-        time_elements = {
-            '早晨': 'morning light, sunrise, early morning atmosphere',
-            '中午': 'midday sun, bright daylight, noon lighting',
-            '下午': 'afternoon light, daytime setting, post-meridiem',
-            '傍晚': 'golden hour, sunset lighting, evening atmosphere',
-            '夜晚': 'nighttime, dark atmosphere, moonlight, artificial lighting',
-            '深夜': 'late night, darkness, urban night lighting'
-        }
-
-        for time_key, time_desc in time_elements.items():
-            if time_key in text:
-                visual_style.append(time_desc)
-                atmosphere.append(f"{time_key} atmosphere")
-                break
-
-        location_semantics = {
-            '城市': 'urban cityscape, city environment, metropolitan area, urban setting',
-            '街道': 'street scene, urban street, city road, pedestrian area',
-            '建筑': 'architecture, building exterior, architectural photography, urban structures',
-            '办公室': 'office interior, corporate workspace, business environment, office setting',
-            '山脉': 'mountain range, mountain landscape, mountain terrain, alpine environment',
-            '河流': 'river scene, waterway, flowing water, river landscape',
-            '海洋': 'ocean view, sea landscape, marine environment, coastal scene',
-            '森林': 'forest environment, woodland, tree-covered area, natural forest',
-            '室内': 'interior scene, indoor setting, indoor environment, room interior',
-            '会议室': 'conference room, meeting space, boardroom, business meeting environment',
-            '实验室': 'laboratory interior, research facility, scientific workspace, lab setting',
-            '战场': 'battlefield, war zone, combat area, military engagement scene',
-            '灾区': 'disaster area, affected region, disaster zone, crisis location',
-            '边境': 'border area, border zone, frontier region, boundary line'
-        }
-
-        for loc_key, loc_desc in location_semantics.items():
-            if loc_key in text:
-                semantic_elements.append(loc_desc)
-                break
-
-        emotion_semantics = {
-            '紧张': 'tense atmosphere, dramatic tension, suspenseful mood, intensity',
-            '危机': 'crisis atmosphere, emergency situation, urgent tone, critical mood',
-            '危险': 'dangerous environment, hazardous situation, risk atmosphere, peril',
-            '沉重': 'heavy atmosphere, serious tone, grave mood, solemn feeling',
-            '严肃': 'serious atmosphere, formal tone, grave mood, solemn setting',
-            '和平': 'peaceful atmosphere, tranquil mood, calm setting, harmonious environment',
-            '宁静': 'serene atmosphere, calm mood, peaceful setting, tranquil environment',
-            '希望': 'hopeful atmosphere, optimistic mood, positive tone, inspiring feeling',
-            '温暖': 'warm atmosphere, comfortable mood, inviting feeling, cozy setting'
-        }
-
-        for emo_key, emo_desc in emotion_semantics.items():
-            if emo_key in text or emo_key in visual_tone:
-                atmosphere.append(emo_desc)
-
-        action_semantics = {
-            '战斗': 'combat action, battle scene, fighting, military engagement',
-            '谈判': 'negotiation scene, diplomatic talk, meeting discussion, conversation',
-            '工作': 'working scene, professional activity, business operation, task execution',
-            '研究': 'research activity, scientific investigation, analytical work, study process'
-        }
-
-        for action_key, action_desc in action_semantics.items():
-            if action_key in text:
-                semantic_elements.append(action_desc)
-
-        if '全景' in text or '整体' in text:
-            camera_direction.append('wide shot, panoramic view, establishing shot')
-        elif '特写' in text or '细节' in text:
-            camera_direction.append('close-up, detailed shot, macro view')
-        elif '中景' in text or '人物' in text:
-            camera_direction.append('medium shot, waist-up framing')
+        for key, en_value in self.SEMANTIC_MAPPINGS.items():
+            if key in text:
+                if key in ['中东', '城市', '街道', '战场', '油田', '工厂', '医院', '市场', '港口', '海峡', '实验室', '沙漠', '山区']:
+                    semantic_elements.append(en_value)
+                elif key in ['紧张', '危机', '危险', '沉重', '绝望', '希望', '恐慌', '混乱']:
+                    atmosphere.append(en_value)
+                elif key in ['早晨', '中午', '夜晚', '深夜']:
+                    visual_style.append(en_value)
+                elif key in ['全景', '特写', '中景']:
+                    camera_direction.append(en_value)
+                else:
+                    semantic_elements.append(en_value)
 
         if core_theme:
             theme_keywords = self._translate_theme_to_elements(core_theme)
@@ -202,18 +202,25 @@ class AbsoluteRealisticPrompts:
         """将核心主题转换为视觉元素"""
         theme_elements = []
 
+        if not theme:
+            return theme_elements
+
         theme_mappings = {
-            '战争反思': ['war aftermath', 'destroyed landscape', 'war memorial', 'post-war reconstruction'],
-            '供应链危机': ['supply chain disruption', 'logistics problems', 'distribution issues', 'transportation breakdown'],
-            '科技发展': ['technological advancement', 'innovation scene', 'future technology', 'digital transformation'],
-            '环境问题': ['environmental degradation', 'pollution scene', 'climate change effects', 'ecological damage'],
-            '国际合作': ['international cooperation', 'diplomatic meeting', 'collaboration scene', 'global partnership']
+            '战争': 'war, conflict, battle, military operation',
+            '冲突': 'conflict zone, war affected area, regional conflict',
+            '中东': 'Middle East region, Levant, Persian Gulf',
+            '芯片': 'semiconductor chips, chip manufacturing',
+            '医疗': 'medical supply, healthcare crisis',
+            '石油': 'oil, petroleum, energy resources',
+            '供应链': 'supply chain, logistics, distribution',
+            '经济': 'economy, finance, market, business',
+            '科技': 'technology, innovation, high-tech',
+            '环境': 'environment, climate, ecological',
         }
 
-        for theme_key, elements in theme_mappings.items():
+        for theme_key, en_value in theme_mappings.items():
             if theme_key in theme:
-                theme_elements.extend(elements)
-                break
+                theme_elements.append(en_value)
 
         return theme_elements
 
@@ -226,50 +233,30 @@ class AbsoluteRealisticPrompts:
             text, core_theme, visual_tone
         )
 
-        content_prompts = self.CONTENT_ARV_PROMPTS.get(content_type, {})
+        content_prompts = self.CONTENT_ARV_PROMPTS.get(content_type, self.CONTENT_ARV_PROMPTS["general"])
 
         prompt_parts = []
 
-        main_subject = []
         if semantic_elements:
-            main_subject.extend(semantic_elements)
-        if 'base' in content_prompts:
-            main_subject.append(content_prompts['base'])
-        prompt_parts.append(', '.join(main_subject))
+            prompt_parts.append(', '.join(semantic_elements[:2]))
 
-        if 'elements' in content_prompts:
-            prompt_parts.append(content_prompts['elements'])
+        if content_prompts.get('base'):
+            prompt_parts.append(content_prompts['base'])
 
         if atmosphere:
-            prompt_parts.append(', '.join(atmosphere))
-        if 'atmosphere' in content_prompts:
+            prompt_parts.append(atmosphere[0])
+        elif content_prompts.get('atmosphere'):
             prompt_parts.append(content_prompts['atmosphere'])
 
-        lighting_tags = []
-        if visual_style:
-            lighting_tags.extend(visual_style)
-        if 'lighting' in content_prompts:
-            lighting_tags.append(content_prompts['lighting'])
-        if lighting_tags:
-            prompt_parts.append(', '.join(lighting_tags))
+        if content_prompts.get('lighting'):
+            prompt_parts.append(content_prompts['lighting'])
 
         if camera_direction:
-            prompt_parts.append(', '.join(camera_direction))
+            prompt_parts.append(camera_direction[0])
 
-        if shot_data:
-            continuity_tags = self.continuity_manager.get_continuity_tags(shot_data)
-            if continuity_tags:
-                prompt_parts.append(', '.join(continuity_tags))
+        prompt_parts.append(self.ARV_QUALITY_TAGS['base'])
 
-        arv_quality = []
-        arv_quality.append(self.ARV_QUALITY_TAGS['base'])
-        arv_quality.append(self.ARV_QUALITY_TAGS['lighting'])
-        arv_quality.append(self.ARV_QUALITY_TAGS['photography'])
-        arv_quality.append(self.ARV_QUALITY_TAGS['texture'])
-        arv_quality.append(self.ARV_QUALITY_TAGS['color'])
-        prompt_parts.append(', '.join(arv_quality))
-
-        final_prompt = ', '.join(prompt_parts)
+        final_prompt = ', '.join(p for p in prompt_parts if p)
 
         return final_prompt
 
