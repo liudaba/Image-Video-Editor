@@ -41,6 +41,17 @@ except ImportError:
     ARV_PROMPTS_AVAILABLE = False
     print("⚠️ ARV提示词模板模块未找到，使用大模型生成所有提示词")
 
+# 导入ARV绝对写实风格优化模块
+try:
+    from video_generator.arv_optimization import (
+        AbsoluteRealisticPrompts,
+        get_arv_prompter
+    )
+    ARV_OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    ARV_OPTIMIZATION_AVAILABLE = False
+    print("⚠️ ARV优化模块未找到")
+
 # 检测是否在 pythonw 环境下运行（无控制台窗口）
 # pythonw.exe 不会创建控制台，sys.stdout/stderr 为 None
 # 这会导致依赖控制台输出的库（如Whisper）抛出 'NoneType' object has no attribute 'write' 错误
@@ -1152,7 +1163,7 @@ class DocuMakerLiteV7:
         self.event_system = {}
         self.state_manager = {}
         self.data_bus = {}
-        
+
         # 缓存系统
         self.cache_system = {
             'models': {},
@@ -1160,7 +1171,7 @@ class DocuMakerLiteV7:
             'images': {},
             'audio': {}
         }
-        
+
         # 线程池管理
         self.thread_pool = {}
         self.thread_pool_stats = {
@@ -1169,7 +1180,15 @@ class DocuMakerLiteV7:
             'failed_tasks': 0,
             'total_tasks': 0
         }
-        
+
+        # ARV提示词生成器（保持单例，确保分镜连贯性）
+        self.arv_prompter = None
+        if ARV_OPTIMIZATION_AVAILABLE:
+            try:
+                self.arv_prompter = get_arv_prompter()
+            except Exception:
+                pass
+
         # 初始化各个系统
         self.init_state_manager()
         self.init_event_system()
@@ -1714,10 +1733,14 @@ class DocuMakerLiteV7:
         # SD提示词按钮
         sd_prompt_btn = ttk.Button(prompt_options, text="SD提示词", command=lambda: self.prompt_type_var.set("SD提示词"), style="Medium.TButton")
         sd_prompt_btn.pack(side=tk.LEFT, padx=5, pady=2, fill=tk.X, expand=True)
-        
+
         # 豆包提示词按钮
         doubao_prompt_btn = ttk.Button(prompt_options, text="豆包提示词", command=lambda: self.prompt_type_var.set("豆包提示词"), style="Medium.TButton")
         doubao_prompt_btn.pack(side=tk.LEFT, padx=5, pady=2, fill=tk.X, expand=True)
+
+        # ARV绝对写实提示词按钮
+        arv_prompt_btn = ttk.Button(prompt_options, text="ARV写实提示词", command=lambda: self.prompt_type_var.set("ARV写实提示词"), style="Medium.TButton")
+        arv_prompt_btn.pack(side=tk.LEFT, padx=5, pady=2, fill=tk.X, expand=True)
         
         # 提示词类型状态显示
         prompt_status_frame = ttk.Frame(prompt_section)
@@ -2975,6 +2998,8 @@ class DocuMakerLiteV7:
             # 根据提示词类型生成相应的提示词
             if prompt_type == "SD提示词":
                 prompt_en = self._generate_sd_prompt(description_parts, content_type, shot_id)
+            elif prompt_type == "ARV写实提示词":
+                prompt_en = self._generate_arv_prompt(description_parts, content_type, shot_id)
             else:
                 prompt_en = self._generate_doubao_prompt(description_parts, content_type, shot_id)
         
@@ -3010,9 +3035,9 @@ class DocuMakerLiteV7:
             "visual_tone": effective_visual_tone if effective_visual_tone else "",
             "theme_elements": theme_elements if theme_elements else []
         }
-        
-        # 如果是SD提示词模式，使用定制化的反向提示词
-        if prompt_type == "SD提示词":
+
+        # 如果是SD提示词或ARV写实提示词模式，使用定制化的反向提示词
+        if prompt_type == "SD提示词" or prompt_type == "ARV写实提示词":
             shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'])
         
         return shot_data
@@ -3267,7 +3292,42 @@ class DocuMakerLiteV7:
         
         # 3. 无法匹配，返回空字符串，由大模型生成
         return ""
-    
+
+    def _generate_arv_prompt(self, description_parts, content_type, shot_id):
+        """生成ARV绝对写实风格提示词 - 使用ARV优化模块"""
+
+        if not ARV_OPTIMIZATION_AVAILABLE:
+            self.log("⚠️ ARV优化模块不可用，切换到SD提示词")
+            return self._generate_sd_prompt(description_parts, content_type, shot_id)
+
+        dubbing = description_parts.get('dubbing', '')
+        core_theme = description_parts.get('custom_theme', '')
+        visual_tone = description_parts.get('custom_visual_tone', '')
+
+        try:
+            if not self.arv_prompter:
+                self.arv_prompter = get_arv_prompter()
+
+            shot_data = {
+                'content_type': content_type,
+                'visual_tone': visual_tone
+            }
+
+            prompt_en = self.arv_prompter.generate_arv_prompt(
+                text=dubbing,
+                content_type=content_type,
+                core_theme=core_theme,
+                visual_tone=visual_tone,
+                shot_data=shot_data
+            )
+
+            self.log(f"🎨 使用ARV绝对写实风格生成提示词")
+            return prompt_en
+
+        except Exception as e:
+            self.log(f"⚠️ ARV提示词生成失败: {e}，切换到SD提示词")
+            return self._generate_sd_prompt(description_parts, content_type, shot_id)
+
     def _generate_sd_prompt(self, description_parts, content_type, shot_id):
         """生成SD提示词 - 使用混合模式：预设模板优先，大模型兜底"""
         
@@ -4086,8 +4146,8 @@ class DocuMakerLiteV7:
         custom_theme = description_parts.get('custom_theme', '')
         custom_visual_tone = description_parts.get('custom_visual_tone', '')
         self.log(f"   [_enhance_prompt_with_details] custom_theme: {custom_theme}, custom_visual_tone: {custom_visual_tone}")
-        
-        is_sd_prompt = prompt_type == "SD提示词"
+
+        is_sd_prompt = prompt_type == "SD提示词" or prompt_type == "ARV写实提示词"
         
         dubbing = description_parts.get('dubbing', '')
         if not dubbing:
@@ -5290,11 +5350,11 @@ class DocuMakerLiteV7:
         
         if not candidate_models:
             return prompt
-        
+
         start_time = time.time()
-        
+
         try:
-            is_sd = prompt_type == "SD提示词"
+            is_sd = prompt_type == "SD提示词" or prompt_type == "ARV写实提示词"
             
             # 构建清晰简洁的指令
             if is_sd:
