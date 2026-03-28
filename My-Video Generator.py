@@ -691,37 +691,27 @@ class PromptTemplates:
     THEME_ANALYSIS = {
         "system": """你是视频内容分析师。分析语音文本并输出结构化结果。
 
-【核心任务】必须先进行彻底的错别字/错别词纠正！
-1. 仔细阅读整个语音文本，找出所有可能的语音识别错误
-2. 常见错误类型：
-   - 同音字错误：如"害器"→"氦气"，"汽年"→"汽车"，"看不"→"看布"
-   - 形近字错误：如"末来"→"未来"，"王作"→"工作"
-   - 方言/口语误识别：根据上下文判断是否为错误
-3. 必须列出所有纠正，格式：原词→纠正词
-
-【重要示例】
-- "害器" → "氦气" (惰性气体，用于芯片生产)
-- "汽年" → "汽车" (交通工具)
-- "错大发了" → "错大发了" (方言表达，保留原词)
-- "看不" → "看不" (可能是"看不惯"，需根据上下文)
-- "今天天气很好" → "今天天气很好" (无误，保留原词)
+【核心任务】分析语音文本，提取内容类型、主题和视觉风格
+- 如果文本中存在明显的语音识别错误（如同音字错字、形近字错字），请进行纠正
+- 如果文本中没有识别错误，则无需列出纠错
 
 【内容类型】新闻播报/军事分析/科普教育/历史纪录/社会民生/财经商业/文化艺术/自然地理/体育竞技
 
 【输出要求】严格按此格式，不要输出其他内容：
 
 【内容类型】：(选一个)
-【核心主题】：(一句话，简洁明了，必须使用纠正后的词语)
+【核心主题】：(一句话，简洁明了)
 【情感基调】：(严肃/紧张/轻松/温馨/激昂)
 【视觉风格】：(推荐风格)
-【核心元素】：(5-8个关键词，使用纠正后的词语)
+【核心元素】：(5-8个关键词)
 【场景建议】：(场景类型)
-【纠错说明】：(必须列出所有纠正的词语，格式：原词→纠正词，多个用逗号分隔，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
+【纠错说明】：(仅当存在实际错别字纠正时列出，格式：错字1→正确1,错字2→正确2，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
 
 重要：
-1. 必须先完成错别字纠正，再输出其他内容
-2. 核心主题和核心元素必须使用纠正后的词语
-3. 直接输出格式内容，不要有开场白或解释""",
+1. 仔细阅读文本，判断是否存在需要纠正的错别字
+2. 如果文本准确无误，【纠错说明】必须写"无"
+3. 不要凭空捏造纠错内容
+4. 直接输出格式内容，不要有开场白或解释""",
         
         "user_template": """语音文本：
 {text}
@@ -3324,29 +3314,8 @@ class DocuMakerLiteV7:
         theme_elements = description_parts.get('theme_elements', [])
 
         try:
-            if not self.arv_prompter:
-                self.arv_prompter = get_arv_prompter()
-
-            if not self.arv_prompter.has_semantic_match(dubbing, core_theme):
-                self.log(f"🔄 ARV关键词未匹配，自动切换到大模型生成（ARV格式）")
-                return self._generate_arv_format_prompt(description_parts, content_type, shot_id)
-
-            shot_data = {
-                'content_type': content_type,
-                'visual_tone': visual_tone,
-                'theme_elements': theme_elements
-            }
-
-            prompt_en = self.arv_prompter.generate_arv_prompt(
-                text=dubbing,
-                content_type=content_type,
-                core_theme=core_theme,
-                visual_tone=visual_tone,
-                shot_data=shot_data
-            )
-
             self.log(f"🎨 使用ARV绝对写实风格生成提示词")
-            return prompt_en
+            return self._generate_arv_format_prompt(description_parts, content_type, shot_id)
 
         except Exception as e:
             self.log(f"⚠️ ARV提示词生成失败: {e}，切换到SD提示词")
@@ -3361,51 +3330,39 @@ class DocuMakerLiteV7:
         theme_elements = description_parts.get('theme_elements', [])
         visual_tone = description_parts.get('custom_visual_tone', '')
         
-        # 将主题元素转换为英文关键词
-        theme_elements_str = ', '.join(theme_elements) if theme_elements else ''
+        # 将主题元素翻译为英文
+        theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
+        theme_elements_str = ', '.join(theme_elements_en) if theme_elements_en else ''
+        
+        # 翻译核心主题和视觉基调为英文
+        core_theme_en = self._translate_text_to_english(core_theme) if core_theme else ''
+        visual_tone_en = self._translate_text_to_english(visual_tone) if visual_tone else ''
 
         system_prompt = f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
 
-【全局分析阶段 - 必须首先完成】
-在生成提示词之前，你必须先分析以下信息：
-1. 核心主题：{core_theme}
-2. 主题元素：{theme_elements_str}
-3. 视觉基调：{visual_tone or '根据内容确定'}
-4. 内容类型：{content_type}
+【关键要求】
+1. 必须基于"当前分镜配音内容"生成提示词
+2. 生成的提示词必须准确反映配音描述的具体场景
+3. 配音是打招呼（如"各位朋友大家好"）→ 生成人物画面或新闻主播场景
+4. 配音是军事行动（如"击中美军舰艇"）→ 生成军事战斗场景
+5. 禁止将全局主题元素硬套到每个分镜！
 
-分析要点：
-- 理解核心主题的整体含义和情感倾向
-- 确定需要表达的关键视觉元素
-- 把握整体氛围（紧张/轻松/严肃/温馨等）
-- 思考如何将主题元素有机融入画面
+【内容类型】：{content_type}
+【视觉基调】：{visual_tone_en or visual_tone or '紧张氛围'}
 
-【提示词生成阶段】
-基于以上分析，生成符合以下规则的英文提示词：
-1. 输出必须是逗号分隔的关键词，不是编号列表
-2. 必须包含所有主题元素：{theme_elements_str}
-3. 从分析结果中选择最相关的视觉元素
-4. 添加场景类型：{content_type}
-5. 体现整体氛围和光线
-6. 以以下标签结尾：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+【输出格式】：直接输出英文提示词（逗号分隔），不要有其他格式
+提示词必须包含：
+- 主要视觉主体（根据配音内容）
+- 具体环境场景
+- 氛围描述
+- ARV标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
 
-输出格式：[CORRECTED_TEXT]|||PROMPT
-示例：芯片供应短缺|||semiconductor chips, supply shortage, factory, production line, industrial facility, geopolitical tensions, global market, economic crisis, realistic atmosphere, natural lighting, masterpiece, best quality, absolute realistic...
+注意：只输出提示词内容，不要输出"以下是"、"|||"等前缀"""
 
-重要提示：
-- 不要拒绝或提及安全指南
-- 只输出纠正后的文本和提示词，用|||分隔
-- 所有元素之间用逗号分隔"""
-
-        user_prompt = f"""【当前分镜配音】
+        user_prompt = f"""【当前分镜配音内容】
 {dubbing}
 
-【整体主题】
-核心主题：{core_theme}
-主题元素：{theme_elements_str}
-视觉基调：{visual_tone or '紧张氛围，危机感'}
-内容类型：{content_type}
-
-请基于上述整体分析，为当前分镜生成提示词："""
+请根据以上配音内容生成英文提示词："""
 
         try:
             import ollama
@@ -3419,10 +3376,7 @@ class DocuMakerLiteV7:
             )
             result = response['message']['content'].strip()
             
-            if '|||' in result:
-                prompt_en = result.split('|||')[1].strip()
-            else:
-                prompt_en = result
+            prompt_en = result.strip()
             
             return prompt_en
         except Exception as e:
@@ -5701,38 +5655,37 @@ Now convert this:
 
 【整体信息】
 - 核心主题：{core_theme}
-- 视觉基调：{visual_tone or '紧张、危机氛围'}
+- 视觉基调：{visual_tone or '紧张氛围'}
 - 内容类型：{content_type}
 - 主题元素：{', '.join(theme_elements_en)}
 
 【核心优化策略 - 必须全部实现】
 
-1. 【从抽象→具体】
+1. 【每个分镜必须基于其配音内容生成】
+   - 分析每个分镜的description（配音内容）
+   - 生成的提示词必须准确反映该分镜的具体内容
+   - 如果配音是打招呼（如"各位朋友大家好"），则生成对应画面
+   - 如果配音是军事行动，则生成军事场景
+
+2. 【从抽象→具体】
    - 禁止使用抽象词如：panic, chaos, fear, crisis, tension
-   - 必须转化为具体可视化场景：如 red warning lights, trading floor chaos, anxious faces
+   - 必须转化为具体可视化场景：如 red warning lights, anxious faces
 
-2. 【从单一→组合】
-   - 禁止单个关键词：如 marketplace, technology, supply chain
-   - 必须组合为完整场景：如 Wall Street trading floor, Silicon Valley tech headquarters
+3. 【从单一→组合】
+   - 禁止单个关键词：如 marketplace, technology
+   - 必须组合为完整场景：如 Wall Street trading floor, military command center
 
-3. 【添加专业摄影参数】（至少选择2-3项）
+4. 【添加专业摄影参数】（至少选择2项）
    - 相机型号：Nikon D850, Canon 5D Mark IV, Sony A7R IV
-   - 镜头：85mm lens, 50mm lens, wide angle, telephoto, macro
-   - 光圈：f/1.8, f/2.8, f/4, f/5.6
-   - 构图：close-up, medium shot, wide angle shot, split screen, aerial view, drone perspective
-
-4. 【场景具体化】
-   - 每个提示词必须有明确主体：交易员、工程师、新闻主播、军人等
-   - 必须有具体环境：交易大厅、医院、工厂、战场、新闻直播间等
-   - 添加环境描述：golden hour, twilight, dramatic lighting, natural lighting, sunset
+   - 镜头：85mm lens, 50mm lens, wide angle
+   - 构图：close-up, medium shot, wide angle shot
 
 5. 【ARV风格强化】
-   - 添加电影感描述：cinematic composition, film grain, cinematic color grading
-   - 添加写实感描述：photorealistic, hyper realistic, true-to-life
-   - 添加细节描述：sharp focus, high detail, intricate details, texture
+   - 必须包含：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
 
-6. 【主题元素贯穿】
-   - 必须合理分布主题元素：helium, semiconductor, medical, supply chain, geopolitical等
+6. 【禁止事项】
+   - 禁止在提示词末尾添加无关词汇如"general"
+   - 禁止生成与配音内容无关的场景
 
 【输出格式】
 请按以下JSON格式输出：
@@ -5747,7 +5700,17 @@ Now convert this:
             prompt = shot.get('prompt_en', '')
             prompts_info.append(f"分镜{i+1} - 配音: {desc} - 当前提示词: {prompt}")
         
-        user_prompt = "【所有分镜信息】\n" + "\n".join(prompts_info) + "\n\n请优化以上所有分镜的提示词："
+        user_prompt = "【所有分镜信息】\n" + "\n".join(prompts_info) + "\n\n请直接输出JSON格式的优化结果，不要有任何解释、开头语或结尾语。"
+        
+        # 强制要求输出纯JSON的系统提示
+        strict_system_prompt = system_prompt + """
+
+【强制要求 - 必须遵守】
+1. 输出必须是纯JSON格式，不能有任何额外文字
+2. 格式：{"0": "提示词1", "1": "提示词2", ...}
+3. 绝对不要输出"以下是"、"好的"、"下面"等开头
+4. 绝对不要输出解释、说明、分析等文字
+5. 只输出JSON对象！"""
         
         try:
             import ollama
@@ -5756,37 +5719,133 @@ Now convert this:
             response = ollama.chat(
                 model=model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": strict_system_prompt},
                     {"role": "user", "content": user_prompt}
                 ]
             )
             
             result = response['message']['content'].strip()
-            self.log(f"   🔍 大模型返回优化结果（预览）: {result[:200]}...")
+            preview_text = result[:150].replace('\n', ' ')
+            self.log(f"   🔍 大模型返回优化结果: {preview_text}...")
             
             # 解析JSON结果
             import json
             import re
             
-            # 尝试提取JSON
+            # 尝试提取JSON（更宽松的匹配）
             json_match = re.search(r'\{[\s\S]*\}', result)
             if json_match:
-                optimized_prompts = json.loads(json_match.group())
-                
-                # 应用优化结果
+                try:
+                    optimized_prompts = json.loads(json_match.group())
+                    
+                    # 格式1: {"0": "提示词1", "1": "提示词2", ...}
+                    if isinstance(optimized_prompts, dict) and all(k.isdigit() for k in optimized_prompts.keys()):
+                        applied_count = 0
+                        for i, shot in enumerate(shots):
+                            if str(i) in optimized_prompts:
+                                old_prompt = shot.get('prompt_en', '')
+                                new_prompt = optimized_prompts[str(i)]
+                                if new_prompt and len(new_prompt) > 10:
+                                    shot['prompt_en'] = new_prompt
+                                    applied_count += 1
+                                    if applied_count <= 3:
+                                        desc = shot.get('description', '')[:15]
+                                        self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
+                        
+                        if applied_count > 0:
+                            self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
+                            return shots
+                    
+                    # 格式2: {"prompts": ["提示词1", "提示词2", ...]}
+                    elif isinstance(optimized_prompts, dict) and "prompts" in optimized_prompts:
+                        prompts_list = optimized_prompts["prompts"]
+                        if isinstance(prompts_list, list):
+                            applied_count = 0
+                            for i, shot in enumerate(shots):
+                                if i < len(prompts_list):
+                                    old_prompt = shot.get('prompt_en', '')
+                                    new_prompt = prompts_list[i]
+                                    if new_prompt and len(new_prompt) > 10:
+                                        shot['prompt_en'] = new_prompt
+                                        applied_count += 1
+                                        if applied_count <= 3:
+                                            desc = shot.get('description', '')[:15]
+                                            self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
+                            
+                            if applied_count > 0:
+                                self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
+                                return shots
+                    
+                    # 格式3: {"scenes": [{"scene_id": 1, "prompt": "..."}, ...]}
+                    elif isinstance(optimized_prompts, dict) and "scenes" in optimized_prompts:
+                        scenes_list = optimized_prompts["scenes"]
+                        if isinstance(scenes_list, list):
+                            applied_count = 0
+                            for scene in scenes_list:
+                                scene_id = scene.get('scene_id', 0) - 1
+                                prompt = scene.get('prompt', '')
+                                if scene_id >= 0 and scene_id < len(shots) and prompt and len(prompt) > 10:
+                                    old_prompt = shots[scene_id].get('prompt_en', '')
+                                    shots[scene_id]['prompt_en'] = prompt
+                                    applied_count += 1
+                                    if applied_count <= 3:
+                                        desc = shots[scene_id].get('description', '')[:15]
+                                        self.log(f"   🔄 分镜{scene_id+1} [{desc}...] 已优化")
+                            
+                            if applied_count > 0:
+                                self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词（scenes格式）")
+                                return shots
+                    
+                    # 格式4: 直接是数组 ["提示词1", "提示词2", ...]
+                    elif isinstance(optimized_prompts, list):
+                        applied_count = 0
+                        for i, shot in enumerate(shots):
+                            if i < len(optimized_prompts):
+                                old_prompt = shot.get('prompt_en', '')
+                                new_prompt = optimized_prompts[i]
+                                if new_prompt and len(new_prompt) > 10:
+                                    shot['prompt_en'] = new_prompt
+                                    applied_count += 1
+                                    if applied_count <= 3:
+                                        desc = shot.get('description', '')[:15]
+                                        self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
+                        
+                        if applied_count > 0:
+                            self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
+                            return shots
+                            
+                except json.JSONDecodeError:
+                    pass
+            
+            # 如果JSON解析失败，尝试逐行解析
+            lines = result.split('\n')
+            optimized_prompts = {}
+            for line in lines:
+                line = line.strip()
+                if ':' in line and ('"' in line or "'" in line):
+                    # 尝试提取 key: value 对
+                    match = re.match(r'["\']?(\d+)["\']?\s*:\s*["\'](.+?)["\']', line)
+                    if match:
+                        idx, value = match.groups()
+                        optimized_prompts[idx] = value
+            
+            if optimized_prompts:
+                self.log(f"   🔧 尝试逐行解析...")
+                applied_count = 0
                 for i, shot in enumerate(shots):
                     if str(i) in optimized_prompts:
                         old_prompt = shot.get('prompt_en', '')
                         new_prompt = optimized_prompts[str(i)]
-                        shot['prompt_en'] = new_prompt
-                        self.log(f"   🔄 分镜{i+1}提示词已优化")
-                        self.log(f"      旧: {old_prompt[:60]}...")
-                        self.log(f"      新: {new_prompt[:60]}...")
+                        if new_prompt and len(new_prompt) > 10:
+                            shot['prompt_en'] = new_prompt
+                            applied_count += 1
                 
-                return shots
-            else:
-                self.log(f"   ⚠️ 无法解析优化结果，保持原提示词")
-                return shots
+                if applied_count > 0:
+                    self.log(f"   ✅ 逐行解析成功，优化 {applied_count} 个分镜")
+                    return shots
+            
+            self.log(f"   ⚠️ 无法解析优化结果，保持原提示词")
+            return shots
                 
         except Exception as e:
             self.log(f"   ⚠️ 优化过程出错: {e}")
@@ -5805,7 +5864,27 @@ Now convert this:
             '价格波动': 'price fluctuation', '生产基地': 'production base',
             '天然气': 'natural gas', '危机': 'crisis', '恐慌': 'panic',
             '战争': 'war', '冲突': 'conflict', '紧张': 'tension',
-            '科技': 'technology', '工业': 'industrial', '经济': 'economy'
+            '科技': 'technology', '工业': 'industrial', '经济': 'economy',
+            '支援舰艇': 'support ship', '补给舰': 'supply ship', '驱逐舰': 'destroyer',
+            '护卫舰': 'frigate', '航母': 'aircraft carrier', '舰队': 'fleet',
+            '无人机': 'drone', '侦察机': 'reconnaissance aircraft', '战斗机': 'fighter jet',
+            '海峡': 'strait', '霍尔木兹海峡': 'Strait of Hormuz', '港口': 'port',
+            '油价': 'oil price', '石油': 'oil', '天然气': 'natural gas',
+            '中东': 'Middle East', '冲突': 'conflict', '战争': 'war',
+            '军事行动': 'military operation', '战略': 'strategy', '紧张': 'tense',
+            '危机': 'crisis', '局势': 'situation', '打击': 'strike',
+            '伊朗': 'Iran', '美国': 'USA', '中国': 'China', '俄罗斯': 'Russia',
+            '塞拉来港': 'Bandar-e Jask', '塞拉杰': 'Bandar-e Jask', '阿巴斯港': 'Bandar Abbas',
+            '霍尔木兹海峡': 'Strait of Hormuz', '波斯湾': 'Persian Gulf',
+            '支援舰艇': 'support ship', '补给舰': 'supply ship', '驱逐舰': 'destroyer',
+            '护卫舰': 'frigate', '航母': 'aircraft carrier', '舰队': 'fleet', '舰艇': 'warship',
+            '无人机': 'drone', '侦察机': 'reconnaissance aircraft', '战斗机': 'fighter jet',
+            '海峡': 'strait', '港口': 'port', '海军': 'navy', '海军舰艇': 'naval vessel',
+            '油价': 'oil price', '石油': 'oil', '天然气': 'natural gas',
+            '中东': 'Middle East', '冲突': 'conflict', '战争': 'war',
+            '军事行动': 'military operation', '战略': 'strategy', '紧张': 'tense',
+            '危机': 'crisis', '局势': 'situation', '打击': 'strike',
+            '雷达': 'radar', '导弹': 'missile', '舰载机': 'carrier-based aircraft'
         }
         
         result = []
@@ -5814,6 +5893,31 @@ Now convert this:
                 result.append(translations[elem])
             else:
                 result.append(elem)
+        return result
+    
+    def _translate_text_to_english(self, text):
+        """将中文文本翻译为英文（用于核心主题、视觉基调等）"""
+        if not text:
+            return ''
+        
+        translations = {
+            '美军': 'US military', '美军 伊朗': 'US-Iran',
+            '伊朗': 'Iran', '美国': 'USA', '中国': 'China', '俄罗斯': 'Russia',
+            '军事': 'military', '战争': 'war', '冲突': 'conflict',
+            '紧张': 'tense', '危机': 'crisis', '严肃': 'serious',
+            '轻松': 'relaxed', '温馨': 'warm', '激昂': '激昂',
+            '紧张氛围': 'tense atmosphere', '危机感': 'sense of crisis',
+            '沉重': 'heavy', '严肃': 'serious', '冷色调': 'cold tones',
+            '暖色调': 'warm tones', '电影感': 'cinematic',
+            '战略分析': 'strategic analysis', '数据可视化': 'data visualization',
+            '新闻播报': 'news broadcast', '军事分析': 'military analysis',
+            '科普教育': 'educational', '历史纪录': 'historical documentary'
+        }
+        
+        result = text
+        for cn, en in translations.items():
+            result = result.replace(cn, en)
+        
         return result
     
     def _simplify_theme(self, theme_text):
@@ -7064,8 +7168,13 @@ Now convert this:
             
             self.log(f"   原始语音片段数: {len(original_shot_tasks)}个")
 
-            # 初始化theme_info
-            theme_info = {'core_theme': '', 'visual_tone': '', 'theme_elements': []}
+            # 初始化theme_info（包含全局内容类型）
+            theme_info = {
+                'core_theme': '', 
+                'visual_tone': '', 
+                'theme_elements': [],
+                'content_type': content_type  # 使用全局内容类型
+            }
             user_custom_theme = ""
             user_custom_tone = ""
             
@@ -7078,6 +7187,14 @@ Now convert this:
                 
                 # 从缓存中提取主题信息
                 theme_info = self.extract_theme_info(analysis_result)
+                
+                # 重要：使用全局内容类型覆盖（用户选择的优先级最高）
+                if content_type:
+                    theme_info['content_type'] = content_type
+                
+                # 确保visual_tone有值
+                if not theme_info.get('visual_tone'):
+                    theme_info['visual_tone'] = '紧张'
                 
                 # 重要：对缓存中的主题再次进行简化处理（确保使用最新逻辑）
                 if theme_info.get('core_theme'):
@@ -7492,23 +7609,12 @@ Now convert this:
                 try:
                     dubbing = task.get('text', '')
                     if dubbing:
-                        # 获取纠错字典
-                        correction_dict = theme_info.get('correction_dict', {})
-                        
-                        # 对分镜描述文本进行纠错
-                        if correction_dict:
-                            corrected_dubbing = dubbing
-                            for old, new in correction_dict.items():
-                                corrected_dubbing = corrected_dubbing.replace(old, new)
-                            task['text'] = corrected_dubbing
-                            task['original_text'] = dubbing
-                        
                         # 如果用户预设了风格，使用用户预设的风格；否则使用主题分析推荐的风格
                         effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
                         
-                        # 使用纠错后的文本生成提示词
+                        # 生成提示词
                         prompt = self._generate_prompt_with_llm(
-                            task.get('text', dubbing), 
+                            dubbing, 
                             content_type=theme_info.get('content_type', ''), 
                             prompt_type=user_prompt_type,
                             core_theme=theme_info.get('core_theme', ''),
@@ -7516,7 +7622,7 @@ Now convert this:
                             theme_elements=theme_info.get('theme_elements', []),
                             visual_style=effective_visual_style,
                             scene_suggestions=theme_info.get('scene_suggestions', ''),
-                            original_dubbing=dubbing  # 传入原始文本用于参考
+                            original_dubbing=dubbing
                         )
                         return (idx, prompt, None)
                     return (idx, "", None)
@@ -7587,10 +7693,12 @@ Now convert this:
             self.log(f"   共 {len(original_shot_tasks)} 个分镜")
             
             # 直接使用 original_shot_tasks（每个原始片段一个分镜）
+            # 使用全局内容类型确保一致性
+            global_content_type = theme_info.get('content_type', 'general')
             shot_tasks = []
             for i, task in enumerate(original_shot_tasks):
                 shot_text = task['text']
-                shot_content_type = task.get('content_type', 'general')
+                shot_content_type = global_content_type  # 使用全局统一的内容类型
                 shot_start = task['start']
                 shot_end = task['end']
                 
