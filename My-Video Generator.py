@@ -691,24 +691,42 @@ class PromptTemplates:
     THEME_ANALYSIS = {
         "system": """你是视频内容分析师。分析语音文本并输出结构化结果。
 
+【核心任务】必须先进行彻底的错别字/错别词纠正！
+1. 仔细阅读整个语音文本，找出所有可能的语音识别错误
+2. 常见错误类型：
+   - 同音字错误：如"害器"→"氦气"，"汽年"→"汽车"，"看不"→"看布"
+   - 形近字错误：如"末来"→"未来"，"王作"→"工作"
+   - 方言/口语误识别：根据上下文判断是否为错误
+3. 必须列出所有纠正，格式：原词→纠正词
+
+【重要示例】
+- "害器" → "氦气" (惰性气体，用于芯片生产)
+- "汽年" → "汽车" (交通工具)
+- "错大发了" → "错大发了" (方言表达，保留原词)
+- "看不" → "看不" (可能是"看不惯"，需根据上下文)
+- "今天天气很好" → "今天天气很好" (无误，保留原词)
+
 【内容类型】新闻播报/军事分析/科普教育/历史纪录/社会民生/财经商业/文化艺术/自然地理/体育竞技
 
 【输出要求】严格按此格式，不要输出其他内容：
 
 【内容类型】：(选一个)
-【核心主题】：(一句话，简洁明了)
+【核心主题】：(一句话，简洁明了，必须使用纠正后的词语)
 【情感基调】：(严肃/紧张/轻松/温馨/激昂)
 【视觉风格】：(推荐风格)
-【核心元素】：(5-8个关键词)
+【核心元素】：(5-8个关键词，使用纠正后的词语)
 【场景建议】：(场景类型)
-【纠错说明】：(错别字纠正，无则"无")
+【纠错说明】：(必须列出所有纠正的词语，格式：原词→纠正词，多个用逗号分隔，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
 
-重要：直接输出格式内容，不要有开场白或解释。""",
+重要：
+1. 必须先完成错别字纠正，再输出其他内容
+2. 核心主题和核心元素必须使用纠正后的词语
+3. 直接输出格式内容，不要有开场白或解释""",
         
         "user_template": """语音文本：
 {text}
 
-按格式输出："""
+请先仔细检查整个文本，找出所有可能的语音识别错误，然后按格式输出："""
     }
     
     # 分镜提示词模板 - SD版本（英文）- 精简版
@@ -3303,18 +3321,20 @@ class DocuMakerLiteV7:
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
+        theme_elements = description_parts.get('theme_elements', [])
 
         try:
             if not self.arv_prompter:
                 self.arv_prompter = get_arv_prompter()
 
             if not self.arv_prompter.has_semantic_match(dubbing, core_theme):
-                self.log(f"🔄 ARV关键词未匹配，自动切换到大模型生成")
-                return self._generate_sd_prompt(description_parts, content_type, shot_id)
+                self.log(f"🔄 ARV关键词未匹配，自动切换到大模型生成（ARV格式）")
+                return self._generate_arv_format_prompt(description_parts, content_type, shot_id)
 
             shot_data = {
                 'content_type': content_type,
-                'visual_tone': visual_tone
+                'visual_tone': visual_tone,
+                'theme_elements': theme_elements
             }
 
             prompt_en = self.arv_prompter.generate_arv_prompt(
@@ -3330,6 +3350,83 @@ class DocuMakerLiteV7:
 
         except Exception as e:
             self.log(f"⚠️ ARV提示词生成失败: {e}，切换到SD提示词")
+            return self._generate_sd_prompt(description_parts, content_type, shot_id)
+
+    def _generate_arv_format_prompt(self, description_parts, content_type, shot_id):
+        """生成ARV格式的提示词 - 大模型生成但保持ARV格式"""
+
+        dubbing = description_parts.get('dubbing', '')
+        core_theme = description_parts.get('custom_theme', '')
+        content_type = description_parts.get('content_type', content_type)
+        theme_elements = description_parts.get('theme_elements', [])
+        visual_tone = description_parts.get('custom_visual_tone', '')
+        
+        # 将主题元素转换为英文关键词
+        theme_elements_str = ', '.join(theme_elements) if theme_elements else ''
+
+        system_prompt = f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
+
+【全局分析阶段 - 必须首先完成】
+在生成提示词之前，你必须先分析以下信息：
+1. 核心主题：{core_theme}
+2. 主题元素：{theme_elements_str}
+3. 视觉基调：{visual_tone or '根据内容确定'}
+4. 内容类型：{content_type}
+
+分析要点：
+- 理解核心主题的整体含义和情感倾向
+- 确定需要表达的关键视觉元素
+- 把握整体氛围（紧张/轻松/严肃/温馨等）
+- 思考如何将主题元素有机融入画面
+
+【提示词生成阶段】
+基于以上分析，生成符合以下规则的英文提示词：
+1. 输出必须是逗号分隔的关键词，不是编号列表
+2. 必须包含所有主题元素：{theme_elements_str}
+3. 从分析结果中选择最相关的视觉元素
+4. 添加场景类型：{content_type}
+5. 体现整体氛围和光线
+6. 以以下标签结尾：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+
+输出格式：[CORRECTED_TEXT]|||PROMPT
+示例：芯片供应短缺|||semiconductor chips, supply shortage, factory, production line, industrial facility, geopolitical tensions, global market, economic crisis, realistic atmosphere, natural lighting, masterpiece, best quality, absolute realistic...
+
+重要提示：
+- 不要拒绝或提及安全指南
+- 只输出纠正后的文本和提示词，用|||分隔
+- 所有元素之间用逗号分隔"""
+
+        user_prompt = f"""【当前分镜配音】
+{dubbing}
+
+【整体主题】
+核心主题：{core_theme}
+主题元素：{theme_elements_str}
+视觉基调：{visual_tone or '紧张氛围，危机感'}
+内容类型：{content_type}
+
+请基于上述整体分析，为当前分镜生成提示词："""
+
+        try:
+            import ollama
+            model = self.ollama_model_var.get()
+            response = ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            result = response['message']['content'].strip()
+            
+            if '|||' in result:
+                prompt_en = result.split('|||')[1].strip()
+            else:
+                prompt_en = result
+            
+            return prompt_en
+        except Exception as e:
+            self.log(f"⚠️ ARV格式生成失败: {e}")
             return self._generate_sd_prompt(description_parts, content_type, shot_id)
 
     def _generate_sd_prompt(self, description_parts, content_type, shot_id):
@@ -3546,11 +3643,11 @@ class DocuMakerLiteV7:
         
         return text.strip()
 
-    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme="", visual_tone="", theme_elements=None, visual_style="", scene_suggestions=""):
+    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme="", visual_tone="", theme_elements=None, visual_style="", scene_suggestions="", original_dubbing=""):
         """使用大模型生成提示词 - 根据内容类型智能调整
         
         Args:
-            dubbing: 分镜的配音内容
+            dubbing: 分镜的配音内容（已纠错）
             content_type: 内容类型（新闻播报/军事分析/科普教育等）
             prompt_type: "SD提示词" 或 "豆包提示词"
             core_theme: 整篇脚本的核心主题
@@ -3558,6 +3655,7 @@ class DocuMakerLiteV7:
             theme_elements: 主题相关元素列表
             visual_style: 视觉风格（根据内容类型推荐）
             scene_suggestions: 场景建议
+            original_dubbing: 原始配音内容（未纠错，用于参考）
         """
         if theme_elements is None:
             theme_elements = []
@@ -5573,6 +5671,150 @@ Now convert this:
             return "消极/沉重"
         else:
             return "中性/客观"
+
+    def _optimize_prompts_with_global_context(self, shots, core_theme, visual_tone, theme_elements, content_type):
+        """【新增】基于整体主题和氛围，对所有分镜提示词进行系统性优化
+        
+        流程：
+        1. 收集所有分镜的当前提示词
+        2. 整体分析核心主题和氛围
+        3. 对每个分镜进行优化，使其更符合整体风格
+        4. 确保主题元素贯穿始终
+        """
+        if not shots:
+            return shots
+        
+        # 将主题元素转换为英文
+        theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
+        
+        # 构建优化系统提示
+        system_prompt = f"""You are a professional AI prompt optimizer SPECIALIZED for absoluteRealisticVision v20 (ARV) model.
+
+【ARV v20 模型特性 - 必须遵循】
+- 擅长生成超写实人像和风景
+- 偏好自然真实的光照效果
+- 喜欢电影感画面和高对比度
+- 适合新闻纪实、战争场景、科技感画面
+- 必须使用以下基础标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+
+【任务】基于整体主题和氛围，优化多个分镜的英文提示词，使其更适合ARV v20模型生成高质量写实图片。
+
+【整体信息】
+- 核心主题：{core_theme}
+- 视觉基调：{visual_tone or '紧张、危机氛围'}
+- 内容类型：{content_type}
+- 主题元素：{', '.join(theme_elements_en)}
+
+【核心优化策略 - 必须全部实现】
+
+1. 【从抽象→具体】
+   - 禁止使用抽象词如：panic, chaos, fear, crisis, tension
+   - 必须转化为具体可视化场景：如 red warning lights, trading floor chaos, anxious faces
+
+2. 【从单一→组合】
+   - 禁止单个关键词：如 marketplace, technology, supply chain
+   - 必须组合为完整场景：如 Wall Street trading floor, Silicon Valley tech headquarters
+
+3. 【添加专业摄影参数】（至少选择2-3项）
+   - 相机型号：Nikon D850, Canon 5D Mark IV, Sony A7R IV
+   - 镜头：85mm lens, 50mm lens, wide angle, telephoto, macro
+   - 光圈：f/1.8, f/2.8, f/4, f/5.6
+   - 构图：close-up, medium shot, wide angle shot, split screen, aerial view, drone perspective
+
+4. 【场景具体化】
+   - 每个提示词必须有明确主体：交易员、工程师、新闻主播、军人等
+   - 必须有具体环境：交易大厅、医院、工厂、战场、新闻直播间等
+   - 添加环境描述：golden hour, twilight, dramatic lighting, natural lighting, sunset
+
+5. 【ARV风格强化】
+   - 添加电影感描述：cinematic composition, film grain, cinematic color grading
+   - 添加写实感描述：photorealistic, hyper realistic, true-to-life
+   - 添加细节描述：sharp focus, high detail, intricate details, texture
+
+6. 【主题元素贯穿】
+   - 必须合理分布主题元素：helium, semiconductor, medical, supply chain, geopolitical等
+
+【输出格式】
+请按以下JSON格式输出：
+{{"0": "优化后的提示词1", "1": "优化后的提示词2", ...}}
+
+注意：只输出JSON，不要有其他内容。"""
+
+        # 收集当前所有分镜信息
+        prompts_info = []
+        for i, shot in enumerate(shots):
+            desc = shot.get('description', '')
+            prompt = shot.get('prompt_en', '')
+            prompts_info.append(f"分镜{i+1} - 配音: {desc} - 当前提示词: {prompt}")
+        
+        user_prompt = "【所有分镜信息】\n" + "\n".join(prompts_info) + "\n\n请优化以上所有分镜的提示词："
+        
+        try:
+            import ollama
+            model = self.ollama_model_var.get()
+            
+            response = ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            result = response['message']['content'].strip()
+            self.log(f"   🔍 大模型返回优化结果（预览）: {result[:200]}...")
+            
+            # 解析JSON结果
+            import json
+            import re
+            
+            # 尝试提取JSON
+            json_match = re.search(r'\{[\s\S]*\}', result)
+            if json_match:
+                optimized_prompts = json.loads(json_match.group())
+                
+                # 应用优化结果
+                for i, shot in enumerate(shots):
+                    if str(i) in optimized_prompts:
+                        old_prompt = shot.get('prompt_en', '')
+                        new_prompt = optimized_prompts[str(i)]
+                        shot['prompt_en'] = new_prompt
+                        self.log(f"   🔄 分镜{i+1}提示词已优化")
+                        self.log(f"      旧: {old_prompt[:60]}...")
+                        self.log(f"      新: {new_prompt[:60]}...")
+                
+                return shots
+            else:
+                self.log(f"   ⚠️ 无法解析优化结果，保持原提示词")
+                return shots
+                
+        except Exception as e:
+            self.log(f"   ⚠️ 优化过程出错: {e}")
+            return shots
+    
+    def _translate_theme_elements_to_english(self, theme_elements):
+        """将主题元素翻译成英文"""
+        if not theme_elements:
+            return []
+        
+        # 常见主题元素的中英对照
+        translations = {
+            '氦气': 'helium', '芯片': 'chip', '半导体': 'semiconductor',
+            '医疗': 'medical', '供应链': 'supply chain', '全球市场': 'global market',
+            '中东战火': 'Middle East war', '地缘政治': 'geopolitics',
+            '价格波动': 'price fluctuation', '生产基地': 'production base',
+            '天然气': 'natural gas', '危机': 'crisis', '恐慌': 'panic',
+            '战争': 'war', '冲突': 'conflict', '紧张': 'tension',
+            '科技': 'technology', '工业': 'industrial', '经济': 'economy'
+        }
+        
+        result = []
+        for elem in theme_elements:
+            if elem in translations:
+                result.append(translations[elem])
+            else:
+                result.append(elem)
+        return result
     
     def _simplify_theme(self, theme_text):
         """简化核心主题：提取关键词，去除描述性内容
@@ -5763,6 +6005,84 @@ Now convert this:
                     theme_info['scene_suggestions'] = scene_match
                 except:
                     theme_info['scene_suggestions'] = ''
+
+            # 提取纠错说明并应用纠正
+            correction_dict = {}
+            self.log(f"   🔍 检查是否存在'纠错说明'...")
+            if '纠错说明' in cleaned_result:
+                self.log(f"   🔍 找到纠错说明，正在解析...")
+                try:
+                    correction_match = cleaned_result.split('纠错说明')[1].split('\n')[0]
+                    correction_match = correction_match.replace('：', '').replace(':', '').strip()
+                    self.log(f"   🔍 纠错内容原始: {correction_match}")
+                    
+                    if correction_match and correction_match != '无' and correction_match != '无纠正':
+                        # 支持多种分隔符：逗号、顿号、分号
+                        separators = [',', '，', '、', ';', '；']
+                        parts = [correction_match]
+                        for sep in separators:
+                            new_parts = []
+                            for part in parts:
+                                new_parts.extend(part.split(sep))
+                            parts = new_parts
+                        
+                        for part in parts:
+                            part = part.strip()
+                            if not part or '→' not in part:
+                                continue
+                            try:
+                                # 支持多种箭头格式：→ -> =>
+                                if '→' in part:
+                                    old, new = part.split('→', 1)
+                                elif '->' in part:
+                                    old, new = part.split('->', 1)
+                                elif '=>' in part:
+                                    old, new = part.split('=>', 1)
+                                else:
+                                    continue
+                                old = old.strip()
+                                new = new.strip()
+                                if old and new and old != new:
+                                    correction_dict[old] = new
+                            except Exception as e:
+                                self.log(f"   ⚠️ 解析单项纠错失败: {part}, 错误: {e}")
+                                continue
+                        
+                        if correction_dict:
+                            self.log(f"   🔍 解析到纠错字典: {correction_dict}")
+                            
+                            # 应用纠错到核心主题
+                            if theme_info.get('core_theme'):
+                                self.log(f"   🔍 原始core_theme: {theme_info['core_theme']}")
+                                corrected_theme = theme_info['core_theme']
+                                for old, new in correction_dict.items():
+                                    corrected_theme = corrected_theme.replace(old, new)
+                                theme_info['core_theme'] = corrected_theme
+                                self.log(f"   🔄 纠错后core_theme: {theme_info['core_theme']}")
+                            
+                            # 应用纠错到核心元素
+                            if theme_info.get('theme_elements'):
+                                self.log(f"   🔍 原始theme_elements: {theme_info['theme_elements']}")
+                                corrected_elements = []
+                                for elem in theme_info['theme_elements']:
+                                    corrected_elem = elem
+                                    for old, new in correction_dict.items():
+                                        corrected_elem = corrected_elem.replace(old, new)
+                                    corrected_elements.append(corrected_elem)
+                                theme_info['theme_elements'] = corrected_elements
+                                self.log(f"   🔄 纠错后theme_elements: {theme_info['theme_elements']}")
+                            
+                            # 保存纠错字典供后续使用
+                            theme_info['correction_dict'] = correction_dict
+                            self.log(f"   ✅ 纠错已应用到主题信息")
+                    else:
+                        self.log(f"   ℹ️ 纠错说明为'无'，无需纠错")
+                        theme_info['correction_dict'] = {}
+                except Exception as e:
+                    self.log(f"   ⚠️ 解析纠错说明失败: {e}")
+                    theme_info['correction_dict'] = {}
+            else:
+                theme_info['correction_dict'] = {}
 
         except Exception as e:
             self.log(f"⚠️ 提取主题信息时出错: {e}")
@@ -7172,18 +7492,31 @@ Now convert this:
                 try:
                     dubbing = task.get('text', '')
                     if dubbing:
+                        # 获取纠错字典
+                        correction_dict = theme_info.get('correction_dict', {})
+                        
+                        # 对分镜描述文本进行纠错
+                        if correction_dict:
+                            corrected_dubbing = dubbing
+                            for old, new in correction_dict.items():
+                                corrected_dubbing = corrected_dubbing.replace(old, new)
+                            task['text'] = corrected_dubbing
+                            task['original_text'] = dubbing
+                        
                         # 如果用户预设了风格，使用用户预设的风格；否则使用主题分析推荐的风格
                         effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
                         
+                        # 使用纠错后的文本生成提示词
                         prompt = self._generate_prompt_with_llm(
-                            dubbing, 
+                            task.get('text', dubbing), 
                             content_type=theme_info.get('content_type', ''), 
                             prompt_type=user_prompt_type,
                             core_theme=theme_info.get('core_theme', ''),
                             visual_tone=theme_info.get('visual_tone', ''),
                             theme_elements=theme_info.get('theme_elements', []),
                             visual_style=effective_visual_style,
-                            scene_suggestions=theme_info.get('scene_suggestions', '')
+                            scene_suggestions=theme_info.get('scene_suggestions', ''),
+                            original_dubbing=dubbing  # 传入原始文本用于参考
                         )
                         return (idx, prompt, None)
                     return (idx, "", None)
@@ -7288,9 +7621,22 @@ Now convert this:
             core_theme = user_custom_theme if user_custom_theme else theme_info.get('core_theme', '')
             visual_tone = user_custom_tone if user_custom_tone else theme_info.get('visual_tone', '')
             theme_elements = theme_info.get('theme_elements', [])
+            correction_dict = theme_info.get('correction_dict', {})
+            
+            if correction_dict:
+                self.log(f"   🔧 获取到纠错字典: {correction_dict}")
             
             def create_shot_task(task_data):
                 idx, shot_start, shot_end, shot_text, shot_type = task_data
+                
+                # 对分镜描述文本进行纠错
+                if correction_dict and shot_text:
+                    original_text = shot_text
+                    for old, new in correction_dict.items():
+                        shot_text = shot_text.replace(old, new)
+                    if shot_text != original_text:
+                        self.log(f"   🔄 分镜{idx+1}纠错: {original_text[:20]}... → {shot_text[:20]}...")
+                
                 shot = self.create_new_shot(
                     idx, shot_start, shot_end, shot_text, shot_type,
                     core_theme=core_theme,
@@ -7337,6 +7683,25 @@ Now convert this:
                 else:
                     self.log(f"⚠️ {consistency_msg}")
                     self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
+
+            # 【新增】整体优化：基于核心主题和氛围，优化所有分镜的提示词
+            if theme_info.get('core_theme') and shots and len(shots) > 0:
+                self.log("\n🎨 基于整体主题和氛围优化分镜提示词...")
+                self.update_task_progress("正在优化提示词...", 75)
+                
+                try:
+                    optimized_shots = self._optimize_prompts_with_global_context(
+                        shots, 
+                        theme_info.get('core_theme', ''),
+                        theme_info.get('visual_tone', ''),
+                        theme_info.get('theme_elements', []),
+                        theme_info.get('content_type', 'general')
+                    )
+                    if optimized_shots:
+                        shots = optimized_shots
+                        self.log(f"✅ 已完成 {len(shots)} 个分镜提示词的优化")
+                except Exception as e:
+                    self.log(f"⚠️ 提示词优化失败: {e}")
             
             # 检查分镜是否为空
             if not shots:

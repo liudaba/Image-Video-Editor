@@ -8,33 +8,35 @@ class SceneContinuityManager:
 
     def __init__(self):
         self.scene_history = []
-        self.current_scene = None
-        self.visual_tone = None
-        self.color_palette = None
-        self.camera_distance = None
-        self.lighting_style = None
+        self.last_scene_type = None
+        self.last_location = None
+        self.last_camera = None
+        self.last_lighting = None
 
-    def update_scene(self, shot_data):
+    def update_scene(self, shot_data, semantic_elements=None, camera_direction=None, lighting_style=None):
         """更新场景状态，保持连贯性"""
-        self.scene_history.append(shot_data)
+        self.scene_history.append({
+            'content_type': shot_data.get('content_type', ''),
+            'visual_tone': shot_data.get('visual_tone', ''),
+            'semantic_elements': semantic_elements or [],
+            'camera': camera_direction,
+            'lighting': lighting_style,
+        })
         if len(self.scene_history) > 5:
             self.scene_history.pop(0)
 
-        self.current_scene = shot_data.get('content_type', '')
-        self.visual_tone = shot_data.get('visual_tone', '')
-
-    def get_continuity_tags(self, shot_data):
+    def get_continuity_tags(self):
         """获取连贯性标签"""
         tags = []
 
-        if len(self.scene_history) > 1:
-            last_shot = self.scene_history[-2]
+        if len(self.scene_history) >= 1:
+            last_shot = self.scene_history[-1]
 
-            if last_shot.get('camera_distance'):
-                tags.append(last_shot['camera_distance'])
+            if last_shot.get('camera'):
+                tags.append(last_shot['camera'])
 
-            if last_shot.get('lighting_style'):
-                tags.append(last_shot['lighting_style'])
+            if last_shot.get('semantic_elements'):
+                tags.append(', '.join(last_shot['semantic_elements'][:1]))
 
         return tags
 
@@ -50,8 +52,7 @@ class AbsoluteRealisticPrompts:
     """
 
     ARV_QUALITY_TAGS = {
-        "base": "masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, sharp focus, 8K resolution, professional photography, documentary style",
-        "lighting": "cinematic lighting, natural lighting, volumetric light, realistic shadows, high contrast, HDR photography, studio lighting",
+        "base": "masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting",
     }
 
     CONTENT_ARV_PROMPTS = {
@@ -191,11 +192,6 @@ class AbsoluteRealisticPrompts:
                 else:
                     semantic_elements.append(en_value)
 
-        if core_theme:
-            theme_keywords = self._translate_theme_to_elements(core_theme)
-            if theme_keywords:
-                semantic_elements.extend(theme_keywords)
-
         return semantic_elements, visual_style, atmosphere, camera_direction
 
     def _translate_theme_to_elements(self, theme):
@@ -206,16 +202,14 @@ class AbsoluteRealisticPrompts:
             return theme_elements
 
         theme_mappings = {
-            '战争': 'war, conflict, battle, military operation',
-            '冲突': 'conflict zone, war affected area, regional conflict',
-            '中东': 'Middle East region, Levant, Persian Gulf',
-            '芯片': 'semiconductor chips, chip manufacturing',
-            '医疗': 'medical supply, healthcare crisis',
-            '石油': 'oil, petroleum, energy resources',
-            '供应链': 'supply chain, logistics, distribution',
-            '经济': 'economy, finance, market, business',
-            '科技': 'technology, innovation, high-tech',
-            '环境': 'environment, climate, ecological',
+            '中东': 'Middle East war zone, Levant conflict area',
+            '芯片': 'semiconductor industry, chip manufacturing',
+            '医疗': 'medical crisis, healthcare emergency',
+            '石油': 'oil industry, energy crisis',
+            '供应链': 'supply chain disruption',
+            '经济': 'financial crisis, market turmoil',
+            '科技': 'technology sector, innovation',
+            '环境': 'environmental disaster, climate crisis',
         }
 
         for theme_key, en_value in theme_mappings.items():
@@ -226,34 +220,53 @@ class AbsoluteRealisticPrompts:
 
     def generate_arv_prompt(self, text, content_type, core_theme, visual_tone, shot_data=None):
         """生成ARV专用提示词"""
-        if shot_data:
-            self.continuity_manager.update_scene(shot_data)
-
         semantic_elements, visual_style, atmosphere, camera_direction = self.analyze_semantic_structure(
             text, core_theme, visual_tone
         )
 
         content_prompts = self.CONTENT_ARV_PROMPTS.get(content_type, self.CONTENT_ARV_PROMPTS["general"])
 
+        # 获取上一帧的连贯性标签（在更新之前获取）
+        continuity_tags = self.continuity_manager.get_continuity_tags()
+
+        # 然后更新当前帧
+        if shot_data:
+            self.continuity_manager.update_scene(shot_data, semantic_elements, camera_direction, content_prompts.get('lighting'))
+
         prompt_parts = []
 
-        if semantic_elements:
-            prompt_parts.append(', '.join(semantic_elements[:2]))
+        # 收集所有元素用于去重
+        all_elements = []
 
-        if content_prompts.get('base'):
+        # 1. 语义分析结果（具体内容，由大模型根据上下文理解）
+        all_elements.extend(semantic_elements[:2])
+
+        # 去重
+        seen = set()
+        unique_elements = []
+        for e in all_elements:
+            if e not in seen:
+                seen.add(e)
+                unique_elements.append(e)
+
+        if unique_elements:
+            prompt_parts.append(', '.join(unique_elements))
+
+        # 只在语义元素和氛围都为空时添加内容类型基础元素
+        if not semantic_elements and not atmosphere and content_prompts.get('base'):
             prompt_parts.append(content_prompts['base'])
 
+        # 3. 氛围（只添加一个）
         if atmosphere:
             prompt_parts.append(atmosphere[0])
-        elif content_prompts.get('atmosphere'):
+        elif not semantic_elements and content_prompts.get('atmosphere'):
             prompt_parts.append(content_prompts['atmosphere'])
 
-        if content_prompts.get('lighting'):
+        # 4. 光影（只添加一个，当没有语义元素时才添加）
+        if not semantic_elements and content_prompts.get('lighting'):
             prompt_parts.append(content_prompts['lighting'])
 
-        if camera_direction:
-            prompt_parts.append(camera_direction[0])
-
+        # 5. ARV质量标签（重要，放在最后但包含所有质量要求）
         prompt_parts.append(self.ARV_QUALITY_TAGS['base'])
 
         final_prompt = ', '.join(p for p in prompt_parts if p)
