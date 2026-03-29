@@ -8707,27 +8707,27 @@ Now convert this:
                 if has_gaps:
                     self.log("   ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
                 
-                extended_clips = []
+                fixed_clips = []
+                prev_clip = None
+                
                 for i, clip in enumerate(clips):
-                    # 处理第一个片段之前的间隔
-                    if i == 0 and has_start_gap:
-                        first_duration = clip.duration + first_start
-                        clip = clip.with_duration(first_duration).with_start(0)
-                    
-                    # 处理片段之间的间隔
-                    if i > 0:
-                        prev_end_time = clips[i-1].start + clips[i-1].duration
-                        curr_start_time = clip.start
-                        gap = curr_start_time - prev_end_time
+                    if prev_clip is not None:
+                        # 计算前一个片段的实际结束时间
+                        prev_end = prev_clip.start + prev_clip.duration
+                        curr_start = clip.start
+                        gap = curr_start - prev_end
                         
                         if gap > 0.05:
-                            # 扩展上一张图片填补间隔
-                            new_duration = clips[i-1].duration + gap
-                            clips[i-1] = clips[i-1].with_duration(new_duration)
+                            # 扩展前一个片段填补间隔
+                            new_duration = prev_clip.duration + gap
+                            prev_clip = prev_clip.with_duration(new_duration)
+                            # 更新列表中前一个元素
+                            fixed_clips[-1] = prev_clip
                     
-                    extended_clips.append(clips[i])
+                    fixed_clips.append(clip)
+                    prev_clip = clip
                 
-                clips = extended_clips
+                clips = fixed_clips
                 self.log(f"   ✅ 已修复时间间隔: {len(clips)} 个片段")
             
             background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
