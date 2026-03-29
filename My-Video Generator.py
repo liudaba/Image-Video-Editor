@@ -8697,12 +8697,24 @@ Now convert this:
             has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
                           for i in range(1, len(self.shots_data)))
             
-            if has_gaps:
-                self.log("   ⚠️ 检测到时间间隔，使用延续图片方式填充（比黑帧更自然）")
-                # 优化：直接扩展上一张图片的时长来填补间隔
-                # 这样不会增加clip数量，保持高性能
+            # 检查第一个片段之前是否有间隔
+            first_start = self.shots_data[0]['start'] if self.shots_data else 0
+            has_start_gap = first_start > 0.05
+            
+            if has_gaps or has_start_gap:
+                if has_start_gap:
+                    self.log(f"   ⚠️ 视频开头有 {first_start:.2f}s 间隔，用第一张图片填充")
+                if has_gaps:
+                    self.log("   ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
+                
                 extended_clips = []
                 for i, clip in enumerate(clips):
+                    # 处理第一个片段之前的间隔
+                    if i == 0 and has_start_gap:
+                        first_duration = clip.duration + first_start
+                        clip = clip.with_duration(first_duration).with_start(0)
+                    
+                    # 处理片段之间的间隔
                     if i > 0:
                         prev_end_time = clips[i-1].start + clips[i-1].duration
                         curr_start_time = clip.start
