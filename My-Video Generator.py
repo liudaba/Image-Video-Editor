@@ -1721,6 +1721,41 @@ class DocuMakerLiteV7:
         )
         audio_model_desc.pack(fill=tk.X, padx=5, pady=2)
         
+        # 并发线程数设置
+        thread_section = ttk.LabelFrame(adv_frame, text="⚡ 并发设置", padding=15)
+        thread_section.pack(fill=tk.X, pady=5)
+        
+        # 分镜创建线程数
+        thread_frame = ttk.Frame(thread_section)
+        thread_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(thread_frame, text="分镜创建线程:", width=14, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        
+        if not hasattr(self, 'thread_count_var'):
+            self.thread_count_var = tk.IntVar(value=16)
+        
+        thread_options = [4, 8, 12, 16, 24, 32]
+        thread_combo = ttk.Combobox(
+            thread_frame,
+            textvariable=self.thread_count_var,
+            values=thread_options,
+            state="readonly",
+            font=('Microsoft YaHei', large_font_size),
+            width=8
+        )
+        thread_combo.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        thread_desc = tk.Label(
+            thread_section,
+            text="说明: 线程越多生成越快，但GPU压力越大。建议GPU性能一般时选择8-12",
+            font=('Microsoft YaHei', large_font_size - 1),
+            foreground="#aaaaaa",
+            background=self.panel_bg,
+            wraplength=500,
+            justify=tk.LEFT,
+            padx=5
+        )
+        thread_desc.pack(fill=tk.X, padx=5, pady=2)
+        
         # 6. 提示词设置部分
         prompt_section = ttk.LabelFrame(adv_frame, text="💬 提示词设置", padding=15)
         prompt_section.pack(fill=tk.X, pady=5)
@@ -3023,9 +3058,10 @@ class DocuMakerLiteV7:
         end_dec = Decimal(str(end_time)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
         duration_dec = end_dec - start_dec
         
-        if duration_dec < Decimal('1.0'):
-            duration_dec = Decimal('1.0')
-            end_dec = start_dec + duration_dec
+        # 禁用短分镜强制扩展 - 保持原始语音时长，确保音画同步
+        # if duration_dec < Decimal('1.0'):
+        #     duration_dec = Decimal('1.0')
+        #     end_dec = start_dec + duration_dec
         
         shot_data = {
             "id": shot_id,
@@ -5728,127 +5764,284 @@ Now convert this:
             preview_text = result[:150].replace('\n', ' ')
             self.log(f"   🔍 大模型返回优化结果: {preview_text}...")
             
-            # 解析JSON结果
+            # 使用健壮的JSON解析器
+            applied_count, parse_msg = self._robust_json_parse(result, len(shots))
+            
+            if applied_count > 0:
+                self.log(f"   ✅ {parse_msg}")
+                
+                # 尝试应用优化结果
+                import json
+                import re
+                
+                # 尝试提取并应用JSON
+                json_match = re.search(r'(\[[\s\S]*\]|\{[\s\S]*\})', result)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group())
+                        
+                        # 安全检查：确保 shots 是有效的列表
+                        if not isinstance(shots, list) or len(shots) == 0:
+                            raise ValueError("shots 不是有效的列表")
+                        
+                        applied = 0
+                        
+                        # 情况1: data 是数组 [{"scene_id": 1, "prompt": "xxx"}, ...]
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, dict) and 'scene_id' in item and 'prompt' in item:
+                                    try:
+                                        sid = int(item['scene_id']) - 1
+                                        prompt = str(item['prompt'])
+                                        if 0 <= sid < len(shots) and isinstance(shots[sid], dict) and len(prompt) > 10:
+                                            shots[sid]['prompt_en'] = prompt
+                                            applied += 1
+                                    except (ValueError, TypeError, KeyError):
+                                        continue
+                        
+                        # 情况2: data 是字典 {"0": "xxx", "1": "yyy"} 或 {"0": {"scene_id": 1, "prompt": "xxx"}, ...}
+                        elif isinstance(data, dict):
+                            for key, value in data.items():
+                                try:
+                                    idx = int(key)
+                                    if 0 <= idx < len(shots) and isinstance(shots[idx], dict):
+                                        # 值是字符串
+                                        if isinstance(value, str) and len(value) > 10:
+                                            shots[idx]['prompt_en'] = value
+                                            applied += 1
+                                        # 值是字典（嵌套格式）
+                                        elif isinstance(value, dict) and 'prompt' in value:
+                                            prompt = str(value['prompt'])
+                                            if len(prompt) > 10:
+                                                shots[idx]['prompt_en'] = prompt
+                                                applied += 1
+                                except (ValueError, TypeError):
+                                    continue
+                        
+                        if applied > 0:
+                            self.log(f"   ✅ 成功应用 {applied} 个优化结果")
+                            shots['_optimized_count'] = applied
+                            return shots
+                    except Exception as e:
+                        import traceback
+                        self.log(f"   ⚠️ 应用优化结果失败: {str(e)[:60]}")
+                        self.log(f"   📋 调试信息: shots类型={type(shots)}, len={len(shots) if isinstance(shots, list) else 'N/A'}")
+            
+            # 如果健壮解析失败，尝试逐行解析
+            self.log(f"   🔧 尝试逐行解析...")
+            lines = result.split('\n')
+            applied = 0
+            for line in lines:
+                line = line.strip()
+                if ':' not in line:
+                    continue
+                match = re.match(r'["\']?(\d+)["\']?\s*:\s*["\'](.+?)["\']', line)
+                if match:
+                    try:
+                        idx, value = match.groups()
+                        idx = int(idx)
+                        if 0 <= idx < len(shots) and isinstance(shots[idx], dict) and len(value) > 10:
+                            shots[idx]['prompt_en'] = value
+                            applied += 1
+                    except (ValueError, TypeError, IndexError):
+                        continue
+            
+            if applied > 0:
+                self.log(f"   ✅ 逐行解析成功，应用 {applied} 个优化结果")
+                shots['_optimized_count'] = applied
+                return shots
+            
+            self.log(f"   ⚠️ 无法解析优化结果，保持原提示词")
+            shots['_optimized_count'] = 0
+            return shots
+        except Exception as e:
+            import traceback
+            self.log(f"   ⚠️ 优化过程出错: {str(e)[:100]}")
+            self.log(f"   📋 调试信息: shots类型={type(shots)}, len={len(shots) if isinstance(shots, list) else 'N/A'}")
+            self.log(f"   📋 堆栈: {traceback.format_exc(3)[:200]}")
+            shots['_optimized_count'] = 0
+            return shots
+    
+    def _robust_json_parse(self, result, shots_count):
+        """健壮的JSON解析函数，处理各种格式
+        
+        返回: (applied_count, log_message)
+        """
+        import json
+        import re
+        
+        applied_count = 0
+        log_message = ""
+        
+        # 方法1: 直接尝试 json.loads
+        try:
+            data = json.loads(result)
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, str) and len(value) > 10:
+                        idx = int(key) if key.isdigit() else None
+                        if idx is not None and 0 <= idx < shots_count:
+                            applied_count += 1
+                if applied_count > 0:
+                    return applied_count, f"直接解析成功: {applied_count}个"
+        except:
+            pass
+        
+        # 方法2: 尝试提取JSON数组或对象
+        patterns = [
+            (r'\[[\s\S]*\]', '数组'),
+            (r'\{[\s\S]*\}', '对象'),
+        ]
+        
+        for pattern, pattern_name in patterns:
+            match = re.search(pattern, result)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                    
+                    # 格式A: {"0": "xxx", "1": "yyy"}
+                    if isinstance(data, dict) and all(k.isdigit() for k in data.keys()):
+                        for i in range(shots_count):
+                            if str(i) in data and len(data[str(i)]) > 10:
+                                applied_count += 1
+                        if applied_count > 0:
+                            return applied_count, f"字典格式解析成功: {applied_count}个"
+                    
+                    # 格式B: ["xxx", "yyy"]
+                    elif isinstance(data, list) and len(data) > 0:
+                        if isinstance(data[0], str):
+                            applied_count = sum(1 for x in data if isinstance(x, str) and len(x) > 10)
+                            if applied_count > 0:
+                                return applied_count, f"数组格式解析成功: {applied_count}个"
+                        
+                        # 格式C: [{"scene_id": 1, "prompt": "xxx"}]
+                        elif isinstance(data[0], dict):
+                            for item in data:
+                                sid = item.get('scene_id')
+                                p = item.get('prompt')
+                                if sid and p and len(p) > 10:
+                                    if 1 <= sid <= shots_count:
+                                        applied_count += 1
+                            if applied_count > 0:
+                                return applied_count, f"scene_id格式解析成功: {applied_count}个"
+                    
+                    # 格式D: {"prompts": ["xxx", "yyy"]}
+                    elif isinstance(data, dict) and 'prompts' in data:
+                        prompts = data.get('prompts', [])
+                        if isinstance(prompts, list):
+                            applied_count = sum(1 for x in prompts if isinstance(x, str) and len(x) > 10)
+                            if applied_count > 0:
+                                return applied_count, f"prompts格式解析成功: {applied_count}个"
+                    
+                    # 格式E: {"scenes": [{"scene_id": 1, "prompt": "xxx"}]}
+                    elif isinstance(data, dict) and 'scenes' in data:
+                        scenes = data.get('scenes', [])
+                        if isinstance(scenes, list):
+                            for item in scenes:
+                                sid = item.get('scene_id')
+                                p = item.get('prompt')
+                                if sid and p and len(p) > 10:
+                                    if 1 <= sid <= shots_count:
+                                        applied_count += 1
+                            if applied_count > 0:
+                                return applied_count, f"scenes格式解析成功: {applied_count}个"
+                except json.JSONDecodeError:
+                    continue
+        
+        # 方法3: 逐行解析 key: value 格式
+        lines = result.split('\n')
+        parsed = {}
+        for line in lines:
+            line = line.strip()
+            if not line or ':' not in line:
+                continue
+            # 尝试提取数字key
+            for num in re.findall(r'^\s*["\']?(\d+)["\']?\s*:', line):
+                # 尝试提取引号中的内容
+                match = re.search(r':\s*["\'](.+?)["\']', line)
+                if match:
+                    parsed[num] = match.group(1)
+        
+        if parsed:
+            applied_count = sum(1 for v in parsed.values() if len(v) > 10)
+            if applied_count > 0:
+                return applied_count, f"逐行解析成功: {applied_count}个"
+        
+    def _optimize_prompts_with_global_context(self, shots, core_theme, visual_tone, theme_elements, content_type):
+        """基于整体主题和氛围，对所有分镜提示词进行系统性优化（简化版）"""
+        if not shots:
+            return shots
+        
+        try:
+            theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
+            
+            system_prompt = f"""You are an ARV v20 prompt optimizer.
+【核心主题】{core_theme}
+【视觉基调】{visual_tone or '紧张'}
+【主题元素】{', '.join(theme_elements_en)}
+输出JSON: {{"0": "提示词1", "1": "提示词2"}}"""
+
+            prompts_info = []
+            for i, shot in enumerate(shots):
+                desc = shot.get('description', '')[:80]
+                prompt = shot.get('prompt_en', '')[:80]
+                prompts_info.append(f"{i}|{desc}|{prompt}")
+            
+            user_prompt = "分镜:\n" + "\n".join(prompts_info)
+            
+            import ollama
             import json
             import re
             
-            # 尝试提取JSON（更宽松的匹配）
+            model = self.ollama_model_var.get()
+            response = ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            result = response['message']['content'].strip()
+            self.log(f"   🔍 大模型返回: {result[:60]}...")
+            
             json_match = re.search(r'\{[\s\S]*\}', result)
-            if json_match:
-                try:
-                    optimized_prompts = json.loads(json_match.group())
-                    
-                    # 格式1: {"0": "提示词1", "1": "提示词2", ...}
-                    if isinstance(optimized_prompts, dict) and all(k.isdigit() for k in optimized_prompts.keys()):
-                        applied_count = 0
-                        for i, shot in enumerate(shots):
-                            if str(i) in optimized_prompts:
-                                old_prompt = shot.get('prompt_en', '')
-                                new_prompt = optimized_prompts[str(i)]
-                                if new_prompt and len(new_prompt) > 10:
-                                    shot['prompt_en'] = new_prompt
-                                    applied_count += 1
-                                    if applied_count <= 3:
-                                        desc = shot.get('description', '')[:15]
-                                        self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
-                        
-                        if applied_count > 0:
-                            self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
-                            return shots
-                    
-                    # 格式2: {"prompts": ["提示词1", "提示词2", ...]}
-                    elif isinstance(optimized_prompts, dict) and "prompts" in optimized_prompts:
-                        prompts_list = optimized_prompts["prompts"]
-                        if isinstance(prompts_list, list):
-                            applied_count = 0
-                            for i, shot in enumerate(shots):
-                                if i < len(prompts_list):
-                                    old_prompt = shot.get('prompt_en', '')
-                                    new_prompt = prompts_list[i]
-                                    if new_prompt and len(new_prompt) > 10:
-                                        shot['prompt_en'] = new_prompt
-                                        applied_count += 1
-                                        if applied_count <= 3:
-                                            desc = shot.get('description', '')[:15]
-                                            self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
-                            
-                            if applied_count > 0:
-                                self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
-                                return shots
-                    
-                    # 格式3: {"scenes": [{"scene_id": 1, "prompt": "..."}, ...]}
-                    elif isinstance(optimized_prompts, dict) and "scenes" in optimized_prompts:
-                        scenes_list = optimized_prompts["scenes"]
-                        if isinstance(scenes_list, list):
-                            applied_count = 0
-                            for scene in scenes_list:
-                                scene_id = scene.get('scene_id', 0) - 1
-                                prompt = scene.get('prompt', '')
-                                if scene_id >= 0 and scene_id < len(shots) and prompt and len(prompt) > 10:
-                                    old_prompt = shots[scene_id].get('prompt_en', '')
-                                    shots[scene_id]['prompt_en'] = prompt
-                                    applied_count += 1
-                                    if applied_count <= 3:
-                                        desc = shots[scene_id].get('description', '')[:15]
-                                        self.log(f"   🔄 分镜{scene_id+1} [{desc}...] 已优化")
-                            
-                            if applied_count > 0:
-                                self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词（scenes格式）")
-                                return shots
-                    
-                    # 格式4: 直接是数组 ["提示词1", "提示词2", ...]
-                    elif isinstance(optimized_prompts, list):
-                        applied_count = 0
-                        for i, shot in enumerate(shots):
-                            if i < len(optimized_prompts):
-                                old_prompt = shot.get('prompt_en', '')
-                                new_prompt = optimized_prompts[i]
-                                if new_prompt and len(new_prompt) > 10:
-                                    shot['prompt_en'] = new_prompt
-                                    applied_count += 1
-                                    if applied_count <= 3:
-                                        desc = shot.get('description', '')[:15]
-                                        self.log(f"   🔄 分镜{i+1} [{desc}...] 已优化")
-                        
-                        if applied_count > 0:
-                            self.log(f"   ✅ 成功优化 {applied_count} 个分镜提示词")
-                            return shots
-                            
-                except json.JSONDecodeError:
-                    pass
+            if not json_match:
+                self.log(f"   ⚠️ 无法提取JSON")
+                shots['_optimized_count'] = 0
+                return shots
             
-            # 如果JSON解析失败，尝试逐行解析
-            lines = result.split('\n')
-            optimized_prompts = {}
-            for line in lines:
-                line = line.strip()
-                if ':' in line and ('"' in line or "'" in line):
-                    # 尝试提取 key: value 对
-                    match = re.match(r'["\']?(\d+)["\']?\s*:\s*["\'](.+?)["\']', line)
-                    if match:
-                        idx, value = match.groups()
-                        optimized_prompts[idx] = value
+            try:
+                data = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                self.log(f"   ⚠️ JSON解析失败")
+                shots['_optimized_count'] = 0
+                return shots
             
-            if optimized_prompts:
-                self.log(f"   🔧 尝试逐行解析...")
-                applied_count = 0
-                for i, shot in enumerate(shots):
-                    if str(i) in optimized_prompts:
-                        old_prompt = shot.get('prompt_en', '')
-                        new_prompt = optimized_prompts[str(i)]
-                        if new_prompt and len(new_prompt) > 10:
-                            shot['prompt_en'] = new_prompt
-                            applied_count += 1
-                
-                if applied_count > 0:
-                    self.log(f"   ✅ 逐行解析成功，优化 {applied_count} 个分镜")
-                    return shots
+            applied = 0
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    try:
+                        idx = int(key)
+                        if 0 <= idx < len(shots) and isinstance(value, str) and len(value) > 10:
+                            if isinstance(shots[idx], dict):
+                                shots[idx]['prompt_en'] = value
+                                applied += 1
+                    except (ValueError, TypeError, IndexError):
+                        continue
             
-            self.log(f"   ⚠️ 无法解析优化结果，保持原提示词")
+            if applied > 0:
+                self.log(f"   ✅ 成功优化 {applied} 个分镜")
+                shots['_optimized_count'] = applied
+            else:
+                self.log(f"   ⚠️ 未应用任何优化")
+                shots['_optimized_count'] = 0
+            
             return shots
-                
+            
         except Exception as e:
-            self.log(f"   ⚠️ 优化过程出错: {e}")
+            self.log(f"   ⚠️ 优化失败: {str(e)[:50]}")
+            shots['_optimized_count'] = 0
             return shots
     
     def _translate_theme_elements_to_english(self, theme_elements):
@@ -6202,17 +6395,19 @@ Now convert this:
 
         # 检查每个分镜的提示词是否包含主题元素
         core_theme = theme_info['core_theme']
-        theme_elements = theme_info['theme_elements']
+        theme_elements = theme_info.get('theme_elements', [])
+        
+        # 翻译主题元素为英文进行比对
+        theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
 
         for i, shot in enumerate(shots):
             prompt = shot.get('prompt_en', '').lower()
 
-            # 检查是否偏离主题（简单启发式检查）
-            # 这里可以添加更复杂的语义相似度检查
-            if theme_elements:
+            # 检查是否偏离主题（使用英文翻译后的元素检查）
+            # 因为提示词是英文的，所以需要比对英文版本
+            if theme_elements_en:
                 has_theme_element = any(
-                    elem.lower() in prompt or elem.lower() in shot.get('description', '').lower()
-                    for elem in theme_elements
+                    elem.lower() in prompt for elem in theme_elements_en
                 )
                 if not has_theme_element and i > 0:  # 第一个分镜可能不需要包含所有元素
                     consistency_issues.append(f"分镜{i+1}可能偏离主题")
@@ -7219,7 +7414,7 @@ Now convert this:
                     self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
                 
                 if theme_info.get('theme_elements'):
-                    self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
+                    self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
                 self.log("✅ 主题提取完成，将直接使用原始语音片段创建分镜")
             else:
@@ -7645,8 +7840,11 @@ Now convert this:
                         pregenerated_prompts[idx] = prompt
                 
                 elapsed = time.time() - start_time
-                speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
-                self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
+                if user_prompt_type == "ARV写实提示词":
+                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (ARV模式将在后续步骤中单独生成提示词)")
+                else:
+                    speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
+                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
             
             if failed_count > 0:
                 self.log(f"❌ 错误: {failed_count} 个提示词生成失败，任务终止")
@@ -7682,7 +7880,7 @@ Now convert this:
             if display_tone:
                 self.log(f"🎨 视觉基调: {display_tone}")
             if theme_info.get('theme_elements'):
-                self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:5])}")
+                self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
 
             # 直接使用原始语音片段创建分镜（跳过sentence列表）
             self.log(f"📊 共 {len(original_shot_tasks)} 个原始语音片段")
@@ -7714,9 +7912,11 @@ Now convert this:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             import os
             
-            # 优化：增加并发线程数以提高处理速度
-            cpu_count = os.cpu_count() or 4
-            thread_count = min(cpu_count * 4, 32)  # 增加并发上限以加速处理
+            # 获取用户设置的线程数（默认16）
+            if hasattr(self, 'thread_count_var'):
+                thread_count = self.thread_count_var.get()
+            else:
+                thread_count = 16
             
             self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理")
             
@@ -7778,10 +7978,9 @@ Now convert this:
             shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
             self.log(f"✅ 成功创建 {len(shots)} 个分镜（{thread_count}线程并行，耗时 {elapsed_time:.1f}秒，速度 {len(shots)/elapsed_time:.1f}个/秒）")
 
-            # 合并时长过短的分镜（低于1.5秒）
-            self.log("🔍 检查并合并短分镜...")
-            shots = self.merge_short_shots(shots, min_duration=1.5)
-            self.log(f"   📊 最终分镜数: {len(shots)} 个")
+            # 禁用分镜合并 - 保持原始语音时间戳，确保音画同步
+            # shots = self.merge_short_shots(shots, min_duration=1.5)
+            self.log("   ✅ 禁用分镜合并，保持原始时间戳")
 
             # 验证分镜主题一致性（如果大模型分析成功）
             if theme_info.get('core_theme'):
@@ -7792,25 +7991,6 @@ Now convert this:
                     self.log(f"⚠️ {consistency_msg}")
                     self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
 
-            # 【新增】整体优化：基于核心主题和氛围，优化所有分镜的提示词
-            if theme_info.get('core_theme') and shots and len(shots) > 0:
-                self.log("\n🎨 基于整体主题和氛围优化分镜提示词...")
-                self.update_task_progress("正在优化提示词...", 75)
-                
-                try:
-                    optimized_shots = self._optimize_prompts_with_global_context(
-                        shots, 
-                        theme_info.get('core_theme', ''),
-                        theme_info.get('visual_tone', ''),
-                        theme_info.get('theme_elements', []),
-                        theme_info.get('content_type', 'general')
-                    )
-                    if optimized_shots:
-                        shots = optimized_shots
-                        self.log(f"✅ 已完成 {len(shots)} 个分镜提示词的优化")
-                except Exception as e:
-                    self.log(f"⚠️ 提示词优化失败: {e}")
-            
             # 检查分镜是否为空
             if not shots:
                 self.log("❌ 未能生成分镜，请检查音频文件是否正确")
@@ -7825,14 +8005,15 @@ Now convert this:
             # 获取音频总时长
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
             
-            # 验证时间戳完整性
+            # 验证时间戳完整性 - 只验证，不调整，保持原始时间戳确保音画同步
             self.log("🔍 验证时间戳完整性...")
             total_shots_duration = sum(s['duration'] for s in shots)
             
             if abs(total_shots_duration - audio_total_duration) > 0.1:
                 self.log(f"   ⚠️ 时长差异: 分镜{total_shots_duration:.2f}s vs 音频{audio_total_duration:.2f}s")
-                shots = self.adjust_shot_durations(shots, audio_total_duration)
-                self.log(f"   ✅ 已调整分镜时长以匹配音频")
+                # 禁用时长调整，保持原始语音时间戳，确保音画同步
+                # shots = self.adjust_shot_durations(shots, audio_total_duration)
+                self.log(f"   ✅ 保持原始时间戳，确保音画同步")
             else:
                 self.log(f"   ✅ 时间戳验证通过")
             
@@ -8512,7 +8693,31 @@ Now convert this:
             # 步骤8: 合成视频片段
             self.update_task_progress("正在合成视频...", 50)
             
-            # 始终使用 CompositeVideoClip 精确定位，保持音画同步
+            # 检查是否有时间间隔
+            has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
+                          for i in range(1, len(self.shots_data)))
+            
+            if has_gaps:
+                self.log("   ⚠️ 检测到时间间隔，使用延续图片方式填充（比黑帧更自然）")
+                # 优化：直接扩展上一张图片的时长来填补间隔
+                # 这样不会增加clip数量，保持高性能
+                extended_clips = []
+                for i, clip in enumerate(clips):
+                    if i > 0:
+                        prev_end_time = clips[i-1].start + clips[i-1].duration
+                        curr_start_time = clip.start
+                        gap = curr_start_time - prev_end_time
+                        
+                        if gap > 0.05:
+                            # 扩展上一张图片填补间隔
+                            new_duration = clips[i-1].duration + gap
+                            clips[i-1] = clips[i-1].with_duration(new_duration)
+                    
+                    extended_clips.append(clips[i])
+                
+                clips = extended_clips
+                self.log(f"   ✅ 已修复时间间隔: {len(clips)} 个片段")
+            
             background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
             final_clip = CompositeVideoClip([background] + clips, size=(width, height))
             
@@ -8652,59 +8857,47 @@ Now convert this:
             traceback.print_exc()
     
     def apply_animation_effect_prerender(self, clip):
-        """预渲染缩放动画效果 - 在生成时直接渲染帧序列
+        """预渲染缩放动画效果 - 使用更高效的帧生成方式
         
         注意：此函数返回新片段，会丢失原片段的 start 属性
               调用方必须在调用此函数后重新设置 with_start()
         """
         try:
             import numpy as np
-            from PIL import Image
-            from moviepy import ImageSequenceClip
+            from moviepy import VideoClip
             
-            # 保存原始时长
             original_duration = clip.duration
             
-            # 边界检查：时长无效时直接返回原片段
             if not original_duration or original_duration <= 0:
                 self.log("⚠️ 动画片段时长无效，跳过动画效果")
                 return clip
             
-            frames = []
-            fps = 30
-            num_frames = max(1, int(original_duration * fps))  # 至少1帧
             w, h = clip.size
             
-            for frame_idx in range(num_frames):
-                t = frame_idx / fps
-                frame = clip.get_frame(t)
-                
-                if isinstance(frame, np.ndarray):
-                    img = Image.fromarray(frame)
-                else:
-                    img = frame
-                
-                # 缩放：从 1.0 到 1.05 的缓慢放大效果
-                scale = 1.0 + 0.05 * (t / original_duration)
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                resized = img.resize((new_w, new_h), Image.LANCZOS)
-                
-                # 裁剪回原始尺寸（居中裁剪）
-                if new_w > w:
-                    left = (new_w - w) // 2
-                    top = (new_h - h) // 2
-                    resized = resized.crop((left, top, left + w, top + h))
-                
-                frames.append(np.array(resized))
+            def make_frame(t):
+                try:
+                    original_frame = clip.get_frame(t)
+                    
+                    if isinstance(original_frame, np.ndarray):
+                        from PIL import Image
+                        img = Image.fromarray(original_frame)
+                        
+                        scale = 1.0 + 0.05 * (t / original_duration)
+                        new_w = int(w * scale)
+                        new_h = int(h * scale)
+                        resized = img.resize((new_w, new_h), Image.LANCZOS)
+                        
+                        if new_w > w:
+                            left = (new_w - w) // 2
+                            top = (new_h - h) // 2
+                            resized = resized.crop((left, top, left + w, top + h))
+                        
+                        return np.array(resized)
+                    return original_frame
+                except Exception:
+                    return clip.get_frame(0) if t > 0 else clip.get_frame(0)
             
-            # 创建新片段，确保时长与原始一致
-            animated_clip = ImageSequenceClip(frames, fps=fps)
-            
-            # 验证时长
-            if abs(animated_clip.duration - original_duration) > 0.01:
-                # 如果时长有偏差，强制设置为原始时长
-                animated_clip = animated_clip.with_duration(original_duration)
+            animated_clip = VideoClip(make_frame, duration=original_duration).resize((w, h))
             
             return animated_clip
         except Exception as e:
@@ -9147,16 +9340,17 @@ Now convert this:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
         print(log_message)
-        # 确保在主线程中更新UI
+        
         def update_ui():
             if hasattr(self, 'txt_log') and self.txt_log:
                 try:
                     self.txt_log.insert(tk.END, log_message + '\n')
                     self.txt_log.see(tk.END)
+                    if hasattr(self, 'root') and self.root:
+                        self.root.update_idletasks()
                 except Exception as e:
                     pass
         
-        # 使用after方法确保在主线程中执行
         if hasattr(self, 'root') and self.root:
             self.root.after(0, update_ui)
     
