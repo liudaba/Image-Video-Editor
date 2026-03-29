@@ -8897,7 +8897,7 @@ Now convert this:
                 except Exception:
                     return clip.get_frame(0) if t > 0 else clip.get_frame(0)
             
-            animated_clip = VideoClip(make_frame, duration=original_duration).resize((w, h))
+            animated_clip = VideoClip(make_frame, duration=original_duration, size=(w, h))
             
             return animated_clip
         except Exception as e:
