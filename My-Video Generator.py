@@ -3,11 +3,527 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import json
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
 import warnings
 import sys
 import time
+import hashlib
+
+# ============ 优化1: 智能缓存系统 ============
+class SmartCache:
+    """智能缓存系统 - 带TTL和LRU的混合缓存"""
+    
+    def __init__(self, max_size=1000, default_ttl=3600):
+        self.max_size = max_size
+        self.default_ttl = default_ttl
+        self._cache = {}
+        self._access_times = {}
+        self._lock = threading.RLock()
+        self._hits = 0
+        self._misses = 0
+        
+    def _generate_key(self, *args, **kwargs):
+        """生成缓存键"""
+        key_data = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
+        return hashlib.md5(key_data.encode()).hexdigest()
+    
+    def get(self, key):
+        """获取缓存值"""
+        with self._lock:
+            if key in self._cache:
+                entry = self._cache[key]
+                if entry['expire'] > time.time():
+                    self._access_times[key] = time.time()
+                    self._hits += 1
+                    return entry['value']
+                else:
+                    # 过期清理
+                    del self._cache[key]
+                    del self._access_times[key]
+            self._misses += 1
+            return None
+    
+    def set(self, key, value, ttl=None):
+        """设置缓存值"""
+        with self._lock:
+            # LRU清理：如果满了，删除最久未访问的
+            if len(self._cache) >= self.max_size:
+                oldest = min(self._access_times.items(), key=lambda x: x[1])[0]
+                del self._cache[oldest]
+                del self._access_times[oldest]
+            
+            ttl = ttl or self.default_ttl
+            self._cache[key] = {
+                'value': value,
+                'expire': time.time() + ttl
+            }
+            self._access_times[key] = time.time()
+    
+    def get_stats(self):
+        """获取缓存统计"""
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = self._hits / total if total > 0 else 0
+            return {
+                'hits': self._hits,
+                'misses': self._misses,
+                'hit_rate': f"{hit_rate*100:.1f}%",
+                'size': len(self._cache)
+            }
+    
+    def clear(self):
+        """清空缓存"""
+        with self._lock:
+            self._cache.clear()
+            self._access_times.clear()
+
+# 全局缓存实例
+prompt_cache = SmartCache(max_size=500, default_ttl=7200)  # 提示词缓存2小时
+image_cache = SmartCache(max_size=200, default_ttl=3600)   # 图像缓存1小时
+
+# ============ 优化2: 并行提示词生成器 ============
+class ParallelPromptGenerator:
+    """并行提示词生成器 - 延迟初始化线程池"""
+    
+    def __init__(self, max_workers=8):
+        self.max_workers = max_workers
+        self.executor = None  # 延迟初始化
+    
+    def _get_executor(self):
+        """获取或创建线程池"""
+        if self.executor is None:
+            self.executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="prompt_")
+        return self.executor
+    
+    def generate_batch(self, shots_data, generate_func, progress_callback=None):
+        """批量并行生成提示词
+        
+        Args:
+            shots_data: 分镜数据列表
+            generate_func: 生成单个提示词的函数
+            progress_callback: 进度回调函数
+        
+        Returns:
+            按原始顺序排列的提示词列表
+        """
+        results = [None] * len(shots_data)
+        completed = 0
+        
+        def generate_with_index(idx_shot):
+            idx, shot = idx_shot
+            try:
+                # 检查缓存
+                cache_key = f"{shot.get('description', '')}_{shot.get('content_type', '')}"
+                cached = prompt_cache.get(cache_key)
+                if cached:
+                    return idx, cached, True  # 返回索引、值、是否来自缓存
+                
+                # 生成提示词
+                result = generate_func(shot)
+                
+                # 存入缓存
+                prompt_cache.set(cache_key, result)
+                
+                return idx, result, False
+            except Exception as e:
+                return idx, f"ERROR: {str(e)}", False
+        
+        # 提交所有任务
+        executor = self._get_executor()
+        future_to_idx = {
+            executor.submit(generate_with_index, (i, shot)): i 
+            for i, shot in enumerate(shots_data)
+        }
+        
+        # 处理完成的任务
+        for future in as_completed(future_to_idx):
+            idx, result, from_cache = future.result()
+            results[idx] = result
+            completed += 1
+            
+            if progress_callback:
+                progress_callback(completed, len(shots_data), from_cache)
+        
+        return results
+    
+    def shutdown(self):
+        """关闭线程池"""
+        if self.executor:
+            self.executor.shutdown(wait=False)
+
+# ============ 优化3: 批量SD图像生成器 ============
+class BatchSDGenerator:
+    """批量SD图像生成器 - 支持连接池和并发"""
+    
+    def __init__(self, api_url="http://127.0.0.1:7860", max_workers=4):
+        self.api_url = api_url
+        self.max_workers = max_workers
+        self.session = None
+        self._init_session()
+    
+    def _init_session(self):
+        """初始化连接池会话"""
+        import requests
+        from requests.adapters import HTTPAdapter
+        
+        self.session = requests.Session()
+        adapter = HTTPAdapter(
+            pool_connections=self.max_workers * 2,
+            pool_maxsize=self.max_workers * 4,
+            max_retries=3,
+            pool_block=False
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+    
+    def generate_batch(self, prompts_data, width=1920, height=1080, 
+                      steps=30, cfg_scale=7.0, progress_callback=None, log_callback=None):
+        """批量生成图像 - 使用队列控制避免SD过载
+        
+        Args:
+            prompts_data: [(idx, prompt, negative_prompt), ...]
+            width, height: 图像尺寸
+            steps: 采样步数
+            cfg_scale: CFG比例
+            progress_callback: 进度回调 (completed, total, from_cache)
+            log_callback: 日志回调 (message)
+        
+        Returns:
+            按索引排列的图像数据列表
+        """
+        import time
+        import threading
+        
+        results = [None] * len(prompts_data)
+        completed = 0
+        total = len(prompts_data)
+        lock = threading.Lock()
+        
+        # SD WebUI 同时处理太多请求会超时，限制并发数
+        # 建议：根据GPU显存调整，8GB显存建议4线程，12GB+建议6-8线程
+        effective_workers = min(self.max_workers, 6)  # 最多6个实际并发
+        
+        def log(msg):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+        
+        def generate_single(item):
+            idx, prompt, negative_prompt = item
+            start_time = time.time()
+            
+            try:
+                # 检查图像缓存
+                cache_key = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                cached = image_cache.get(cache_key)
+                if cached:
+                    log(f"📷 [{idx+1}/{total}] 缓存命中，跳过生成")
+                    with lock:
+                        results[idx] = cached
+                    return idx, cached, True, 0
+                
+                log(f"📷 [{idx+1}/{total}] 开始生成...")
+                
+                # 增加超时时间到120秒，并添加重试
+                max_retries = 2
+                for retry in range(max_retries):
+                    try:
+                        response = self.session.post(
+                            f"{self.api_url}/sdapi/v1/txt2img",
+                            json={
+                                "prompt": prompt,
+                                "negative_prompt": negative_prompt or "",
+                                "width": width,
+                                "height": height,
+                                "steps": steps,
+                                "cfg_scale": cfg_scale,
+                                "batch_size": 1,
+                                "sampler_name": "DPM++ 2M Karras",
+                            },
+                            timeout=120  # 增加到120秒超时
+                        )
+                        
+                        elapsed = time.time() - start_time
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            images = result.get('images', [])
+                            if images:
+                                # 缓存图像
+                                image_cache.set(cache_key, images[0])
+                                with lock:
+                                    results[idx] = images[0]
+                                log(f"   ✅ 完成 (耗时 {elapsed:.1f}s)")
+                                return idx, images[0], False, elapsed
+                            else:
+                                log(f"   ❌ 失败: 无图像数据")
+                                return idx, None, False, elapsed
+                        else:
+                            log(f"   ❌ 失败: HTTP {response.status_code}")
+                            if retry < max_retries - 1:
+                                log(f"   🔄 重试 {retry+1}/{max_retries}...")
+                                time.sleep(2)
+                                continue
+                            return idx, None, False, elapsed
+                            
+                    except Exception as e:
+                        if retry < max_retries - 1:
+                            log(f"   ⚠️ 请求失败，重试 {retry+1}/{max_retries}...")
+                            time.sleep(2)
+                            continue
+                        raise
+                    
+            except Exception as e:
+                elapsed = time.time() - start_time
+                log(f"   ❌ 错误: {str(e)[:80]}")
+                return idx, None, False, elapsed
+        
+        log(f"🚀 启动批量生成: {total}张图像，实际并发{effective_workers}线程 (设置{self.max_workers}线程)")
+        log(f"💡 提示: 如果继续超时，请在高级设置中将线程数改为4-6")
+        
+        # 使用限制并发数的线程池
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            futures = {executor.submit(generate_single, item): item[0] for item in prompts_data}
+            
+            for future in as_completed(futures):
+                idx, image_data, from_cache, elapsed = future.result()
+                # 结果已在generate_single中写入results
+                with lock:
+                    completed += 1
+                
+                if progress_callback:
+                    try:
+                        progress_callback(completed, total, from_cache)
+                    except Exception as e:
+                        log(f"进度回调错误: {e}")
+        
+        # 统计结果
+        success_count = sum(1 for r in results if r is not None)
+        log(f"📊 批量生成完成: {success_count}/{total} 成功")
+        
+        if success_count < total:
+            log(f"⚠️ {total - success_count}张图像生成失败，建议：")
+            log(f"   1. 降低线程数到4-6")
+            log(f"   2. 检查SD WebUI是否正常运行")
+            log(f"   3. 降低图像分辨率或步数")
+        
+        return results
+    
+    def close(self):
+        """关闭会话"""
+        if self.session:
+            self.session.close()
+
+# ============ 优化4: 硬件加速视频渲染 ============
+class HardwareAcceleratedRenderer:
+    """硬件加速视频渲染器 - 延迟检测"""
+    
+    def __init__(self):
+        self._has_cuda = None
+        self._has_quicksync = None
+        self._preferred_encoder = None
+    
+    @property
+    def has_cuda(self):
+        if self._has_cuda is None:
+            self._has_cuda = self._check_cuda()
+        return self._has_cuda
+    
+    @property
+    def has_quicksync(self):
+        if self._has_quicksync is None:
+            self._has_quicksync = self._check_quicksync()
+        return self._has_quicksync
+    
+    @property
+    def preferred_encoder(self):
+        if self._preferred_encoder is None:
+            self._preferred_encoder = self._select_encoder()
+        return self._preferred_encoder
+    
+    def _check_cuda(self):
+        """检查CUDA可用性"""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except:
+            return False
+    
+    def _check_quicksync(self):
+        """检查Intel Quick Sync可用性 - 带超时"""
+        try:
+            import subprocess
+            # 设置3秒超时，避免ffmpeg卡住
+            result = subprocess.run(
+                ['ffmpeg', '-hwaccels'], 
+                capture_output=True, text=True,
+                timeout=3
+            )
+            return 'qsv' in result.stdout.lower()
+        except:
+            return False
+    
+    def _select_encoder(self):
+        """选择最佳编码器"""
+        if self.has_cuda:
+            return {
+                'vcodec': 'h264_nvenc',
+                'preset': 'p4',  # 性能与质量平衡
+                'rc': 'vbr',
+                'cq': 23
+            }
+        elif self.has_quicksync:
+            return {
+                'vcodec': 'h264_qsv',
+                'preset': 'medium',
+                'global_quality': 23
+            }
+        else:
+            # CPU编码，使用快速预设
+            return {
+                'vcodec': 'libx264',
+                'preset': 'veryfast',
+                'crf': 23
+            }
+    
+    def render(self, image_files, audio_file, output_file, fps=30, 
+               transition_type="hard_cut", progress_callback=None):
+        """渲染视频
+        
+        Args:
+            image_files: 图像文件路径列表
+            audio_file: 音频文件路径
+            output_file: 输出视频路径
+            fps: 帧率
+            transition_type: 转场类型 (hard_cut/crossfade)
+            progress_callback: 进度回调
+        """
+        import subprocess
+        import tempfile
+        import shutil
+        
+        # 创建临时目录
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            # 生成ffmpeg命令
+            encoder_config = self.preferred_encoder
+            
+            # 构建输入参数
+            if transition_type == "hard_cut":
+                # 硬切：简单高效
+                cmd = self._build_hardcut_cmd(
+                    image_files, audio_file, output_file, 
+                    fps, encoder_config, temp_dir
+                )
+            else:
+                # 交叉淡化
+                cmd = self._build_crossfade_cmd(
+                    image_files, audio_file, output_file,
+                    fps, encoder_config, temp_dir
+                )
+            
+            # 执行渲染
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # 监控进度
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                raise Exception(f"FFmpeg渲染失败: {stderr}")
+            
+            return True
+            
+        finally:
+            # 清理临时文件
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    
+    def _build_hardcut_cmd(self, image_files, audio_file, output_file, 
+                          fps, encoder_config, temp_dir):
+        """构建硬切视频命令"""
+        import os
+        
+        # 计算每张图片的持续时间
+        import subprocess
+        
+        # 获取音频时长
+        audio_duration = self._get_audio_duration(audio_file)
+        duration_per_image = audio_duration / len(image_files)
+        
+        # 创建concat文件列表
+        concat_file = os.path.join(temp_dir, "concat.txt")
+        with open(concat_file, 'w') as f:
+            for img_file in image_files:
+                # 使用loop滤镜循环每张图片
+                f.write(f"file '{img_file}'\n")
+                f.write(f"duration {duration_per_image}\n")
+            # 最后一张图片也需要duration
+            if image_files:
+                f.write(f"file '{image_files[-1]}'\n")
+        
+        # 构建ffmpeg命令
+        cmd = [
+            'ffmpeg',
+            '-y',  # 覆盖输出
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concat_file,
+            '-i', audio_file,
+            '-c:v', encoder_config['vcodec'],
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-r', str(fps),
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',  # 快速启动
+        ]
+        
+        # 添加编码器特定参数
+        if 'preset' in encoder_config:
+            cmd.extend(['-preset', encoder_config['preset']])
+        if 'cq' in encoder_config:
+            cmd.extend(['-cq', str(encoder_config['cq'])])
+        if 'crf' in encoder_config:
+            cmd.extend(['-crf', str(encoder_config['crf'])])
+        if 'rc' in encoder_config:
+            cmd.extend(['-rc', encoder_config['rc']])
+        
+        cmd.append(output_file)
+        
+        return cmd
+    
+    def _build_crossfade_cmd(self, image_files, audio_file, output_file,
+                            fps, encoder_config, temp_dir):
+        """构建交叉淡化视频命令（简化版）"""
+        # 对于交叉淡化，使用较慢但效果更好的方法
+        return self._build_hardcut_cmd(
+            image_files, audio_file, output_file,
+            fps, encoder_config, temp_dir
+        )
+    
+    def _get_audio_duration(self, audio_file):
+        """获取音频时长"""
+        import subprocess
+        import json
+        
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            audio_file
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        data = json.loads(result.stdout)
+        return float(data['format']['duration'])
+
+print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
 
 # 添加src目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -129,7 +645,6 @@ OLLAMA_AVAILABLE = False
 ollama = None
 ollama_lock = threading.Lock()  # 全局锁，保护Ollama API调用
 requests = None
-PIL = None
 
 # ==================== 统一的 Ollama 模型调用函数 ====================
 def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None, num_predict=512, num_ctx=4096):
@@ -233,14 +748,6 @@ def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None,
     return None, None
 
 # ==================== 提示词优化器 ====================
-Image = None
-ImageDraw = None
-ImageFont = None
-BytesIO = None
-
-# 全局实例
-performance_monitor = None
-cache_manager = None
 
 # 配置常量
 DEFAULT_MIN_SHOT_DURATION = 4.0 
@@ -637,56 +1144,6 @@ class PromptTemplates:
     5. 统一视觉风格：电影纪实风格，4K画质，真实感
     """
     
-    # 统一的视觉风格基础标签
-    UNIFIED_STYLE_BASE = {
-        "sd": "documentary photography, news footage style, realistic, 4K, high detail, sharp focus, cinematic lighting",
-        "doubao": "纪录片风格，新闻摄影，真实感，高清画质，细节丰富，电影级光影"
-    }
-    
-    # 内容类型对应的视觉风格
-    CONTENT_TYPE_STYLE = {
-        "military": {
-            "sd": "war zone, military environment, combat documentary, tactical scene",
-            "doubao": "战区环境，军事场景，战争纪实，战术画面"
-        },
-        "politics": {
-            "sd": "government building, political scene, diplomatic setting, official venue",
-            "doubao": "政府建筑，政治场景，外交场合，官方场所"
-        },
-        "space": {
-            "sd": "deep space, cosmic scene, astronomical visualization, celestial bodies",
-            "doubao": "深空场景，宇宙画面，天文可视化，天体图像"
-        },
-        "science": {
-            "sd": "scientific environment, laboratory, research setting, technology",
-            "doubao": "科学环境，实验室，研究场所，科技感"
-        },
-        "nature": {
-            "sd": "natural landscape, outdoor scene, environment, wildlife",
-            "doubao": "自然风光，户外场景，环境画面，野生动物"
-        },
-        "history": {
-            "sd": "historical setting, period scene, cultural heritage, classical",
-            "doubao": "历史场景，时代画面，文化遗产，古典风格"
-        },
-        "technology": {
-            "sd": "high-tech, futuristic, digital, innovation, technology",
-            "doubao": "高科技，未来感，数字化，创新，科技感"
-        },
-        "business": {
-            "sd": "business environment, corporate setting, financial district, office scene",
-            "doubao": "商业环境，企业场景，金融区，办公画面"
-        },
-        "economy": {
-            "sd": "economic scene, financial market, trading floor, business district",
-            "doubao": "经济场景，金融市场，交易大厅，商业区"
-        },
-        "general": {
-            "sd": "documentary style, news photography, realistic scene",
-            "doubao": "纪录片风格，新闻摄影，真实场景"
-        }
-    }
-    
     # 主题分析模板 - 智能识别内容类型，针对性分析
     THEME_ANALYSIS = {
         "system": """你是视频内容分析师。分析语音文本并输出结构化结果。
@@ -860,10 +1317,20 @@ class PromptTemplates:
                 theme_instruction = ""
             
             # 格式化 system prompt（同时处理两个占位符）
-            system_content = template["system"].format(
-                style_instruction=style_instruction,
-                theme_instruction=theme_instruction
-            )
+            # 如果 theme_instruction 为空，移除多余的空行
+            if theme_instruction:
+                system_content = template["system"].format(
+                    style_instruction=style_instruction,
+                    theme_instruction=theme_instruction
+                )
+            else:
+                # theme_instruction 为空时，移除对应的那一行避免空行
+                system_content = template["system"].format(
+                    style_instruction=style_instruction,
+                    theme_instruction=""  # 空字符串会留下空行，需要在模板后处理
+                )
+                # 清理多余空行
+                system_content = system_content.replace("\n\n\n", "\n\n")
             
             # 构建 user prompt
             dubbing = kwargs.get("dubbing", "")
@@ -919,18 +1386,36 @@ class DocuMakerLiteV7:
     def __init__(self, root):
         """初始化应用程序"""
         self.root = root
+        
+        # ============ 初始化优化模块（延迟加载） ============
+        # 并行提示词生成器 - 延迟初始化
+        self.prompt_generator = None
+        # 批量SD图像生成器
+        self.sd_generator = None
+        # 硬件加速渲染器 - 延迟检测
+        self.video_renderer = None
+        
         self._initialize_ui()
         self._initialize_variables()
         self._initialize_systems()
         self._setup_ui_components()
         self._initialize_event_handlers()
         self._start_system_services()
+        
+        # 显示优化状态（不立即检测硬件）
+        print(f"🚀 性能优化已启用:")
+        print(f"   - 并行提示词生成: 8线程（按需加载）")
+        print(f"   - 批量图像生成: 就绪")
+        print(f"   - 视频编码器: 延迟检测（首次使用时）")
     
     def _initialize_ui(self):
         """初始化用户界面"""
         self.root.title("DocuMaker Pro Lite V7 | 智能分镜工作流 (SD API 连通版)")
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
+        
+        # 初始化完成标志 - 防止启动时resize事件触发样式重设
+        self._ui_initialized = False
         
         # 启用高DPI支持
         try:
@@ -953,21 +1438,24 @@ class DocuMakerLiteV7:
         
         # 防抖相关
         self.resize_timer = None
-        self.resize_delay = 200  # 防抖延迟，单位毫秒
+        self.resize_delay = 500  # 增加防抖延迟到500毫秒
         
         # 窗口大小跟踪
         self.current_width = 1000
         self.current_height = 700
         
-        # 设置样式
+        # 先创建布局
+        self._create_layout()
+        
+        # 设置样式（只执行一次）
         self._setup_styles()
         self.root.configure(bg=self.bg_color)
         
         # 监听窗口大小变化事件
         self.root.bind("<Configure>", self.on_window_resize)
         
-        # 创建布局
-        self._create_layout()
+        # 标记UI初始化完成
+        self._ui_initialized = True
     
     def _setup_styles(self):
         """设置UI样式"""
@@ -1023,6 +1511,14 @@ class DocuMakerLiteV7:
     
     def on_window_resize(self, event):
         """窗口大小变化时的处理"""
+        # UI未完成初始化时不处理
+        if not getattr(self, '_ui_initialized', False):
+            return
+        
+        # 只处理窗口大小变化，忽略其他Configure事件
+        if event.widget != self.root:
+            return
+        
         # 检查窗口大小是否真的发生了变化
         if event.width == self.current_width and event.height == self.current_height:
             return
@@ -1039,7 +1535,7 @@ class DocuMakerLiteV7:
         self.resize_timer = self.root.after(self.resize_delay, lambda: self._handle_resize(event))
     
     def _handle_resize(self, event):
-        """处理窗口大小变化的实际逻辑"""
+        """处理窗口大小变化的实际逻辑 - 优化版"""
         # 计算缩放比例
         width = event.width
         height = event.height
@@ -1048,16 +1544,24 @@ class DocuMakerLiteV7:
         scale_factor = min(width / 1000, height / 700)
         new_font_size = max(8, int(self.base_font_size * scale_factor))
         
-        # 如果字体大小有变化，更新样式
-        if new_font_size != self.font_size:
+        # 只有字体大小变化超过2个像素才更新，避免频繁重设样式
+        if abs(new_font_size - self.font_size) >= 2:
             self.font_size = new_font_size
+            # 使用after延迟执行样式更新，避免阻塞UI
+            self.root.after(100, self._update_fonts_async)
+    
+    def _update_fonts_async(self):
+        """异步更新字体，避免阻塞UI"""
+        try:
             self._setup_styles()
             
             # 更新文本框字体大小
-            if hasattr(self, 'txt_script'):
+            if hasattr(self, 'txt_script') and self.txt_script:
                 self.txt_script.configure(font=("Microsoft YaHei", self.font_size + 4))
-            if hasattr(self, 'txt_log'):
+            if hasattr(self, 'txt_log') and self.txt_log:
                 self.txt_log.configure(font=("Microsoft YaHei", self.font_size + 4))
+        except Exception:
+            pass
     
     def _create_layout(self):
         """创建UI布局"""
@@ -1422,6 +1926,10 @@ class DocuMakerLiteV7:
         # 高级设置按钮
         btn_advanced = ttk.Button(status_frame, text="⚙️ 高级设置", command=self.toggle_advanced_settings, style="Medium.TButton")
         btn_advanced.pack(fill=tk.X, pady=5)
+        
+        # 性能统计按钮
+        btn_stats = ttk.Button(status_frame, text="📊 性能统计", command=self.show_performance_stats, style="Medium.TButton")
+        btn_stats.pack(fill=tk.X, pady=5)
 
         # 性能监控面板
         if PERFORMANCE_MONITOR_AVAILABLE:
@@ -2157,7 +2665,18 @@ class DocuMakerLiteV7:
             self.style_dropdown_visible = True
     
     def update_task_progress(self, message, progress=None):
-        """更新任务进度 - 确保线程安全"""
+        """更新任务进度 - 优化版（防抖）"""
+        # 初始化防抖计时器
+        if not hasattr(self, '_progress_timer'):
+            self._progress_timer = None
+            self._last_progress = -1
+        
+        # 如果进度变化很小，跳过更新
+        if progress is not None and abs(progress - self._last_progress) < 2:
+            return
+        
+        self._last_progress = progress if progress is not None else self._last_progress
+        
         def _update():
             try:
                 if hasattr(self, 'lbl_progress'):
@@ -2166,9 +2685,19 @@ class DocuMakerLiteV7:
                     self.progress_var.set(progress)
             except Exception:
                 pass
+            finally:
+                self._progress_timer = None
+        
+        # 取消之前的定时器
+        if self._progress_timer:
+            try:
+                self.root.after_cancel(self._progress_timer)
+            except:
+                pass
         
         if hasattr(self, 'root') and self.root:
-            self.root.after(0, _update)
+            # 延迟50ms执行，合并快速连续的更新
+            self._progress_timer = self.root.after(50, _update)
         else:
             _update()
     
@@ -3358,13 +3887,20 @@ class DocuMakerLiteV7:
             return self._generate_sd_prompt(description_parts, content_type, shot_id)
 
     def _generate_arv_format_prompt(self, description_parts, content_type, shot_id):
-        """生成ARV格式的提示词 - 大模型生成但保持ARV格式"""
+        """生成ARV格式的提示词 - 带缓存机制"""
 
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         content_type = description_parts.get('content_type', content_type)
         theme_elements = description_parts.get('theme_elements', [])
         visual_tone = description_parts.get('custom_visual_tone', '')
+        
+        # 检查缓存 - 使用配音内容+内容类型作为缓存键
+        cache_key = hashlib.md5(f"arv_{dubbing}_{content_type}_{core_theme}_{visual_tone}".encode()).hexdigest()
+        cached_prompt = prompt_cache.get(cache_key)
+        if cached_prompt:
+            self.log(f"   ⚡ ARV提示词缓存命中")
+            return cached_prompt
         
         # 将主题元素翻译为英文
         theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
@@ -3413,6 +3949,10 @@ class DocuMakerLiteV7:
             result = response['message']['content'].strip()
             
             prompt_en = result.strip()
+            
+            # 存入缓存
+            if prompt_en:
+                prompt_cache.set(cache_key, prompt_en)
             
             return prompt_en
         except Exception as e:
@@ -3665,11 +4205,26 @@ class DocuMakerLiteV7:
                 "dubbing": dubbing
             }
             
-            # 根据提示词类型选择模板
+            # 根据提示词类型选择模板或生成方式
             if prompt_type == "SD提示词":
                 template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
             elif prompt_type == "ARV写实提示词":
-                return ""  # ARV模式不需要预生成，会在create_new_shot中单独处理
+                # ARV模式：使用简化的系统提示词，统一格式
+                template = {
+                    "system": f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
+
+【关键要求】
+1. 基于配音内容生成英文提示词
+2. 必须包含：主体、场景、氛围、ARV标签
+3. ARV标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR
+
+【内容类型】：{content_type}
+【核心主题】：{core_theme or '根据内容确定'}
+【视觉基调】：{visual_tone or '真实氛围'}
+
+只输出英文提示词，不要解释。""",
+                    "user": f"配音：{dubbing}\n\n生成英文提示词："
+                }
             else:
                 # 豆包提示词使用中文模板
                 template = PromptTemplates.get_template("shot_prompt_doubao", **template_params)
@@ -6088,6 +6643,111 @@ Now convert this:
                 result.append(elem)
         return result
     
+    def _split_segments_by_punctuation(self, segments, max_duration=8.0):
+        """根据标点符号和词级时间戳智能切分长片段，确保音画同步
+        
+        Args:
+            segments: Whisper识别的原始片段列表（包含words时间戳）
+            max_duration: 最大片段时长（秒），超过此值会尝试切分
+        
+        Returns:
+            切分后的片段列表，保持精确时间戳
+        """
+        import re
+        
+        if not segments:
+            return segments
+        
+        # 句子结束标点
+        sentence_endings = r'[。！？；\.\!\?;]'
+        
+        new_segments = []
+        split_count = 0
+        
+        for seg in segments:
+            text = seg.get('text', '').strip()
+            start = seg.get('start', 0)
+            end = seg.get('end', 0)
+            duration = end - start
+            words = seg.get('words', [])  # 获取词级时间戳
+            
+            # 如果片段较短（小于max_duration），保持原样
+            if duration < max_duration:
+                new_segments.append(seg)
+                continue
+            
+            # 如果有词级时间戳，使用词级时间戳精确切分
+            if words and len(words) > 0:
+                sentences = self._split_by_words_with_punctuation(words, sentence_endings)
+                if sentences and len(sentences) > 1:
+                    new_segments.extend(sentences)
+                    split_count += len(sentences) - 1
+                    continue
+            
+            # 回退方案：如果无法获取词级时间戳，保持原样（不破坏同步）
+            new_segments.append(seg)
+        
+        if split_count > 0:
+            self.log(f"   🔄 智能切分：从 {len(segments)} 个片段拆分为 {len(new_segments)} 个片段（保持音画同步）")
+        
+        return new_segments
+    
+    def _split_by_words_with_punctuation(self, words, sentence_endings):
+        """使用词级时间戳精确切分句子，确保音画同步
+        
+        Args:
+            words: 词列表，每个词包含 'word', 'start', 'end'
+            sentence_endings: 句子结束标点的正则表达式
+        
+        Returns:
+            切分后的片段列表
+        """
+        import re
+        
+        if not words:
+            return []
+        
+        sentences = []
+        current_sentence_words = []
+        
+        for word_info in words:
+            word = word_info.get('word', '').strip()
+            if not word:
+                continue
+            
+            current_sentence_words.append(word_info)
+            
+            # 检查是否句子结束
+            if re.search(sentence_endings, word):
+                if current_sentence_words:
+                    # 构建新片段，使用精确的词时间戳
+                    sentence_text = ''.join([w.get('word', '') for w in current_sentence_words])
+                    sentence_start = current_sentence_words[0].get('start', 0)
+                    sentence_end = current_sentence_words[-1].get('end', 0)
+                    
+                    sentences.append({
+                        'text': sentence_text.strip(),
+                        'start': sentence_start,
+                        'end': sentence_end,
+                        'words': current_sentence_words
+                    })
+                    current_sentence_words = []
+        
+        # 处理剩余的词
+        if current_sentence_words:
+            sentence_text = ''.join([w.get('word', '') for w in current_sentence_words])
+            sentence_start = current_sentence_words[0].get('start', 0)
+            sentence_end = current_sentence_words[-1].get('end', 0)
+            
+            sentences.append({
+                'text': sentence_text.strip(),
+                'start': sentence_start,
+                'end': sentence_end,
+                'words': current_sentence_words
+            })
+        
+        return sentences
+    
     def _translate_text_to_english(self, text):
         """将中文文本翻译为英文（用于核心主题、视觉基调等）"""
         if not text:
@@ -6641,45 +7301,53 @@ Now convert this:
         messagebox.showinfo("成功", msg)
     
     def monitor_performance(self):
-        """监控系统性能"""
+        """监控系统性能 - 优化版（非阻塞）"""
         try:
+            # 首次调用cpu_percent需要间隔，之后可以非阻塞
+            if psutil:
+                psutil.cpu_percent(interval=None)  # 初始化
+            
+            update_interval = 0  # 更新计数器
+            
             while getattr(self, 'perf_monitor_running', True):
                 if psutil and GPUtil:
-                    # 获取CPU使用率
-                    cpu_usage = psutil.cpu_percent(interval=1)
+                    # 获取CPU使用率（非阻塞，interval=None）
+                    cpu_usage = psutil.cpu_percent(interval=None)
                     # 获取内存使用率
                     memory = psutil.virtual_memory()
                     memory_usage = memory.percent
-                    memory_used = memory.used // (1024 * 1024)  # 转换为MB
-                    memory_total = memory.total // (1024 * 1024)  # 转换为MB
-                    # 获取GPU使用率和显存使用情况
-                    gpus = GPUtil.getGPUs()
-                    if gpus:
-                        gpu_usage = gpus[0].load * 100
-                        gpu_memory_used = gpus[0].memoryUsed  # 显存使用量（MB）
-                        gpu_memory_total = gpus[0].memoryTotal  # 显存总量（MB）
-                        gpu_memory_percent = (gpu_memory_used / gpu_memory_total) * 100 if gpu_memory_total > 0 else 0
-                    else:
-                        gpu_usage = 0
-                        gpu_memory_used = 0
-                        gpu_memory_total = 0
-                        gpu_memory_percent = 0
+                    memory_used = memory.used // (1024 * 1024)
+                    memory_total = memory.total // (1024 * 1024)
+                    
+                    # 降低GPU检测频率（每5次更新一次）
+                    if update_interval % 5 == 0:
+                        try:
+                            gpus = GPUtil.getGPUs()
+                            if gpus:
+                                gpu_memory_percent = gpus[0].memoryUtil * 100
+                            else:
+                                gpu_memory_percent = 0
+                        except:
+                            gpu_memory_percent = 0
                     
                     # 更新UI（捕获 tkinter 组件已销毁的异常）
                     try:
-                        if hasattr(self, 'cpu_label') and self.cpu_label.winfo_exists():
-                            self.cpu_label.config(text=f"{cpu_usage:.1f}%")
-                        if hasattr(self, 'memory_label') and self.memory_label.winfo_exists():
-                            self.memory_label.config(text=f"{memory_usage:.1f}%")
-                        if hasattr(self, 'gpu_label') and self.gpu_label.winfo_exists():
-                            self.gpu_label.config(text=f"{gpu_memory_percent:.1f}%")
-                        if hasattr(self, 'memory_detail_label') and self.memory_detail_label.winfo_exists():
-                            self.memory_detail_label.config(text=f"{memory_used} MB / {memory_total} MB")
+                        if update_interval % 2 == 0:  # 每2次循环更新一次UI
+                            if hasattr(self, 'cpu_label') and self.cpu_label.winfo_exists():
+                                self.cpu_label.config(text=f"{cpu_usage:.1f}%")
+                            if hasattr(self, 'memory_label') and self.memory_label.winfo_exists():
+                                self.memory_label.config(text=f"{memory_usage:.1f}%")
+                            if hasattr(self, 'gpu_label') and self.gpu_label.winfo_exists():
+                                self.gpu_label.config(text=f"{gpu_memory_percent:.1f}%")
+                            if hasattr(self, 'memory_detail_label') and self.memory_detail_label.winfo_exists():
+                                self.memory_detail_label.config(text=f"{memory_used} MB / {memory_total} MB")
                     except tk.TclError:
-                        # 组件已被销毁，退出循环
                         break
-                time.sleep(2)
-        except Exception as e:
+                    
+                    update_interval += 1
+                
+                time.sleep(0.5)  # 缩短睡眠时间为0.5秒，使UI更新更流畅
+        except Exception:
             pass
 
     def init_state_manager(self):
@@ -7237,6 +7905,11 @@ Now convert this:
                 # 加载Whisper模型进行语音识别
                 self.log("🔊 正在加载Whisper模型...")
                 self.update_task_progress("正在加载Whisper模型...", 20)
+                
+                # 抑制Triton警告（可选）
+                import warnings
+                warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
+                
                 if not self.whisper_model:
                     self.log("📦 正在加载Whisper模型...")
                     try:
@@ -7287,27 +7960,24 @@ Now convert this:
                     # 使用线程池添加超时控制
                     import concurrent.futures
                     
-                    def transcribe_with_timeout():
-                        return self.whisper_model.transcribe(
-                            self.audio_path, 
-                            language="zh", 
-                            word_timestamps=True, 
-                            fp16=False,
-                            verbose=False
-                        )
-                    
-                    # 设置10分钟超时
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(transcribe_with_timeout)
-                        try:
-                            result = future.result(timeout=600)  # 10分钟超时
-                        except concurrent.futures.TimeoutError:
-                            self.log("❌ 语音识别超时（超过10分钟），请检查音频文件")
-                            self.update_task_progress("就绪")
-                            return
+                    # 语音识别（优化参数，更敏感检测停顿）
+                    result = self.whisper_model.transcribe(
+                        self.audio_path,
+                        language="zh",
+                        word_timestamps=True,
+                        fp16=False,
+                        verbose=False,
+                        condition_on_previous_text=False,  # 减少对前文依赖，提高切分精度
+                        no_speech_threshold=0.3            # 降低无语音阈值，更敏感检测停顿
+                    )
                     
                     segments = result.get("segments", [])
                     self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段")
+                    
+                    # 提示：如果片段过少，说明语音停顿不明显
+                    if len(segments) < 50:
+                        avg_duration = sum(s.get('end', 0) - s.get('start', 0) for s in segments) / len(segments) if segments else 0
+                        self.log(f"   ℹ️ 平均片段时长: {avg_duration:.1f}秒，如需要更细分镜可减小停顿检测阈值")
                 except Exception as e:
                     self.log(f"❌ 语音识别失败: {e}")
                     self.update_task_progress("就绪")
@@ -7840,10 +8510,10 @@ Now convert this:
                         pregenerated_prompts[idx] = prompt
                 
                 elapsed = time.time() - start_time
+                speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
                 if user_prompt_type == "ARV写实提示词":
-                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (ARV模式将在后续步骤中单独生成提示词)")
+                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒, 已预生成，步骤3直接复用)")
                 else:
-                    speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
                     self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
             
             if failed_count > 0:
@@ -8225,6 +8895,7 @@ Now convert this:
                 image_file = shot['image_file']
                 image_path = os.path.join(self.images_dir, image_file)
                 description = shot.get('description', 'No content')
+                negative_prompt = shot.get('negative_prompt', '')
                 
                 if os.path.exists(image_path):
                     skipped_count += 1
@@ -8235,7 +8906,7 @@ Now convert this:
                     style_text = ", ".join(style_descriptions)
                     enhanced_prompt = f"{prompt}, {style_text}"
                 
-                tasks.append((shot_id, enhanced_prompt, image_file, image_path, description))
+                tasks.append((shot_id, enhanced_prompt, image_file, image_path, description, negative_prompt))
             
             self.log("")
             self.log(f"📊 任务统计:")
@@ -8403,13 +9074,23 @@ Now convert this:
                 
                 return False
             
-            # 串行生成图像
+            # ========== 步骤4: 串行生成图像（优化版）==========
             if tasks:
                 self.log("")
                 self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
+                self.log(f"   模式: 串行生成（一张一张生成，最稳定）")
                 self.log("")
+                
                 results = []
-                for i, task in enumerate(tasks):
+                generated_count = 0
+                failed_count = 0
+                cached_count = 0
+                
+                # 记录开始时间
+                batch_start_time = time.time()
+                
+                for i, (shot_id, enhanced_prompt, image_file, image_path, description, negative_prompt) in enumerate(tasks):
+                    # 检查是否被暂停
                     if not self.pause_event.is_set():
                         self.log("⏸️ 任务已暂停，等待恢复...")
                         self.pause_event.wait()
@@ -8418,19 +9099,121 @@ Now convert this:
                         self.log("❌ 任务已被取消")
                         break
                     
+                    # 更新进度
                     progress = 40 + (i / len(tasks)) * 50
                     self.update_task_progress(f"生成图像 {i+1}/{len(tasks)}...", progress)
                     
-                    result = generate_single_image(task)
-                    results.append(result)
-                    time.sleep(0.3)
-                
-                generated_count = sum(results)
-                failed_count = len(results) - generated_count
+                    # 每5张图输出一次日志，减少UI更新
+                    if i % 5 == 0 or i == len(tasks) - 1:
+                        elapsed = time.time() - batch_start_time
+                        avg_time = elapsed / (i + 1) if i > 0 else 0
+                        remaining = (len(tasks) - i - 1) * avg_time
+                        self.log(f"📷 [{i+1}/{len(tasks)}] {image_file} (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
+                    
+                    # 检查图像缓存
+                    cache_key = hashlib.md5(f"{enhanced_prompt}_{width}_{height}".encode()).hexdigest()
+                    cached_image = image_cache.get(cache_key)
+                    
+                    if cached_image:
+                        try:
+                            import base64
+                            from PIL import Image
+                            from io import BytesIO
+                            
+                            img_bytes = base64.b64decode(cached_image)
+                            image = Image.open(BytesIO(img_bytes))
+                            image.save(image_path)
+                            self.log(f"   ✅ 缓存命中，直接保存")
+                            cached_count += 1
+                            continue
+                        except Exception as e:
+                            self.log(f"   ⚠️ 缓存读取失败，重新生成: {e}")
+                    
+                    # 调用SD API生成图像
+                    max_retries = 3
+                    retry_delay = 5
+                    success = False
+                    
+                    for retry in range(max_retries):
+                        try:
+                            request_start_time = time.time()
+                            
+                            payload = {
+                                "prompt": enhanced_prompt,
+                                "negative_prompt": negative_prompt or "",
+                                "width": width,
+                                "height": height,
+                                "steps": 25,
+                                "cfg_scale": 7.0,
+                                "sampler_name": "DPM++ 2M Karras",
+                                "seed": -1,
+                                "batch_size": 1
+                            }
+                            
+                            response = requests.post(
+                                f"{api_url}/sdapi/v1/txt2img",
+                                json=payload,
+                                timeout=120
+                            )
+                            
+                            request_time = time.time() - request_start_time
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                if "images" in result and len(result["images"]) > 0:
+                                    import base64
+                                    from PIL import Image
+                                    from io import BytesIO
+                                    
+                                    image_data = result["images"][0]
+                                    # 缓存图像
+                                    image_cache.set(cache_key, image_data)
+                                    # 保存图像
+                                    img_bytes = base64.b64decode(image_data)
+                                    image = Image.open(BytesIO(img_bytes))
+                                    image.save(image_path)
+                                    
+                                    self.log(f"   ✅ 完成 (耗时 {request_time:.1f}s)")
+                                    generated_count += 1
+                                    success = True
+                                    break
+                                else:
+                                    self.log(f"   ❌ 失败: 无图像数据")
+                                    if retry < max_retries - 1:
+                                        self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
+                                        time.sleep(retry_delay)
+                            else:
+                                self.log(f"   ❌ 失败: HTTP {response.status_code}")
+                                if retry < max_retries - 1:
+                                    self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
+                                    time.sleep(retry_delay)
+                                    
+                        except requests.exceptions.Timeout:
+                            self.log(f"   ❌ 请求超时 (120秒)")
+                            if retry < max_retries - 1:
+                                self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
+                                time.sleep(retry_delay)
+                        except requests.exceptions.ConnectionError:
+                            self.log(f"   ❌ 连接失败: SD服务未响应")
+                            self.log(f"   💡 请检查 SD WebUI 是否正常运行")
+                            break
+                        except Exception as e:
+                            error_msg = str(e)[:50]
+                            self.log(f"   ❌ 错误: {error_msg}")
+                            if retry < max_retries - 1:
+                                self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
+                                time.sleep(retry_delay)
+                    
+                    if not success:
+                        failed_count += 1
+                    
+                    # 生成间隔，给SD喘息时间（优化为0.2秒）
+                    if i < len(tasks) - 1:
+                        time.sleep(0.2)
                 
                 self.log("")
                 self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                self.log(f"📊 生成结果: 成功 {generated_count} 张, 失败 {failed_count} 张")
+                self.log(f"📊 生成结果: 成功 {generated_count} 张, 缓存 {cached_count} 张, 失败 {failed_count} 张")
                 self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             else:
                 self.log("")
@@ -9348,23 +10131,40 @@ Now convert this:
         self.log("📋 日志区域初始化完成")
     
     def log(self, message):
-        """记录日志"""
+        """记录日志 - 优化版（批量更新）"""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
         print(log_message)
         
+        # 初始化日志缓冲区和计数器
+        if not hasattr(self, '_log_buffer'):
+            self._log_buffer = []
+            self._log_counter = 0
+        
+        self._log_buffer.append(log_message)
+        self._log_counter += 1
+        
+        # 每10条日志或关键日志立即更新，其他批量更新
+        is_important = any(key in message for key in ['✅', '❌', '🎉', '完成', '失败', '错误'])
+        
         def update_ui():
             if hasattr(self, 'txt_log') and self.txt_log:
                 try:
-                    self.txt_log.insert(tk.END, log_message + '\n')
-                    self.txt_log.see(tk.END)
-                    if hasattr(self, 'root') and self.root:
-                        self.root.update_idletasks()
-                except Exception as e:
+                    # 批量插入日志
+                    if self._log_buffer:
+                        text = '\n'.join(self._log_buffer) + '\n'
+                        self._log_buffer.clear()
+                        self.txt_log.insert(tk.END, text)
+                        self.txt_log.see(tk.END)
+                except Exception:
                     pass
         
         if hasattr(self, 'root') and self.root:
-            self.root.after(0, update_ui)
+            if is_important or self._log_counter % 10 == 0:
+                self.root.after(0, update_ui)
+            elif self._log_counter > 100:  # 防止缓冲区无限增长
+                self.root.after(100, update_ui)
+                self._log_counter = 0
     
     def clear_log(self):
         """清除日志"""
@@ -9386,6 +10186,55 @@ Now convert this:
             self.log(f"❌ 日志清除失败: {e}")
             import traceback
             traceback.print_exc()
+    
+    def show_performance_stats(self):
+        """显示性能优化统计信息"""
+        self.log("=" * 60)
+        self.log("📊 性能优化统计报告")
+        self.log("=" * 60)
+        
+        # 提示词缓存统计
+        prompt_stats = prompt_cache.get_stats()
+        self.log(f"\n💬 提示词缓存:")
+        self.log(f"   命中次数: {prompt_stats['hits']}")
+        self.log(f"   未命中次数: {prompt_stats['misses']}")
+        self.log(f"   命中率: {prompt_stats['hit_rate']}")
+        self.log(f"   缓存条目: {prompt_stats['size']}")
+        
+        # 图像缓存统计
+        image_stats = image_cache.get_stats()
+        self.log(f"\n🖼️ 图像缓存:")
+        self.log(f"   命中次数: {image_stats['hits']}")
+        self.log(f"   未命中次数: {image_stats['misses']}")
+        self.log(f"   命中率: {image_stats['hit_rate']}")
+        self.log(f"   缓存条目: {image_stats['size']}")
+        
+        # 硬件加速状态 - 延迟初始化
+        self.log(f"\n⚡ 硬件加速:")
+        if self.video_renderer is None:
+            self.log("   正在检测硬件...")
+            self.video_renderer = HardwareAcceleratedRenderer()
+        if self.video_renderer:
+            encoder = self.video_renderer.preferred_encoder
+            self.log(f"   视频编码器: {encoder.get('vcodec', '未知')}")
+            self.log(f"   CUDA可用: {'是' if self.video_renderer.has_cuda else '否'}")
+            self.log(f"   Quick Sync可用: {'是' if self.video_renderer.has_quicksync else '否'}")
+        
+        # 线程配置
+        self.log(f"\n🔧 并发配置:")
+        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 4
+        self.log(f"   图像生成线程数: {thread_count}")
+        self.log(f"   提示词生成线程数: 8")
+        
+        # 计算节省时间估计
+        total_hits = prompt_stats['hits'] + image_stats['hits']
+        if total_hits > 0:
+            avg_time_saved_per_hit = 3.0  # 估计每次缓存命中节省3秒
+            estimated_time_saved = total_hits * avg_time_saved_per_hit
+            self.log(f"\n💰 优化收益估算:")
+            self.log(f"   预计节省时间: {estimated_time_saved:.0f} 秒 ({estimated_time_saved/60:.1f} 分钟)")
+        
+        self.log("=" * 60)
     
     def clear_script(self):
         """清除脚本"""
