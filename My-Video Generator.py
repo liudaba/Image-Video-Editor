@@ -1274,12 +1274,13 @@ class PromptTemplates:
     SHOT_PROMPT_SD = {
         "system": """你是AI图像提示词工程师，为Stable Diffusion生成英文提示词。
 
-【规则】
-- 只输出英文关键词，逗号分隔
-- 描述可拍摄的画面
-- 不要输出解释、标题、标注
+【严格格式要求】
+- 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
+- 只输出英文关键词，逗号分隔，禁止使用完整句子
+- 描述可拍摄的画面内容，不要描述抽象概念或叙事
+- 不要输出解释、标题、标注、括号说明
 - 必须将用户提供的"核心主题"和"视觉基调"融入提示词
-- 统一使用电影纪实风格，确保画面风格一致
+- 结尾必须添加：cinematic lighting, documentary style, film grain texture
 
 {style_instruction}
 {theme_instruction}
@@ -1288,19 +1289,19 @@ class PromptTemplates:
 配音："中东战事升级"
 核心主题：战争反思
 视觉基调：冷色调，沉重深刻
-输出：Middle Eastern war zone, destroyed buildings with smoke, military tanks on desert road, fighter jets overhead, cold blue tones, somber atmosphere, war documentary style, news photography, realistic, 4K, high detail
+输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, Middle Eastern war zone, destroyed buildings, smoke rising, military tanks, desert road, fighter jets overhead, cold blue tones, tense atmosphere, war documentary, news photography, cinematic lighting, documentary style, film grain texture
 
 配音："科学家发现新黑洞"
 核心主题：宇宙探索
 视觉基调：神秘，科技感
-输出：Space telescope control room, scientists examining data screens, cosmic imagery on displays, mysterious deep space elements, high-tech atmosphere, professional photography, realistic, 4K, high detail, sharp focus
+输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, space telescope control room, scientists, data screens, monitors, cosmic imagery, deep space background, mysterious atmosphere, high-tech setting, professional lighting, cinematic lighting, documentary style, film grain texture
 
 配音："幸福的一家人"
 核心主题：家庭温情
 视觉基调：温暖，明亮
-输出：Happy Asian family, warm home interior, soft golden natural lighting, candid moment, warm and bright atmosphere, lifestyle photography, realistic, 4K, high detail
+输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, Asian family, warm home interior, living room, soft golden light, candid moment, happy expressions, warm atmosphere, lifestyle photography, cinematic lighting, documentary style, film grain texture
 
-【必加标签】documentary photography, realistic, 4K, high detail""",
+【必加标签】masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture""",
         
         "user_template": """配音：{dubbing}
 
@@ -1311,12 +1312,13 @@ class PromptTemplates:
     SHOT_PROMPT_DOUBAO = {
         "system": """你是AI图像提示词工程师，为Stable Diffusion生成中文提示词。
 
-【规则】
-- 只输出中文关键词，逗号分隔
-- 描述可拍摄的画面
-- 不要输出解释、标题、标注
+【严格格式要求】
+- 必须以质量前缀开头：高清画质，细节丰富，8K，超写实，照片级真实感
+- 只输出中文关键词，逗号分隔，禁止使用完整句子
+- 描述可拍摄的画面内容，不要描述抽象概念或叙事
+- 不要输出解释、标题、标注、括号说明
 - 必须将用户提供的"核心主题"和"视觉基调"融入提示词
-- 统一使用电影纪实风格，确保画面风格一致
+- 结尾必须添加：电影级布光，纪录片风格，胶片颗粒感
 
 {style_instruction}
 {theme_instruction}
@@ -1325,19 +1327,19 @@ class PromptTemplates:
 配音："中东战事升级"
 核心主题：战争反思
 视觉基调：冷色调，沉重深刻
-输出：中东战区，冒着浓烟的废墟建筑，沙漠公路上的坦克，头顶的战斗机，冷色调画面，沉重深刻的氛围，战地纪录片风格，新闻摄影风格，真实感，高清画质，细节丰富
+输出：高清画质，细节丰富，8K，超写实，中东战区，废墟建筑，浓烟升起，军事坦克，沙漠公路，战斗机，冷蓝色调，紧迫氛围，战争纪录片，新闻摄影，电影级布光，纪录片风格，胶片颗粒感
 
 配音："科学家发现新黑洞"
 核心主题：宇宙探索
 视觉基调：神秘，科技感
-输出：太空望远镜控制室，科学家查看数据屏幕，显示屏上的宇宙图像，神秘的深空元素，高科技氛围，专业摄影，真实感，高清画质，细节丰富
+输出：高清画质，细节丰富，8K，超写实，太空望远镜控制室，科学家，数据屏幕，显示器，宇宙图像，深空背景，神秘氛围，高科技场景，专业布光，电影级布光，纪录片风格，胶片颗粒感
 
 配音："幸福的一家人"
 核心主题：家庭温情
 视觉基调：温暖，明亮
-输出：幸福的亚洲家庭，温馨的家居环境，温暖明亮的自然光，抓拍瞬间，生活摄影风格，真实感，高清画质，细节丰富
+输出：高清画质，细节丰富，8K，超写实，亚裔家庭，温馨家居，客厅，柔和金色光线，抓拍瞬间，开心表情，温暖氛围，生活摄影，电影级布光，纪录片风格，胶片颗粒感
 
-【必加标签】纪录片风格，真实感，高清画质，细节丰富""",
+【必加标签】高清画质，细节丰富，8K，超写实，电影级布光，纪录片风格，胶片颗粒感""",
         
         "user_template": """配音：{dubbing}
 
@@ -4009,6 +4011,12 @@ class DocuMakerLiteV7:
 4. 配音是军事行动（如"击中美军舰艇"）→ 生成军事战斗场景
 5. 禁止将全局主题元素硬套到每个分镜！
 
+【严格格式要求】
+- 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
+- 只输出英文关键词，逗号分隔，禁止使用完整句子
+- 描述可拍摄的画面内容，不要描述抽象概念或叙事
+- 结尾必须添加：cinematic lighting, documentary style, film grain texture
+
 【内容类型】：{content_type}
 【视觉基调】：{visual_tone_en or visual_tone or '紧张氛围'}
 
@@ -4017,7 +4025,7 @@ class DocuMakerLiteV7:
 - 主要视觉主体（根据配音内容）
 - 具体环境场景
 - 氛围描述
-- ARV标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+- 质量标签：masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture
 
 注意：只输出提示词内容，不要输出"以下是"、"|||"等前缀"""
 
@@ -4305,8 +4313,9 @@ class DocuMakerLiteV7:
 
 【关键要求】
 1. 基于配音内容生成英文提示词
-2. 必须包含：主体、场景、氛围、ARV标签
-3. ARV标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR
+2. 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
+3. 只输出英文关键词，逗号分隔，禁止使用完整句子
+4. 结尾必须添加：cinematic lighting, documentary style, film grain texture
 
 【内容类型】：{content_type}
 【核心主题】：{core_theme or '根据内容确定'}
@@ -6330,7 +6339,12 @@ Now convert this:
 - 偏好自然真实的光照效果
 - 喜欢电影感画面和高对比度
 - 适合新闻纪实、战争场景、科技感画面
-- 必须使用以下基础标签：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+- 必须使用以下基础标签：masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture
+
+【严格格式要求】
+- 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
+- 只输出英文关键词，逗号分隔，禁止使用完整句子
+- 结尾必须添加：cinematic lighting, documentary style, film grain texture
 
 【任务】基于整体主题和氛围，优化多个分镜的英文提示词，使其更适合ARV v20模型生成高质量写实图片。
 
@@ -6362,11 +6376,12 @@ Now convert this:
    - 构图：close-up, medium shot, wide angle shot
 
 5. 【ARV风格强化】
-   - 必须包含：masterpiece, best quality, absolute realistic, photo-realistic, ultra detailed, 8K, HDR, cinematic lighting
+   - 必须包含：masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture
 
 6. 【禁止事项】
    - 禁止在提示词末尾添加无关词汇如"general"
    - 禁止生成与配音内容无关的场景
+   - 禁止使用完整句子，只用逗号分隔的关键词
 
 【输出格式】
 请按以下JSON格式输出：
