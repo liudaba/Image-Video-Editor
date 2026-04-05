@@ -9,57 +9,151 @@ import warnings
 import sys
 import time
 import hashlib
+import re
+import requests
+
+# ============ 性能优化配置常量 ============
+class Config:
+    # API 配置
+    OLLAMA_BASE_URL = "http://localhost:11434"
+    SD_API_BASE_URL = "http://127.0.0.1:7860"
+    API_TIMEOUT_SHORT = 3
+    API_TIMEOUT_MEDIUM = 5
+    API_TIMEOUT_LONG = 90
+
+    # 线程池配置
+    DEFAULT_MAX_WORKERS = 8
+    SD_MAX_WORKERS = 4
+
+    # 缓存配置
+    PROMPT_CACHE_SIZE = 500
+    PROMPT_CACHE_TTL = 7200
+    IMAGE_CACHE_SIZE = 200
+    IMAGE_CACHE_TTL = 3600
+
+    # 重试配置
+    DEFAULT_MAX_RETRIES = 3
+    RETRY_DELAY_BASE = 1
+
+    # UI 配置
+    RESIZE_DEBOUNCE_MS = 300
+    PROGRESS_UPDATE_INTERVAL_MS = 100
+
+# ============ 预编译正则表达式 ============
+# 文本清理
+RE_BOLD = re.compile(r'\*\*([^*]+)\*\*')
+RE_ITALIC = re.compile(r'\*([^*]+)\*')
+RE_NEWLINES = re.compile(r'\n+')
+RE_WHITESPACE = re.compile(r'\s+')
+RE_LEADING_PUNCT = re.compile(r'^[，,。、：:；;\s]+')
+RE_TRAILING_PUNCT = re.compile(r'[，,。、：:；;\s]+$')
+RE_THINK_TAGS = re.compile(r'</?think>')
+RE_THOUGHT_TAG = re.compile(r'<\|thought\|>.*?</\|thought\|>', re.DOTALL)
+RE_THOUGHT_TAG_SIMPLE = re.compile(r'</?\|thought\|>')
+
+# 提取模式
+RE_COLON_SPLIT = re.compile(r'[：:]\s*([^\n]+)')
+RE_KEYWORDS = re.compile(r'【关键词】[：:]?\s*([^【\n]+)')
+RE_CHINESE_ELEMENT = re.compile(r'[场情元素风格氛围][:：]')
+RE_ELEMENT_LABEL = re.compile(r'{label}[：:]\\s*([^场元素风格氛围主体细节\\n]+)')
+RE_SENTENCE_END = re.compile(r'[.!?。！？]+')
+
+# 主题提取（用于分镜解析）
+RE_CORE_THEME = re.compile(r'\*\*核心主题[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+RE_CORE_THEME_ALT = re.compile(r'核心主题[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+RE_VISUAL_TONE = re.compile(r'\*\*视觉基调[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+RE_VISUAL_TONE_ALT = re.compile(r'视觉基调[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+RE_THEME_ELEMENTS = re.compile(r'\*\*主题元素[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+RE_THEME_ELEMENTS_ALT = re.compile(r'主题元素[：:]\s*(.+?)(?:\n|$)', re.DOTALL)
+
+# JSON 提取
+RE_JSON_BRACKETS = re.compile(r'(\[[\s\S]*\]|\{[\s\S]*\})')
+RE_JSON_BRACES = re.compile(r'\{[\s\S]*\}')
+RE_JSON_LINE = re.compile(r'["\']?(\d+)["\']?\s*:\s*["\'](.+?)["\']')
+
+# 主题提取
+RE_CORE_THEME = re.compile(r'\*\*核心主题[：:]\s*(.+?)(?:\n|$)')
+RE_CORE_THEME_ALT = re.compile(r'核心主题[：:]\s*(.+?)(?:\n|$)')
+
+# 文件匹配
+RE_NUMBER = re.compile(r'\d+')
+
+# ============ 全局 HTTP Session (连接复用) ============
+_http_session = None
+
+def get_http_session():
+    """获取全局 HTTP Session，复用连接提升性能"""
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=2
+        )
+        _http_session.mount('http://', adapter)
+        _http_session.mount('https://', adapter)
+    return _http_session
 
 # ============ 优化1: 智能缓存系统 ============
 class SmartCache:
-    """智能缓存系统 - 带TTL和LRU的混合缓存"""
-    
+    """智能缓存系统 - 带TTL和LRU的混合缓存（优化版）"""
+
+    __slots__ = ('max_size', 'default_ttl', '_cache', '_lock', '_hits', '_misses', '_expire_times')
+
     def __init__(self, max_size=1000, default_ttl=3600):
         self.max_size = max_size
         self.default_ttl = default_ttl
         self._cache = {}
-        self._access_times = {}
+        self._expire_times = {}
         self._lock = threading.RLock()
         self._hits = 0
         self._misses = 0
-        
+
     def _generate_key(self, *args, **kwargs):
         """生成缓存键"""
         key_data = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
         return hashlib.md5(key_data.encode()).hexdigest()
-    
+
     def get(self, key):
         """获取缓存值"""
         with self._lock:
-            if key in self._cache:
-                entry = self._cache[key]
-                if entry['expire'] > time.time():
-                    self._access_times[key] = time.time()
+            expire_time = self._expire_times.get(key)
+            if expire_time is not None:
+                if expire_time > time.time():
                     self._hits += 1
-                    return entry['value']
+                    return self._cache.get(key)
                 else:
-                    # 过期清理
-                    del self._cache[key]
-                    del self._access_times[key]
+                    self._cache.pop(key, None)
+                    self._expire_times.pop(key, None)
             self._misses += 1
             return None
-    
+
     def set(self, key, value, ttl=None):
         """设置缓存值"""
         with self._lock:
-            # LRU清理：如果满了，删除最久未访问的
             if len(self._cache) >= self.max_size:
-                oldest = min(self._access_times.items(), key=lambda x: x[1])[0]
-                del self._cache[oldest]
-                del self._access_times[oldest]
-            
+                min_expire = min(self._expire_times.values()) if self._expire_times else 0
+                expired_keys = [k for k, v in self._expire_times.items() if v <= min_expire]
+                if expired_keys:
+                    for k in expired_keys[:max(1, len(expired_keys) // 4)]:
+                        self._cache.pop(k, None)
+                        self._expire_times.pop(k, None)
+
             ttl = ttl or self.default_ttl
-            self._cache[key] = {
-                'value': value,
-                'expire': time.time() + ttl
-            }
-            self._access_times[key] = time.time()
-    
+            self._cache[key] = value
+            self._expire_times[key] = time.time() + ttl
+
+    def cleanup_expired(self):
+        """清理过期项"""
+        with self._lock:
+            current_time = time.time()
+            expired_keys = [k for k, v in self._expire_times.items() if v <= current_time]
+            for k in expired_keys:
+                self._cache.pop(k, None)
+                self._expire_times.pop(k, None)
+            return len(expired_keys)
+
     def get_stats(self):
         """获取缓存统计"""
         with self._lock:
@@ -71,16 +165,16 @@ class SmartCache:
                 'hit_rate': f"{hit_rate*100:.1f}%",
                 'size': len(self._cache)
             }
-    
+
     def clear(self):
         """清空缓存"""
         with self._lock:
             self._cache.clear()
-            self._access_times.clear()
+            self._expire_times.clear()
 
 # 全局缓存实例
-prompt_cache = SmartCache(max_size=500, default_ttl=7200)  # 提示词缓存2小时
-image_cache = SmartCache(max_size=200, default_ttl=3600)   # 图像缓存1小时
+prompt_cache = SmartCache(max_size=Config.PROMPT_CACHE_SIZE, default_ttl=Config.PROMPT_CACHE_TTL)
+image_cache = SmartCache(max_size=Config.IMAGE_CACHE_SIZE, default_ttl=Config.IMAGE_CACHE_TTL)
 
 # ============ 优化2: 并行提示词生成器 ============
 class ParallelPromptGenerator:
@@ -665,7 +759,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None,
     
     # 获取可用模型列表
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
         if response.status_code == 200:
             models_info = response.json()
             available_models = []
@@ -701,8 +795,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None,
                 log_callback(f"   尝试模型: {model}")
             
             # 使用HTTP API直接调用
-            response = requests.post(
-                "http://localhost:11434/api/chat",
+            response = get_http_session().post(
+                f"{Config.OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": model,
                     "messages": [
@@ -1760,7 +1854,7 @@ class DocuMakerLiteV7:
             
             # 尝试直接连接
             try:
-                response = requests.get("http://localhost:11434/api/tags", timeout=3)
+                response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_SHORT)
                 if response.status_code == 200:
                     OLLAMA_AVAILABLE = True
                     self.log("✅ Ollama服务已连接")
@@ -1785,7 +1879,7 @@ class DocuMakerLiteV7:
                 time.sleep(3)
                 # 再次尝试连接
                 try:
-                    response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                    response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
                     if response.status_code == 200:
                         OLLAMA_AVAILABLE = True
                         self.log("✅ Ollama服务已启动并连接")
@@ -2376,8 +2470,7 @@ class DocuMakerLiteV7:
         # 【修改】自动检测并启动Ollama服务
         ollama_connected = False
         try:
-            import requests
-            response = requests.get("http://localhost:11434/api/tags", timeout=3)
+            response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_SHORT)
             if response.status_code == 200:
                 OLLAMA_AVAILABLE = True
                 ollama_connected = True
@@ -2401,7 +2494,7 @@ class DocuMakerLiteV7:
                     time.sleep(3)
                     # 再次尝试连接
                     try:
-                        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
                         if response.status_code == 200:
                             OLLAMA_AVAILABLE = True
                             ollama_connected = True
@@ -2844,33 +2937,34 @@ class DocuMakerLiteV7:
         ]
         
         for pattern in patterns_to_remove:
-            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-        
+            compiled = re.compile(pattern, re.IGNORECASE)
+            text = compiled.sub('', text)
+
         # 移除Markdown格式
-        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **text** -> text
-        text = re.sub(r'\*([^*]+)\*', r'\1', text)  # *text* -> text
-        
+        text = RE_BOLD.sub(r'\1', text)
+        text = RE_ITALIC.sub(r'\1', text)
+
         # 移除换行和多余空格
-        text = re.sub(r'\n+', ', ', text)
-        text = re.sub(r'\s+', ' ', text)
-        
+        text = RE_NEWLINES.sub(', ', text)
+        text = RE_WHITESPACE.sub(' ', text)
+
         # 如果包含"核心概念"、"关键要素"等，提取冒号后的内容
         if '核心概念' in text or '关键要素' in text or 'Core concept' in text.lower():
             # 尝试提取描述部分
-            match = re.search(r'[：:]\s*([^\n]+)', text)
+            match = RE_COLON_SPLIT.search(text)
             if match:
                 text = match.group(1)
-        
+
         # 截取前200字符，防止太长
         if len(text) > 200:
             # 在逗号处截断
             last_comma = text[:200].rfind(',')
             if last_comma > 50:
                 text = text[:last_comma]
-        
+
         # 清理首尾标点
-        text = re.sub(r'^[，,。、：:；;\s]+', '', text)
-        text = re.sub(r'[，,。、：:；;\s]+$', '', text)
+        text = RE_LEADING_PUNCT.sub('', text)
+        text = RE_TRAILING_PUNCT.sub('', text)
         
         return text.strip()
 
@@ -2951,11 +3045,10 @@ class DocuMakerLiteV7:
     
     def _check_sd_api_impl(self, silent=False):
         """实际执行SD API连接检查（内部方法）"""
-        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
-        
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+
         try:
-            import requests
-            response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=5)
+            response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
             if response.status_code == 200:
                 self.log("✅ SD API 连接成功！")
                 
@@ -3009,11 +3102,10 @@ class DocuMakerLiteV7:
     
     def _get_sd_models_from_api(self):
         """从 SD API 获取可用模型列表"""
-        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
-        
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+
         try:
-            import requests
-            response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=3)
+            response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_SHORT)
             if response.status_code == 200:
                 models_data = response.json()
                 # 提取模型名称（使用 title 或 model_name）
@@ -3700,9 +3792,8 @@ class DocuMakerLiteV7:
 
 返回格式：a detailed visual scene description"""
             
-            import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
-            response = requests.post(
+            response = get_http_session().post(
                 f"{ollama_url}/api/generate",
                 json={
                     "model": model,
@@ -3746,9 +3837,8 @@ class DocuMakerLiteV7:
 
 返回格式：keyword1, keyword2, keyword3"""
             
-            import requests
             config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
-            response = requests.post(
+            response = get_http_session().post(
                 f"{ollama_url}/api/generate",
                 json={
                     "model": model,
@@ -8095,9 +8185,8 @@ Now convert this:
                     try:
                         import ollama
                         # 尝试调用API检测服务是否响应
-                        import requests
                         try:
-                            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                            response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
                             if response.status_code == 200:
                                 global OLLAMA_AVAILABLE
                                 OLLAMA_AVAILABLE = True
@@ -8126,7 +8215,7 @@ Now convert this:
                                     time.sleep(3)  # 等待服务启动
                                     # 再次尝试连接
                                     try:
-                                        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                                        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
                                         if response.status_code == 200:
                                             OLLAMA_AVAILABLE = True
                                             ollama_connected = True
@@ -8834,7 +8923,7 @@ Now convert this:
             
             try:
                 # 获取当前SD配置
-                options_response = requests.get(f"{api_url}/sdapi/v1/options", timeout=5)
+                options_response = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=Config.API_TIMEOUT_MEDIUM)
                 if options_response.status_code != 200:
                     self.log(f"❌ SD服务连接失败 (状态码: {options_response.status_code})")
                     self.log("💡 请确认 Stable Diffusion Web UI 已启动")
@@ -8848,7 +8937,7 @@ Now convert this:
                 self.log(f"   当前模型: {current_sd_model}")
                 
                 # 获取可用模型列表
-                models_response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=5)
+                models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
                 if models_response.status_code == 200:
                     available_models = models_response.json()
                     self.log(f"   可用模型: {len(available_models)} 个")
@@ -8927,7 +9016,7 @@ Now convert this:
                     sd_model_name = selected_model
                     
                     if len(available_models) == 0:
-                        models_response = requests.get(f"{api_url}/sdapi/v1/sd-models", timeout=10)
+                        models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_LONG)
                         if models_response.status_code == 200:
                             available_models = models_response.json()
                     
@@ -8949,14 +9038,14 @@ Now convert this:
                             break
                     
                     if target_model:
-                        switch_response = requests.post(
-                            f"{api_url}/sdapi/v1/options", 
-                            json={"sd_model_checkpoint": target_model}, 
+                        switch_response = get_http_session().post(
+                            f"{api_url}/sdapi/v1/options",
+                            json={"sd_model_checkpoint": target_model},
                             timeout=30
                         )
                         if switch_response.status_code == 200:
                             # 确认切换成功
-                            confirm_response = requests.get(f"{api_url}/sdapi/v1/options", timeout=5)
+                            confirm_response = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=Config.API_TIMEOUT_MEDIUM)
                             if confirm_response.status_code == 200:
                                 new_options = confirm_response.json()
                                 current_sd_model = new_options.get('sd_model_checkpoint', '未知')
@@ -9028,7 +9117,7 @@ Now convert this:
                         }
                         
                         # 发送请求（超时90秒）
-                        response = requests.post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=90)
+                        response = get_http_session().post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=Config.API_TIMEOUT_LONG)
                         
                         request_time = time.time() - request_start_time
                         
@@ -9150,7 +9239,7 @@ Now convert this:
                                 "batch_size": 1
                             }
                             
-                            response = requests.post(
+                            response = get_http_session().post(
                                 f"{api_url}/sdapi/v1/txt2img",
                                 json=payload,
                                 timeout=120
