@@ -1280,8 +1280,13 @@ class PromptTemplates:
 - 只输出英文关键词，逗号分隔，禁止使用完整句子
 - 描述可拍摄的画面内容，不要描述抽象概念或叙事
 - 不要输出解释、标题、标注、括号说明
-- 必须将用户提供的"核心主题"和"视觉基调"融入提示词
 - 结尾必须添加：cinematic lighting, documentary style, film grain texture
+- 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
+
+【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
+- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
+- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
+- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素
 
 {style_instruction}
 {theme_instruction}
@@ -1318,8 +1323,13 @@ class PromptTemplates:
 - 只输出中文关键词，逗号分隔，禁止使用完整句子
 - 描述可拍摄的画面内容，不要描述抽象概念或叙事
 - 不要输出解释、标题、标注、括号说明
-- 必须将用户提供的"核心主题"和"视觉基调"融入提示词
 - 结尾必须添加：电影级布光，纪录片风格，胶片颗粒感
+- 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
+
+【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
+- 配音提到"台海和平" → 提示词必须包含台海、和平相关元素
+- 配音提到"宪法" → 提示词必须包含宪法、法律文件相关元素
+- 配音提到"两岸关系" → 提示词必须包含两岸、关系相关元素
 
 {style_instruction}
 {theme_instruction}
@@ -4302,8 +4312,8 @@ class DocuMakerLiteV7:
                 "core_theme": core_theme or "未指定",
                 "visual_style": visual_style,  # 用户预设的风格（可能为空）
                 "visual_tone": visual_tone or "",
-                "theme_elements": ", ".join(theme_elements) if theme_elements else "根据内容确定",
-                "scene_suggestions": scene_suggestions or "根据配音内容确定",
+                "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
+                "scene_suggestions": "",  # 不再使用全局场景建议，让LLM根据每个配音内容独立分析
                 "dubbing": dubbing
             }
             
@@ -4320,12 +4330,17 @@ class DocuMakerLiteV7:
 2. 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
 3. 只输出英文关键词，逗号分隔，禁止使用完整句子
 4. 结尾必须添加：cinematic lighting, documentary style, film grain texture
+5. 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
+
+【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
+- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
+- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
+- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素
 
 【内容类型】：{content_type}
-【核心主题】：{core_theme or '根据内容确定'}
+【核心主题】：{core_theme or '根据配音内容确定'}
 【视觉基调】：{visual_tone or '真实氛围'}
-【场景建议】：{scene_suggestions or '根据配音内容确定'}
-【主题元素】：{', '.join(theme_elements) if theme_elements else '根据内容确定'}
+【主题元素】：{', '.join(theme_elements) if theme_elements else '根据配音内容确定'}
 
 只输出英文提示词，不要解释。""",
                     "user": f"配音：{dubbing}\n\n生成英文提示词："
