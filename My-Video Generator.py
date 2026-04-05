@@ -1255,14 +1255,15 @@ class PromptTemplates:
 【情感基调】：(严肃/紧张/轻松/温馨/激昂)
 【视觉风格】：(推荐风格)
 【核心元素】：(5-8个关键词)
-【场景建议】：(场景类型)
+【场景建议】：(必须包含具体场景+视觉元素，如：新闻主播+台湾地图+蓝绿阵营对比图+演播室灯光，新闻工作室+大屏幕地图+两岸关系图表+主播严肃表情)
 【纠错说明】：(仅当存在实际错别字纠正时列出，格式：错字1→正确1,错字2→正确2，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
 
 重要：
 1. 仔细阅读文本，判断是否存在需要纠正的错别字
 2. 如果文本准确无误，【纠错说明】必须写"无"
 3. 不要凭空捏造纠错内容
-4. 直接输出格式内容，不要有开场白或解释""",
+4. 直接输出格式内容，不要有开场白或解释
+5. 【场景建议】必须具体到可以生成图片的程度，包含主体+场景+视觉元素""",
         
         "user_template": """语音文本：
 {text}
@@ -1395,6 +1396,7 @@ class PromptTemplates:
             # 处理主题指令（核心主题 + 视觉基调）
             core_theme = kwargs.get("core_theme", "")
             visual_tone = kwargs.get("visual_tone", "")
+            scene_suggestions = kwargs.get("scene_suggestions", "")
             
             if (core_theme and core_theme != "未指定") or (visual_tone and visual_tone.strip()):
                 # 用户设置了主题或基调，生成指令
@@ -1403,6 +1405,8 @@ class PromptTemplates:
                     theme_parts.append(f"核心主题：{core_theme}")
                 if visual_tone and visual_tone.strip():
                     theme_parts.append(f"视觉基调：{visual_tone}")
+                if scene_suggestions and scene_suggestions.strip():
+                    theme_parts.append(f"场景建议：{scene_suggestions}")
                 
                 theme_text = "，".join(theme_parts)
                 theme_instruction = f"""【重要：必须融入以下元素】
@@ -4320,6 +4324,8 @@ class DocuMakerLiteV7:
 【内容类型】：{content_type}
 【核心主题】：{core_theme or '根据内容确定'}
 【视觉基调】：{visual_tone or '真实氛围'}
+【场景建议】：{scene_suggestions or '根据配音内容确定'}
+【主题元素】：{', '.join(theme_elements) if theme_elements else '根据内容确定'}
 
 只输出英文提示词，不要解释。""",
                     "user": f"配音：{dubbing}\n\n生成英文提示词："
