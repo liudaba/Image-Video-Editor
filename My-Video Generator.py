@@ -1271,6 +1271,21 @@ class PromptTemplates:
 请先仔细检查整个文本，找出所有可能的语音识别错误，然后按格式输出："""
     }
     
+    # 共享的配音语义映射规则 - 用于生成符合配音内容的独特提示词
+    # 避免在多个模板中重复维护
+    DUBBING_SEMANTIC_MAPPING = {
+        "en": """
+【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
+- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
+- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
+- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素""",
+        "zh": """
+【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
+- 配音提到"台海和平" → 提示词必须包含台海、和平相关元素
+- 配音提到"宪法" → 提示词必须包含宪法、法律文件相关元素
+- 配音提到"两岸关系" → 提示词必须包含两岸、关系相关元素"""
+    }
+    
     # 分镜提示词模板 - SD版本（英文）- 精简版
     SHOT_PROMPT_SD = {
         "system": """你是AI图像提示词工程师，为Stable Diffusion生成英文提示词。
@@ -1283,10 +1298,7 @@ class PromptTemplates:
 - 结尾必须添加：cinematic lighting, documentary style, film grain texture
 - 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
 
-【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
-- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
-- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
-- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素
+{semantic_mapping}
 
 {style_instruction}
 {theme_instruction}
@@ -1326,10 +1338,7 @@ class PromptTemplates:
 - 结尾必须添加：电影级布光，纪录片风格，胶片颗粒感
 - 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
 
-【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
-- 配音提到"台海和平" → 提示词必须包含台海、和平相关元素
-- 配音提到"宪法" → 提示词必须包含宪法、法律文件相关元素
-- 配音提到"两岸关系" → 提示词必须包含两岸、关系相关元素
+{semantic_mapping}
 
 {style_instruction}
 {theme_instruction}
@@ -1428,16 +1437,21 @@ class PromptTemplates:
             
             # 格式化 system prompt（同时处理两个占位符）
             # 如果 theme_instruction 为空，移除多余的空行
+            # 获取对应的语义映射
+            semantic_mapping = cls.DUBBING_SEMANTIC_MAPPING["en"] if is_sd else cls.DUBBING_SEMANTIC_MAPPING["zh"]
+            
             if theme_instruction:
                 system_content = template["system"].format(
                     style_instruction=style_instruction,
-                    theme_instruction=theme_instruction
+                    theme_instruction=theme_instruction,
+                    semantic_mapping=semantic_mapping
                 )
             else:
                 # theme_instruction 为空时，移除对应的那一行避免空行
                 system_content = template["system"].format(
                     style_instruction=style_instruction,
-                    theme_instruction=""  # 空字符串会留下空行，需要在模板后处理
+                    theme_instruction="",
+                    semantic_mapping=semantic_mapping
                 )
                 # 清理多余空行
                 system_content = system_content.replace("\n\n\n", "\n\n")
@@ -4322,6 +4336,7 @@ class DocuMakerLiteV7:
                 template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
             elif prompt_type == "ARV写实提示词":
                 # ARV模式：使用简化的系统提示词，统一格式
+                semantic_mapping = PromptTemplates.DUBBING_SEMANTIC_MAPPING["en"]
                 template = {
                     "system": f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
 
@@ -4332,10 +4347,7 @@ class DocuMakerLiteV7:
 4. 结尾必须添加：cinematic lighting, documentary style, film grain texture
 5. 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
 
-【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
-- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
-- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
-- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素
+{semantic_mapping}
 
 【内容类型】：{content_type}
 【核心主题】：{core_theme or '根据配音内容确定'}
