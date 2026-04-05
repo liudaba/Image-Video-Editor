@@ -4297,7 +4297,31 @@ class DocuMakerLiteV7:
         if len(text.strip()) < 10:
             return raw_output.strip()
         
+        # 确保提示词包含必需的结尾标签
+        text = self._ensure_required_tags(text)
+        
         return text.strip()
+    
+    def _ensure_required_tags(self, prompt_text):
+        """确保提示词包含必需的结尾标签"""
+        # 检测是否为中文提示词
+        is_chinese = any('\u4e00' <= c <= '\u9fff' for c in prompt_text)
+        
+        if is_chinese:
+            required_tags = ["电影级布光", "纪录片风格", "胶片颗粒感"]
+        else:
+            required_tags = ["cinematic lighting", "documentary style", "film grain texture"]
+        
+        prompt_lower = prompt_text.lower()
+        
+        # 检查是否缺少必需的结尾标签
+        missing_tags = [tag for tag in required_tags if tag.lower() not in prompt_lower]
+        
+        if missing_tags:
+            # 如果缺少标签，添加到提示词末尾
+            prompt_text = prompt_text.rstrip(',; ') + ", " + ", ".join(missing_tags)
+        
+        return prompt_text
 
     def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme="", visual_tone="", theme_elements=None, visual_style="", scene_suggestions="", original_dubbing=""):
         """使用大模型生成提示词 - 根据内容类型智能调整
