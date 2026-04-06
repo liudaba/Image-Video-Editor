@@ -1255,15 +1255,13 @@ class PromptTemplates:
 【情感基调】：(严肃/紧张/轻松/温馨/激昂)
 【视觉风格】：(推荐风格)
 【核心元素】：(5-8个关键词)
-【场景建议】：(必须包含具体场景+视觉元素，如：新闻主播+台湾地图+蓝绿阵营对比图+演播室灯光，新闻工作室+大屏幕地图+两岸关系图表+主播严肃表情)
 【纠错说明】：(仅当存在实际错别字纠正时列出，格式：错字1→正确1,错字2→正确2，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
 
 重要：
 1. 仔细阅读文本，判断是否存在需要纠正的错别字
 2. 如果文本准确无误，【纠错说明】必须写"无"
 3. 不要凭空捏造纠错内容
-4. 直接输出格式内容，不要有开场白或解释
-5. 【场景建议】必须具体到可以生成图片的程度，包含主体+场景+视觉元素""",
+4. 直接输出格式内容，不要有开场白或解释""",
         
         "user_template": """语音文本：
 {text}
@@ -1415,7 +1413,6 @@ class PromptTemplates:
             # 处理主题指令（核心主题 + 视觉基调）
             core_theme = kwargs.get("core_theme", "")
             visual_tone = kwargs.get("visual_tone", "")
-            scene_suggestions = kwargs.get("scene_suggestions", "")
             
             if (core_theme and core_theme != "未指定") or (visual_tone and visual_tone.strip()):
                 # 用户设置了主题或基调，生成指令
@@ -1424,8 +1421,6 @@ class PromptTemplates:
                     theme_parts.append(f"核心主题：{core_theme}")
                 if visual_tone and visual_tone.strip():
                     theme_parts.append(f"视觉基调：{visual_tone}")
-                if scene_suggestions and scene_suggestions.strip():
-                    theme_parts.append(f"场景建议：{scene_suggestions}")
                 
                 theme_text = "，".join(theme_parts)
                 theme_instruction = f"""【重要：必须融入以下元素】
@@ -3905,7 +3900,6 @@ class DocuMakerLiteV7:
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)  # 优先使用传入的类型
         visual_style = description_parts.get('visual_style', '')
-        scene_suggestions = description_parts.get('scene_suggestions', '')
         
         # 使用大模型生成提示词
         prompt = self._generate_prompt_with_llm(
@@ -3914,8 +3908,7 @@ class DocuMakerLiteV7:
             core_theme=core_theme, 
             visual_tone=visual_tone, 
             theme_elements=theme_elements,
-            visual_style=visual_style,
-            scene_suggestions=scene_suggestions
+            visual_style=visual_style
         )
         return prompt
     
@@ -4096,7 +4089,6 @@ class DocuMakerLiteV7:
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)  # 优先使用传入的类型
         visual_style = description_parts.get('visual_style', '')
-        scene_suggestions = description_parts.get('scene_suggestions', '')
         
         # ===== 混合模式：优先使用预设模板，提升速度 =====
         preset_key = self._get_preset_prompt_key(content_type, dubbing)
@@ -4133,8 +4125,7 @@ class DocuMakerLiteV7:
             core_theme=core_theme, 
             visual_tone=visual_tone, 
             theme_elements=theme_elements,
-            visual_style=visual_style,
-            scene_suggestions=scene_suggestions
+            visual_style=visual_style
         )
         return prompt
     
@@ -4323,7 +4314,7 @@ class DocuMakerLiteV7:
         
         return prompt_text
 
-    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme="", visual_tone="", theme_elements=None, visual_style="", scene_suggestions="", original_dubbing=""):
+    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="豆包", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing=""):
         """使用大模型生成提示词 - 根据内容类型智能调整
         
         Args:
@@ -4334,7 +4325,6 @@ class DocuMakerLiteV7:
             visual_tone: 整体视觉基调
             theme_elements: 主题相关元素列表
             visual_style: 视觉风格（根据内容类型推荐）
-            scene_suggestions: 场景建议
             original_dubbing: 原始配音内容（未纠错，用于参考）
         """
         if theme_elements is None:
@@ -4351,7 +4341,6 @@ class DocuMakerLiteV7:
                 "visual_style": visual_style,  # 用户预设的风格（可能为空）
                 "visual_tone": visual_tone or "",
                 "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
-                "scene_suggestions": "",  # 不再使用全局场景建议，让LLM根据每个配音内容独立分析
                 "dubbing": dubbing
             }
             
@@ -7003,7 +6992,6 @@ Now convert this:
             'visual_tone': '',
             'visual_style': '',        # 新增：视觉风格
             'theme_elements': [],
-            'scene_suggestions': '',   # 新增：场景建议
             'emotional_tone': ''       # 新增：情感基调
         }
 
@@ -7115,15 +7103,6 @@ Now convert this:
                 elements_text = cleaned_result.split('Theme Elements:')[1].split('\n')[0].strip()
                 elements = re.split(r'[,;]', elements_text)
                 theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()]
-
-            # 提取场景建议（新增）
-            if '场景建议' in cleaned_result:
-                try:
-                    scene_match = cleaned_result.split('场景建议')[1].split('\n')[0]
-                    scene_match = scene_match.replace('：', '').replace(':', '').strip()
-                    theme_info['scene_suggestions'] = scene_match
-                except:
-                    theme_info['scene_suggestions'] = ''
 
             # 提取纠错说明并应用纠正
             correction_dict = {}
@@ -8547,9 +8526,6 @@ Now convert this:
                             if theme_info.get('theme_elements'):
                                 self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                             
-                            if theme_info.get('scene_suggestions'):
-                                self.log(f"📍 场景建议: {theme_info['scene_suggestions']}")
-                            
                             # 不生成分镜列表，跳到步骤3直接使用原始语音片段
                             self.log("✅ 主题分析完成，将直接使用原始语音片段创建分镜")
                         
@@ -8562,7 +8538,6 @@ Now convert this:
                                 'visual_tone': '', 
                                 'theme_elements': [],
                                 'visual_style': '',
-                                'scene_suggestions': '',
                                 'emotional_tone': ''
                             }
                             # 即使大模型分析失败，也要保留用户设置的主题和基调
@@ -8647,7 +8622,6 @@ Now convert this:
                             visual_tone=theme_info.get('visual_tone', ''),
                             theme_elements=theme_info.get('theme_elements', []),
                             visual_style=effective_visual_style,
-                            scene_suggestions=theme_info.get('scene_suggestions', ''),
                             original_dubbing=dubbing
                         )
                         return (idx, prompt, None)
