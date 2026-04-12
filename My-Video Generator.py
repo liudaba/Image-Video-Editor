@@ -2377,9 +2377,28 @@ class DocuMakerLiteV7:
         )
         thread_combo.pack(side=tk.LEFT, padx=5, pady=2)
         
+        # 提示词生成线程数（新增）
+        prompt_thread_frame = ttk.Frame(thread_section)
+        prompt_thread_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(prompt_thread_frame, text="提示词生成线程:", width=14, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        
+        if not hasattr(self, 'prompt_thread_count_var'):
+            self.prompt_thread_count_var = tk.IntVar(value=4)
+        
+        prompt_thread_options = [1, 2, 3, 4, 6, 8]
+        prompt_thread_combo = ttk.Combobox(
+            prompt_thread_frame,
+            textvariable=self.prompt_thread_count_var,
+            values=prompt_thread_options,
+            state="readonly",
+            font=('Microsoft YaHei', large_font_size),
+            width=8
+        )
+        prompt_thread_combo.pack(side=tk.LEFT, padx=5, pady=2)
+        
         thread_desc = tk.Label(
             thread_section,
-            text="说明: 线程越多生成越快，但GPU压力越大。建议GPU性能一般时选择8-12",
+            text="说明: 线程越多生成越快，但GPU压力越大。建议GPU性能一般时选择8-12；提示词线程建议2-4",
             font=('Microsoft YaHei', large_font_size - 1),
             foreground="#aaaaaa",
             background=self.panel_bg,
@@ -4346,28 +4365,27 @@ class DocuMakerLiteV7:
         if theme_elements is None:
             theme_elements = []
             
-        try:
-            model = self.ollama_model_var.get()
-            ollama_url = "http://localhost:11434"
-            
-            # 构建模板参数 - 包含内容类型信息
-            template_params = {
-                "content_type": content_type or "未指定类型",
-                "core_theme": core_theme or "未指定",
-                "visual_style": visual_style,  # 用户预设的风格（可能为空）
-                "visual_tone": visual_tone or "",
-                "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
-                "dubbing": dubbing
-            }
-            
-            # 根据提示词类型选择模板或生成方式
-            if prompt_type == "SD提示词":
-                template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
-            elif prompt_type == "ARV写实提示词":
-                # ARV模式：使用简化的系统提示词，统一格式
-                semantic_mapping = PromptTemplates.DUBBING_SEMANTIC_MAPPING["en"]
-                template = {
-                    "system": f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
+        model = self.ollama_model_var.get()
+        ollama_url = "http://localhost:11434"
+        
+        # 构建模板参数 - 包含内容类型信息
+        template_params = {
+            "content_type": content_type or "未指定类型",
+            "core_theme": core_theme or "未指定",
+            "visual_style": visual_style,  # 用户预设的风格（可能为空）
+            "visual_tone": visual_tone or "",
+            "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
+            "dubbing": dubbing
+        }
+        
+        # 根据提示词类型选择模板或生成方式
+        if prompt_type == "SD提示词":
+            template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
+        elif prompt_type == "ARV写实提示词":
+            # ARV模式：使用简化的系统提示词，统一格式
+            semantic_mapping = PromptTemplates.DUBBING_SEMANTIC_MAPPING["en"]
+            template = {
+                "system": f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
 
 【关键要求】
 1. 基于配音内容生成英文提示词
@@ -4384,37 +4402,31 @@ class DocuMakerLiteV7:
 【主题元素】：{', '.join(theme_elements) if theme_elements else '根据配音内容确定'}
 
 只输出英文提示词，不要解释。""",
-                    "user": f"配音：{dubbing}\n\n生成英文提示词："
-                }
-            else:
-                # 豆包提示词使用中文模板
-                template = PromptTemplates.get_template("shot_prompt_doubao", **template_params)
-            
-            # 使用 ollama.chat API（支持 system + user 消息）
-            import ollama
-            
-            # 简化参数配置，避免验证错误
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": template["system"]},
-                    {"role": "user", "content": template["user"]}
-                ]
-            )
-            
-            raw_output = response["message"]["content"].strip()
-            if raw_output:
-                # 清洗提示词，移除解释性文字
-                cleaned_prompt = self._clean_prompt_output(raw_output)
-                return cleaned_prompt
-            
-            raise Exception("大模型返回为空")
-            
-        except Exception as e:
-            import traceback
-            self.log(f"❌ 大模型生成提示词失败: {str(e)}")
-            self.log(f"   完整错误: {traceback.format_exc()[:500]}")
-            raise Exception(f"大模型生成提示词失败: {str(e)}")
+                "user": f"配音：{dubbing}\n\n生成英文提示词："
+            }
+        else:
+            # 豆包提示词使用中文模板
+            template = PromptTemplates.get_template("shot_prompt_doubao", **template_params)
+        
+        # 使用 ollama.chat API（支持 system + user 消息）
+        import ollama
+        
+        # 简化参数配置，避免验证错误
+        response = ollama.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": template["system"]},
+                {"role": "user", "content": template["user"]}
+            ]
+        )
+        
+        raw_output = response["message"]["content"].strip()
+        if raw_output:
+            # 清洗提示词，移除解释性文字
+            cleaned_prompt = self._clean_prompt_output(raw_output)
+            return cleaned_prompt
+        
+        raise Exception("大模型返回为空")
     
     def _get_custom_negative_prompt(self, content_type, dubbing):
         """【整改新增】根据内容类型和配音内容生成定制化负面提示词"""
@@ -6695,83 +6707,6 @@ Now convert this:
             if applied_count > 0:
                 return applied_count, f"逐行解析成功: {applied_count}个"
         
-    def _optimize_prompts_with_global_context(self, shots, core_theme, visual_tone, theme_elements, content_type):
-        """基于整体主题和氛围，对所有分镜提示词进行系统性优化（简化版）"""
-        if not shots:
-            return shots
-        
-        try:
-            theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
-            
-            system_prompt = f"""You are an ARV v20 prompt optimizer.
-【核心主题】{core_theme}
-【视觉基调】{visual_tone or '紧张'}
-【主题元素】{', '.join(theme_elements_en)}
-输出JSON: {{"0": "提示词1", "1": "提示词2"}}"""
-
-            prompts_info = []
-            for i, shot in enumerate(shots):
-                desc = shot.get('description', '')[:80]
-                prompt = shot.get('prompt_en', '')[:80]
-                prompts_info.append(f"{i}|{desc}|{prompt}")
-            
-            user_prompt = "分镜:\n" + "\n".join(prompts_info)
-            
-            import ollama
-            import json
-            import re
-            
-            model = self.ollama_model_var.get()
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            
-            result = response['message']['content'].strip()
-            self.log(f"   🔍 大模型返回: {result[:60]}...")
-            
-            json_match = re.search(r'\{[\s\S]*\}', result)
-            if not json_match:
-                self.log(f"   ⚠️ 无法提取JSON")
-                shots['_optimized_count'] = 0
-                return shots
-            
-            try:
-                data = json.loads(json_match.group())
-            except json.JSONDecodeError:
-                self.log(f"   ⚠️ JSON解析失败")
-                shots['_optimized_count'] = 0
-                return shots
-            
-            applied = 0
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    try:
-                        idx = int(key)
-                        if 0 <= idx < len(shots) and isinstance(value, str) and len(value) > 10:
-                            if isinstance(shots[idx], dict):
-                                shots[idx]['prompt_en'] = value
-                                applied += 1
-                    except (ValueError, TypeError, IndexError):
-                        continue
-            
-            if applied > 0:
-                self.log(f"   ✅ 成功优化 {applied} 个分镜")
-                shots['_optimized_count'] = applied
-            else:
-                self.log(f"   ⚠️ 未应用任何优化")
-                shots['_optimized_count'] = 0
-            
-            return shots
-            
-        except Exception as e:
-            self.log(f"   ⚠️ 优化失败: {str(e)[:50]}")
-            shots['_optimized_count'] = 0
-            return shots
-    
     def _translate_theme_elements_to_english(self, theme_elements):
         """将主题元素翻译成英文"""
         if not theme_elements:
@@ -8631,9 +8566,12 @@ Now convert this:
             
             start_time = time.time()
             
-            # 4线程并发生成提示词
+            # 4线程并发生成提示词（添加超时控制防止卡死）
             max_workers = 4
             failed_count = 0
+            
+            # 生成超时设置（秒）
+            prompt_timeout = 60
             
             def generate_single_prompt(idx_task):
                 """单个提示词生成任务"""
@@ -8662,25 +8600,34 @@ Now convert this:
                     full_error = f"{str(e)}\n{traceback.format_exc()}"
                     return (idx, "", full_error)
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 获取用户设置的提示词生成线程数
+            if hasattr(self, 'prompt_thread_count_var'):
+                prompt_max_workers = self.prompt_thread_count_var.get()
+            else:
+                prompt_max_workers = 4
+            
+            total_tasks = len(original_shot_tasks)
+            self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
+            
+            # 使用线程池并行执行
+            with concurrent.futures.ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
                 results = list(executor.map(generate_single_prompt, enumerate(original_shot_tasks)))
                 
                 for idx, prompt, error in results:
                     if error:
                         failed_count += 1
-                        # 显示前500字符的错误信息
-                        error_display = error[:500] if len(error) > 500 else error
+                        error_display = error[:200] if len(error) > 200 else error
                         self.log(f"   ⚠️ 第{idx+1}个生成失败: {error_display}")
                         pregenerated_prompts[idx] = ""
                     else:
                         pregenerated_prompts[idx] = prompt
-                
-                elapsed = time.time() - start_time
-                speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
-                if user_prompt_type == "ARV写实提示词":
-                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒, 已预生成，步骤3直接复用)")
-                else:
-                    self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
+            
+            elapsed = time.time() - start_time
+            speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
+            if user_prompt_type == "ARV写实提示词":
+                self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒, 已预生成，步骤3直接复用)")
+            else:
+                self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
             
             if failed_count > 0:
                 self.log(f"❌ 错误: {failed_count} 个提示词生成失败，任务终止")
