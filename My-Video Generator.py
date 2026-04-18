@@ -3669,6 +3669,57 @@ class DocuMakerLiteV7:
         self.log(f"❌ 解析失败")
         return None
 
+    def _extract_shot_theme_elements(self, shot_text, global_elements):
+        """从分镜文案中提取相关的主题元素，而非直接使用全局共享列表
+
+        策略：只保留全局元素中与当前文案有语义关联的元素，
+        避免所有分镜的 theme_elements 完全一样。
+        同时基于文案内容提取新的专属元素。
+        """
+        if not global_elements or not shot_text:
+            return []
+
+        shot_lower = shot_text.lower()
+        matched_elements = []
+
+        # 1. 从全局元素中筛选与当前文案相关的
+        for elem in global_elements:
+            elem_lower = elem.lower()
+            # 如果全局元素的某个字出现在文案中，保留
+            if any(char in shot_text for char in elem if len(char) > 1):
+                matched_elements.append(elem)
+
+        # 2. 从文案中提取新的视觉元素（简单的关键词提取）
+        # 常见的视觉描述词
+        visual_keywords = {
+            '城市': 'cityscape', '无人机': 'drone', '飞行': 'flying',
+            '建筑': 'building', '科技': 'technology', '数据': 'data',
+            '工厂': 'factory', '生产': 'production', '港口': 'port',
+            '网络': 'network', '智能': 'intelligent', '交通': 'transportation',
+            '经济': 'economy', '市场': 'market', '投资': 'investment',
+            '中国': 'China', '美国': 'United States', '深圳': 'Shenzhen',
+            '竞争': 'competition', '合作': 'cooperation', '创新': 'innovation',
+            '基础设施': 'infrastructure', '商业化': 'commercialization',
+            '起降': 'takeoff landing', '制造': 'manufacturing',
+            '出租': 'taxi', '空中': 'aerial', '未来': 'futuristic',
+            '规模': 'scale', '产业': 'industry', '万亿': 'trillion',
+            '全球': 'global', '世界': 'world',
+        }
+
+        extracted = []
+        for cn_keyword, en_keyword in visual_keywords.items():
+            if cn_keyword in shot_text and en_keyword not in extracted:
+                extracted.append(en_keyword)
+
+        # 合并：优先使用文案提取的，补充全局匹配的（去重）
+        combined = extracted.copy()
+        for elem in matched_elements:
+            if elem not in combined:
+                combined.append(elem)
+
+        # 限制数量，避免过多
+        return combined[:6]
+
     def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, llm_keywords='', llm_prompt='', use_raw_text=False, core_theme='', visual_tone='', theme_elements=None):
         """创建新分镜 - 增强版：根据每个分镜的独特内容生成个性化提示词
         
@@ -4401,27 +4452,46 @@ class DocuMakerLiteV7:
         if prompt_type == "SD提示词":
             template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
         elif prompt_type == "ARV写实提示词":
-            # ARV模式：使用简化的系统提示词，统一格式
-            semantic_mapping = PromptTemplates.DUBBING_SEMANTIC_MAPPING["en"]
+            # ARV模式：配音文案优先级最高的提示词生成
+            # 优先级: 配音文案具体场景 > 分镜前后文 > 全局主题（仅参考）
+            # 构建上下文信息（前后几个分镜的文案，帮助模型理解叙事位置）
+            context_hint = ""
+            if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
+                shot_texts = self._shot_texts_for_context
+                try:
+                    # 找到当前 dubbing 在列表中的位置
+                    idx = shot_texts.index(dubbing) if dubbing in shot_texts else -1
+                    if idx >= 0:
+                        prev_texts = [shot_texts[j] for j in range(max(0, idx-2), idx)]
+                        next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+3))]
+                        if prev_texts:
+                            context_hint += f"前文: {' | '.join(prev_texts)}\n"
+                        if next_texts:
+                            context_hint += f"后文: {' | '.join(next_texts)}\n"
+                except Exception:
+                    pass
+
             template = {
                 "system": f"""You are a professional AI image prompt engineer for absoluteRealisticVision v20 model.
 
-【关键要求】
-1. 基于配音内容生成英文提示词
-2. 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
-3. 只输出英文关键词，逗号分隔，禁止使用完整句子
-4. 结尾必须添加：cinematic lighting, documentary style, film grain texture
-5. 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
+【最高优先级规则】
+1. 提示词必须严格反映当前配音文案的具体场景、人物、物体和动作
+2. 每个分镜的配音内容不同，提示词必须有所区别，禁止千篇一律
+3. 如果配音提到具体事物（如"深圳"、"一航智能"、"万亿市场"），提示词必须包含对应英文视觉元素
+4. 全局主题仅作为背景参考，不要把全局主题的关键词塞进每个分镜
 
-{semantic_mapping}
+【格式要求】
+- 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
+- 只输出英文关键词，逗号分隔，禁止使用完整句子
+- 结尾必须添加：cinematic lighting, documentary style, film grain texture
 
 【内容类型】：{content_type}
-【核心主题】：{core_theme or '根据配音内容确定'}
-【视觉基调】：{visual_tone or '真实氛围'}
-【主题元素】：{', '.join(theme_elements) if theme_elements else '根据配音内容确定'}
+【全局主题（仅参考，不要每张图都用）】：{core_theme or '根据配音内容确定'}
 
 只输出英文提示词，不要解释。""",
-                "user": f"配音：{dubbing}\n\n生成英文提示词："
+                "user": f"""{context_hint}当前配音: {dubbing}
+
+根据当前配音的具体内容生成英文提示词（不要使用全局主题的泛化词汇，只画当前这帧画面）："""
             }
         else:
             # 豆包提示词使用中文模板
@@ -8647,6 +8717,9 @@ Now convert this:
             total_tasks = len(original_shot_tasks)
             self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
             
+            # 【改动A】保存所有分镜文案作为上下文，让每个分镜知道自己在叙事中的位置
+            self._shot_texts_for_context = [task.get('text', '') for task in original_shot_tasks]
+
             # 使用线程池并行执行
             with concurrent.futures.ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
                 results = list(executor.map(generate_single_prompt, enumerate(original_shot_tasks)))
@@ -8766,11 +8839,15 @@ Now convert this:
                     if shot_text != original_text:
                         self.log(f"   🔄 分镜{idx+1}纠错: {original_text[:20]}... → {shot_text[:20]}...")
                 
+                # 【改动A2】从分镜文案中提取相关元素，而非使用全局 theme_elements
+                shot_theme_elements = self._extract_shot_theme_elements(
+                    shot_text, theme_elements
+                )
                 shot = self.create_new_shot(
                     idx, shot_start, shot_end, shot_text, shot_type,
                     core_theme=core_theme,
                     visual_tone=visual_tone,
-                    theme_elements=theme_elements
+                    theme_elements=shot_theme_elements
                 )
                 return idx, shot
             
