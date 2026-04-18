@@ -10,6 +10,9 @@ import sys
 import time
 import hashlib
 import re
+import gc
+import subprocess
+import traceback
 import requests
 
 # ============ 性能优化配置常量 ============
@@ -38,6 +41,21 @@ class Config:
     # UI 配置
     RESIZE_DEBOUNCE_MS = 300
     PROGRESS_UPDATE_INTERVAL_MS = 100
+
+# ============ UI 线程安全装饰器 ============
+def run_on_main_thread(method):
+    """装饰器: 确保方法在 tkinter 主线程中执行"""
+    def wrapper(self, *args, **kwargs):
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            return method(self, *args, **kwargs)
+        if hasattr(self, 'root') and self.root:
+            self.root.after_idle(method, self, *args, **kwargs)
+        else:
+            method(self, *args, **kwargs)
+    wrapper.__name__ = method.__name__
+    wrapper.__doc__ = method.__doc__
+    return wrapper
 
 # ============ 预编译正则表达式 ============
 # 文本清理
@@ -336,7 +354,7 @@ class BatchSDGenerator:
                                 "batch_size": 1,
                                 "sampler_name": "DPM++ 2M Karras",
                             },
-                            timeout=120  # 增加到120秒超时
+                            timeout=45  # 增加到120秒超时
                         )
                         
                         elapsed = time.time() - start_time
@@ -810,7 +828,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None,
                         "num_ctx": num_ctx
                     }
                 },
-                timeout=120
+                timeout=45
             )
             
             if response.status_code != 200:
@@ -2092,6 +2110,7 @@ class DocuMakerLiteV7:
             
             # 启动性能监控线程
             self.perf_monitor_running = True
+            self._perf_monitor_interval = 5.0  # 性能监控间隔（秒），任务中自动切换为2s
             self.perf_monitor_thread = threading.Thread(target=self.monitor_performance, daemon=True)
             self.perf_monitor_thread.start()
 
@@ -2815,7 +2834,7 @@ class DocuMakerLiteV7:
             self._last_progress = -1
         
         # 如果进度变化很小，跳过更新
-        if progress is not None and abs(progress - self._last_progress) < 2:
+        if progress is not None and abs(progress - self._last_progress) < 0.5:
             return
         
         self._last_progress = progress if progress is not None else self._last_progress
@@ -7446,8 +7465,10 @@ Now convert this:
                         break
                     
                     update_interval += 1
+                    # 智能调整监控间隔
+                    self._perf_monitor_interval = 2.0 if getattr(self, "task_running", False) else 5.0
                 
-                time.sleep(0.5)  # 缩短睡眠时间为0.5秒，使UI更新更流畅
+                time.sleep(self._perf_monitor_interval)  # 智能间隔：空闲5s，任务中2s
         except Exception:
             pass
 
@@ -7947,11 +7968,8 @@ Now convert this:
         """
         # 确保在函数开始时就导入必要的模块
         import os
-        import whisper
-        import numpy as np
         import hashlib
         import gc
-        import concurrent.futures
         
         # 初始化变量，防止 NameError
         analysis_result = ""
@@ -9207,7 +9225,7 @@ Now convert this:
                 
                 return False
             
-            # ========== 步骤4: 串行生成图像（优化版）==========
+            # ========== 步骤4: 预取流水线生成图像 ==========
             if tasks:
                 self.log("")
                 # SD 生成前释放 Whisper 占用的 GPU
@@ -9220,149 +9238,178 @@ Now convert this:
                 except Exception as e:
                     self.log(f"   ⚠️ GPU 显存释放失败: {e}")
                 self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
-                self.log(f"   模式: 串行生成（一张一张生成，最稳定）")
+                self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
                 self.log("")
-                
+
+                import queue
+                import base64
+                from PIL import Image
+                from io import BytesIO
+
+                # --- 图片保存队列: 解码+保存在独立线程中执行 ---
+                save_queue = queue.Queue(maxsize=4)
+
+                def image_saver():
+                    """独立IO线程: 解码base64并保存图片到磁盘"""
+                    while True:
+                        item = save_queue.get()
+                        if item is None:
+                            save_queue.task_done()
+                            break
+                        try:
+                            _, save_path, b64_data = item
+                            img_bytes = base64.b64decode(b64_data)
+                            image = Image.open(BytesIO(img_bytes))
+                            image.save(save_path)
+                        except Exception:
+                            pass
+                        finally:
+                            save_queue.task_done()
+
+                saver_thread = threading.Thread(target=image_saver, daemon=True)
+                saver_thread.start()
+
+                # --- 结果队列: producer线程把SD响应放入，主线程消费 ---
+                result_queue = queue.Queue(maxsize=2)
+
+                def sd_producer():
+                    """独立请求线程: 连续发送SD生成请求，实现预取"""
+                    for idx, (sid, prompt, img_file, img_path, desc, neg) in enumerate(tasks):
+                        # 检查取消
+                        if not self.task_running:
+                            result_queue.put((idx, None, None, "cancelled"))
+                            break
+                        # 检查暂停
+                        if not self.pause_event.is_set():
+                            self.pause_event.wait()
+
+                        # 检查缓存
+                        ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                        cached = image_cache.get(ck)
+                        if cached:
+                            result_queue.put((idx, ck, cached, "cached", img_path))
+                            continue
+
+                        # 发送SD请求（含重试）
+                        max_retries = 3
+                        retry_delay = 5
+                        for retry in range(max_retries):
+                            if not self.task_running:
+                                result_queue.put((idx, None, None, "cancelled"))
+                                break
+                            try:
+                                req_start = time.time()
+                                resp = get_http_session().post(
+                                    f"{api_url}/sdapi/v1/txt2img",
+                                    json={
+                                        "prompt": prompt,
+                                        "negative_prompt": neg or "",
+                                        "width": width, "height": height,
+                                        "steps": 25, "cfg_scale": 7.0,
+                                        "sampler_name": "DPM++ 2M Karras",
+                                        "seed": -1, "batch_size": 1
+                                    },
+                                    timeout=45
+                                )
+                                req_time = time.time() - req_start
+
+                                if resp.status_code == 200:
+                                    rj = resp.json()
+                                    if "images" in rj and rj["images"]:
+                                        img_data = rj["images"][0]
+                                        image_cache.set(ck, img_data)
+                                        result_queue.put((idx, ck, img_data, "generated", req_time, img_path))
+                                        break
+                                    else:
+                                        if retry < max_retries - 1:
+                                            time.sleep(retry_delay)
+                                else:
+                                    if retry < max_retries - 1:
+                                        time.sleep(retry_delay)
+                            except requests.exceptions.ConnectionError:
+                                result_queue.put((idx, None, None, "connection_error"))
+                                break
+                            except requests.exceptions.Timeout:
+                                if retry < max_retries - 1:
+                                    time.sleep(retry_delay)
+                            except Exception as e:
+                                if retry < max_retries - 1:
+                                    time.sleep(retry_delay)
+                        else:
+                            result_queue.put((idx, None, None, "failed"))
+                    # 发送结束信号
+                    result_queue.put(None)
+
+                producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
+                producer_thread.start()
+
+                # --- 主线程（消费者）: 从队列取结果，更新UI ---
                 results = []
                 generated_count = 0
                 failed_count = 0
                 cached_count = 0
-                
-                # 记录开始时间
                 batch_start_time = time.time()
-                
-                for i, (shot_id, enhanced_prompt, image_file, image_path, description, negative_prompt) in enumerate(tasks):
-                    # 检查是否被暂停
-                    if not self.pause_event.is_set():
-                        self.log("⏸️ 任务已暂停，等待恢复...")
-                        self.pause_event.wait()
-                    
-                    if not self.task_running:
+                total_tasks = len(tasks)
+                received = 0
+
+                while received < total_tasks:
+                    item = result_queue.get()
+                    if item is None:
+                        break
+
+                    result_type = item[3] if len(item) > 3 else "unknown"
+
+                    if result_type == "cancelled":
                         self.log("❌ 任务已被取消")
                         break
-                    
+
+                    idx = item[0]
+
                     # 更新进度
-                    progress = 40 + (i / len(tasks)) * 50
-                    self.update_task_progress(f"生成图像 {i+1}/{len(tasks)}...", progress)
-                    
-                    # 每5张图输出一次日志，减少UI更新
-                    if i % 5 == 0 or i == len(tasks) - 1:
+                    progress = 40 + (received / total_tasks) * 50
+                    self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
+
+                    # 每5张输出一次日志
+                    if received % 5 == 0 or received == total_tasks - 1:
                         elapsed = time.time() - batch_start_time
-                        avg_time = elapsed / (i + 1) if i > 0 else 0
-                        remaining = (len(tasks) - i - 1) * avg_time
-                        self.log(f"📷 [{i+1}/{len(tasks)}] {image_file} (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
-                    
-                    # 检查图像缓存
-                    cache_key = hashlib.md5(f"{enhanced_prompt}_{width}_{height}".encode()).hexdigest()
-                    cached_image = image_cache.get(cache_key)
-                    
-                    if cached_image:
-                        try:
-                            import base64
-                            from PIL import Image
-                            from io import BytesIO
-                            
-                            img_bytes = base64.b64decode(cached_image)
-                            image = Image.open(BytesIO(img_bytes))
-                            image.save(image_path)
-                            self.log(f"   ✅ 缓存命中，直接保存")
-                            cached_count += 1
-                            continue
-                        except Exception as e:
-                            self.log(f"   ⚠️ 缓存读取失败，重新生成: {e}")
-                    
-                    # 调用SD API生成图像
-                    max_retries = 3
-                    retry_delay = 5
-                    success = False
-                    
-                    for retry in range(max_retries):
-                        try:
-                            request_start_time = time.time()
-                            
-                            payload = {
-                                "prompt": enhanced_prompt,
-                                "negative_prompt": negative_prompt or "",
-                                "width": width,
-                                "height": height,
-                                "steps": 25,
-                                "cfg_scale": 7.0,
-                                "sampler_name": "DPM++ 2M Karras",
-                                "seed": -1,
-                                "batch_size": 1
-                            }
-                            
-                            response = get_http_session().post(
-                                f"{api_url}/sdapi/v1/txt2img",
-                                json=payload,
-                                timeout=120
-                            )
-                            
-                            request_time = time.time() - request_start_time
-                            
-                            if response.status_code == 200:
-                                result = response.json()
-                                if "images" in result and len(result["images"]) > 0:
-                                    import base64
-                                    from PIL import Image
-                                    from io import BytesIO
-                                    
-                                    image_data = result["images"][0]
-                                    # 缓存图像
-                                    image_cache.set(cache_key, image_data)
-                                    # 保存图像
-                                    img_bytes = base64.b64decode(image_data)
-                                    image = Image.open(BytesIO(img_bytes))
-                                    image.save(image_path)
-                                    
-                                    self.log(f"   ✅ 完成 (耗时 {request_time:.1f}s)")
-                                    generated_count += 1
-                                    success = True
-                                    break
-                                else:
-                                    self.log(f"   ❌ 失败: 无图像数据")
-                                    if retry < max_retries - 1:
-                                        self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                        time.sleep(retry_delay)
-                            else:
-                                self.log(f"   ❌ 失败: HTTP {response.status_code}")
-                                if retry < max_retries - 1:
-                                    self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                    time.sleep(retry_delay)
-                                    
-                        except requests.exceptions.Timeout:
-                            self.log(f"   ❌ 请求超时 (120秒)")
-                            if retry < max_retries - 1:
-                                self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                time.sleep(retry_delay)
-                        except requests.exceptions.ConnectionError:
-                            self.log(f"   ❌ 连接失败: SD服务未响应")
-                            self.log(f"   💡 请检查 SD WebUI 是否正常运行")
-                            break
-                        except Exception as e:
-                            error_msg = str(e)[:50]
-                            self.log(f"   ❌ 错误: {error_msg}")
-                            if retry < max_retries - 1:
-                                self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                time.sleep(retry_delay)
-                    
-                    if not success:
+                        avg_time = elapsed / (received + 1)
+                        remaining = (total_tasks - received - 1) * avg_time
+                        _, _, _, shot_id = tasks[idx][:4]
+                        self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
+
+                    if result_type == "cached":
+                        cached_count += 1
+                        img_path = item[4]
+                        save_queue.put((idx, img_path, item[2]), timeout=30)
+                        self.log(f"   ✅ 缓存命中")
+
+                    elif result_type == "generated":
+                        generated_count += 1
+                        req_time = item[4]
+                        img_path = item[5]
+                        save_queue.put((idx, img_path, item[2]), timeout=30)
+                        self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
+
+                    elif result_type == "connection_error":
                         failed_count += 1
-                    
-                    # 生成间隔，给SD喘息时间（优化为0.2秒）
-                    if i < len(tasks) - 1:
-                        time.sleep(0.2)
-                
-                self.log("")
-                self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                self.log(f"📊 生成结果: 成功 {generated_count} 张, 缓存 {cached_count} 张, 失败 {failed_count} 张")
-                self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            else:
-                self.log("")
-                self.log("⚠️ 所有图像已存在，无需重新生成")
-                generated_count = 0
-            
-            self.update_task_progress("图像生成完成", 100)
+                        self.log(f"   ❌ 连接失败: SD服务未响应")
+                        self.log(f"   💡 请检查 SD WebUI 是否正常运行")
+                        break
+
+                    else:
+                        failed_count += 1
+                        self.log(f"   ❌ 生成失败")
+
+                    received += 1
+                    result_queue.task_done()
+
+                # 等待保存线程完成
+                save_queue.put(None)
+                saver_thread.join(timeout=120)
+
+                # 等待producer结束
+                producer_thread.join(timeout=5)
+
             self.state_manager['images']['generated'] = True
             self.state_manager['images']['count'] = generated_count
             
