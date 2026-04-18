@@ -4480,9 +4480,23 @@ class DocuMakerLiteV7:
 3. 如果配音提到具体事物（如"深圳"、"一航智能"、"万亿市场"），提示词必须包含对应英文视觉元素
 4. 全局主题仅作为背景参考，不要把全局主题的关键词塞进每个分镜
 
+                
+                【禁止事项】
+                - 禁止在每个分镜都使用"cityscape"或"futuristic cityscape"
+                - 禁止只用泛化词汇（如 global competition, strategic overview），必须描述具体画面
+                - 如果文案提到无人机/飞行器/eVTOL，必须用"(drone:1.3)"等权重语法强调主体
+                - 如果文案没有提到建筑/城市，就不要写cityscape
+                
+                【画面主体优先级】
+                - 文案提到飞行器/无人机 -> 画面主体必须是飞行器在空中飞行，用 mid-air, in flight, taking off
+                - 文案提到具体地点(深圳/中国) -> 可以包含地点视觉元素，但不要让城市成为主体
+                - 文案提到数据/市场规模 -> 画面应该是数据可视化图表，而不是城市天际线
+                - 文案提到竞争/排名 -> 画面应该是对比图或排名图，而不是城市航拍
+                
 【格式要求】
 - 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
 - 只输出英文关键词，逗号分隔，禁止使用完整句子
+                - 重要主体用权重语法强调：(drone:1.3), (eVTOL aircraft:1.2), (data chart:1.2)
 - 结尾必须添加：cinematic lighting, documentary style, film grain texture
 
 【内容类型】：{content_type}
@@ -8838,6 +8852,20 @@ Now convert this:
                         shot_text = shot_text.replace(old, new)
                     if shot_text != original_text:
                         self.log(f"   🔄 分镜{idx+1}纠错: {original_text[:20]}... → {shot_text[:20]}...")
+
+                # 二次纠错：补充大模型识别不了的同音字/近音字错误
+                common_errors = {
+                    '食物規劃': '低空規劃', '食物规划': '低空规划',
+                    '飛行地勢': '飛行汽車', '飞行地势': '飞行汽车',
+                    '垂直升線': '垂直升降', '垂直升线': '垂直升降',
+                }
+                corrected_by_dict2 = False
+                for wrong, right in common_errors.items():
+                    if wrong in shot_text and right not in shot_text:
+                        shot_text = shot_text.replace(wrong, right)
+                        corrected_by_dict2 = True
+                if corrected_by_dict2:
+                    self.log(f"   🔄 分镜{idx+1}二次纠错: 同音字修正")
                 
                 # 【改动A2】从分镜文案中提取相关元素，而非使用全局 theme_elements
                 shot_theme_elements = self._extract_shot_theme_elements(
