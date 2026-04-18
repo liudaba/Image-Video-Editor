@@ -8008,6 +8008,16 @@ Now convert this:
                 segments = cached_result.get('segments', [])
                 full_text = cached_result.get('full_text', "")
                 self.log(f"   识别片段数: {len(segments)}")
+
+                # 缓存命中，释放 Whisper 占用的 GPU
+                try:
+                    import torch
+                    if self.whisper_model is not None and torch.cuda.is_available():
+                        self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.empty_cache()
+                        self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
+                except Exception as e:
+                    self.log(f"   ⚠️ Whisper GPU 释放失败: {e}")
             else:
                 # 加载Whisper模型进行语音识别
                 self.log("🔊 正在加载Whisper模型...")
@@ -8105,6 +8115,16 @@ Now convert this:
                 }
                 self.cache_set('audio_analysis', audio_key, cache_data)
                 self.log("✅ 音频分析结果已缓存")
+
+                # Whisper 转录完成，主动释放 GPU 资源（关键优化）
+                try:
+                    import torch
+                    if self.whisper_model is not None and torch.cuda.is_available():
+                        self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.empty_cache()
+                        self.log("   ✅ Whisper 模型 GPU 资源已释放")
+                except Exception as e:
+                    self.log(f"   ⚠️ Whisper GPU 释放失败: {e}")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
@@ -9190,7 +9210,16 @@ Now convert this:
             # ========== 步骤4: 串行生成图像（优化版）==========
             if tasks:
                 self.log("")
-                self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
+                                # SD 生成前释放 Whisper 占用的 GPU
+                try:
+                    import torch
+                    if self.whisper_model is not None and torch.cuda.is_available():
+                        self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.empty_cache()
+                        self.log("   🧹 Whisper GPU 显存已释放，准备 SD 生成")
+                except Exception as e:
+                    self.log(f"   ⚠️ GPU 显存释放失败: {e}")
+self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
                 self.log(f"   模式: 串行生成（一张一张生成，最稳定）")
                 self.log("")
                 
