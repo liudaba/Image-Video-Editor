@@ -9210,7 +9210,7 @@ Now convert this:
             # ========== 步骤4: 串行生成图像（优化版）==========
             if tasks:
                 self.log("")
-                                # SD 生成前释放 Whisper 占用的 GPU
+                # SD 生成前释放 Whisper 占用的 GPU
                 try:
                     import torch
                     if self.whisper_model is not None and torch.cuda.is_available():
@@ -9219,7 +9219,7 @@ Now convert this:
                         self.log("   🧹 Whisper GPU 显存已释放，准备 SD 生成")
                 except Exception as e:
                     self.log(f"   ⚠️ GPU 显存释放失败: {e}")
-self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
+                self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
                 self.log(f"   模式: 串行生成（一张一张生成，最稳定）")
                 self.log("")
                 
