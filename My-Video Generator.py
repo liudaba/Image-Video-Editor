@@ -235,8 +235,16 @@ from ctypes import wintypes
 if _is_pythonw or _has_no_console:
     ctypes.windll.kernel32.AllocConsole()
     _console_allocated = True
+    
+    # 获取控制台窗口句柄
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
 
-hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    # 隐藏控制台窗口
+    if hwnd:
+        SW_HIDE = 0
+        ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+else:
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
 
 if hwnd:
     user32 = ctypes.windll.user32
@@ -1252,7 +1260,7 @@ class DocuMakerLiteV7:
         section2.columnconfigure(0, weight=1)
         section2.rowconfigure(0, weight=1)
         
-        btn_generate = ttk.Button(section2, text="🎬 一键生成分镜", command=self.generate_shots_threaded, style="LargeBlue.TButton")
+        btn_generate = ttk.Button(section2, text="🎬 生成分镜脚本", command=self.generate_shots_threaded, style="LargeBlue.TButton")
         btn_generate.pack(fill=tk.BOTH, expand=True, pady=5)
 
         # 分隔线
@@ -1266,11 +1274,10 @@ class DocuMakerLiteV7:
         section5.rowconfigure(0, weight=1)
         section5.rowconfigure(1, weight=1)
         
-        btn_render = ttk.Button(section5, text="🎞️ （跑图）生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
+        btn_render = ttk.Button(section5, text="🎞️ 生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
         btn_render.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        btn_direct_render = ttk.Button(section5, text="🎞️ （直接）生成视频", command=self.direct_render_video, style="LargeBlue.TButton")
-        btn_direct_render.pack(fill=tk.BOTH, expand=True, pady=5)
+
 
         # 分隔线
         sep3 = ttk.Separator(frame, orient='horizontal')
@@ -1684,9 +1691,7 @@ class DocuMakerLiteV7:
         for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
         
-        # 添加"本地大模型"选项
-        script_model_btn = ttk.Button(self.model_dropdown_inner_frame, text="本地大模型", command=lambda m="本地大模型": self.select_ollama_model(m), style="Medium.TButton")
-        script_model_btn.pack(fill=tk.X, pady=1, padx=5)
+        # 已移除"本地大模型"选项，因为该功能已不再使用
         
         # 【修改】自动检测并启动Ollama服务
         ollama_connected = False
@@ -7496,12 +7501,17 @@ class DocuMakerLiteV7:
         1. 必须导入音频文件
         2. 图片文件夹内不允许存在图片文件
         
-        工作流程（始终从头执行，确保流水线完整）：
-        - 先清除旧分镜数据 → 生成分镜脚本 → 生成图片 → 合成视频
+        工作流程：
+        - 如果存在分镜脚本文件，直接使用它生成图片
+        - 如果不存在分镜脚本文件，则生成分镜脚本，然后生成图片
+        - 最后合成视频
         """
         try:
             self.log("🎞️ 开始跑图生成视频...")
             
+            # 添加明确的任务开始提示
+            self.log("🎬 开始执行生成视频任务")
+
             # ===== 前置检查 =====
             # 检查1: 必须导入音频文件
             if not self.audio_path:
@@ -7514,18 +7524,33 @@ class DocuMakerLiteV7:
                 messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
                 return
             
-            # 检查2: 图片文件夹内不允许存在图片文件
+            # 检查2: 检查是否存在分镜脚本文件
+            shots_file = os.path.join(self.output_dir, "shots_data.json")
+            has_shots_file = os.path.exists(shots_file)
+            
+            # 检查3: 图片文件夹内是否存在图片文件
             if os.path.exists(self.images_dir):
                 image_files = [f for f in os.listdir(self.images_dir) 
                               if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp'))]
-                if image_files:
-                    self.log(f"⚠️ 图片文件夹中已存在 {len(image_files)} 个图片文件")
+                has_images = len(image_files) > 0
+                
+                # 如果有图片但没有分镜脚本，提示用户清理图片
+                if has_images and not has_shots_file:
+                    self.log(f"⚠️ 图片文件夹中已存在 {len(image_files)} 个图片文件，但没有分镜脚本")
                     messagebox.showwarning(
                         "图片文件已存在",
-                        f"图片文件夹中已存在 {len(image_files)} 个图片文件！\n\n"
-                        "跑图生成视频要求图片文件夹为空，请先清理图片文件夹。\n\n"
+                        f"图片文件夹中已存在 {len(image_files)} 个图片文件，但没有分镜脚本！\n\n"
+                        "请先清理图片文件夹，然后重新执行跑图生成视频任务。\n\n"
                         "提示：可以在左侧面板点击「清除」按钮清理旧文件。"
                     )
+                    return
+                
+                # 如果既有图片又有分镜脚本，询问用户是否使用现有分镜脚本
+                if has_images and has_shots_file:
+                    self.log(f"✅ 检测到 {len(image_files)} 个图片文件和分镜脚本文件")
+                    self.log("ℹ️ 将使用现有分镜脚本文件，直接生成视频")
+                    # 直接生成视频，不重新生成分镜和图片
+                    self.generate_video(skip_clear=True, skip_image_check=True)
                     return
             
             # 启动渲染线程
@@ -7539,8 +7564,24 @@ class DocuMakerLiteV7:
                     self.log("📋 阶段1: 生成分镜脚本")
                     self.log("━" * 50)
                     
-                    # 始终清除旧的分镜数据，避免残留旧音频内容
-                    self.log("🗑️ 清除旧分镜数据，确保使用当前音频...")
+                    # 检查是否存在分镜脚本文件
+                    shots_file = os.path.join(self.output_dir, "shots_data.json")
+                    if os.path.exists(shots_file):
+                        self.log("✅ 检测到已存在的分镜脚本文件")
+                        self.log("ℹ️ 将使用现有分镜脚本文件，跳过生成步骤")
+                        # 加载现有分镜数据
+                        try:
+                            with open(shots_file, 'r', encoding='utf-8') as f:
+                                self.shots_data = json.load(f)
+                            self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
+                        except Exception as e:
+                            self.log(f"❌ 加载分镜数据失败: {e}")
+                            # 如果加载失败，则重新生成
+                            self.log("ℹ️ 加载失败，将重新生成分镜脚本")
+                            self._generate_shots_data()
+                    else:
+                        # 没有分镜脚本文件，生成新的
+                        self._generate_shots_data()
                     self.shots_data = []
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
@@ -7624,17 +7665,11 @@ class DocuMakerLiteV7:
             import traceback
             traceback.print_exc()
     
-    def direct_render_video(self):
-        """直接渲染视频 - 使用已有图片和分镜脚本直接合成视频
+
         
-        前置检查：
-        1. 必须导入音频文件
-        2. 必须存在分镜脚本文件
-        3. 图片文件夹必须有图片
-        4. 图片数量必须与分镜数量一致
-        """
+
         
-        # ===== 前置检查（主线程执行，可弹窗） =====
+
         # 检查1: 必须导入音频文件
         if not self.audio_path:
             self.log("❌ 没有导入音频文件，无法执行任务")
@@ -7807,6 +7842,9 @@ class DocuMakerLiteV7:
                 self.task_running = True
                 self.current_task_thread = None
             
+            # 添加明确的任务开始提示
+            self.log("🎬 开始执行生成分镜脚本任务")
+
             # ===== 前置检查 =====
             # 检查1: 必须导入音频文件
             if not self.audio_path:
