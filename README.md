@@ -400,4 +400,46 @@ warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
 
 **收益：**
 - Ollama API 调用延迟降低 10-20%
-- SD API 调用更稳定
+
+---
+
+## 🌍 跨平台兼容性说明
+
+此程序具有良好的跨平台兼容性，可以在Windows、Linux和macOS上运行，但需要注意以下几点：
+
+### 1. Python环境
+- 确保目标操作系统上安装了Python 3.x
+- 建议使用Python 3.8或更高版本
+
+### 2. 依赖库安装
+- 安装所有必要的Python依赖库
+- 可以通过`requirements.txt`安装：
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+### 3. 外部服务配置
+- **Ollama服务**：安装并配置Ollama服务
+  - Windows: 从官网下载安装包
+  - Linux: 使用包管理器或Docker安装
+  - macOS: 使用Homebrew或下载安装包
+  - 确保Ollama服务在运行中（默认端口：11434）
+
+- **Stable Diffusion服务**：安装并配置Stable Diffusion API服务
+  - Windows: 下载SD WebUI并启动
+  - Linux: 使用Docker或本地安装
+  - macOS: 使用Docker或本地安装
+  - 确保SD API服务在运行中（默认端口：7860）
+
+### 4. FFmpeg安装
+- 安装FFmpeg并确保其在系统PATH中
+  - Windows: 下载FFmpeg并添加到系统PATH
+  - Linux: 使用包管理器安装（如`sudo apt install ffmpeg`）
+  - macOS: 使用Homebrew安装（`brew install ffmpeg`）
+
+### 5. 平台特定功能
+- 程序已自动处理不同操作系统的差异
+- 子进程创建、路径处理等均使用跨平台兼容的方式
+- 无需额外配置即可在不同平台上运行
+
+---
