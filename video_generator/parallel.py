@@ -11,7 +11,7 @@ from .config import Config
 class ParallelPromptGenerator:
     """并行提示词生成器 - 延迟初始化线程池"""
     
-    def __init__(self, max_workers=8):
+    def __init__(self, max_workers=Config.DEFAULT_MAX_WORKERS):
         self.max_workers = max_workers
         self.executor = None  # 延迟初始化
     

@@ -14,7 +14,7 @@ class Config:
     API_TIMEOUT_LONG = 180
 
     # 线程池配置
-    DEFAULT_MAX_WORKERS = 8
+    DEFAULT_MAX_WORKERS = 4
     SD_MAX_WORKERS = 4
 
     # 缓存配置

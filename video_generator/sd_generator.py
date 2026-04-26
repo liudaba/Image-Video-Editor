@@ -36,8 +36,8 @@ class BatchSDGenerator:
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
     
-    def generate_batch(self, prompts_data, width=1920, height=1080, 
-                      steps=30, cfg_scale=7.0, progress_callback=None, log_callback=None):
+    def generate_batch(self, prompts_data, width=768, height=512, 
+                      steps=28, cfg_scale=7.5, progress_callback=None, log_callback=None):
         """批量生成图像 - 使用队列控制避免SD过载
         
         Args:
