@@ -293,7 +293,81 @@ warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
 | 窗口拖动 | 卡顿 | **流畅** | 无卡顿 |
 
 ---
-
++## 🚀 快速开始
++
++本项目提供两种获取代码的方式，请根据你的需求选择：
++
++### 方式一：使用 Git 克隆（推荐）
++如果你熟悉 Git，或者希望后续能轻松获取项目更新，建议使用此方式。
++
++```bash
++# 1. 克隆仓库
++git clone https://github.com/liudaba/Image-Video-Editor.git
++
++# 2. 进入项目目录
++cd Image-Video-Editor
++
++# 3. (可选) 后续更新代码时，只需在项目目录下执行：
++# git pull
++```
++
++### 方式二：直接下载压缩包
++如果你不想安装 Git，或者只需要下载当前版本的代码，可以直接下载。
++
++1. 点击仓库页面右上角的 **Code** 按钮。
++2. 选择 **Download ZIP** 下载源码压缩包。
++3. 将下载的压缩包解压到任意目录。
++
++> ⚠️ **注意**：
++> - **配置文件**：如果项目中包含配置模板（如 `config.example.yaml`），请务必手动复制一份并重命名（例如改为 `config.yaml`），再根据你的实际情况修改配置。
++> - **路径安全**：请确保解压后的**文件夹路径中不包含中文或特殊符号**，否则可能导致程序无法正确读取文件。
++> - **更新问题**：使用此方式无法通过命令直接更新。如需更新版本，你需要重新下载新的压缩包并覆盖旧文件。
++
++### 通用安装步骤
++
++无论你选择哪种方式，下载完代码后，请按照以下步骤配置运行环境：
++
++#### 1. 配置 Python 环境
++确保已安装 Python 3.10 或更高版本。建议创建虚拟环境以避免依赖冲突：
++
++**Windows:**
++```bash
++python -m venv venv
++venv\Scripts\activate
++```
++
++**Linux / macOS:**
++```bash
++python3 -m venv venv
++source venv/bin/activate
++```
++
++#### 2. 安装依赖库
++在激活虚拟环境的状态下，执行以下命令安装所需依赖：
++
++```bash
++pip install -r requirements.txt
++```
++
++> 💡 **提示**：如果下载速度过慢，建议使用国内镜像源，例如：
++> `pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
++
++#### 3. 配置外部服务
++本项目依赖以下外部服务，请确保它们已安装并运行：
++
++*   **Ollama 服务**（默认端口：11434）
++*   **Stable Diffusion WebUI 服务**（默认端口：7860）
++
++详细的跨平台配置指南请参考下方的 [🌍 跨平台兼容性说明](#-跨平台兼容性说明)。
++
++#### 4. 启动项目
++完成上述配置后，即可运行主程序：
++
++```bash
++python main.py
++```
+ 
+ ## 🌍 跨平台兼容性说明
 ## 🔧 配置建议
 
 ### 线程数设置
