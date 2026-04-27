@@ -6887,7 +6887,9 @@ class DocuMakerLiteV7:
             use_original_resolution: 是否使用原始图片分辨率
             skip_image_check: 是否跳过图片检查（直接渲染模式设为True）
         """
+        self.log("=" * 60)
         self.log("🎞️ 开始生成视频...")
+        self.log("=" * 60)
         
         # 定义简化的取消检查函数
         def check_cancelled():
@@ -6904,32 +6906,42 @@ class DocuMakerLiteV7:
             from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip
             import numpy as np
             
+            # 步骤1: 准备阶段
             self.update_task_progress("正在准备...", 10)
+            self.log("\n📍 步骤 1/10: 准备工作")
             
             if check_cancelled():
                 return
             
-            # 步骤1: 清理旧文件（可选）
+            # 步骤2: 清理旧文件（可选）
             if not skip_clear:
                 self.update_task_progress("正在清理旧文件...", 15)
+                self.log("\n📍 步骤 2/10: 清理旧文件")
                 self.clear_images_and_videos()
+                self.log("   ✅ 旧文件清理完成")
             
             if check_cancelled():
                 return
             
-            # 步骤2: 加载分镜数据
+            # 步骤3: 加载分镜数据
+            self.update_task_progress("正在加载分镜数据...", 20)
+            self.log("\n📍 步骤 3/10: 加载分镜数据")
             if not self.shots_data:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
                     with open(shots_file, 'r', encoding='utf-8') as f:
                         self.shots_data = json.load(f)
-                    self.log(f"📂 加载分镜数据: {len(self.shots_data)} 个")
+                    self.log(f"   📂 从文件加载分镜数据: {len(self.shots_data)} 个")
                 else:
                     self.log("❌ 没有分镜数据，请先生成分镜")
                     self.update_task_progress("就绪")
                     return
+            else:
+                self.log(f"   ✅ 使用内存中的分镜数据: {len(self.shots_data)} 个")
             
-            # 步骤3: 检查音频文件
+            # 步骤4: 检查音频文件
+            self.update_task_progress("正在检查音频文件...", 25)
+            self.log("\n📍 步骤 4/10: 检查音频文件")
             if not self.audio_path:
                 self.log("❌ 没有音频文件，请先导入音频")
                 self.update_task_progress("就绪")
@@ -6940,18 +6952,21 @@ class DocuMakerLiteV7:
                 self.log("   请重新导入音频文件")
                 self.update_task_progress("就绪")
                 return
+            self.log(f"   ✅ 音频文件存在: {os.path.basename(self.audio_path)}")
             
-            # 步骤4: 检查并补充图片
+            # 步骤5: 检查并补充图片
             if skip_image_check:
-                self.log("ℹ️ 跳过图片检查")
+                self.update_task_progress("跳过图片检查", 30)
+                self.log("\n📍 步骤 5/10: 跳过图片检查（直接使用现有图片）")
             else:
-                self.update_task_progress("正在检查图片...", 20)
+                self.update_task_progress("正在检查图片...", 30)
+                self.log("\n📍 步骤 5/10: 检查并补充图片")
                 missing_count = sum(1 for shot in self.shots_data 
                                    if not os.path.exists(os.path.join(self.images_dir, shot['image_file'])))
                 
                 if missing_count > 0:
-                    self.log(f"⚠️ 缺少 {missing_count} 张图片，开始生成...")
-                    self.log("🔄 正在调用图像生成模块...")
+                    self.log(f"   ⚠️ 检测到 {missing_count} 张图片缺失，开始生成...")
+                    self.log("   🔄 正在调用图像生成模块...")
                     
                     # 记录开始时间
                     img_start_time = time.time()
@@ -6960,8 +6975,8 @@ class DocuMakerLiteV7:
                     
                     # 记录耗时
                     img_elapsed = time.time() - img_start_time
-                    self.log(f"✅ 图像生成完成 (耗时: {img_elapsed:.1f}s)")
-                    self.log("🎬 所有图片已就绪，开始视频合成...")
+                    self.log(f"   ✅ 图像生成完成 (耗时: {img_elapsed:.1f}s)")
+                    self.log("   🎬 所有图片已就绪，开始视频合成...")
                     
                     # 再次检查
                     missing_count = sum(1 for shot in self.shots_data 
@@ -6969,41 +6984,46 @@ class DocuMakerLiteV7:
                     if missing_count > 0:
                         missing_files = [shot['image_file'] for shot in self.shots_data 
                                         if not os.path.exists(os.path.join(self.images_dir, shot['image_file']))]
-                        self.log(f"❌ 仍有 {missing_count} 张图片缺失，无法生成视频")
-                        self.log(f"   缺失的图片: {missing_files[:5]}")
+                        self.log(f"   ❌ 仍有 {missing_count} 张图片缺失，无法生成视频")
+                        self.log(f"      缺失的图片: {missing_files[:5]}")
                         if len(missing_files) > 5:
-                            self.log(f"   ... 还有 {len(missing_files) - 5} 张")
+                            self.log(f"      ... 还有 {len(missing_files) - 5} 张")
                         self.update_task_progress("就绪")
                         return
+                    else:
+                        self.log("   ✅ 所有图片已补全")
                 else:
-                    self.log("✅ 所有图片已存在，跳过生成步骤")
+                    self.log("   ✅ 所有图片已存在，跳过生成步骤")
 
             if check_cancelled():
                 return
             
-            # 步骤5: 加载音频
-            self.update_task_progress("正在加载音频...", 30)
+            # 步骤6: 加载音频
+            self.update_task_progress("正在加载音频...", 35)
+            self.log("\n📍 步骤 6/10: 加载音频文件")
             
             # 再次检查音频文件（可能在图片生成期间被删除或移动）
             if not os.path.exists(self.audio_path):
-                self.log(f"❌ 音频文件不存在: {self.audio_path}")
-                self.log("   音频文件可能在图片生成期间被移动或删除")
-                self.log("   请重新导入音频文件")
+                self.log(f"   ❌ 音频文件不存在: {self.audio_path}")
+                self.log("      音频文件可能在图片生成期间被移动或删除")
+                self.log("      请重新导入音频文件")
                 self.update_task_progress("就绪")
                 return
             
             audio = AudioFileClip(self.audio_path)
             audio_duration = audio.duration
+            self.log(f"   ✅ 音频加载成功，时长: {audio_duration:.2f}s")
             
             # 验证时间轴（只显示信息，不修改原始时间戳）
-            self.update_task_progress("正在验证时间轴...", 35)
+            self.update_task_progress("正在验证时间轴...", 40)
+            self.log("\n📍 步骤 7/10: 验证时间轴")
             total_shots_duration = 0
             for shot in self.shots_data:
                 expected_duration = shot['end'] - shot['start']
                 shot['duration'] = expected_duration
                 total_shots_duration += expected_duration
             
-            self.log(f"📊 音频时长: {audio_duration:.2f}s, 分镜总时长: {total_shots_duration:.2f}s")
+            self.log(f"   📊 音频时长: {audio_duration:.2f}s, 分镜总时长: {total_shots_duration:.2f}s")
             
             # 计算时间间隔和重叠
             total_gaps = 0
@@ -7016,27 +7036,29 @@ class DocuMakerLiteV7:
                     total_overlap += abs(gap)
             
             if total_gaps > 0:
-                self.log(f"   ⏱️ 时间间隔: {total_gaps:.2f}s")
+                self.log(f"      ⏱️ 时间间隔: {total_gaps:.2f}s")
             if total_overlap > 0:
-                self.log(f"   ⚠️ 时间重叠: {total_overlap:.2f}s")
+                self.log(f"      ⚠️ 时间重叠: {total_overlap:.2f}s")
             
-            self.log("   📍 保持原始语音时间戳，确保音画同步")
+            self.log("      📍 保持原始语音时间戳，确保音画同步")
             
             if check_cancelled():
                 return
             
-            # 步骤6: 准备视频片段
-            self.update_task_progress("正在准备视频片段...", 40)
+            # 步骤8: 准备视频片段
+            self.update_task_progress("正在准备视频片段...", 45)
+            self.log("\n📍 步骤 8/10: 准备视频片段")
             
             # 获取用户选择的动画效果
             animation_type = self.animation_var.get() if hasattr(self, 'animation_var') else "无"
             transition_type = self.transition_var.get() if hasattr(self, 'transition_var') else "硬切"
-            self.log(f"🎬 动画效果: {animation_type}")
-            self.log(f"🎬 过渡效果: {transition_type}")
+            self.log(f"   🎬 动画效果: {animation_type}")
+            self.log(f"   🎬 过渡效果: {transition_type}")
             
             # 获取视频分辨率
             width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
             height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+            self.log(f"   📐 视频分辨率: {width}x{height}")
             
             # 检测是否有时间间隔或重叠
             # 始终使用精确定位模式，保持语音时间戳不变
@@ -7047,22 +7069,25 @@ class DocuMakerLiteV7:
                              for i in range(1, len(self.shots_data)))
             
             if has_gaps:
-                self.log("   ⚠️ 检测到时间间隔，使用精确定位模式")
+                self.log("      ⚠️ 检测到时间间隔，使用精确定位模式")
             elif has_overlap:
-                self.log("   ⚠️ 检测到时间重叠，使用精确定位模式")
+                self.log("      ⚠️ 检测到时间重叠，使用精确定位模式")
             else:
-                self.log("   ✅ 时间戳连续，使用精确定位模式")
+                self.log("      ✅ 时间戳连续，使用精确定位模式")
             
-            self.log("   📍 保持原始语音时间戳，确保音画同步")
+            self.log("      📍 保持原始语音时间戳，确保音画同步")
             
             if check_cancelled():
                 return
             
-            # 步骤7: 创建视频片段
-            self.update_task_progress("正在创建视频片段...", 45)
+            # 步骤9: 创建视频片段
+            self.update_task_progress("正在创建视频片段...", 50)
+            self.log("\n📍 步骤 9/10: 创建视频片段")
             clips = []
             total_shots = len(self.shots_data)
             processed_shots = 0
+            
+            self.log(f"   📊 共 {total_shots} 个分镜需要处理...")
             
             for shot in self.shots_data:
                 if check_cancelled():
@@ -7070,10 +7095,11 @@ class DocuMakerLiteV7:
                 
                 processed_shots += 1
                 
-                # 更新进度（45% - 55% 范围）
-                progress = 45 + int((processed_shots / total_shots) * 10)
+                # 更新进度（50% - 60% 范围）
+                progress = 50 + int((processed_shots / total_shots) * 10)
                 if processed_shots % 10 == 0 or processed_shots == total_shots:  # 每10个分镜更新一次，避免频繁更新
                     self.update_task_progress(f"正在创建视频片段 ({processed_shots}/{total_shots})...", progress)
+                    self.log(f"   📸 已处理: {processed_shots}/{total_shots} 个分镜")
                 
                 image_path = os.path.join(self.images_dir, shot['image_file'])
                 if os.path.exists(image_path):
@@ -7089,7 +7115,7 @@ class DocuMakerLiteV7:
                     
                     # 边界检查：时长无效时跳过此片段
                     if shot_duration <= 0:
-                        self.log(f"⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
+                        self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
                         continue
                     
                     # 创建视频片段
@@ -7110,20 +7136,23 @@ class DocuMakerLiteV7:
                     
                     clips.append(clip)
                 else:
-                    self.log(f"⚠️ 图片缺失: {shot['image_file']}")
+                    self.log(f"      ⚠️ 图片缺失: {shot['image_file']}")
             
             if not clips:
                 self.log("❌ 没有有效的图片文件")
                 self.update_task_progress("就绪")
                 return
             
+            self.log(f"   ✅ 视频片段创建完成: {len(clips)} 个片段")
+            
             # 检查是否被取消
             if not self.task_running:
                 self.log("❌ 任务已被取消")
                 return
             
-            # 步骤8: 合成视频片段
-            self.update_task_progress("正在合成视频...", 50)
+            # 步骤10: 合成视频片段
+            self.update_task_progress("正在合成视频...", 60)
+            self.log("\n📍 步骤 10/10: 合成视频片段")
             
             # 检查是否有时间间隔
             has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
@@ -7135,9 +7164,9 @@ class DocuMakerLiteV7:
             
             if has_gaps or has_start_gap:
                 if has_start_gap:
-                    self.log(f"   ⚠️ 视频开头有 {first_start:.2f}s 间隔，用第一张图片填充")
+                    self.log(f"      ⚠️ 视频开头有 {first_start:.2f}s 间隔，用第一张图片填充")
                 if has_gaps:
-                    self.log("   ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
+                    self.log("      ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
                 
                 fixed_clips = []
                 prev_clip = None
@@ -7160,26 +7189,29 @@ class DocuMakerLiteV7:
                     prev_clip = clip
                 
                 clips = fixed_clips
-                self.log(f"   ✅ 已修复时间间隔: {len(clips)} 个片段")
+                self.log(f"      ✅ 已修复时间间隔: {len(clips)} 个片段")
             
             try:
                 background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
                 final_clip = CompositeVideoClip([background] + clips, size=(width, height))
-                self.log(f"✅ 视频片段合成完成: {len(clips)} 个")
+                self.log(f"   ✅ 视频片段合成完成: {len(clips)} 个片段")
             except Exception as e:
-                self.log(f"❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
+                self.log(f"   ❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
                 self.update_task_progress("就绪")
                 return
 
             if check_cancelled():
                 return
             
-            # 步骤9: 添加音频
-            self.update_task_progress("正在添加音频...", 60)
+            # 步骤11: 添加音频
+            self.update_task_progress("正在添加音频...", 65)
+            self.log("\n🔊 添加音频轨道...")
             final_clip = final_clip.with_audio(audio)
+            self.log("   ✅ 音频轨道添加成功")
             
-            # 步骤10: 渲染视频
+            # 步骤12: 渲染视频
             self.update_task_progress("正在渲染视频...", 70)
+            self.log("\n🎥 开始渲染视频...")
             output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
             
             # 检测GPU加速
@@ -7192,17 +7224,19 @@ class DocuMakerLiteV7:
                     result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
                     if 'h264_nvenc' in result.stdout:
                         use_gpu = True
-                        self.log(f"⚡ 使用GPU加速渲染 (h264_nvenc)")
-                        self.log(f"   📊 编码器预设: preset='{gpu_preset}' (质量优先)")
+                        self.log(f"   ⚡ 检测到GPU加速可用 (h264_nvenc)")
+                        self.log(f"      📊 编码器预设: preset='{gpu_preset}' (质量优先)")
             except Exception as e:
-                self.log(f"⚠️ GPU检测失败: {type(e).__name__} - {str(e)[:100]}")
+                self.log(f"      ⚠️ GPU检测失败: {type(e).__name__} - {str(e)[:100]}")
                 use_gpu = False
             
             if not use_gpu:
-                self.log("🖥️ 使用CPU渲染 (libx264, preset='veryfast')")
+                self.log("      🖥️ 将使用CPU渲染 (libx264, preset='veryfast')")
             
             # 渲染视频
             try:
+                self.log(f"   🔄 正在渲染视频文件...")
+                self.log(f"      输出路径: {os.path.basename(output_path)}")
                 if use_gpu:
                     # 使用 p4 预设（质量优先），适合高质量输出
                     final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset=gpu_preset, logger=None)
@@ -7210,23 +7244,24 @@ class DocuMakerLiteV7:
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
             except Exception as e:
                 if use_gpu:
-                    self.log(f"⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
-                    self.log("🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
+                    self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
+                    self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
                 else:
                     raise
             
             # 完成
             self.update_task_progress("视频生成完成", 100)
-            self.log("=" * 50)
+            self.log("\n" + "=" * 60)
             self.log("✅ 视频生成完成！")
             self.log(f"   📁 保存位置: {output_path}")
-            self.log("=" * 50)
+            self.log("=" * 60)
             
             self.state_manager['video']['generated'] = True
             self.state_manager['video']['path'] = output_path
             
             # 释放资源
+            self.log("\n🧹 释放资源...")
             for clip in clips:
                 try: clip.close()
                 except: pass
@@ -7237,13 +7272,15 @@ class DocuMakerLiteV7:
             
             import gc
             gc.collect()
+            self.log("   ✅ 资源释放完成")
             
             # 打开输出文件夹
             import subprocess
+            self.log("\n📂 打开输出文件夹...")
             subprocess.Popen(f'explorer "{os.path.dirname(output_path)}"')
             
         except Exception as e:
-            self.log(f"❌ 视频生成失败: {e}")
+            self.log(f"\n❌ 视频生成失败: {e}")
             import traceback
             traceback.print_exc()
         finally:
