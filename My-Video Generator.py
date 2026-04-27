@@ -5250,6 +5250,63 @@ class DocuMakerLiteV7:
         except Exception:
             pass
 
+    def _cleanup_residual_files(self):
+        """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
+        try:
+            # 创建垃圾桶文件夹（如果不存在）
+            trash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "垃圾桶")
+            if not os.path.exists(trash_dir):
+                os.makedirs(trash_dir)
+                self.log(f"🗑️ 已创建垃圾桶文件夹: {trash_dir}")
+            
+            # 为本次清理创建一个带时间戳的子文件夹
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
+            os.makedirs(trash_session_dir)
+            
+            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
+                moved_count = 0
+                
+                # 1. 移动分镜脚本文件
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                if os.path.exists(shots_file):
+                    dest = os.path.join(trash_session_dir, "shots_data.json")
+                    os.rename(shots_file, dest)
+                    moved_count += 1
+
+                # 2. 移动images文件夹内的所有图片文件
+                if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
+                    images_trash_dir = os.path.join(trash_session_dir, "images")
+                    os.makedirs(images_trash_dir)
+                    
+                    for f in os.listdir(self.images_dir):
+                        fp = os.path.join(self.images_dir, f)
+                        if os.path.isfile(fp):
+                            try:
+                                dest = os.path.join(images_trash_dir, f)
+                                os.rename(fp, dest)
+                                moved_count += 1
+                            except Exception as e:
+                                self.log(f"⚠️ 移动图片文件失败 {f}: {e}")
+
+                # 3. 移动output_dir下的其他文件（视频文件等）
+                for f in os.listdir(self.output_dir):
+                    fp = os.path.join(self.output_dir, f)
+                    if os.path.isfile(fp):
+                        try:
+                            dest = os.path.join(trash_session_dir, f)
+                            os.rename(fp, dest)
+                            moved_count += 1
+                        except Exception as e:
+                            self.log(f"⚠️ 移动文件失败 {f}: {e}")
+                
+                if moved_count > 0:
+                    self.log(f"🗑️ 已将 {moved_count} 个文件移至垃圾桶: {trash_session_dir}")
+                    
+        except Exception as e:
+            self.log(f"⚠️ 清理文件到垃圾桶失败: {e}")
+
     def on_close(self):
         """关闭窗口时的处理 - 增强版，确保快速退出并彻底清除所有残留数据"""
         try:
