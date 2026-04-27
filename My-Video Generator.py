@@ -30,6 +30,14 @@ class Config:
     IMAGE_CACHE_SIZE = 200
     IMAGE_CACHE_TTL = 3600
 
+# ============ 性能优化模块导入 ============
+from video_generator.optimization import (
+    ProgressManager,
+    ResourceManager,
+    BatchImageLoader,
+    VideoRendererOptimizer
+)
+
 # ============ 预编译正则表达式 ============
 RE_BOLD = re.compile(r'\*\*([^*]+)\*\*')
 RE_ITALIC = re.compile(r'\*([^*]+)\*')
@@ -1049,6 +1057,14 @@ class DocuMakerLiteV7:
     
     def _initialize_systems(self):
         """初始化各个系统"""
+        # ========== 启动时清空所有全局缓存（确保全新开始）==========
+        try:
+            prompt_cache.clear()
+            image_cache.clear()
+            self.log("🗑️ 已清空全局缓存（prompt_cache + image_cache）")
+        except Exception as e:
+            self.log(f"⚠️ 清空全局缓存失败: {e}")
+        
         # 通信系统
         self.event_system = {}
         self.state_manager = {}
@@ -1125,6 +1141,15 @@ class DocuMakerLiteV7:
         def preload_whisper():
             time.sleep(2)  # 等待UI完全加载后再预加载
             self.preload_whisper_model()
+            
+            # 所有预加载完成后，显示就绪提示
+            time.sleep(0.5)  # 稍微延迟，确保日志输出顺序正确
+            self.log("")
+            self.log("=" * 60)
+            self.log("✅ 程序启动完成，工具已就绪！")
+            self.log("📂 请导入音频文件开始创作")
+            self.log("=" * 60)
+            self.log("")
         threading.Thread(target=preload_whisper, daemon=True).start()
     
     def auto_connect_ollama(self):
@@ -6183,16 +6208,20 @@ class DocuMakerLiteV7:
 
             # 验证分镜主题一致性（如果大模型分析成功）
             if theme_info.get('core_theme'):
-                is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
-                if is_consistent:
-                    self.log(f"✅ {consistency_msg}")
+                # 在自动模式下，跳过耗时的主题一致性检查和修正
+                if auto_mode:
+                    self.log("ℹ️ 自动模式：跳过主题一致性检查以加速流程")
                 else:
-                    self.log(f"⚠️ {consistency_msg}")
-                    self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
-                    if not is_consistent:
-                        with open(shots_file, 'w', encoding='utf-8') as f:
-                            json.dump(shots, f, ensure_ascii=False, indent=2)
-                        self.log(f"   ✅ 修正后的分镜数据已重新保存")
+                    is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
+                    if is_consistent:
+                        self.log(f"✅ {consistency_msg}")
+                    else:
+                        self.log(f"⚠️ {consistency_msg}")
+                        self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
+                        if not is_consistent:
+                            with open(shots_file, 'w', encoding='utf-8') as f:
+                                json.dump(shots, f, ensure_ascii=False, indent=2)
+                            self.log(f"   ✅ 修正后的分镜数据已重新保存")
 
             # 检查分镜是否为空
             if not shots:
@@ -6645,7 +6674,7 @@ class DocuMakerLiteV7:
                 from io import BytesIO
 
                 # --- 图片保存队列: 解码+保存在独立线程中执行 ---
-                save_queue = queue.Queue(maxsize=4)
+                save_queue = queue.Queue(maxsize=8)
 
                 def image_saver():
                     """独立IO线程: 解码base64并保存图片到磁盘"""
@@ -6668,7 +6697,7 @@ class DocuMakerLiteV7:
                 saver_thread.start()
 
                 # --- 结果队列: producer线程把SD响应放入，主线程消费 ---
-                result_queue = queue.Queue(maxsize=2)
+                result_queue = queue.Queue(maxsize=16)
 
                 def sd_producer():
                     """独立请求线程: 连续发送SD生成请求，实现预取"""
@@ -6922,16 +6951,33 @@ class DocuMakerLiteV7:
                 
                 if missing_count > 0:
                     self.log(f"⚠️ 缺少 {missing_count} 张图片，开始生成...")
+                    self.log("🔄 正在调用图像生成模块...")
+                    
+                    # 记录开始时间
+                    img_start_time = time.time()
+                    
                     self.generate_images()
+                    
+                    # 记录耗时
+                    img_elapsed = time.time() - img_start_time
+                    self.log(f"✅ 图像生成完成 (耗时: {img_elapsed:.1f}s)")
+                    self.log("🎬 所有图片已就绪，开始视频合成...")
                     
                     # 再次检查
                     missing_count = sum(1 for shot in self.shots_data 
                                        if not os.path.exists(os.path.join(self.images_dir, shot['image_file'])))
                     if missing_count > 0:
+                        missing_files = [shot['image_file'] for shot in self.shots_data 
+                                        if not os.path.exists(os.path.join(self.images_dir, shot['image_file']))]
                         self.log(f"❌ 仍有 {missing_count} 张图片缺失，无法生成视频")
+                        self.log(f"   缺失的图片: {missing_files[:5]}")
+                        if len(missing_files) > 5:
+                            self.log(f"   ... 还有 {len(missing_files) - 5} 张")
                         self.update_task_progress("就绪")
                         return
-            
+                else:
+                    self.log("✅ 所有图片已存在，跳过生成步骤")
+
             if check_cancelled():
                 return
             
@@ -7032,13 +7078,14 @@ class DocuMakerLiteV7:
                 image_path = os.path.join(self.images_dir, shot['image_file'])
                 if os.path.exists(image_path):
                     from PIL import Image
-                    orig_img = Image.open(image_path)
-                    
-                    # 调整图片尺寸
-                    img = self._resize_image_to_fit(orig_img, width, height)
+                    with Image.open(image_path) as orig_img:
+                        # 调整图片尺寸
+                        img = self._resize_image_to_fit(orig_img.copy(), width, height)
                     
                     # 计算图片显示时长（基于原始语音片段时间戳）
                     shot_duration = shot['end'] - shot['start']
+
+
                     
                     # 边界检查：时长无效时跳过此片段
                     if shot_duration <= 0:
@@ -7115,11 +7162,15 @@ class DocuMakerLiteV7:
                 clips = fixed_clips
                 self.log(f"   ✅ 已修复时间间隔: {len(clips)} 个片段")
             
-            background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
-            final_clip = CompositeVideoClip([background] + clips, size=(width, height))
-            
-            self.log(f"✅ 视频片段合成完成: {len(clips)} 个")
-            
+            try:
+                background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
+                final_clip = CompositeVideoClip([background] + clips, size=(width, height))
+                self.log(f"✅ 视频片段合成完成: {len(clips)} 个")
+            except Exception as e:
+                self.log(f"❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
+                self.update_task_progress("就绪")
+                return
+
             if check_cancelled():
                 return
             
@@ -7143,8 +7194,9 @@ class DocuMakerLiteV7:
                         use_gpu = True
                         self.log(f"⚡ 使用GPU加速渲染 (h264_nvenc)")
                         self.log(f"   📊 编码器预设: preset='{gpu_preset}' (质量优先)")
-            except Exception:
-                pass
+            except Exception as e:
+                self.log(f"⚠️ GPU检测失败: {type(e).__name__} - {str(e)[:100]}")
+                use_gpu = False
             
             if not use_gpu:
                 self.log("🖥️ 使用CPU渲染 (libx264, preset='veryfast')")
@@ -7497,19 +7549,15 @@ class DocuMakerLiteV7:
     def render_video_threaded(self):
         """跑图生成视频（完整流程：生成分镜 + 生成图片 + 合成视频）
         
-        前置检查：
-        1. 必须导入音频文件
-        2. 图片文件夹内不允许存在图片文件
+        工作流程（三种情况）：
+        1. 有分镜脚本 + 有图片（数量匹配）→ 直接使用，合成视频
+        2. 有分镜脚本 + 无图片/图片不匹配 → 使用分镜脚本，生成图片，合成视频
+        3. 无分镜脚本 → 从头生成分镜，生成图片，合成视频
         
-        工作流程：
-        - 如果存在分镜脚本文件，直接使用它生成图片
-        - 如果不存在分镜脚本文件，则生成分镜脚本，然后生成图片
-        - 最后合成视频
+        每次执行前会自动清除上一次任务的缓存
         """
         try:
             self.log("🎞️ 开始跑图生成视频...")
-            
-            # 添加明确的任务开始提示
             self.log("🎬 开始执行生成视频任务")
 
             # ===== 前置检查 =====
@@ -7529,59 +7577,121 @@ class DocuMakerLiteV7:
             has_shots_file = os.path.exists(shots_file)
             
             # 检查3: 图片文件夹内是否存在图片文件
+            has_images = False
+            image_count = 0
             if os.path.exists(self.images_dir):
                 image_files = [f for f in os.listdir(self.images_dir) 
                               if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp'))]
                 has_images = len(image_files) > 0
-                
-                # 如果有图片但没有分镜脚本，提示用户清理图片
-                if has_images and not has_shots_file:
-                    self.log(f"⚠️ 图片文件夹中已存在 {len(image_files)} 个图片文件，但没有分镜脚本")
-                    messagebox.showwarning(
-                        "图片文件已存在",
-                        f"图片文件夹中已存在 {len(image_files)} 个图片文件，但没有分镜脚本！\n\n"
-                        "请先清理图片文件夹，然后重新执行跑图生成视频任务。\n\n"
-                        "提示：可以在左侧面板点击「清除」按钮清理旧文件。"
-                    )
-                    return
-                
-                # 如果既有图片又有分镜脚本，询问用户是否使用现有分镜脚本
-                if has_images and has_shots_file:
-                    self.log(f"✅ 检测到 {len(image_files)} 个图片文件和分镜脚本文件")
-                    self.log("ℹ️ 将使用现有分镜脚本文件，直接生成视频")
-                    # 直接生成视频，不重新生成分镜和图片
-                    self.generate_video(skip_clear=True, skip_image_check=True)
-                    return
+                image_count = len(image_files)
             
-            # 启动渲染线程
-            def render_video_worker():
-                self.task_running = True
-                self.pause_event.set()
+            # 加载分镜数据以获取分镜数量（用于后续验证）
+            shots_count = 0
+            if has_shots_file:
                 try:
-                    # ========== 阶段1: 清除旧数据 + 生成分镜脚本 ==========
+                    with open(shots_file, 'r', encoding='utf-8') as f:
+                        temp_shots = json.load(f)
+                    shots_count = len(temp_shots)
+                except Exception as e:
+                    self.log(f"⚠️ 读取分镜脚本失败: {e}")
+                    has_shots_file = False
+            
+            # ========== 情况1: 有分镜脚本 + 有图片（数量匹配）→ 直接合成视频 ==========
+            if has_shots_file and has_images and image_count == shots_count:
+                self.log("")
+                self.log("=" * 60)
+                self.log("✅ 检测到完整的分镜脚本和图片文件")
+                self.log("=" * 60)
+                self.log(f"   📋 分镜数量: {shots_count} 个")
+                self.log(f"   🖼️ 图片数量: {image_count} 张")
+                self.log(f"   ✅ 数量匹配，可以直接合成视频")
+                self.log("")
+                self.log("💡 提示: 将直接使用现有文件，跳过生成分镜和生成图片步骤")
+                
+                # 直接生成视频
+                self.generate_video(skip_clear=True, skip_image_check=True)
+                return
+            
+            # ========== 情况2: 有分镜脚本 + 无图片/图片不匹配 → 使用分镜，生成图片 ==========
+            if has_shots_file and (not has_images or image_count != shots_count):
+                if not has_images:
                     self.log("")
-                    self.log("━" * 50)
-                    self.log("📋 阶段1: 生成分镜脚本")
-                    self.log("━" * 50)
+                    self.log("=" * 60)
+                    self.log("✅ 检测到分镜脚本文件，但图片文件夹为空")
+                    self.log("=" * 60)
+                    self.log(f"   📋 分镜数量: {shots_count} 个")
+                    self.log(f"   🖼️ 图片数量: 0 张")
+                    self.log("")
+                    self.log("💡 提示: 将使用现有分镜脚本，自动生成图片")
+                else:
+                    self.log("")
+                    self.log("=" * 60)
+                    self.log("⚠️ 检测到分镜脚本文件，但图片数量不匹配")
+                    self.log("=" * 60)
+                    self.log(f"   📋 分镜数量: {shots_count} 个")
+                    self.log(f"   🖼️ 图片数量: {image_count} 张")
+                    self.log(f"   ❌ 数量不匹配（需要 {shots_count} 张）")
+                    self.log("")
+                    self.log("💡 提示: 将使用现有分镜脚本，重新生成所有图片")
+                
+                # 启动渲染线程
+                self._start_render_thread(mode="use_existing_shots")
+                return
+            
+            # ========== 情况3: 无分镜脚本 → 从头生成 ==========
+            if not has_shots_file:
+                self.log("")
+                self.log("=" * 60)
+                self.log("📝 未检测到分镜脚本文件")
+                self.log("=" * 60)
+                self.log("")
+                self.log("💡 提示: 将从头开始生成分镜脚本、图片和视频")
+                
+                # 启动渲染线程
+                self._start_render_thread(mode="full_generation")
+                return
+            
+        except Exception as e:
+            self.log(f"❌ 渲染视频线程启动失败: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _start_render_thread(self, mode="full_generation"):
+        """启动渲染线程
+        
+        Args:
+            mode: "full_generation" - 从头生成, "use_existing_shots" - 使用现有分镜
+        """
+        def render_video_worker():
+            self.task_running = True
+            self.pause_event.set()
+            try:
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                
+                # ========== 阶段1: 准备分镜数据 ==========
+                self.log("")
+                self.log("=" * 60)
+                self.log("📋 阶段1/3: 准备分镜数据")
+                self.log("=" * 60)
+                
+                if mode == "use_existing_shots" and os.path.exists(shots_file):
+                    # 使用现有分镜脚本
+                    self.log("✅ 检测到已存在的分镜脚本文件")
+                    self.log("ℹ️ 将直接使用文件夹内分镜脚本生成图片")
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            self.shots_data = json.load(f)
+                        self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self.log("🔄 将重新生成分镜脚本")
+                        self.generate_shots(auto_mode=True)
+                else:
+                    # 从头生成分镜
+                    self.log("📝 未检测到分镜脚本，开始从头生成...")
+                    self.log("🔄 正在清除上一次任务的缓存...")
                     
-                    # 检查是否存在分镜脚本文件
-                    shots_file = os.path.join(self.output_dir, "shots_data.json")
-                    if os.path.exists(shots_file):
-                        self.log("✅ 检测到已存在的分镜脚本文件")
-                        self.log("ℹ️ 将使用现有分镜脚本文件，跳过生成步骤")
-                        # 加载现有分镜数据
-                        try:
-                            with open(shots_file, 'r', encoding='utf-8') as f:
-                                self.shots_data = json.load(f)
-                            self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
-                        except Exception as e:
-                            self.log(f"❌ 加载分镜数据失败: {e}")
-                            # 如果加载失败，则重新生成
-                            self.log("ℹ️ 加载失败，将重新生成分镜脚本")
-                            self._generate_shots_data()
-                    else:
-                        # 没有分镜脚本文件，生成新的
-                        self._generate_shots_data()
+                    # 清除旧的分镜数据
                     self.shots_data = []
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
@@ -7589,7 +7699,6 @@ class DocuMakerLiteV7:
                         delattr(self, '_shot_texts_for_context')
                     
                     # 删除旧的分镜脚本文件
-                    shots_file = os.path.join(self.output_dir, "shots_data.json")
                     if os.path.exists(shots_file):
                         os.remove(shots_file)
                         self.log("   🗑️ 已删除旧的shots_data.json")
@@ -7617,250 +7726,69 @@ class DocuMakerLiteV7:
                         pass
                     
                     self.log("✅ 旧数据已清除，开始生成分镜...")
-                    
-                    # 生成分镜脚本（auto_mode=True，不弹窗）
                     self.generate_shots(auto_mode=True)
                     
-                    # 验证分镜是否生成成功
-                    if not hasattr(self, 'shots_data') or not self.shots_data:
-                        # 尝试从文件加载
-                        shots_file = os.path.join(self.output_dir, "shots_data.json")
-                        if os.path.exists(shots_file):
-                            try:
-                                with open(shots_file, 'r', encoding='utf-8') as f:
-                                    self.shots_data = json.load(f)
-                                self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
-                            except Exception as e:
-                                self.log(f"❌ 加载分镜数据失败: {e}")
-                        
-                        if not self.shots_data:
-                            self.log("❌ 分镜生成失败，无法继续")
-                            self.update_task_progress("就绪")
-                            return
-                    
-                    self.log(f"✅ 分镜生成完成: {len(self.shots_data)} 个分镜")
-                    
-                    # ========== 阶段2: 生成图片 & 合成视频 ==========
-                    self.log("")
-                    self.log("━" * 50)
-                    self.log("🖼️ 阶段2: 生成图片 & 合成视频")
-                    self.log("━" * 50)
-                    
-                    self.generate_video(skip_clear=False, skip_image_check=False)
-                    
-                except Exception as e:
-                    self.log(f"❌ 渲染视频出错: {e}")
-                    import traceback
-                    traceback.print_exc()
-                finally:
-                    self.task_running = False
-                    if hasattr(self, '_pregenerated_prompts'):
-                        delattr(self, '_pregenerated_prompts')
-            
-            thread = threading.Thread(target=render_video_worker, daemon=True)
-            thread.start()
-            self.log("✅ 渲染线程已启动")
-        except Exception as e:
-            self.log(f"❌ 渲染视频线程启动失败: {e}")
-            import traceback
-            traceback.print_exc()
-    
-
-        
-
-        
-
-        # 检查1: 必须导入音频文件
-        if not self.audio_path:
-            self.log("❌ 没有导入音频文件，无法执行任务")
-            messagebox.showwarning("缺少音频", "请先导入音频文件，再执行直接生成视频任务！")
-            return
-        
-        if not os.path.exists(self.audio_path):
-            self.log(f"❌ 音频文件不存在: {self.audio_path}")
-            messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
-            return
-        
-        # 检查2: 必须存在分镜脚本文件
-        shots_file = os.path.join(self.output_dir, "shots_data.json")
-        has_shots_in_memory = hasattr(self, 'shots_data') and self.shots_data
-        has_shots_in_file = os.path.exists(shots_file)
-        
-        if not has_shots_in_memory and not has_shots_in_file:
-            self.log("❌ 没有分镜脚本文件，无法执行直接生成视频")
-            messagebox.showwarning(
-                "缺少分镜脚本",
-                "没有找到分镜脚本文件！\n\n"
-                "直接生成视频要求输出文件夹中存在分镜脚本（shots_data.json），\n"
-                "请先执行「一键生成分镜」或「跑图生成视频」任务。"
-            )
-            return
-        
-        # 检查3: 图片文件夹必须有图片
-        if not os.path.exists(self.images_dir):
-            self.log("❌ 图片文件夹不存在")
-            messagebox.showwarning(
-                "缺少图片",
-                "图片文件夹不存在！\n\n"
-                "直接生成视频要求图片文件夹中有图片文件，\n"
-                "请先执行「跑图生成视频」任务生成图片。"
-            )
-            return
-        
-        image_files = [f for f in os.listdir(self.images_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp'))]
-        if not image_files:
-            self.log("❌ 图片文件夹中没有图片文件")
-            messagebox.showwarning(
-                "缺少图片",
-                "图片文件夹中没有图片文件！\n\n"
-                "直接生成视频要求图片文件夹中有图片文件，\n"
-                "请先执行「跑图生成视频」任务生成图片。"
-            )
-            return
-        
-        # 检查4: 图片数量必须与分镜数量一致
-        # 先加载分镜数据以获取分镜数量
-        shots_count = 0
-        if has_shots_in_memory:
-            shots_count = len(self.shots_data)
-        elif has_shots_in_file:
-            try:
-                with open(shots_file, 'r', encoding='utf-8') as f:
-                    temp_shots = json.load(f)
-                shots_count = len(temp_shots)
-            except Exception:
-                shots_count = 0
-        
-        if shots_count > 0 and len(image_files) != shots_count:
-            self.log(f"⚠️ 图片数量({len(image_files)})与分镜数量({shots_count})不一致")
-            messagebox.showwarning(
-                "数量不一致",
-                f"图片数量与分镜数量不一致！\n\n"
-                f"  • 图片数量: {len(image_files)} 张\n"
-                f"  • 分镜数量: {shots_count} 个\n\n"
-                f"请确保图片数量与分镜数量一致后再执行任务。"
-            )
-            return
-        
-        # 启动后台线程执行完整流程
-        def direct_render_worker():
-            try:
-                self.log("🎞️ 开始直接渲染视频...")
-                self.task_running = True
-                self.pause_event.set()
+                    # 分镜生成完成后，立即记录日志确认
+                    self.log("🔍 检查分镜生成结果...")
                 
-                # 加载分镜数据
+                # 验证分镜是否生成成功
+                self.log(f"🔍 验证分镜数据: hasattr={hasattr(self, 'shots_data')}, data={'存在' if hasattr(self, 'shots_data') else '不存在'}, 长度={len(self.shots_data) if hasattr(self, 'shots_data') and self.shots_data else 0}")
+                
                 if not hasattr(self, 'shots_data') or not self.shots_data:
+                    self.log("⚠️ 内存中无分镜数据，尝试从文件加载...")
+                    # 尝试从文件加载
                     if os.path.exists(shots_file):
                         try:
                             with open(shots_file, 'r', encoding='utf-8') as f:
                                 self.shots_data = json.load(f)
-                            for shot in self.shots_data:
-                                if 'description' in shot and shot['description']:
-                                    shot['description'] = self.clean_text(shot['description'])
-                            self.log(f"📂 从文件加载了分镜数据: {len(self.shots_data)} 个分镜")
+                            self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                         except Exception as e:
-                            self.log(f"⚠️ 加载分镜数据失败: {e}")
-                            self.shots_data = []
+                            self.log(f"❌ 加载分镜数据失败: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    
+                    if not self.shots_data:
+                        self.log("❌ 分镜生成失败，无法继续")
+                        self.update_task_progress("就绪")
+                        return
                 
-                if not hasattr(self, 'shots_data') or not self.shots_data:
-                    self.log("❌ 分镜数据加载失败")
-                    self.root.after(0, lambda: messagebox.showerror("错误", "分镜数据加载失败"))
-                    return
+                self.log(f"✅ 阶段1完成: {len(self.shots_data)} 个分镜已就绪")
+                self.log("🚀 即将进入阶段2: 生成图像...")
+
+                # ========== 阶段2: 生成图像 ==========
+                self.log("")
+                self.log("=" * 60)
+                self.log("🖼️ 阶段2/3: 生成图像")
+                self.log("=" * 60)
                 
-                # 验证图片与分镜的对应关系
-                import re
-                def extract_number(filename):
-                    match = re.search(r'\d+', filename)
-                    return int(match.group()) if match else None
+                # 注意: skip_clear=True 避免删除已有图片
+                self.generate_video(skip_clear=True, skip_image_check=False)
                 
-                image_map = {}
-                for img_file in image_files:
-                    num = extract_number(img_file)
-                    if num:
-                        image_map[num] = img_file
-                
-                missing_shots = []
-                for i, shot in enumerate(self.shots_data):
-                    expected_num = i + 1
-                    if expected_num not in image_map:
-                        missing_shots.append(expected_num)
-                
-                if missing_shots:
-                    error_msg = f"缺少图片序号: {', '.join(map(str, missing_shots[:10]))}"
-                    if len(missing_shots) > 10:
-                        error_msg += f" ... 共 {len(missing_shots)} 个"
-                    self.log(f"❌ {error_msg}")
-                    self.root.after(0, lambda msg=error_msg: messagebox.showerror("缺少图片", msg))
-                    return
-                
-                self.log(f"✅ 前置检查通过: {len(self.shots_data)} 个分镜, {len(image_files)} 张图片")
-                
-                # === 执行视频生成 ===
-                self.generate_video(skip_clear=True, use_original_resolution=True, skip_image_check=True)
+                self.log("✅ 所有阶段完成")
                 
             except Exception as e:
-                self.log(f"❌ 直接渲染视频失败: {e}")
+                self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
                 import traceback
                 traceback.print_exc()
             finally:
                 self.task_running = False
-                
-                def show_completion():
-                    try:
-                        messagebox.showinfo(
-                            "🎉 任务完成",
-                            "视频生成已完成！\n\n您可以在输出文件夹中查看生成的视频文件。",
-                            icon='info'
-                        )
-                    except Exception:
-                        pass
-                
-                if hasattr(self, 'root') and self.root:
-                    self.root.after(0, show_completion)
+                if hasattr(self, '_pregenerated_prompts'):
+                    delattr(self, '_pregenerated_prompts')
         
-        thread = threading.Thread(target=direct_render_worker, daemon=True)
+        thread = threading.Thread(target=render_video_worker, daemon=True)
         thread.start()
-        self.log("✅ 渲染任务已启动，请在后台查看进度...")
+        self.log("✅ 渲染线程已启动")
     
-    # =======================================================================
-    # 第十二部分：线程化渲染与分镜生成 (行 10174-10562)
-    # =======================================================================
     def generate_shots_threaded(self):
-        """线程化生成分镜 - 修复线程安全问题"""
+        """生成分镜脚本（线程化版本）"""
         try:
-            if not hasattr(self, '_task_lock'):
-                self._task_lock = threading.Lock()
-            
             with self._task_lock:
                 if self.task_running:
-                    self.log("⚠️ 任务正在运行中，请勿重复点击")
-                    messagebox.showwarning("提示", "任务正在运行中，请等待当前任务完成")
+                    self.log("⚠️ 已有任务正在运行，请稍后再试")
                     return
-                
                 self.task_running = True
-                self.current_task_thread = None
             
-            # 添加明确的任务开始提示
             self.log("🎬 开始执行生成分镜脚本任务")
-
-            # ===== 前置检查 =====
-            # 检查1: 必须导入音频文件
-            if not self.audio_path:
-                self.log("❌ 没有导入音频文件，无法生成分镜")
-                messagebox.showwarning("缺少音频", "请先导入音频文件，再执行生成分镜任务！")
-                with self._task_lock:
-                    self.task_running = False
-                return
-            
-            if not os.path.exists(self.audio_path):
-                self.log(f"❌ 音频文件不存在: {self.audio_path}")
-                messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
-                with self._task_lock:
-                    self.task_running = False
-                return
-            
             # 检查2: 输出文件夹中不允许存在分镜脚本文件
             shots_file = os.path.join(self.output_dir, "shots_data.json")
             if os.path.exists(shots_file):
