@@ -3259,14 +3259,14 @@ class DocuMakerLiteV7:
             # 场景/元素/风格标签（中文格式）
             r'\n?【?场景】?[：:][^。\n]*[。\n]?',
             r'\n?【?元素】?[：:][^。\n]*[。\n]?',
-            r'\n?【?风格】?[：:][^。\n]*[。\n]?',
+            r'\n?【?風格】?[：:][^。\n]*[。\n]?',
             r'\n?【?氛围】?[：:][^。\n]*[。\n]?',
             r'\n?【?主体】?[：:][^。\n]*[。\n]?',
             r'\n?【?细节】?[：:][^。\n]*[。\n]?',
             
             # 为什么选择这些提示词等解释
             r'\n?为什么[^\n]*',
-            r'\n?进一步[^\n]*',
+            r'\n?進一步[^\n]*',
         ]
         
         # 应用所有移除模式
@@ -3282,11 +3282,11 @@ class DocuMakerLiteV7:
         
         # 处理中英文混合的场景描述
         # 如果存在"场景："、"元素："等格式，提取内容
-        if re.search(r'[场情元素风格氛围][:：]', text):
+        if re.search(r'[场情元素風格氛围][:：]', text):
             # 尝试提取关键词组合
             parts = []
-            for label in ['场景', '元素', '风格', '氛围', '主体', '细节']:
-                match = re.search(f'{label}[：:]\\s*([^场元素风格氛围主体细节\\n]+)', text)
+            for label in ['场景', '元素', '風格', '氛围', '主体', '细节']:
+                match = re.search(f'{label}[：:]\\s*([^場元素風格氛圍主体細節\\n]+)', text)
                 if match:
                     parts.append(match.group(1).strip().rstrip('。，'))
             if parts:
@@ -4014,49 +4014,149 @@ class DocuMakerLiteV7:
                 return applied_count, f"逐行解析成功: {applied_count}个"
         
     def _translate_theme_elements_to_english(self, theme_elements):
-        """将主题元素翻译成英文"""
+        """将主题元素翻译成英文（双层策略 + 自动学习）
+        
+        策略：
+        1. 字典匹配（快速，覆盖常用词）
+        2. LLM批量翻译（智能，处理生僻词，结果自动加入字典）
+        """
         if not theme_elements:
             return []
         
-        # 常见主题元素的中英对照
-        translations = {
-            '氦气': 'helium', '芯片': 'chip', '半导体': 'semiconductor',
-            '医疗': 'medical', '供应链': 'supply chain', '全球市场': 'global market',
-            '中东战火': 'Middle East war', '地缘政治': 'geopolitics',
-            '价格波动': 'price fluctuation', '生产基地': 'production base',
-            '天然气': 'natural gas', '危机': 'crisis', '恐慌': 'panic',
-            '战争': 'war', '冲突': 'conflict', '紧张': 'tension',
-            '科技': 'technology', '工业': 'industrial', '经济': 'economy',
-            '支援舰艇': 'support ship', '补给舰': 'supply ship', '驱逐舰': 'destroyer',
-            '护卫舰': 'frigate', '航母': 'aircraft carrier', '舰队': 'fleet',
-            '无人机': 'drone', '侦察机': 'reconnaissance aircraft', '战斗机': 'fighter jet',
-            '海峡': 'strait', '霍尔木兹海峡': 'Strait of Hormuz', '港口': 'port',
-            '油价': 'oil price', '石油': 'oil', '天然气': 'natural gas',
-            '中东': 'Middle East', '冲突': 'conflict', '战争': 'war',
-            '军事行动': 'military operation', '战略': 'strategy', '紧张': 'tense',
-            '危机': 'crisis', '局势': 'situation', '打击': 'strike',
-            '伊朗': 'Iran', '美国': 'USA', '中国': 'China', '俄罗斯': 'Russia',
-            '塞拉来港': 'Bandar-e Jask', '塞拉杰': 'Bandar-e Jask', '阿巴斯港': 'Bandar Abbas',
-            '霍尔木兹海峡': 'Strait of Hormuz', '波斯湾': 'Persian Gulf',
-            '支援舰艇': 'support ship', '补给舰': 'supply ship', '驱逐舰': 'destroyer',
-            '护卫舰': 'frigate', '航母': 'aircraft carrier', '舰队': 'fleet', '舰艇': 'warship',
-            '无人机': 'drone', '侦察机': 'reconnaissance aircraft', '战斗机': 'fighter jet',
-            '海峡': 'strait', '港口': 'port', '海军': 'navy', '海军舰艇': 'naval vessel',
-            '油价': 'oil price', '石油': 'oil', '天然气': 'natural gas',
-            '中东': 'Middle East', '冲突': 'conflict', '战争': 'war',
-            '军事行动': 'military operation', '战略': 'strategy', '紧张': 'tense',
-            '危机': 'crisis', '局势': 'situation', '打击': 'strike',
-            '雷达': 'radar', '导弹': 'missile', '舰载机': 'carrier-based aircraft'
-        }
-        
         result = []
+        untranslated = []
+        
+        # === 第一层：字典快速匹配 ===
         for elem in theme_elements:
-            if elem in translations:
-                result.append(translations[elem])
+            translation = self._get_translation_from_dict(elem)
+            if translation:
+                result.append(translation)
             else:
-                result.append(elem)
+                untranslated.append(elem)
+                result.append(elem)  # 暂时保留中文
+        
+        # === 第二层：LLM批量翻译未命中的词汇 ===
+        if untranslated and OLLAMA_AVAILABLE:
+            try:
+                translated_map = self._batch_translate_with_llm(untranslated)
+                if translated_map:
+                    # 更新结果列表并自动学习新词汇
+                    for i, elem in enumerate(theme_elements):
+                        if elem in translated_map:
+                            result[i] = translated_map[elem]
+                            # 自动加入字典（下次直接使用）
+                            self._add_to_translation_cache(elem, translated_map[elem])
+                            self.log(f"🌐 LLM翻译: '{elem}' → '{translated_map[elem]}' (已缓存)")
+            except Exception as e:
+                self.log(f"⚠️ LLM翻译失败: {e}，使用原文")
+        
         return result
     
+    def _get_translation_from_dict(self, word):
+        """从字典获取翻译（支持动态扩展）"""
+        # 核心常用词汇（高频词，优先加载）
+        core_translations = {
+            # === 城市/地点 ===
+            '东京': 'Tokyo', '北京': 'Beijing', '上海': 'Shanghai', '纽约': 'New York',
+            '伦敦': 'London', '巴黎': 'Paris', '首尔': 'Seoul', '大阪': 'Osaka',
+            
+            # === 人物/性别 ===
+            '女性': 'woman', '男性': 'man', '年轻人': 'young people', '老人': 'elderly',
+            '儿童': 'children', '学生': 'student', '工人': 'worker',
+            
+            # === 经济/社会 ===
+            '零工经济': 'gig economy', '社会问题': 'social issues', '房租': 'rent',
+            '物价': 'price', '低薪': 'low salary', '失业': 'unemployment',
+            '经济': 'economy', '市场': 'market',
+            
+            # === 科技/互联网 ===
+            '社交软件': 'social media', '互联网': 'internet', '智能手机': 'smartphone',
+            '人工智能': 'AI',
+            
+            # === 生活/文化 ===
+            '饮食': 'food', '时尚': 'fashion', '娱乐': 'entertainment', '旅游': 'travel',
+            '教育': 'education', '医疗': 'medical', '健康': 'health',
+            
+            # === 政治/国际 ===
+            '政府': 'government', '政策': 'policy', '战争': 'war', '和平': 'peace', '冲突': 'conflict',
+        }
+        
+        # 先查核心字典
+        if word in core_translations:
+            return core_translations[word]
+        
+        # 再查动态缓存（运行时学习的词汇）
+        if hasattr(self, '_translation_cache'):
+            return self._translation_cache.get(word)
+        
+        return None
+    
+    def _add_to_translation_cache(self, chinese, english):
+        """将新翻译加入动态缓存"""
+        if not hasattr(self, '_translation_cache'):
+            self._translation_cache = {}
+        self._translation_cache[chinese] = english
+    
+    def _batch_translate_with_llm(self, words_list):
+        """使用Ollama批量翻译中文词汇为英文
+        
+        Args:
+            words_list: 需要翻译的中文词汇列表
+            
+        Returns:
+            dict: {中文: 英文} 的映射字典，失败返回空字典
+        """
+        if not words_list:
+            return {}
+        
+        try:
+            # 构造翻译提示词
+            words_str = ', '.join(words_list)
+            prompt = f"""请将以下中文词汇翻译成英文，以JSON格式返回结果。
+
+中文词汇：{words_str}
+
+要求：
+1. 只返回JSON格式，不要其他解释
+2. 格式示例：{{"东京": "Tokyo", "女性": "woman"}}
+3. 保持简洁，每个词用最常用的英文翻译
+
+返回："""
+            
+            # 调用Ollama API
+            import requests
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "qwen2.5:7b",  # 使用轻量级模型
+                    "prompt": prompt,
+                    "stream": False,
+                    "temperature": 0.1  # 低温度保证稳定性
+                },
+                timeout=15  # 15秒超时
+            )
+            
+            if response.status_code == 200:
+                import json
+                result = response.json()
+                content = result.get('response', '')
+                
+                # 尝试解析JSON
+                try:
+                    # 提取JSON部分（可能包含```
+                    import re
+                    json_match = re.search(r'\{[^}]+\}', content)
+                    if json_match:
+                        translated_dict = json.loads(json_match.group())
+                        return translated_dict
+                except:
+                    pass
+            
+            return {}
+        except Exception as e:
+            self.log(f"⚠️ LLM批量翻译异常: {e}")
+            return {}
+
     # =======================================================================
     # 第八部分：文本翻译与主题分析 (行 6819-7221)
     # =======================================================================
@@ -4346,6 +4446,57 @@ class DocuMakerLiteV7:
 
         return theme_info
 
+    def quick_theme_consistency_check(self, shots, theme_info):
+        """快速主题一致性预检查（轻量级，不调用LLM）
+        
+        只检查关键词匹配，用于快速发现明显偏离的分镜
+        返回: (是否一致, 偏离数量, 总检查数)
+        """
+        if not theme_info.get('core_theme'):
+            return True, 0, len(shots)
+        
+        core_theme = theme_info['core_theme']
+        theme_elements = theme_info.get('theme_elements', [])
+        
+        # 翻译主题元素为英文（用于匹配英文prompt）
+        theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
+        
+        # 调试日志：显示检查参数
+        self.log(f"\n🔍 快速预检查调试信息:")
+        self.log(f"   core_theme: '{core_theme}'")
+        self.log(f"   theme_elements: {theme_elements}")
+        self.log(f"   theme_elements_en: {theme_elements_en}")
+        
+        deviation_count = 0
+        
+        for i, shot in enumerate(shots):
+            prompt = shot.get('prompt_en', '').lower()
+            
+            # 检查是否包含任何主题元素
+            has_theme_element = False
+            
+            # 1. 检查核心主题关键词
+            if core_theme.lower() in prompt:
+                has_theme_element = True
+            
+            # 2. 检查主题元素
+            if theme_elements_en:
+                for elem in theme_elements_en:
+                    if elem.lower() in prompt:
+                        has_theme_element = True
+                        break
+            
+            # 3. 对于第一个分镜，允许一定的灵活性（可能是开场镜头）
+            if not has_theme_element and i > 0:
+                deviation_count += 1
+        
+        total_checked = len(shots)
+        is_consistent = deviation_count == 0
+        
+        self.log(f"📊 检查结果: {deviation_count}/{total_checked} 偏离")
+        
+        return is_consistent, deviation_count, total_checked
+    
     def validate_theme_consistency(self, shots, theme_info):
         """验证分镜的主题一致性，偏离时自动修正提示词"""
         if not theme_info.get('core_theme'):
@@ -6208,10 +6359,11 @@ class DocuMakerLiteV7:
 
             # 验证分镜主题一致性（如果大模型分析成功）
             if theme_info.get('core_theme'):
-                # 在自动模式下，跳过耗时的主题一致性检查和修正
-                if auto_mode:
-                    self.log("ℹ️ 自动模式：跳过主题一致性检查以加速流程")
-                else:
+                # 手动模式（auto_mode=False）：始终执行完整的主题一致性检查和修正
+                # 自动模式（auto_mode=True）：基于偏离率智能决策
+                if not auto_mode:
+                    # 手动模式：强制执行完整检查和修正
+                    self.log(f"\n🔍 手动模式：执行完整的主题一致性检查与修正...")
                     is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
                     if is_consistent:
                         self.log(f"✅ {consistency_msg}")
@@ -6222,6 +6374,32 @@ class DocuMakerLiteV7:
                             with open(shots_file, 'w', encoding='utf-8') as f:
                                 json.dump(shots, f, ensure_ascii=False, indent=2)
                             self.log(f"   ✅ 修正后的分镜数据已重新保存")
+                else:
+                    # 自动模式：先执行快速预检查，根据偏离率决定是否深度修正
+                    is_consistent, deviation_count, total_checked = self.quick_theme_consistency_check(shots, theme_info)
+                    
+                    if deviation_count == 0:
+                        self.log(f"✅ 主题一致性检查通过")
+                    else:
+                        deviation_ratio = (deviation_count / total_checked * 100) if total_checked > 0 else 0
+                        self.log(f"\n🔍 主题一致性预检查: 偏离率 {deviation_ratio:.1f}% ({deviation_count}/{total_checked})")
+                        
+                        # 根据偏离率决定是否执行深度修正
+                        if deviation_ratio < 15:
+                            # 偏离率较低，跳过深度修正以加速流程
+                            self.log(f"ℹ️ 偏离率较低({deviation_ratio:.1f}%)，跳过深度修正以加速流程")
+                        else:
+                            # 偏离率较高，执行完整的主题一致性检查和自动修正
+                            self.log(f"\n⚠️ 偏离率较高({deviation_ratio:.1f}%)，正在执行深度检查与自动修正...")
+                            is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
+                            if is_consistent:
+                                self.log(f"✅ {consistency_msg}")
+                            else:
+                                self.log(f"⚠️ {consistency_msg}")
+                                if not is_consistent:
+                                    with open(shots_file, 'w', encoding='utf-8') as f:
+                                        json.dump(shots, f, ensure_ascii=False, indent=2)
+                                    self.log(f"   ✅ 修正后的分镜数据已重新保存")
 
             # 检查分镜是否为空
             if not shots:
@@ -7819,7 +7997,7 @@ class DocuMakerLiteV7:
     def generate_shots_threaded(self):
         """生成分镜脚本（线程化版本）"""
         try:
-            with self._task_lock:
+            with self.task_lock:
                 if self.task_running:
                     self.log("⚠️ 已有任务正在运行，请稍后再试")
                     return
@@ -7836,7 +8014,7 @@ class DocuMakerLiteV7:
                     "请先清理输出文件夹中的旧分镜脚本，再执行生成分镜任务。\n\n"
                     "提示：可以在左侧面板点击「清除」按钮清理旧文件。"
                 )
-                with self._task_lock:
+                with self.task_lock:
                     self.task_running = False
                 return
             
@@ -7862,7 +8040,7 @@ class DocuMakerLiteV7:
                     import traceback
                     traceback.print_exc()
                 finally:
-                    with self._task_lock:
+                    with self.task_lock:
                         self.task_running = False
                         self.current_task_thread = None
                     if hasattr(self, '_pregenerated_prompts'):
@@ -7872,14 +8050,14 @@ class DocuMakerLiteV7:
             thread = threading.Thread(target=generate_shots_worker, daemon=True, name="GenerateShotsThread")
             thread.start()
             
-            with self._task_lock:
+            with self.task_lock:
                 self.current_task_thread = thread
                 
         except Exception as e:
             self.log(f"❌ 生成分镜线程启动失败: {e}")
             import traceback
             traceback.print_exc()
-            with getattr(self, '_task_lock', threading.Lock()):
+            with self.task_lock:
                 self.task_running = False
     
     def open_output_folder(self):
@@ -7917,6 +8095,7 @@ class DocuMakerLiteV7:
         # 添加滚动条
         scrollbar = ttk.Scrollbar(self.txt_log, command=self.txt_log.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
         self.txt_log.config(yscrollcommand=scrollbar.set)
         
         # 添加初始日志
@@ -7944,8 +8123,21 @@ class DocuMakerLiteV7:
                     if self._log_buffer:
                         text = '\n'.join(self._log_buffer) + '\n'
                         self._log_buffer.clear()
+                        
+                        # 检查用户是否正在手动滚动查看历史日志
+                        # 获取当前可见区域的最后一行
+                        current_view_end = self.txt_log.index(tk.END + '-1c linestart')
+                        visible_end = self.txt_log.yview()[1]
+                        
+                        # 如果用户已经滚动到接近底部（最后5%），则自动跟随新日志
+                        # 否则保持用户的滚动位置不变
+                        should_auto_scroll = visible_end >= 0.95
+                        
                         self.txt_log.insert(tk.END, text)
-                        self.txt_log.see(tk.END)
+                        
+                        # 只在用户位于底部时才自动滚动到新内容
+                        if should_auto_scroll:
+                            self.txt_log.see(tk.END)
                 except Exception:
                     pass
         
