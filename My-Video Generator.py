@@ -14,6 +14,8 @@ import gc
 import subprocess
 import traceback
 import requests
+import whisper
+
 
 # ============ 性能优化配置常量 ============
 class Config:
