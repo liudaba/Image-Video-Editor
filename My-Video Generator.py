@@ -643,7 +643,7 @@ class DocuMakerLiteV7:
         try:
             import whisper
             
-            whisper_model_size = "medium"
+            whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
             
             self.log(f"🔄 预加载 Whisper {whisper_model_size} 模型到内存...")
             self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
@@ -972,9 +972,30 @@ class DocuMakerLiteV7:
         animation_combo = ttk.Combobox(animation_frame, textvariable=self.animation_var, values=animation_options, state="readonly", font=('Microsoft YaHei', large_font_size))
         animation_combo.pack(fill=tk.X, padx=5, pady=2)
         
+        # 过渡效果设置
+        transition_frame = ttk.Frame(video_section)
+        transition_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(transition_frame, text="过渡效果:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        
+        if not hasattr(self, 'transition_var'):
+            self.transition_var = tk.StringVar(value="硬切")
+        
+        transition_options = ["硬切", "交叉淡化"]
+        transition_combo = ttk.Combobox(transition_frame, textvariable=self.transition_var, values=transition_options, state="readonly", font=('Microsoft YaHei', large_font_size))
+        transition_combo.pack(fill=tk.X, padx=5, pady=2)
+        
         # 5. 优化方法部分
         model_section = ttk.LabelFrame(adv_frame, text="🔧 优化方法", padding=15)
         model_section.pack(fill=tk.X, pady=5)
+        
+        # Whisper模型设置
+        whisper_frame = ttk.Frame(model_section)
+        whisper_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(whisper_frame, text="语音模型:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        
+        whisper_options = ["tiny", "base", "small", "medium", "large"]
+        whisper_combo = ttk.Combobox(whisper_frame, textvariable=self.whisper_model_var, values=whisper_options, state="readonly", font=('Microsoft YaHei', large_font_size))
+        whisper_combo.pack(fill=tk.X, padx=5, pady=2)
         
         # Ollama模型设置
         ollama_frame = ttk.Frame(model_section)
@@ -1507,7 +1528,8 @@ class DocuMakerLiteV7:
             result_text, _ = call_ollama_single(
                 model=model,
                 system_prompt="You are an AI art style keyword generator. Output only English keywords separated by commas.",
-                user_prompt=user_message
+                user_prompt=user_message,
+                log_callback=self.log
             )
             
             if result_text:
@@ -1608,6 +1630,13 @@ class DocuMakerLiteV7:
         else:
             confirm_msg += "风格预设: 无\n"
         confirm_msg += f"SD API地址: {self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else 'http://127.0.0.1:7860'}\n"
+        confirm_msg += f"Ollama模型: {self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'}\n"
+        confirm_msg += f"语音模型: {self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'}\n"
+        confirm_msg += f"配置模式: {self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先'}\n"
+        confirm_msg += f"动画效果: {self.animation_var.get() if hasattr(self, 'animation_var') else '无'}\n"
+        confirm_msg += f"过渡效果: {self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'}\n"
+        confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16}\n"
+        confirm_msg += f"提示词线程: {self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else 4}\n"
 
         # 显示确认对话框
         confirmed = messagebox.askyesno("确认设置", confirm_msg)
@@ -2030,6 +2059,7 @@ class DocuMakerLiteV7:
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+                log_callback=self.log,
                 num_predict=4000,
                 num_ctx=8192
             )
@@ -2406,6 +2436,7 @@ class DocuMakerLiteV7:
                 model=model,
                 system_prompt="You are a visual scene designer. Describe a specific visual scene based on the given text.",
                 user_prompt=prompt,
+                log_callback=self.log,
                 num_predict=256,
                 num_ctx=2048
             )
@@ -2443,6 +2474,7 @@ class DocuMakerLiteV7:
                 model=model,
                 system_prompt="You are a visual element extractor. Extract visual keywords from text.",
                 user_prompt=prompt,
+                log_callback=self.log,
                 num_predict=256,
                 num_ctx=2048
             )
@@ -2850,6 +2882,7 @@ Translation examples (Chinese meaning → English visual elements):
                 model=model,
                 system_prompt=template["system"],
                 user_prompt=template["user"],
+                log_callback=self.log,
                 num_predict=768,
                 num_ctx=4096,
                 llm_config=llm_config
@@ -2858,9 +2891,11 @@ Translation examples (Chinese meaning → English visual elements):
             if result_text:
                 raw_output = result_text.strip()
                 cleaned_prompt = self._clean_prompt_output(raw_output)
-                return cleaned_prompt
+                if cleaned_prompt:
+                    return cleaned_prompt
+                self.log(f"⚠️ 模型 {model} 输出被清洗后为空，原始输出: {raw_output[:100]}")
             
-            raise Exception("大模型返回为空")
+            raise Exception(f"大模型 {model} 返回为空 (配音: {dubbing[:30]}...)")
         except Exception as e:
             self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
@@ -3498,6 +3533,7 @@ Translation examples (Chinese meaning → English visual elements):
                 model_list=model_list,
                 system_prompt="You are a translator. Translate Chinese words to English. Output only JSON format like {\"中文\": \"English\"}.",
                 user_prompt=prompt,
+                log_callback=self.log,
                 num_predict=500,
                 num_ctx=2048
             )
@@ -4967,7 +5003,7 @@ Translation examples (Chinese meaning → English visual elements):
                     # 模型已预加载（在CPU上），按需移至GPU
                     try:
                         import torch
-                        whisper_model_size = "medium"
+                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                         if torch.cuda.is_available():
                             gpu_name = torch.cuda.get_device_name(0)
                             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
@@ -4985,7 +5021,7 @@ Translation examples (Chinese meaning → English visual elements):
                     try:
                         import torch
                         
-                        whisper_model_size = "medium"
+                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                         
                         if torch.cuda.is_available():
                             device = "cuda"
@@ -5011,7 +5047,7 @@ Translation examples (Chinese meaning → English visual elements):
                             self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
                     except Exception as e:
                         self.log(f"⚠️ GPU加载失败，回退到CPU: {e}")
-                        whisper_model_size = "medium"
+                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                         try:
                             self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
                             whisper_model_loaded = True
@@ -5265,13 +5301,14 @@ Translation examples (Chinese meaning → English visual elements):
                                         model=model_name,
                                         system_prompt=system_content,
                                         user_prompt=user_content,
+                                        log_callback=self.log,
                                         num_predict=2000,
                                         num_ctx=8192,
                                         llm_config=getattr(self, 'current_llm_config', None)
                                     )
                                     
                                     if not result_content:
-                                        raise Exception("大模型返回为空")
+                                        raise Exception(f"大模型 {model_name} 主题分析返回为空")
                                     
                                     result_content = result_content.strip()
                                     
@@ -5861,7 +5898,6 @@ Translation examples (Chinese meaning → English visual elements):
         self.log("🖼️ 开始生成图像...")
         try:
             import os
-            import requests
             from PIL import Image
             from io import BytesIO
             
@@ -6066,98 +6102,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             self.log("")
             
-            # 定义图像生成函数
-            def generate_single_image(task):
-                shot_id, enhanced_prompt, image_file, image_path, description, neg_prompt = task
-                
-                # 检查是否被暂停
-                if not self.pause_event.is_set():
-                    self.log("⏸️ 任务已暂停，等待恢复...")
-                    self.pause_event.wait()
-                
-                # 检查是否被取消
-                if not self.task_running:
-                    self.log("❌ 任务已被取消")
-                    return False
-                
-                self.log(f"📷 [{shot_id+1}/{len(self.shots_data)}] {image_file}")
-                
-                # 检查提示词长度，过长可能导致处理变慢
-                if len(enhanced_prompt) > 500:
-                    self.log(f"   ⚠️ 提示词较长 ({len(enhanced_prompt)}字符)，可能影响生成速度")
-                
-                # 尝试使用本地Stable Diffusion API生成图像，增加重试机制
-                max_retries = 3
-                retry_delay = 5
-                
-                for retry in range(max_retries):
-                    try:
-                        gen_width = width
-                        gen_height = height
-                        
-                        # 记录请求开始时间
-                        request_start_time = time.time()
-                        
-                        # 发送完整参数
-                        payload = {
-                            "prompt": enhanced_prompt,
-                            "negative_prompt": neg_prompt or "",
-                            "width": gen_width,
-                            "height": gen_height,
-                            "steps": 28,
-                            "cfg_scale": 7.5,
-                            "sampler_name": "DPM++ 2M Karras",
-                            "seed": -1,
-                            "batch_size": 1
-                        }
-                        
-                        # 发送请求（超时90秒）
-                        response = get_http_session().post(f"{api_url}/sdapi/v1/txt2img", json=payload, timeout=Config.API_TIMEOUT_LONG)
-                        
-                        request_time = time.time() - request_start_time
-                        
-                        if response.status_code == 200:
-                            result = response.json()
-                            if "images" in result and len(result["images"]) > 0:
-                                import base64
-                                image_data = base64.b64decode(result["images"][0])
-                                image = Image.open(BytesIO(image_data))
-                                image.save(image_path)
-                                self.log(f"   ✅ 完成 (耗时 {request_time:.1f}s)")
-                                return True
-                            else:
-                                self.log(f"   ❌ 失败: 无图像数据")
-                                if retry < max_retries - 1:
-                                    self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                    time.sleep(retry_delay)
-                                    continue
-                        else:
-                            self.log(f"   ❌ 失败: HTTP {response.status_code}")
-                            if retry < max_retries - 1:
-                                self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                                time.sleep(retry_delay)
-                                continue
-                            
-                    except requests.exceptions.Timeout:
-                        self.log(f"   ❌ 请求超时 (90秒)")
-                        if retry < max_retries - 1:
-                            self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                            time.sleep(retry_delay)
-                            continue
-                    except requests.exceptions.ConnectionError:
-                        self.log(f"   ❌ 连接失败: SD服务未响应")
-                        self.log(f"   💡 请检查 SD WebUI 是否正常运行")
-                        return False
-                    except Exception as e:
-                        error_msg = str(e)[:50]
-                        self.log(f"   ❌ 错误: {error_msg}")
-                        if retry < max_retries - 1:
-                            self.log(f"   🔄 重试 {retry+1}/{max_retries}...")
-                            time.sleep(retry_delay)
-                            continue
-                
-                return False
-            
             # ========== 步骤4: 预取流水线生成图像 ==========
             if tasks:
                 self.log("")
@@ -6242,7 +6186,7 @@ Translation examples (Chinese meaning → English visual elements):
                                         "sampler_name": "DPM++ 2M Karras",
                                         "seed": -1, "batch_size": 1
                                     },
-                                    timeout=45
+                                    timeout=Config.API_TIMEOUT_LONG
                                 )
                                 req_time = time.time() - req_start
 
@@ -6397,7 +6341,10 @@ Translation examples (Chinese meaning → English visual elements):
         self.log("🎞️ 开始生成视频...")
         self.log("=" * 60)
         
-        # 定义简化的取消检查函数
+        audio = None
+        final_clip = None
+        clips = []
+        
         def check_cancelled():
             if not self.task_running:
                 self.log("❌ 任务已被取消")
@@ -6768,21 +6715,9 @@ Translation examples (Chinese meaning → English visual elements):
             self.state_manager['video']['generated'] = True
             self.state_manager['video']['path'] = output_path
             
-            # 释放资源
             self.log("\n🧹 释放资源...")
-            for clip in clips:
-                try: clip.close()
-                except: pass
-            try: final_clip.close()
-            except: pass
-            try: audio.close()
-            except: pass
-            
-            import gc
-            gc.collect()
             self.log("   ✅ 资源释放完成")
             
-            # 打开输出文件夹
             import subprocess
             self.log("\n📂 打开输出文件夹...")
             subprocess.Popen(f'explorer "{os.path.dirname(output_path)}"')
@@ -6792,7 +6727,15 @@ Translation examples (Chinese meaning → English visual elements):
             import traceback
             traceback.print_exc()
         finally:
-            # 确保资源释放
+            for clip in clips:
+                try: clip.close()
+                except: pass
+            if final_clip:
+                try: final_clip.close()
+                except: pass
+            if audio:
+                try: audio.close()
+                except: pass
             try:
                 import gc
                 gc.collect()
@@ -7153,8 +7096,15 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("")
                 self.log("💡 提示: 将直接使用现有文件，跳过生成分镜和生成图片步骤")
                 
-                # 直接生成视频
-                self.generate_video(skip_clear=True, skip_image_check=True)
+                with self.task_lock:
+                    self.task_running = True
+                self.pause_event.set()
+                
+                try:
+                    self.generate_video(skip_clear=True, skip_image_check=True)
+                finally:
+                    with self.task_lock:
+                        self.task_running = False
                 return
             
             # ========== 情况2: 有分镜脚本 + 无图片/图片不匹配 → 使用分镜，生成图片 ==========
@@ -7650,9 +7600,13 @@ Translation examples (Chinese meaning → English visual elements):
                 if 'prompt_thread_count' in config and hasattr(self, 'prompt_thread_count_var'):
                     self.prompt_thread_count_var.set(config['prompt_thread_count'])
                 
+                # 加载Whisper模型设置
+                if 'whisper_model' in config and hasattr(self, 'whisper_model_var'):
+                    self.whisper_model_var.set(config['whisper_model'])
+                
                 # 集中显示已加载的配置
                 ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'
-                whisper_model = 'medium'
+                whisper_model = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'
                 core_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ''
                 visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ''
                 prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
@@ -7685,7 +7639,7 @@ Translation examples (Chinese meaning → English visual elements):
                 'api_url': self.sd_api_url_var.get(),
                 'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b',
                 'llm_config_preset': self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先',
-                'whisper_model': 'medium',
+                'whisper_model': self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium',
                 'transition': self.transition_var.get(),
                 'selected_styles': selected_styles,
                 'custom_theme': self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else '',
