@@ -5227,27 +5227,11 @@ class DocuMakerLiteV7:
 
         try:
             if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    os.remove(shots_file)
-
-                if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-
-                for f in os.listdir(self.output_dir):
-                    fp = os.path.join(self.output_dir, f)
-                    if os.path.isfile(fp):
-                        try:
-                            os.remove(fp)
-                        except Exception:
-                            pass
+                # 注意：不在这里直接删除文件，而是由 _cleanup_residual_files() 移动到垃圾桶
+                # 这样可以保留生成的文件供用户查看和恢复
+                pass
         except Exception:
+            pass
             pass
 
     def _cleanup_residual_files(self):
@@ -5375,6 +5359,12 @@ class DocuMakerLiteV7:
 
         try:
             self._thorough_cleanup()
+        except Exception:
+            pass
+
+        # 将残留文件移动到垃圾桶而非直接删除
+        try:
+            self._cleanup_residual_files()
         except Exception:
             pass
 
