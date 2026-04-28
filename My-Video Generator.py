@@ -1462,9 +1462,9 @@ class DocuMakerLiteV7:
     def generate_style_description(self, style):
         """使用Ollama模型生成详细的风格描述"""
         # 检查Ollama模型设置
-        model = self.ollama_model_var.get()
-        
-        # 检查缓存
+        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+        if not model:
+            model = "gemma3:4b"
         cache_key = f"style_{style}_{model}"
         cached_description = self.cache_get('prompts', cache_key)
         if cached_description:
@@ -2384,13 +2384,13 @@ class DocuMakerLiteV7:
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
-        # 检查是否配置了 Ollama
-        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+        if not is_ollama_available():
             return ""
         
         try:
-            model = self.ollama_model_var.get()
-            ollama_url = "http://localhost:11434"
+            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            if not model:
+                model = "gemma3:4b"
             
             prompt = f"""根据以下配音文本，构思一个适合的图像画面场景。
 要求：
@@ -2402,26 +2402,18 @@ class DocuMakerLiteV7:
 
 返回格式：a detailed visual scene description"""
             
-            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
-            response = get_http_session().post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": config_options
-                },
-                timeout=30
+            result_text, _ = call_ollama_single(
+                model=model,
+                system_prompt="You are a visual scene designer. Describe a specific visual scene based on the given text.",
+                user_prompt=prompt,
+                num_predict=256,
+                num_ctx=2048
             )
             
-            if response.status_code == 200:
-                result = response.json()
-                visual_concept = result.get('response', '').strip()
-                if visual_concept:
-                    return visual_concept
-            
+            if result_text:
+                return result_text.strip()
             return ""
-        except Exception as e:
+        except Exception:
             return ""
     
     def _infer_visual_elements_from_dubbing(self, dubbing):
@@ -2429,13 +2421,13 @@ class DocuMakerLiteV7:
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
         
-        # 检查是否配置了 Ollama
-        if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
+        if not is_ollama_available():
             return ""
         
         try:
-            model = self.ollama_model_var.get()
-            ollama_url = "http://localhost:11434"
+            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            if not model:
+                model = "gemma3:4b"
             
             prompt = f"""从以下配音文本中提取所有能够用于图像生成的视觉元素关键词。
 要求：
@@ -2447,26 +2439,18 @@ class DocuMakerLiteV7:
 
 返回格式：keyword1, keyword2, keyword3"""
             
-            config_options = self.current_llm_config.get_options() if hasattr(self, 'current_llm_config') else {"temperature": 0.3}
-            response = get_http_session().post(
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": config_options
-                },
-                timeout=30
+            result_text, _ = call_ollama_single(
+                model=model,
+                system_prompt="You are a visual element extractor. Extract visual keywords from text.",
+                user_prompt=prompt,
+                num_predict=256,
+                num_ctx=2048
             )
             
-            if response.status_code == 200:
-                result = response.json()
-                visual_elements = result.get('response', '').strip()
-                if visual_elements:
-                    return visual_elements
-            
+            if result_text:
+                return result_text.strip()
             return ""
-        except Exception as e:
+        except Exception:
             return ""
     
     def _generate_arv_prompt(self, description_parts, content_type, shot_id):
@@ -2725,7 +2709,7 @@ class DocuMakerLiteV7:
         if theme_elements is None:
             theme_elements = []
         
-        if not OLLAMA_AVAILABLE:
+        if not is_ollama_available():
             self.log("⚠️ Ollama不可用，使用内置逻辑生成提示词")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                 return self._generate_arv_format_prompt(dubbing, content_type, 0)
@@ -2734,7 +2718,9 @@ class DocuMakerLiteV7:
             else:
                 return self._analyze_and_generate_sd_prompt(dubbing, content_type)
             
-        model = self.ollama_model_var.get()
+        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+        if not model:
+            model = "gemma3:4b"
         
         template_params = {
             "content_type": content_type or "未指定类型",
@@ -2861,6 +2847,8 @@ class DocuMakerLiteV7:
             raise Exception("大模型返回为空")
         except Exception as e:
             self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑")
+            if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type)
     
     def _get_custom_negative_prompt(self, content_type, dubbing):
@@ -3398,7 +3386,7 @@ class DocuMakerLiteV7:
                 result.append(elem)  # 暂时保留中文
         
         # === 第二层：LLM批量翻译未命中的词汇 ===
-        if untranslated and OLLAMA_AVAILABLE:
+        if untranslated and is_ollama_available():
             try:
                 translated_map = self._batch_translate_with_llm(untranslated)
                 if translated_map:
@@ -3485,34 +3473,26 @@ class DocuMakerLiteV7:
 
 返回："""
             
-            # 调用Ollama API
-            import requests
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "qwen2.5:7b",  # 使用轻量级模型
-                    "prompt": prompt,
-                    "stream": False,
-                    "temperature": 0.1  # 低温度保证稳定性
-                },
-                timeout=15  # 15秒超时
+            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            if not model:
+                model = "gemma3:4b"
+            model_list = [model, "gemma3:4b", "qwen3:8b", "mistral"]
+            
+            result_text, _ = call_ollama_model(
+                model_list=model_list,
+                system_prompt="You are a translator. Translate Chinese words to English. Output only JSON format like {\"中文\": \"English\"}.",
+                user_prompt=prompt,
+                num_predict=500,
+                num_ctx=2048
             )
             
-            if response.status_code == 200:
-                import json
-                result = response.json()
-                content = result.get('response', '')
-                
-                # 尝试解析JSON
-                try:
-                    # 提取JSON部分（可能包含```
-                    import re
-                    json_match = re.search(r'\{[^}]+\}', content)
-                    if json_match:
-                        translated_dict = json.loads(json_match.group())
-                        return translated_dict
-                except:
-                    pass
+            if result_text:
+                import re
+                json_match = re.search(r'\{[^}]+\}', result_text)
+                if json_match:
+                    import json
+                    translated_dict = json.loads(json_match.group())
+                    return translated_dict
             
             return {}
         except Exception as e:
@@ -3882,7 +3862,7 @@ class DocuMakerLiteV7:
                 if not has_theme_element and i > 0:
                     consistency_issues.append(f"分镜{i+1}")
                     
-                    if OLLAMA_AVAILABLE and shot.get('description'):
+                    if is_ollama_available() and shot.get('description'):
                         try:
                             dubbing = shot['description']
                             content_type = shot.get('content_type', 'general')
@@ -5466,8 +5446,9 @@ class DocuMakerLiteV7:
             # 预热模型 - 发送简单请求加载模型到GPU
             self.log("🔥 预热模型中...")
             try:
-                model = self.ollama_model_var.get()
-                warmup_start = time.time()
+                model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                if not model:
+                    model = "gemma3:4b"
                 warmup_model(model)
                 warmup_time = time.time() - warmup_start
                 self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
