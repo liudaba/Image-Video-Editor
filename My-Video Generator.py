@@ -5094,7 +5094,7 @@ class DocuMakerLiteV7:
         # 在子线程中执行任务
         threading.Thread(target=run_task, daemon=True, name=f"Task-{task_id}").start()
     
-    def _cleanup_residual_files(self):
+    def _thorough_cleanup(self):
         """启动时清理上次可能残留的磁盘文件"""
         try:
             if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
