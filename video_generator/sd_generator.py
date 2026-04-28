@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
 """批量SD图像生成器 - 从 My-Video Generator.py 提取"""
 
-import requests
 import threading
 import time
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .config import Config
+from .config import Config, get_http_session
 from .cache import image_cache
 
-
-# === 从 My-Video Generator.py 提取 ===
 
 class BatchSDGenerator:
     """批量SD图像生成器 - 支持连接池和并发"""
     
-    def __init__(self, api_url="http://127.0.0.1:7860", max_workers=4):
-        self.api_url = api_url
+    def __init__(self, api_url=None, max_workers=4):
+        self.api_url = api_url or Config.SD_API_BASE_URL
         self.max_workers = max_workers
         self.session = None
         self._init_session()

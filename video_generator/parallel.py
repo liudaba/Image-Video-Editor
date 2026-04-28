@@ -3,7 +3,7 @@
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .cache import prompt_cache
 from .config import Config
 

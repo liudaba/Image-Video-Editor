@@ -25,7 +25,7 @@ from .ollama_client import (
     get_available_models,
     try_start_ollama_service,
 )
-from .multi_model import LLMPerformanceOptimizer, llm_optimizer, MultiModelFusion
+from .multi_model import LLMPerformanceOptimizer, llm_optimizer
 from .templates import PromptTemplates
 from .enhanced_content_recognition import (
     get_enhanced_recognizer, EnhancedContentRecognizer,
@@ -34,20 +34,23 @@ from .enhanced_content_recognition import (
 )
 
 try:
-    from .arv_optimization import SceneContinuityManager, AbsoluteRealisticPrompts, ARVPromptTemplates
+    from .arv_optimization import SceneContinuityManager, AbsoluteRealisticPrompts, get_arv_prompter
     ARV_OPTIMIZATION_AVAILABLE = True
 except ImportError:
     ARV_OPTIMIZATION_AVAILABLE = False
-    ARVPromptTemplates = None
+    SceneContinuityManager = None
+    AbsoluteRealisticPrompts = None
+    get_arv_prompter = None
 
 try:
-    from .prompts_arv import PRESET_PROMPTS
+    from .prompts_arv import ARVPromptTemplates, quick_generate_arv_prompt
     ARV_PROMPTS_AVAILABLE = True
 except ImportError:
     ARV_PROMPTS_AVAILABLE = False
-    PRESET_PROMPTS = None
+    ARVPromptTemplates = None
+    quick_generate_arv_prompt = None
 
 
 def init_ollama():
-    """初始化时检测 Ollama 可用性（替代 __init__.py 中的顶层检测）"""
+    """初始化时检测 Ollama 可用性"""
     check_ollama_available()

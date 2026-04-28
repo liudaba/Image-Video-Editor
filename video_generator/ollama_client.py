@@ -6,10 +6,7 @@
 """
 
 import threading
-import datetime
 import time
-import json
-import re
 from .config import Config, get_http_session
 
 
@@ -413,6 +410,3 @@ def warmup_model(model, log_callback=None):
     except Exception:
         return False
 
-
-# ============ 兼容旧代码的别名 ============
-OLLAMA_AVAILABLE = property(lambda self: is_ollama_available())

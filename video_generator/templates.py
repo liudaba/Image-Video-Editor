@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
 """精简提示词系统 - 大模型自主创作（唯一版本）"""
 
-import re
-from .config import Config
-
 
 class PromptTemplates:
     """精简提示词系统 - 删除过度约束，保留必要指导，让大模型自主创作

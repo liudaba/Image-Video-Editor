@@ -5,7 +5,6 @@ import threading
 import time
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .config import Config
 from .ollama_client import (
     LLMConfig, is_ollama_available, get_available_models,
     call_ollama_single

@@ -172,7 +172,7 @@ psutil = None
 GPUtil = None
 
 DEFAULT_MIN_SHOT_DURATION = Config.DEFAULT_MIN_SHOT_DURATION
-SD_API_URL = Config.SD_API_URL
+SD_API_URL = Config.SD_API_BASE_URL
 MAX_RETRY_COUNT = Config.MAX_RETRY_COUNT
 RETRY_DELAY = Config.RETRY_DELAY
 
@@ -431,10 +431,10 @@ class DocuMakerLiteV7:
         
         # 核心变量
         self.audio_path = None
-        self.shots_data = [] 
+        self.shots_data = []
         self.total_audio_duration = 0
         self.MIN_SHOT_DURATION = DEFAULT_MIN_SHOT_DURATION
-        self.whisper_model = None  # 缓存 Whisper 模型
+        self.whisper_model = None
         
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
@@ -2831,12 +2831,14 @@ class DocuMakerLiteV7:
             template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
         
         try:
+            llm_config = getattr(self, 'current_llm_config', None)
             result_text, _ = call_ollama_single(
                 model=model,
                 system_prompt=template["system"],
                 user_prompt=template["user"],
                 num_predict=512,
-                num_ctx=4096
+                num_ctx=4096,
+                llm_config=llm_config
             )
             
             if result_text:
@@ -5250,7 +5252,8 @@ class DocuMakerLiteV7:
                                         system_prompt=system_content,
                                         user_prompt=user_content,
                                         num_predict=2000,
-                                        num_ctx=8192
+                                        num_ctx=8192,
+                                        llm_config=getattr(self, 'current_llm_config', None)
                                     )
                                     
                                     if not result_content:
@@ -5654,7 +5657,8 @@ class DocuMakerLiteV7:
             self.log("   ✅ 保持原始时间戳，确保音画同步")
 
             # 立即保存分镜数据（先保存再验证，确保文件不延迟）
-            self.shots_data = shots
+            with self.resource_lock:
+                self.shots_data = shots
             self.state_manager['shots']['generated'] = True
             self.state_manager['shots']['count'] = len(shots)
             self.state_manager['shots']['data'] = None
@@ -5852,7 +5856,9 @@ class DocuMakerLiteV7:
                 if os.path.exists(shots_file):
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
-                            self.shots_data = json.load(f)
+                            loaded_shots = json.load(f)
+                        with self.resource_lock:
+                            self.shots_data = loaded_shots
                         for shot in self.shots_data:
                             if 'description' in shot and shot['description']:
                                 shot['description'] = self.clean_text(shot['description'])
@@ -6415,7 +6421,9 @@ class DocuMakerLiteV7:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
                     with open(shots_file, 'r', encoding='utf-8') as f:
-                        self.shots_data = json.load(f)
+                        loaded = json.load(f)
+                    with self.resource_lock:
+                        self.shots_data = loaded
                     self.log(f"   📂 从文件加载分镜数据: {len(self.shots_data)} 个")
                 else:
                     self.log("❌ 没有分镜数据，请先生成分镜")
@@ -7185,7 +7193,8 @@ class DocuMakerLiteV7:
             mode: "full_generation" - 从头生成, "use_existing_shots" - 使用现有分镜
         """
         def render_video_worker():
-            self.task_running = True
+            with self.task_lock:
+                self.task_running = True
             self.pause_event.set()
             try:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
@@ -7202,7 +7211,9 @@ class DocuMakerLiteV7:
                     self.log("ℹ️ 将直接使用文件夹内分镜脚本生成图片")
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
-                            self.shots_data = json.load(f)
+                            loaded = json.load(f)
+                        with self.resource_lock:
+                            self.shots_data = loaded
                         self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self.log(f"❌ 加载分镜数据失败: {e}")
@@ -7262,7 +7273,9 @@ class DocuMakerLiteV7:
                     if os.path.exists(shots_file):
                         try:
                             with open(shots_file, 'r', encoding='utf-8') as f:
-                                self.shots_data = json.load(f)
+                                loaded = json.load(f)
+                            with self.resource_lock:
+                                self.shots_data = loaded
                             self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                         except Exception as e:
                             self.log(f"❌ 加载分镜数据失败: {e}")
@@ -7293,7 +7306,8 @@ class DocuMakerLiteV7:
                 import traceback
                 traceback.print_exc()
             finally:
-                self.task_running = False
+                with self.task_lock:
+                    self.task_running = False
                 if hasattr(self, '_pregenerated_prompts'):
                     delattr(self, '_pregenerated_prompts')
         

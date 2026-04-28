@@ -7,9 +7,7 @@ import tempfile
 import shutil
 import json
 import re
-import time
-import threading
-from typing import Dict, Optional, Callable
+from typing import Dict
 
 
 class HardwareAcceleratedRenderer:
