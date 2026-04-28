@@ -1,47 +1,75 @@
 # -*- coding: utf-8 -*-
-"""Ollama客户端、全局变量、LLMConfig - 从 My-Video Generator.py 提取"""
+"""Ollama 统一调用入口 + LLMConfig + 全局状态管理
+
+所有 Ollama 调用必须通过本模块的函数进行，禁止在其他模块直接调用 ollama.chat()
+使用 HTTP API 直接调用，避免 ollama 库版本兼容性问题
+"""
 
 import threading
 import datetime
 import time
 import json
 import re
-import requests
-from .config import Config
-from .cache import prompt_cache
-from .multi_model import LLMPerformanceOptimizer
+from .config import Config, get_http_session
 
-# === 从 My-Video Generator.py 提取 ===
 
-# 全局变量
-PERFORMANCE_MONITOR_AVAILABLE = False
-psutil = None
-GPUtil = None
-OLLAMA_AVAILABLE = False
-ollama = None
-ollama_lock = threading.Lock()  # 全局锁，保护Ollama API调用
-requests = None
+# ============ Ollama 全局状态（线程安全管理） ============
+_ollama_state_lock = threading.Lock()
+_ollama_available = False
+_ollama_models_cache = None
+_ollama_models_cache_time = 0
+_OLLAMA_MODELS_CACHE_TTL = 30
 
-# ==================== 统一的 Ollama 模型调用函数 ====================
-def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None, num_predict=512, num_ctx=4096):
-    """
-    统一的 Ollama 模型调用函数 - 自动尝试多个模型，直到成功
-    
-    使用HTTP API直接调用，避免ollama库版本兼容性问题
-    """
-    global requests
-    
-    if requests is None:
-        try:
-            import requests
-        except ImportError:
-            if log_callback:
-                log_callback("⚠️ requests库未安装")
-            return None, None
-    
-    # 获取可用模型列表
+
+def is_ollama_available():
+    """线程安全地获取 Ollama 可用状态"""
+    with _ollama_state_lock:
+        return _ollama_available
+
+
+def set_ollama_available(value):
+    """线程安全地设置 Ollama 可用状态"""
+    global _ollama_available
+    with _ollama_state_lock:
+        _ollama_available = value
+
+
+def check_ollama_available():
+    """检测 Ollama 服务是否可用，更新全局状态并返回"""
     try:
-        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
+        response = get_http_session().get(
+            f"{Config.OLLAMA_BASE_URL}/api/tags",
+            timeout=Config.API_TIMEOUT_SHORT
+        )
+        available = response.status_code == 200
+        set_ollama_available(available)
+        return available
+    except Exception:
+        set_ollama_available(False)
+        return False
+
+
+def get_available_models(force_refresh=False):
+    """获取可用模型列表（带缓存）
+
+    Args:
+        force_refresh: 强制刷新缓存
+
+    Returns:
+        list: 模型名称列表，失败返回空列表
+    """
+    global _ollama_models_cache, _ollama_models_cache_time
+
+    now = time.time()
+    if not force_refresh and _ollama_models_cache is not None:
+        if now - _ollama_models_cache_time < _OLLAMA_MODELS_CACHE_TTL:
+            return _ollama_models_cache
+
+    try:
+        response = get_http_session().get(
+            f"{Config.OLLAMA_BASE_URL}/api/tags",
+            timeout=Config.API_TIMEOUT_MEDIUM
+        )
         if response.status_code == 200:
             models_info = response.json()
             available_models = []
@@ -50,92 +78,58 @@ def call_ollama_model(model_list, system_prompt, user_prompt, log_callback=None,
                     model_name = m.get("name", m.get("model", ""))
                     if model_name:
                         available_models.append(model_name)
-        else:
-            if log_callback:
-                log_callback(f"⚠️ 获取模型列表失败: HTTP {response.status_code}")
-            return None, None
-    except Exception as e:
-        if log_callback:
-            log_callback(f"⚠️ 获取模型列表失败: {e}")
-        return None, None
-    
-    # 过滤出实际可用的模型
-    candidate_models = []
-    for model in model_list:
-        if model in available_models:
-            candidate_models.append(model)
-    
-    if not candidate_models:
-        if log_callback:
-            log_callback(f"⚠️ 模型列表 {model_list} 中没有可用的模型")
-        return None, None
-    
-    # 依次尝试每个模型
-    for model in candidate_models:
+            _ollama_models_cache = available_models
+            _ollama_models_cache_time = now
+            set_ollama_available(True)
+            return available_models
+    except Exception:
+        pass
+
+    return _ollama_models_cache or []
+
+
+def try_start_ollama_service():
+    """尝试自动启动 Ollama 服务
+
+    Returns:
+        bool: 是否成功启动
+    """
+    import subprocess
+    import os
+
+    ollama_path = None
+    for path in [
+        r"C:\Ollama\ollama.exe",
+        r"C:\Program Files\Ollama\ollama.exe",
+        os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
+        "ollama"
+    ]:
+        if os.path.exists(path) or path == "ollama":
+            ollama_path = path
+            break
+
+    if ollama_path:
         try:
-            if log_callback:
-                log_callback(f"   尝试模型: {model}")
-            
-            # 使用HTTP API直接调用
-            response = get_http_session().post(
-                f"{Config.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "options": {
-                        "temperature": 0.3,
-                        "top_p": 0.9,
-                        "num_predict": num_predict,
-                        "num_ctx": num_ctx
-                    }
-                },
-                timeout=120
+            subprocess.Popen(
+                [ollama_path, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-            
-            if response.status_code != 200:
-                if log_callback:
-                    log_callback(f"   ⚠️ 模型 {model} HTTP错误: {response.status_code}")
-                continue
-            
-            result_data = response.json()
-            result = result_data.get("message", {}).get("content", "").strip()
-            
-            if not result:
-                if log_callback:
-                    log_callback(f"   ⚠️ 模型 {model} 返回空结果")
-                continue
-            
-            if log_callback:
-                log_callback(f"   ✅ 使用模型: {model}")
-            
-            return result, model
-            
-        except Exception as e:
-            error_msg = str(e)
-            if log_callback:
-                log_callback(f"   ⚠️ 模型 {model} 调用失败: {error_msg[:50]}")
-            continue
-    
-    if log_callback:
-        log_callback(f"❌ 所有模型调用失败")
-    return None, None
+            for _ in range(6):
+                time.sleep(1)
+                if check_ollama_available():
+                    return True
+        except Exception:
+            pass
 
-# ==================== 提示词优化器 ====================
+    return False
 
-# 配置常量
-DEFAULT_MIN_SHOT_DURATION = 4.0 
-SD_API_URL = "http://127.0.0.1:7860"  # 秋叶 SD 默认地址
-MAX_RETRY_COUNT = 3  # API 调用最大重试次数
-RETRY_DELAY = 2  # 重试延迟（秒）
 
-# ==================== 大模型高级配置 ====================
+# ============ LLMConfig ============
 class LLMConfig:
-    """大模型高级配置类 - 释放模型最大潜力"""
-    
-    # 预设配置模式
+    """大模型高级配置类"""
+
     PRESETS = {
         "创意模式": {
             "temperature": 0.9,
@@ -186,27 +180,24 @@ class LLMConfig:
             "description": "最高输出质量，适合复杂任务"
         }
     }
-    
+
     def __init__(self, preset="质量优先"):
         self.preset = preset
         self.config = self.PRESETS.get(preset, self.PRESETS["质量优先"]).copy()
         self.custom_params = {}
-    
+
     def get_options(self, **overrides):
         """获取Ollama调用参数"""
         options = self.config.copy()
         options.update(self.custom_params)
         options.update(overrides)
-        # 移除描述字段
         options.pop("description", None)
         return options
-    
+
     def set_custom_param(self, key, value):
-        """设置自定义参数"""
         self.custom_params[key] = value
-    
+
     def apply_preset(self, preset_name):
-        """应用预设配置"""
         if preset_name in self.PRESETS:
             self.preset = preset_name
             self.config = self.PRESETS[preset_name].copy()
@@ -215,5 +206,213 @@ class LLMConfig:
         return False
 
 
+# ============ 统一 Ollama 调用函数 ============
+_ollama_call_lock = threading.Lock()
 
-# 全局优化器实例 (从 multi_model 导入)
+
+def call_ollama_model(model_list, system_prompt, user_prompt,
+                      log_callback=None, num_predict=512, num_ctx=4096,
+                      llm_config=None):
+    """统一的 Ollama 模型调用函数
+
+    使用 HTTP API 直接调用，避免 ollama 库版本兼容性问题。
+    自动尝试多个模型，直到成功。
+
+    Args:
+        model_list: 模型名称列表，按优先级排列
+        system_prompt: 系统提示词
+        user_prompt: 用户提示词
+        log_callback: 日志回调函数
+        num_predict: 预测token数
+        num_ctx: 上下文长度
+        llm_config: LLMConfig 实例，如果提供则使用其参数
+
+    Returns:
+        tuple: (result_text, model_name) 或 (None, None)
+    """
+    if not is_ollama_available():
+        if not check_ollama_available():
+            if log_callback:
+                log_callback("⚠️ Ollama 服务不可用")
+            return None, None
+
+    available_models = get_available_models()
+    if not available_models:
+        if log_callback:
+            log_callback("⚠️ 获取模型列表失败")
+        return None, None
+
+    candidate_models = [m for m in model_list if m in available_models]
+
+    if not candidate_models:
+        if log_callback:
+            log_callback(f"⚠️ 模型列表 {model_list} 中没有可用的模型")
+        return None, None
+
+    options = {}
+    if llm_config:
+        options = llm_config.get_options(
+            num_predict=num_predict,
+            num_ctx=num_ctx
+        )
+    else:
+        options = {
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "num_predict": num_predict,
+            "num_ctx": num_ctx
+        }
+
+    for model in candidate_models:
+        try:
+            if log_callback:
+                log_callback(f"   尝试模型: {model}")
+
+            with _ollama_call_lock:
+                response = get_http_session().post(
+                    f"{Config.OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "options": options
+                    },
+                    timeout=120
+                )
+
+            if response.status_code != 200:
+                if log_callback:
+                    log_callback(f"   ⚠️ 模型 {model} HTTP错误: {response.status_code}")
+                continue
+
+            result_data = response.json()
+            result = result_data.get("message", {}).get("content", "").strip()
+
+            if not result:
+                if log_callback:
+                    log_callback(f"   ⚠️ 模型 {model} 返回空结果")
+                continue
+
+            if log_callback:
+                log_callback(f"   ✅ 使用模型: {model}")
+
+            return result, model
+
+        except Exception as e:
+            if log_callback:
+                log_callback(f"   ⚠️ 模型 {model} 调用失败: {str(e)[:80]}")
+            continue
+
+    if log_callback:
+        log_callback("❌ 所有模型调用失败")
+    return None, None
+
+
+def call_ollama_single(model, system_prompt, user_prompt,
+                       log_callback=None, num_predict=512, num_ctx=4096,
+                       llm_config=None):
+    """调用单个 Ollama 模型（不自动切换）
+
+    Args:
+        model: 模型名称
+        system_prompt: 系统提示词
+        user_prompt: 用户提示词
+        log_callback: 日志回调
+        num_predict: 预测token数
+        num_ctx: 上下文长度
+        llm_config: LLMConfig 实例
+
+    Returns:
+        tuple: (result_text, model_name) 或 (None, None)
+    """
+    if not is_ollama_available():
+        if not check_ollama_available():
+            if log_callback:
+                log_callback("⚠️ Ollama 服务不可用")
+            return None, None
+
+    options = {}
+    if llm_config:
+        options = llm_config.get_options(
+            num_predict=num_predict,
+            num_ctx=num_ctx
+        )
+    else:
+        options = {
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "num_predict": num_predict,
+            "num_ctx": num_ctx
+        }
+
+    try:
+        with _ollama_call_lock:
+            response = get_http_session().post(
+                f"{Config.OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "options": options
+                },
+                timeout=120
+            )
+
+        if response.status_code != 200:
+            if log_callback:
+                log_callback(f"⚠️ 模型 {model} HTTP错误: {response.status_code}")
+            return None, None
+
+        result_data = response.json()
+        result = result_data.get("message", {}).get("content", "").strip()
+
+        if not result:
+            if log_callback:
+                log_callback(f"⚠️ 模型 {model} 返回空结果")
+            return None, None
+
+        return result, model
+
+    except Exception as e:
+        if log_callback:
+            log_callback(f"⚠️ 模型 {model} 调用失败: {str(e)[:80]}")
+        return None, None
+
+
+def warmup_model(model, log_callback=None):
+    """预热模型（发送简单请求让模型加载到内存）
+
+    Args:
+        model: 模型名称
+        log_callback: 日志回调
+
+    Returns:
+        bool: 是否成功
+    """
+    try:
+        with _ollama_call_lock:
+            response = get_http_session().post(
+                f"{Config.OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "user", "content": "ok"}
+                    ],
+                    "options": {
+                        "num_predict": 1,
+                        "temperature": 0.1
+                    }
+                },
+                timeout=60
+            )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+# ============ 兼容旧代码的别名 ============
+OLLAMA_AVAILABLE = property(lambda self: is_ollama_available())

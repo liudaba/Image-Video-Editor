@@ -16,179 +16,31 @@ import traceback
 import requests
 import whisper
 
-
-# ============ 性能优化配置常量 ============
-class Config:
-    OLLAMA_BASE_URL = "http://localhost:11434"
-    SD_API_BASE_URL = "http://127.0.0.1:7860"
-    API_TIMEOUT_SHORT = 3
-    API_TIMEOUT_MEDIUM = 5
-    API_TIMEOUT_LONG = 90
-
-    DEFAULT_MAX_WORKERS = 4
-
-    PROMPT_CACHE_SIZE = 500
-    PROMPT_CACHE_TTL = 7200
-    IMAGE_CACHE_SIZE = 200
-    IMAGE_CACHE_TTL = 3600
-
-# ============ 性能优化模块导入 ============
+# ============ 从子模块统一导入（唯一来源） ============
+from video_generator.config import Config, get_http_session
+from video_generator.cache import SmartCache, prompt_cache, image_cache
+from video_generator.ollama_client import (
+    LLMConfig,
+    call_ollama_model,
+    call_ollama_single,
+    warmup_model,
+    is_ollama_available,
+    set_ollama_available,
+    check_ollama_available,
+    get_available_models,
+    try_start_ollama_service,
+)
+from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer, MultiModelFusion
+from video_generator.templates import PromptTemplates
+from video_generator.parallel import ParallelPromptGenerator
+from video_generator.sd_generator import BatchSDGenerator
+from video_generator.hardware import HardwareAcceleratedRenderer
 from video_generator.optimization import (
     ProgressManager,
     ResourceManager,
     BatchImageLoader,
     VideoRendererOptimizer
 )
-
-# ============ 预编译正则表达式 ============
-RE_BOLD = re.compile(r'\*\*([^*]+)\*\*')
-RE_ITALIC = re.compile(r'\*([^*]+)\*')
-RE_NEWLINES = re.compile(r'\n+')
-RE_WHITESPACE = re.compile(r'\s+')
-RE_LEADING_PUNCT = re.compile(r'^[，,。、：:；;\s]+')
-RE_TRAILING_PUNCT = re.compile(r'[，,。、：:；;\s]+$')
-RE_COLON_SPLIT = re.compile(r'[：:]\s*([^\n]+)')
-
-# ============ 全局 HTTP Session (连接复用) ============
-_http_session = None
-
-def get_http_session():
-    """获取全局 HTTP Session，复用连接提升性能"""
-    global _http_session
-    if _http_session is None:
-        _http_session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=20,
-            max_retries=2
-        )
-        _http_session.mount('http://', adapter)
-        _http_session.mount('https://', adapter)
-    return _http_session
-
-# ============ 优化1: 智能缓存系统 ============
-class SmartCache:
-    """智能缓存系统 - 带TTL和LRU的混合缓存（优化版）"""
-
-    __slots__ = ('max_size', 'default_ttl', '_cache', '_lock', '_hits', '_misses', '_expire_times')
-
-    def __init__(self, max_size=1000, default_ttl=3600):
-        self.max_size = max_size
-        self.default_ttl = default_ttl
-        self._cache = {}
-        self._expire_times = {}
-        self._lock = threading.RLock()
-        self._hits = 0
-        self._misses = 0
-
-    def get(self, key):
-        """获取缓存值"""
-        with self._lock:
-            expire_time = self._expire_times.get(key)
-            if expire_time is not None:
-                if expire_time > time.time():
-                    self._hits += 1
-                    return self._cache.get(key)
-                else:
-                    self._cache.pop(key, None)
-                    self._expire_times.pop(key, None)
-            self._misses += 1
-            return None
-
-    def set(self, key, value, ttl=None):
-        """设置缓存值"""
-        with self._lock:
-            if len(self._cache) >= self.max_size:
-                min_expire = min(self._expire_times.values()) if self._expire_times else 0
-                expired_keys = [k for k, v in self._expire_times.items() if v <= min_expire]
-                if expired_keys:
-                    for k in expired_keys[:max(1, len(expired_keys) // 4)]:
-                        self._cache.pop(k, None)
-                        self._expire_times.pop(k, None)
-
-            ttl = ttl or self.default_ttl
-            self._cache[key] = value
-            self._expire_times[key] = time.time() + ttl
-
-    def get_stats(self):
-        """获取缓存统计"""
-        with self._lock:
-            total = self._hits + self._misses
-            hit_rate = self._hits / total if total > 0 else 0
-            return {
-                'hits': self._hits,
-                'misses': self._misses,
-                'hit_rate': f"{hit_rate*100:.1f}%",
-                'size': len(self._cache)
-            }
-
-    def clear(self):
-        """清空缓存"""
-        with self._lock:
-            self._cache.clear()
-            self._expire_times.clear()
-
-# 全局缓存实例
-prompt_cache = SmartCache(max_size=Config.PROMPT_CACHE_SIZE, default_ttl=Config.PROMPT_CACHE_TTL)
-image_cache = SmartCache(max_size=Config.IMAGE_CACHE_SIZE, default_ttl=Config.IMAGE_CACHE_TTL)
-
-# ============ 优化2: 并行提示词生成器 ============
-
-# ============ 优化3: 批量SD图像生成器 ============
-
-# ============ 优化4: 硬件加速视频渲染 ============
-class HardwareAcceleratedRenderer:
-    """硬件加速视频渲染器 - 延迟检测"""
-    
-    def __init__(self):
-        self._has_cuda = None
-        self._has_quicksync = None
-        self._preferred_encoder = None
-    
-    @property
-    def has_cuda(self):
-        if self._has_cuda is None:
-            self._has_cuda = self._check_cuda()
-        return self._has_cuda
-    
-    @property
-    def has_quicksync(self):
-        if self._has_quicksync is None:
-            self._has_quicksync = self._check_quicksync()
-        return self._has_quicksync
-    
-    @property
-    def preferred_encoder(self):
-        if self._preferred_encoder is None:
-            self._preferred_encoder = self._select_encoder()
-        return self._preferred_encoder
-    
-    def _check_cuda(self):
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except:
-            return False
-    
-    def _check_quicksync(self):
-        try:
-            import subprocess
-            result = subprocess.run(
-                ['ffmpeg', '-hwaccels'], 
-                capture_output=True, text=True,
-                timeout=3
-            )
-            return 'qsv' in result.stdout.lower()
-        except:
-            return False
-    
-    def _select_encoder(self):
-        if self.has_cuda:
-            return {'vcodec': 'h264_nvenc', 'preset': 'p4', 'rc': 'vbr', 'cq': 23}
-        elif self.has_quicksync:
-            return {'vcodec': 'h264_qsv', 'preset': 'medium', 'global_quality': 23}
-        else:
-            return {'vcodec': 'libx264', 'preset': 'veryfast', 'crf': 23}
 
 print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
 
@@ -314,417 +166,32 @@ print()
 # 忽略requests库的依赖版本警告
 warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version", module="requests")
 
-# 全局变量
+# ============ 全局状态 ============
 PERFORMANCE_MONITOR_AVAILABLE = False
 psutil = None
 GPUtil = None
-OLLAMA_AVAILABLE = False
-ollama = None
-ollama_lock = threading.Lock()  # 全局锁，保护Ollama API调用
-requests = None
 
-# ==================== 统一的 Ollama 模型调用函数 ====================
+DEFAULT_MIN_SHOT_DURATION = Config.DEFAULT_MIN_SHOT_DURATION
+SD_API_URL = Config.SD_API_URL
+MAX_RETRY_COUNT = Config.MAX_RETRY_COUNT
+RETRY_DELAY = Config.RETRY_DELAY
 
-# ==================== 提示词优化器 ====================
-
-# 配置常量
-DEFAULT_MIN_SHOT_DURATION = 4.0 
-SD_API_URL = "http://127.0.0.1:7860"  # 秋叶 SD 默认地址
-MAX_RETRY_COUNT = 3  # API 调用最大重试次数
-RETRY_DELAY = 2  # 重试延迟（秒）
-
-# ==================== 大模型高级配置 ====================
-class LLMConfig:
-    """大模型高级配置类 - 释放模型最大潜力"""
-    
-    # 预设配置模式
-    PRESETS = {
-        "创意模式": {
-            "temperature": 0.9,
-            "top_p": 0.95,
-            "top_k": 100,
-            "repeat_penalty": 1.1,
-            "frequency_penalty": 0.3,
-            "presence_penalty": 0.3,
-            "description": "高创造性，适合头脑风暴和创意生成"
-        },
-        "平衡模式": {
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 80,
-            "repeat_penalty": 1.15,
-            "frequency_penalty": 0.2,
-            "presence_penalty": 0.2,
-            "description": "平衡创造性和准确性"
-        },
-        "精确模式": {
-            "temperature": 0.3,
-            "top_p": 0.7,
-            "top_k": 40,
-            "repeat_penalty": 1.2,
-            "frequency_penalty": 0.1,
-            "presence_penalty": 0.1,
-            "description": "高准确性，适合分析和结构化任务"
-        },
-        "极速模式": {
-            "temperature": 0.2,
-            "top_p": 0.5,
-            "top_k": 20,
-            "repeat_penalty": 1.1,
-            "frequency_penalty": 0.0,
-            "presence_penalty": 0.0,
-            "num_predict": 500,
-            "description": "最快响应，适合简单任务"
-        },
-        "质量优先": {
-            "temperature": 0.6,
-            "top_p": 0.92,
-            "top_k": 60,
-            "repeat_penalty": 1.18,
-            "frequency_penalty": 0.25,
-            "presence_penalty": 0.25,
-            "num_predict": 4000,
-            "num_ctx": 8192,
-            "description": "最高输出质量，适合复杂任务"
-        }
-    }
-    
-    def __init__(self, preset="质量优先"):
-        self.preset = preset
-        self.config = self.PRESETS.get(preset, self.PRESETS["质量优先"]).copy()
-        self.custom_params = {}
-    
-    def get_options(self, **overrides):
-        """获取Ollama调用参数"""
-        options = self.config.copy()
-        options.update(self.custom_params)
-        options.update(overrides)
-        # 移除描述字段
-        options.pop("description", None)
-        return options
-    
-    def set_custom_param(self, key, value):
-        """设置自定义参数"""
-        self.custom_params[key] = value
-    
-    def apply_preset(self, preset_name):
-        """应用预设配置"""
-        if preset_name in self.PRESETS:
-            self.preset = preset_name
-            self.config = self.PRESETS[preset_name].copy()
-            self.custom_params = {}
-            return True
-        return False
+# Ollama 可用性统一由 ollama_client 模块管理
+# 使用 is_ollama_available() / set_ollama_available() / check_ollama_available()
+# 兼容旧代码：提供 OLLAMA_AVAILABLE 属性访问
+OLLAMA_AVAILABLE = False  # 仅用于全局读取，实际状态由 ollama_client 管理
 
 
-class LLMPerformanceOptimizer:
-    """大模型性能优化器 - 自适应调整参数"""
-    
-    def __init__(self):
-        self.call_history = []
-        self.max_history = 10
-        self.avg_response_time = 0
-        self.success_rate = 1.0
-        self._lock = threading.Lock()  # 线程安全锁
-        
-    def record_call(self, duration, success, token_count=0):
-        """记录调用性能"""
-        with self._lock:
-            self.call_history.append({
-                "duration": duration,
-                "success": success,
-                "token_count": token_count,
-                "timestamp": datetime.datetime.now()
-            })
-            
-            # 保持历史记录在限制范围内
-            if len(self.call_history) > self.max_history:
-                self.call_history.pop(0)
-            
-            # 更新统计
-            self._update_stats()
-    
-    def _update_stats(self):
-        """更新性能统计"""
-        if not self.call_history:
-            return
-        
-        durations = [h["duration"] for h in self.call_history]
-        self.avg_response_time = sum(durations) / len(durations)
-        
-        successes = sum(1 for h in self.call_history if h["success"])
-        self.success_rate = successes / len(self.call_history)
-    
-    def get_optimal_config(self, task_complexity="medium"):
-        """根据历史性能获取最优配置"""
-        base_config = LLMConfig("质量优先")
-        
-        # 根据成功率调整
-        if self.success_rate < 0.7:
-            # 成功率低，降低复杂度
-            base_config.apply_preset("平衡模式")
-            base_config.set_custom_param("num_predict", 1500)
-        elif self.avg_response_time > 20:
-            # 响应慢，使用极速模式
-            base_config.apply_preset("极速模式")
-        
-        # 根据任务复杂度调整
-        complexity_adjustments = {
-            "low": {"temperature": 0.3, "num_predict": 500},
-            "medium": {"temperature": 0.6, "num_predict": 2000},
-            "high": {"temperature": 0.7, "num_predict": 4000, "num_ctx": 8192}
-        }
-        
-        if task_complexity in complexity_adjustments:
-            for key, value in complexity_adjustments[task_complexity].items():
-                base_config.set_custom_param(key, value)
-        
-        return base_config
-    
-    def suggest_optimization(self):
-        """提供优化建议"""
-        suggestions = []
-        
-        if self.avg_response_time > 15:
-            suggestions.append(f"平均响应时间 {self.avg_response_time:.1f}s 较长，建议使用极速模式或减少num_predict")
-        
-        if self.success_rate < 0.8:
-            suggestions.append(f"成功率 {self.success_rate*100:.1f}% 较低，建议检查模型状态或降低temperature")
-        
-        if not suggestions:
-            suggestions.append(f"性能良好：平均响应 {self.avg_response_time:.1f}s，成功率 {self.success_rate*100:.1f}%")
-        
-        return suggestions
+def get_ollama_available():
+    """获取 Ollama 可用状态（线程安全）"""
+    return is_ollama_available()
 
 
-# 全局优化器实例
-llm_optimizer = LLMPerformanceOptimizer()
-
-
-# ==================== 多模型融合系统 ====================
-
-
-# 全局多模型融合实例
-
-
-# ==================== 精简提示词系统 - 大模型自主创作 ====================
-class PromptTemplates:
-    """精简提示词系统 - 删除过度约束，保留必要指导，让大模型自主创作
-    
-    核心原则：
-    1. 分镜数量由语音片段数量决定（每个segment一个分镜）
-    2. 大模型负责：通篇分析、纠正错别字、捋清语义、确定主题基调、生成优化的提示词
-    3. 不限制大模型的创作方式，让它根据内容自主发挥
-    4. 输出必须是纯粹的提示词，不含任何解释性文字
-    5. 统一视觉风格：电影纪实风格，4K画质，真实感
-    """
-    
-    # 主题分析模板 - 智能识别内容类型，针对性分析
-    THEME_ANALYSIS = {
-        "system": """你是视频内容分析师。分析语音文本并输出结构化结果。
-
-【核心任务】分析语音文本，提取内容类型、主题和视觉风格
-- 如果文本中存在明显的语音识别错误（如同音字错字、形近字错字），请进行纠正
-- 如果文本中没有识别错误，则无需列出纠错
-
-【内容类型】新闻播报/军事分析/科普教育/历史纪录/社会民生/财经商业/文化艺术/自然地理/体育竞技
-
-【输出要求】严格按此格式，不要输出其他内容：
-
-【内容类型】：(选一个)
-【核心主题】：(一句话，简洁明了)
-【情感基调】：(严肃/紧张/轻松/温馨/激昂)
-【视觉风格】：(推荐风格)
-【核心元素】：(5-8个关键词)
-【纠错说明】：(仅当存在实际错别字纠正时列出，格式：错字1→正确1,错字2→正确2，如"害器→氦气,汽年→汽车"，如无纠正则写"无")
-
-重要：
-1. 仔细阅读文本，判断是否存在需要纠正的错别字
-2. 如果文本准确无误，【纠错说明】必须写"无"
-3. 不要凭空捏造纠错内容
-4. 直接输出格式内容，不要有开场白或解释""",
-        
-        "user_template": """语音文本：
-{text}
-
-请先仔细检查整个文本，找出所有可能的语音识别错误，然后按格式输出："""
-    }
-    
-    # 共享的配音语义映射规则 - 用于生成符合配音内容的独特提示词
-    # 避免在多个模板中重复维护
-    DUBBING_SEMANTIC_MAPPING = {
-        "en": """
-【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
-- 配音提到"台海和平" → 提示词必须包含Taiwan Strait, peace相关元素
-- 配音提到"宪法" → 提示词必须包含constitution, legal document相关元素
-- 配音提到"两岸关系" → 提示词必须包含cross-strait, relations相关元素""",
-        "zh": """
-【重要】每个分镜的配音内容不同，生成的提示词必须体现该配音的独特语义：
-- 配音提到"台海和平" → 提示词必须包含台海、和平相关元素
-- 配音提到"宪法" → 提示词必须包含宪法、法律文件相关元素
-- 配音提到"两岸关系" → 提示词必须包含两岸、关系相关元素"""
-    }
-    
-    # 分镜提示词模板 - SD版本（英文）- 精简版
-    SHOT_PROMPT_SD = {
-        "system": """你是AI图像提示词工程师，为Stable Diffusion生成英文提示词。
-
-【严格格式要求】
-- 必须以质量前缀开头：masterpiece, best quality, ultra detailed, 8k, photorealistic
-- 只输出英文关键词，逗号分隔，禁止使用完整句子
-- 描述可拍摄的画面内容，不要描述抽象概念或叙事
-- 不要输出解释、标题、标注、括号说明
-- 结尾必须添加：cinematic lighting, documentary style, film grain texture
-- 【核心】提示词必须准确反映当前配音内容的具体场景，禁止千篇一律
-
-{semantic_mapping}
-
-{style_instruction}
-{theme_instruction}
-
-【上下文理解规则 - 极其重要】
-- 仔细阅读前文上下文和后文上下文，理解当前配音在整体故事中的位置
-- 当前配音可能语义不完整，结合上下文推断完整含义
-- 避免生成与上下文矛盾的场景，确保视觉连贯性
-- 如果当前配音是过渡词或连接词，从上下文推断具体场景
-- 考虑故事的叙事流，确保视觉风格在整个视频中保持一致
-
-【位置感知规则】
-- 开头分镜：建立场景，介绍主要元素
-- 中段分镜：发展故事，展示具体内容
-- 结尾分镜：总结主题，强化情感
-- 避免前后分镜使用完全相同的场景设置
-
-【示例】
-配音："中东战事升级"
-核心主题：战争反思
-视觉基调：冷色调，沉重深刻
-输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, Middle Eastern war zone, destroyed buildings, smoke rising, military tanks, desert road, fighter jets overhead, cold blue tones, tense atmosphere, war documentary, news photography, cinematic lighting, documentary style, film grain texture
-
-配音："科学家发现新黑洞"
-核心主题：宇宙探索
-视觉基调：神秘，科技感
-输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, space telescope control room, scientists, data screens, monitors, cosmic imagery, deep space background, mysterious atmosphere, high-tech setting, professional lighting, cinematic lighting, documentary style, film grain texture
-
-配音："幸福的一家人"
-核心主题：家庭温情
-视觉基调：温暖，明亮
-输出：masterpiece, best quality, ultra detailed, 8k, photorealistic, Asian family, warm home interior, living room, soft golden light, candid moment, happy expressions, warm atmosphere, lifestyle photography, cinematic lighting, documentary style, film grain texture
-
-【必加标签】masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture""",
-        
-        "user_template": """配音：{dubbing}
-
-输出英文提示词："""
-    }
-    
-    @classmethod
-    def get_template(cls, template_type, **kwargs):
-        """获取提示词模板
-        
-        Args:
-            template_type: 模板类型
-            **kwargs: 模板参数，包括：
-                - visual_style: 用户预设的视觉风格（如有）
-                - dubbing: 配音文本
-                - 其他参数...
-        """
-        templates = {
-            "theme_analysis": cls.THEME_ANALYSIS,
-            "shot_prompt_sd": cls.SHOT_PROMPT_SD,
-            "theme_extraction": cls.THEME_ANALYSIS,
-        }
-        
-        if template_type not in templates:
-            # 默认返回空模板，让大模型完全自主
-            return {
-                "system": "",
-                "user": kwargs.get("text", kwargs.get("description", ""))
-            }
-        
-        template = templates[template_type]
-        
-        # 只有 shot_prompt 模板需要处理 style_instruction 和 theme_instruction
-        is_shot_prompt = template_type == "shot_prompt_sd"
-        
-        if is_shot_prompt:
-            # 处理风格指令
-            visual_style = kwargs.get("visual_style", "")
-            is_sd = template_type == "shot_prompt_sd"
-            
-            if visual_style and visual_style.strip():
-                # 用户预设了风格，强制使用该风格
-                style_instruction = f"""【重要：必须使用用户预设的风格】
-用户预设的视觉风格：{visual_style}
-你必须严格按照此风格生成提示词，禁止自行更改或添加其他风格。"""
-            else:
-                # 用户未预设风格，让模型自主选择
-                style_instruction = """【风格选择】
-根据内容自主选择合适的视觉风格（如电影感、新闻纪实、艺术摄影、商业摄影等）。"""
-            
-            # 处理主题指令（核心主题 + 视觉基调）
-            core_theme = kwargs.get("core_theme", "")
-            visual_tone = kwargs.get("visual_tone", "")
-            
-            if (core_theme and core_theme != "未指定") or (visual_tone and visual_tone.strip()):
-                # 用户设置了主题或基调，生成指令
-                theme_parts = []
-                if core_theme and core_theme != "未指定":
-                    theme_parts.append(f"核心主题：{core_theme}")
-                if visual_tone and visual_tone.strip():
-                    theme_parts.append(f"视觉基调：{visual_tone}")
-                
-                theme_text = "，".join(theme_parts)
-                theme_instruction = f"""【重要：必须融入以下元素】
-{theme_text}
-你生成的提示词必须体现以上主题和基调，将其转化为具体的视觉元素。"""
-            else:
-                # 用户未设置，不需要额外指令
-                theme_instruction = ""
-            
-            # 格式化 system prompt（同时处理两个占位符）
-            # 如果 theme_instruction 为空，移除多余的空行
-            # 获取对应的语义映射
-            semantic_mapping = cls.DUBBING_SEMANTIC_MAPPING["en"] if is_sd else cls.DUBBING_SEMANTIC_MAPPING["zh"]
-            
-            if theme_instruction:
-                system_content = template["system"].format(
-                    style_instruction=style_instruction,
-                    theme_instruction=theme_instruction,
-                    semantic_mapping=semantic_mapping
-                )
-            else:
-                # theme_instruction 为空时，移除对应的那一行避免空行
-                system_content = template["system"].format(
-                    style_instruction=style_instruction,
-                    theme_instruction="",
-                    semantic_mapping=semantic_mapping
-                )
-                # 清理多余空行
-                system_content = system_content.replace("\n\n\n", "\n\n")
-            
-            # 构建 user prompt
-            dubbing = kwargs.get("dubbing", "")
-            context_hint = kwargs.get("context_hint", "")
-            
-            if context_hint:
-                user_content = f"""{context_hint}
-当前配音：{dubbing}
-
-根据上下文和当前配音生成英文提示词："""
-            else:
-                user_content = f"""配音：{dubbing}
-
-输出英文提示词："""
-        else:
-            # theme_analysis 模板，直接使用原模板
-            system_content = template["system"]
-            user_content = template["user_template"].format(**kwargs)
-        
-        return {
-            "system": system_content,
-            "user": user_content
-        }
+def set_ollama_available_global(value):
+    """设置 Ollama 可用状态（线程安全），同时更新全局变量"""
+    global OLLAMA_AVAILABLE
+    OLLAMA_AVAILABLE = value
+    set_ollama_available(value)
 
 
 
@@ -732,11 +199,8 @@ class PromptTemplates:
 def lazy_import():
     """延迟导入非必要模块"""
     global PERFORMANCE_MONITOR_AVAILABLE, psutil, GPUtil
-    global OLLAMA_AVAILABLE, ollama
-    global requests
-    
+
     try:
-        # 尝试导入性能监控库
         try:
             import psutil as _psutil
             import GPUtil as _GPUtil
@@ -745,19 +209,9 @@ def lazy_import():
             PERFORMANCE_MONITOR_AVAILABLE = True
         except ImportError:
             pass
-        
-        # 尝试导入Ollama客户端
-        try:
-            import ollama as _ollama
-            ollama = _ollama
-            OLLAMA_AVAILABLE = True
-        except ImportError:
-            pass
-        
-        # 导入 requests
-        import requests as _requests
-        requests = _requests
-        
+
+        check_ollama_available()
+
     except Exception as e:
         print(f"延迟导入模块失败: {e}")
 
@@ -1156,47 +610,18 @@ class DocuMakerLiteV7:
     
     def auto_connect_ollama(self):
         """启动时自动检测并连接Ollama服务 - 失败时弹窗提醒"""
-        global OLLAMA_AVAILABLE
-        
         try:
-            import requests
-            import subprocess
-            import os
-            
-            try:
-                response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_SHORT)
-                if response.status_code == 200:
-                    OLLAMA_AVAILABLE = True
-                    self.log("✅ Ollama服务已连接")
-                    return
-            except Exception:
-                pass
-            
-            ollama_path = None
-            for path in [r"C:\Ollama\ollama.exe", r"C:\Program Files\Ollama\ollama.exe", 
-                       os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
-                       "ollama"]:
-                if os.path.exists(path) or path == "ollama":
-                    ollama_path = path
-                    break
-            
-            if ollama_path:
-                subprocess.Popen([ollama_path, "serve"], 
-                               stdout=subprocess.DEVNULL, 
-                               stderr=subprocess.DEVNULL,
-                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                time.sleep(3)
-                try:
-                    response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
-                    if response.status_code == 200:
-                        OLLAMA_AVAILABLE = True
-                        self.log("✅ Ollama服务已启动并连接")
-                        return
-                except Exception:
-                    pass
-            
-            # 连接失败 - 弹窗提醒用户
-            OLLAMA_AVAILABLE = False
+            if check_ollama_available():
+                set_ollama_available_global(True)
+                self.log("✅ Ollama服务已连接")
+                return
+
+            if try_start_ollama_service():
+                set_ollama_available_global(True)
+                self.log("✅ Ollama服务已启动并连接")
+                return
+
+            set_ollama_available_global(False)
             self.log("❌ Ollama服务连接失败")
             self.root.after(0, lambda: messagebox.showwarning(
                 "Ollama服务未连接",
@@ -1205,7 +630,7 @@ class DocuMakerLiteV7:
                 "请手动启动Ollama后重试，或在高级设置中检查Ollama模型配置。"
             ))
         except Exception as e:
-            OLLAMA_AVAILABLE = False
+            set_ollama_available_global(False)
             self.log(f"❌ Ollama连接失败: {e}")
             self.root.after(0, lambda: messagebox.showwarning(
                 "Ollama服务异常",
@@ -1694,7 +1119,6 @@ class DocuMakerLiteV7:
 
     def update_model_list(self):
         """更新模型列表，自动检测本地已安装的Ollama模型"""
-        global OLLAMA_AVAILABLE
         
         # 模型信息字典：名称 -> (大小, 用途)
         model_info = {
@@ -1720,125 +1144,59 @@ class DocuMakerLiteV7:
         
         # 已移除"本地大模型"选项，因为该功能已不再使用
         
-        # 【修改】自动检测并启动Ollama服务
+        # 自动检测并启动Ollama服务
         ollama_connected = False
-        try:
-            response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_SHORT)
-            if response.status_code == 200:
-                OLLAMA_AVAILABLE = True
+        if check_ollama_available():
+            set_ollama_available_global(True)
+            ollama_connected = True
+        else:
+            if try_start_ollama_service():
+                set_ollama_available_global(True)
                 ollama_connected = True
-        except Exception:
-            # Ollama未运行，尝试自动启动
-            try:
-                import subprocess
-                import os
-                ollama_path = None
-                for path in [r"C:\Ollama\ollama.exe", r"C:\Program Files\Ollama\ollama.exe", 
-                           os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
-                           "ollama"]:
-                    if os.path.exists(path) or path == "ollama":
-                        ollama_path = path
-                        break
-                if ollama_path:
-                    subprocess.Popen([ollama_path, "serve"], 
-                                   stdout=subprocess.DEVNULL, 
-                                   stderr=subprocess.DEVNULL,
-                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                    time.sleep(3)
-                    # 再次尝试连接
-                    try:
-                        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
-                        if response.status_code == 200:
-                            OLLAMA_AVAILABLE = True
-                            ollama_connected = True
-                    except Exception:
-                        pass
-            except Exception:
-                pass
         
         # 尝试获取本地已安装的Ollama模型
         try:
-            if OLLAMA_AVAILABLE or ollama_connected:
-                models = ollama.list()
-                # 尝试不同的键名来获取模型列表
-                if "models" in models:
-                    model_list = models["models"]
-                    model_names = []
-                    for model in model_list:
-                        # 尝试不同的键名来获取模型名称
-                        if "name" in model:
-                            model_names.append(model["name"])
-                        elif "model" in model:
-                            model_names.append(model["model"])
+            if is_ollama_available() or ollama_connected:
+                available_models = get_available_models()
+                model_names = available_models
                     
-                    if model_names:
-                        # 智能推荐模型
-                        recommended_models = []
-                        for model in model_names:
-                            if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
-                                recommended_models.append((model, True))
-                            else:
-                                recommended_models.append((model, False))
+                if model_names:
+                    recommended_models = []
+                    for model in model_names:
+                        if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
+                            recommended_models.append((model, True))
+                        else:
+                            recommended_models.append((model, False))
+                    
+                    for model, is_recommended in recommended_models:
+                        model_label = model
+                        if "qwen2.5:7b" in model:
+                            model_label = f"{model} (通用任务，推荐)"
+                        elif "qwen2.5:3b" in model:
+                            model_label = f"{model} (轻量级任务，速度优先)"
+                        elif "qwen3:8b" in model:
+                            model_label = f"{model} (通用任务，内容分析)"
+                        elif "qwen3:4b" in model:
+                            model_label = f"{model} (轻量级通用任务)"
+                        elif "deepseek-r1:8b" in model:
+                            model_label = f"{model} (推理任务，逻辑分析)"
+                        elif "gemma3:4b" in model:
+                            model_label = f"{model} (通用任务，提示词优化)"
+                        elif "gemma3:1b" in model:
+                            model_label = f"{model} (超轻量任务，极速响应)"
+                        elif "mistral" in model:
+                            model_label = f"{model} (通用任务，创意生成)"
+                        elif "llama3" in model:
+                            model_label = f"{model} (通用任务，长文本分析)"
                         
-                        # 先显示推荐模型
-                        for model, is_recommended in recommended_models:
-                            # 添加模型任务标注
-                            model_label = model
-                            if "qwen2.5:7b" in model:
-                                model_label = f"{model} (通用任务，推荐)"
-                            elif "qwen2.5:3b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
-                            elif "qwen3:8b" in model:
-                                model_label = f"{model} (通用任务，内容分析)"
-                            elif "qwen3:4b" in model:
-                                model_label = f"{model} (轻量级通用任务)"
-                            elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (推理任务，逻辑分析)"
-                            elif "gemma3:4b" in model:
-                                model_label = f"{model} (通用任务，提示词优化)"
-                            elif "gemma3:1b" in model:
-                                model_label = f"{model} (超轻量任务，极速响应)"
-                            elif "mistral" in model:
-                                model_label = f"{model} (通用任务，创意生成)"
-                            elif "llama3" in model:
-                                model_label = f"{model} (通用任务，长文本分析)"
-                            
-                            if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            else:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            btn.pack(fill=tk.X, pady=1, padx=5)
-                    else:
-                        # 如果没有模型，显示默认模型
-                        default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
-                        for model in default_models:
-                            # 添加模型任务标注
-                            model_label = model
-                            if "qwen2.5:7b" in model:
-                                model_label = f"{model} (通用任务，推荐)"
-                            elif "qwen2.5:3b" in model:
-                                model_label = f"{model} (轻量级任务，速度优先)"
-                            elif "gemma3:4b" in model:
-                                model_label = f"{model} (通用任务，提示词优化)"
-                            elif "gemma3:1b" in model:
-                                model_label = f"{model} (超轻量任务，极速响应)"
-                            elif "deepseek-r1:8b" in model:
-                                model_label = f"{model} (推理任务，逻辑分析)"
-                            elif "mistral" in model:
-                                model_label = f"{model} (通用任务，创意生成)"
-                            elif "llama3" in model:
-                                model_label = f"{model} (通用任务，长文本分析)"
-                            
-                            if is_recommended:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            else:
-                                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                            btn.pack(fill=tk.X, pady=1, padx=5)
+                        if is_recommended:
+                            btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                        else:
+                            btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                        btn.pack(fill=tk.X, pady=1, padx=5)
                 else:
-                    # 如果没有models键，显示默认模型
                     default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
                     for model in default_models:
-                        # 添加模型任务标注
                         model_label = model
                         if "qwen2.5:7b" in model:
                             model_label = f"{model} (通用任务，推荐)"
@@ -2146,14 +1504,16 @@ class DocuMakerLiteV7:
 
 输出："""
             
-            response = ollama.chat(
+            result_text, _ = call_ollama_single(
                 model=model,
-                messages=[
-                    {"role": "user", "content": user_message}
-                ]
+                system_prompt="You are an AI art style keyword generator. Output only English keywords separated by commas.",
+                user_prompt=user_message
             )
             
-            raw_output = response["message"]["content"].strip()
+            if result_text:
+                raw_output = result_text.strip()
+            else:
+                raise Exception("Ollama调用失败")
             
             # 清洗输出，移除开场白和解释
             cleaned = self._clean_style_output(raw_output)
@@ -2628,7 +1988,8 @@ class DocuMakerLiteV7:
             return segments
         
         try:
-            import ollama
+            if not is_ollama_available():
+                return segments
             model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
             
             indexed_lines = []
@@ -2665,15 +2026,18 @@ class DocuMakerLiteV7:
 
             user_prompt = f"以下是{len(segments)}个语音片段，请添加标点并按语义划分分镜：\n\n{segments_text}"
             
-            response = ollama.chat(
+            result_text, _ = call_ollama_single(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                num_predict=4000,
+                num_ctx=8192
             )
             
-            raw_output = response["message"]["content"].strip()
+            if not result_text:
+                raise ValueError("大模型调用失败")
+            
+            raw_output = result_text.strip()
             
             import re
             import json
@@ -3481,24 +2845,20 @@ class DocuMakerLiteV7:
             template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
         
         try:
-            import ollama
-            response = ollama.chat(
+            result_text, _ = call_ollama_single(
                 model=model,
-                messages=[
-                    {"role": "system", "content": template["system"]},
-                    {"role": "user", "content": template["user"]}
-                ]
+                system_prompt=template["system"],
+                user_prompt=template["user"],
+                num_predict=512,
+                num_ctx=4096
             )
             
-            raw_output = response["message"]["content"].strip()
-            if raw_output:
+            if result_text:
+                raw_output = result_text.strip()
                 cleaned_prompt = self._clean_prompt_output(raw_output)
                 return cleaned_prompt
             
             raise Exception("大模型返回为空")
-        except ImportError:
-            self.log("⚠️ ollama模块导入失败，回退到内置逻辑")
-            return self._analyze_and_generate_sd_prompt(dubbing, content_type)
         except Exception as e:
             self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑")
             return self._analyze_and_generate_sd_prompt(dubbing, content_type)
@@ -5435,8 +4795,6 @@ class DocuMakerLiteV7:
         import hashlib
         import gc
         
-        global OLLAMA_AVAILABLE
-        
         # 初始化变量，防止 NameError
         analysis_result = ""
         theme_info = {}
@@ -5454,41 +4812,18 @@ class DocuMakerLiteV7:
                 return
             
             # 检查Ollama服务是否可用
-            if not OLLAMA_AVAILABLE:
+            if not is_ollama_available():
                 self.log("🔄 正在检测Ollama服务...")
-                try:
-                    response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_SHORT)
-                    if response.status_code == 200:
-                        OLLAMA_AVAILABLE = True
-                        self.log("✅ Ollama服务已连接")
-                    else:
-                        raise Exception("服务响应异常")
-                except Exception:
-                    # 尝试自动启动
+                if check_ollama_available():
+                    set_ollama_available_global(True)
+                    self.log("✅ Ollama服务已连接")
+                else:
                     self.log("⚠️ Ollama服务未运行，尝试自动启动...")
-                    import subprocess
-                    ollama_path = None
-                    for path in [r"C:\Ollama\ollama.exe", r"C:\Program Files\Ollama\ollama.exe",
-                               os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
-                               "ollama"]:
-                        if os.path.exists(path) or path == "ollama":
-                            ollama_path = path
-                            break
-                    if ollama_path:
-                        subprocess.Popen([ollama_path, "serve"],
-                                       stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.DEVNULL,
-                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                        time.sleep(3)
-                        try:
-                            response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
-                            if response.status_code == 200:
-                                OLLAMA_AVAILABLE = True
-                                self.log("✅ Ollama服务已自动启动并连接")
-                        except Exception:
-                            pass
-                    
-                    if not OLLAMA_AVAILABLE:
+                    if try_start_ollama_service():
+                        set_ollama_available_global(True)
+                        self.log("✅ Ollama服务已自动启动并连接")
+                    else:
+                        set_ollama_available_global(False)
                         self.log("❌ Ollama服务不可用")
                         if not auto_mode:
                             self.root.after(0, lambda: messagebox.showwarning(
@@ -5835,58 +5170,23 @@ class DocuMakerLiteV7:
                 
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
             else:
-                # 动态检测Ollama服务是否可用
                 if len(full_text) > 100:
-                    # 尝试动态导入和检测Ollama服务
                     ollama_connected = False
-                    try:
-                        import ollama
-                        # 尝试调用API检测服务是否响应
-                        try:
-                            response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
-                            if response.status_code == 200:
-                                OLLAMA_AVAILABLE = True
-                                ollama_connected = True
-                                self.log("✅ 已连接到Ollama服务")
-                        except Exception as e:
-                            self.log(f"⚠️ Ollama服务未响应: {e}")
-                            # 尝试自动启动Ollama服务
-                            self.log("   尝试自动启动Ollama服务...")
-                            try:
-                                import subprocess
-                                import os
-                                # 查找ollama可执行文件并启动
-                                ollama_path = None
-                                for path in [r"C:\Ollama\ollama.exe", r"C:\Program Files\Ollama\ollama.exe", 
-                                           os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
-                                           "ollama"]:
-                                    if os.path.exists(path) or path == "ollama":
-                                        ollama_path = path
-                                        break
-                                if ollama_path:
-                                    subprocess.Popen([ollama_path, "serve"], 
-                                                   stdout=subprocess.DEVNULL, 
-                                                   stderr=subprocess.DEVNULL,
-                                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                                    time.sleep(3)  # 等待服务启动
-                                    # 再次尝试连接
-                                    try:
-                                        response = get_http_session().get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=Config.API_TIMEOUT_MEDIUM)
-                                        if response.status_code == 200:
-                                            OLLAMA_AVAILABLE = True
-                                            ollama_connected = True
-                                            self.log("✅ Ollama服务已启动并连接成功")
-                                    except Exception:
-                                        self.log("❌ 无法启动Ollama服务")
-                                else:
-                                    self.log("❌ 未找到Ollama安装路径")
-                            except Exception as start_err:
-                                self.log(f"❌ 启动Ollama失败: {start_err}")
-                    except ImportError:
-                        self.log("❌ Ollama模块未安装，请运行: pip install ollama")
+                    if check_ollama_available():
+                        set_ollama_available_global(True)
+                        ollama_connected = True
+                        self.log("✅ 已连接到Ollama服务")
+                    else:
+                        self.log("⚠️ Ollama服务未响应")
+                        self.log("   尝试自动启动Ollama服务...")
+                        if try_start_ollama_service():
+                            set_ollama_available_global(True)
+                            ollama_connected = True
+                            self.log("✅ Ollama服务已启动并连接成功")
+                        else:
+                            self.log("❌ 无法启动Ollama服务")
                     
-                    # 只有连接成功后才使用大模型分析
-                    if ollama_connected and OLLAMA_AVAILABLE:
+                    if ollama_connected and is_ollama_available():
                         try:
                             self.update_task_progress("正在使用大模型分析文章内容...", 50)
                             
@@ -5904,22 +5204,6 @@ class DocuMakerLiteV7:
                                 ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
                                 ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
                             ]
-                            
-                            # 获取可用的模型列表
-                            def get_available_models():
-                                """获取本地可用的Ollama模型列表"""
-                                try:
-                                    models_info = ollama.list()
-                                    available = []
-                                    if "models" in models_info:
-                                        for m in models_info["models"]:
-                                            model_name = m.get("name", m.get("model", ""))
-                                            if model_name:
-                                                available.append(model_name)
-                                    return available
-                                except Exception as e:
-                                    self.log(f"⚠️ 获取可用模型列表失败: {e}")
-                                    return []
                             
                             available_models = get_available_models()
                             
@@ -5981,22 +5265,19 @@ class DocuMakerLiteV7:
                                         system_content = template["system"]
                                         user_content = f"语音转录文本：\n{full_text}"
                                     
-                                    response = ollama.chat(
+                                    result_content, _ = call_ollama_single(
                                         model=model_name,
-                                        messages=[
-                                            {"role": "system", "content": system_content},
-                                            {"role": "user", "content": user_content}
-                                        ]
+                                        system_prompt=system_content,
+                                        user_prompt=user_content,
+                                        num_predict=2000,
+                                        num_ctx=8192
                                     )
                                     
-                                    # 添加详细调试日志
-                                    raw_response = response
-                                    result_content = raw_response["message"]["content"].strip()
+                                    if not result_content:
+                                        raise Exception("大模型返回为空")
                                     
-                                    # 调试：打印原始响应结构（ChatResponse是对象不是字典）
-                                    self.log(f"   🔍 调试: 响应类型: {type(raw_response)}")
+                                    result_content = result_content.strip()
                                     
-                                    # 调试：打印模型返回的原始内容（截取前200字符）
                                     self.log(f"   🔍 调试: 原始响应内容: {repr(result_content[:200])}")
                                     
                                     return result_content
@@ -6185,13 +5466,9 @@ class DocuMakerLiteV7:
             # 预热模型 - 发送简单请求加载模型到GPU
             self.log("🔥 预热模型中...")
             try:
-                import ollama
                 model = self.ollama_model_var.get()
                 warmup_start = time.time()
-                ollama.chat(
-                    model=model,
-                    messages=[{"role": "user", "content": "ok"}]
-                )
+                warmup_model(model)
                 warmup_time = time.time() - warmup_start
                 self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
             except Exception as e:
