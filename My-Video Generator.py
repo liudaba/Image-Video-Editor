@@ -2792,7 +2792,20 @@ class DocuMakerLiteV7:
                     pass
 
             template = {
-                "system": f"""You are a prompt engineer for absoluteRealisticVision v20 SD model.
+                "system": f"""You are an expert prompt engineer for absoluteRealisticVision v20 SD model.
+
+【CRITICAL: Semantic-to-Visual Translation】
+You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene that visually represents that meaning. Do NOT just translate words literally - translate the MEANING into VISUAL ELEMENTS.
+
+Translation examples (Chinese meaning → English visual elements):
+- "经济衰退" → falling stock charts, empty shopping mall, closed storefront, worried businessman
+- "军事冲突" → military vehicles, soldiers in combat gear, smoke over cityscape, fighter jets
+- "科技创新" → laboratory with holographic displays, scientist examining data, circuit board closeup
+- "环境污染" → factory smokestacks, polluted river, mask-wearing pedestrians, dead trees
+- "外交谈判" → conference table with flags, handshake between leaders, press conference
+- "自然灾害" → flooded streets, earthquake damage, rescue workers, destroyed buildings
+- "社会不公" → protest march, divided city rich/poor, courtroom scene
+- "太空探索" → rocket launch, astronaut in spacewalk, mission control center
 
 【格式规则】
 - Start with: (masterpiece, best quality:1.2), RAW photo, (photorealistic:1.3), ultra detailed, 8k
@@ -2803,7 +2816,7 @@ class DocuMakerLiteV7:
 - NO explanations, NO quotes, NO newlines
 
 【核心规则】
-- Prompt MUST accurately reflect the specific content of the dubbing text
+- Prompt MUST accurately reflect the SPECIFIC content of the dubbing text
 - Each shot has different dubbing, each prompt MUST be unique and visually distinct
 - Global theme is background reference only, do NOT stuff it into every shot
 - Describe the specific scene that matches the current dubbing
@@ -2817,6 +2830,7 @@ class DocuMakerLiteV7:
 - If dubbing mentions success/safety → show achievement scene (handshake, celebration, not just office)
 - If dubbing mentions legal issues → show courtroom, police, handcuffs, gavel (not just office)
 - If dubbing mentions specific industry → show THAT industry's visuals (construction site, tech lab, farmland)
+- If dubbing mentions a country/region → show THAT location's landmarks or scenery
 
 【内容类型】：{content_type}
 【全局主题（仅参考）】：{core_theme or '根据配音内容确定'}
@@ -2825,7 +2839,7 @@ class DocuMakerLiteV7:
 只输出英文提示词，不要解释。""",
                 "user": f"""{context_hint}当前配音: {dubbing}
 
-根据当前配音的具体内容生成英文提示词（必须与之前的场景不同）："""
+根据当前配音的具体语义生成英文提示词（必须与之前的场景不同）："""
             }
         else:
             template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
@@ -2836,7 +2850,7 @@ class DocuMakerLiteV7:
                 model=model,
                 system_prompt=template["system"],
                 user_prompt=template["user"],
-                num_predict=512,
+                num_predict=768,
                 num_ctx=4096,
                 llm_config=llm_config
             )
