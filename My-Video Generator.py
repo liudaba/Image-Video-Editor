@@ -5466,6 +5466,7 @@ Translation examples (Chinese meaning → English visual elements):
                 model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
                 if not model:
                     model = "gemma3:4b"
+                warmup_start = time.time()
                 warmup_model(model)
                 warmup_time = time.time() - warmup_start
                 self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")

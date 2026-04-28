@@ -274,6 +274,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
+                        "stream": False,
                         "options": options
                     },
                     timeout=120
@@ -354,6 +355,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
+                    "stream": False,
                     "options": options
                 },
                 timeout=120
@@ -399,6 +401,7 @@ def warmup_model(model, log_callback=None):
                     "messages": [
                         {"role": "user", "content": "ok"}
                     ],
+                    "stream": False,
                     "options": {
                         "num_predict": 1,
                         "temperature": 0.1
