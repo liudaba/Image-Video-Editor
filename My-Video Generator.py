@@ -5034,6 +5034,7 @@ Translation examples (Chinese meaning → English visual elements):
                         try:
                             self.whisper_model = self.whisper_model.to("cpu")
                             torch.cuda.empty_cache()
+                            whisper_used_gpu = False
                             self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
                         except Exception:
                             pass
@@ -5110,6 +5111,10 @@ Translation examples (Chinese meaning → English visual elements):
                     # 使用线程池添加超时控制
                     import concurrent.futures
                     
+                    if not self.task_running:
+                        self.log("❌ 任务已被取消")
+                        return
+                    
                     # 语音识别（优化参数，更敏感检测停顿）
                     result = self.whisper_model.transcribe(
                         self.audio_path,
@@ -5162,6 +5167,10 @@ Translation examples (Chinese meaning → English visual elements):
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
             self.update_task_progress("正在分析文章内容...", 40)
+            
+            if not self.task_running:
+                self.log("❌ 任务已被取消")
+                return
             
             # 初始化变量（修复：确保变量在所有代码路径中都有定义）
             content_type = "general"
@@ -5381,7 +5390,7 @@ Translation examples (Chinese meaning → English visual elements):
                                         self.log(f"   等待模型响应中...")
                                         
                                         start_time = time.time()
-                                        analysis_result = future.result()
+                                        analysis_result = future.result(timeout=180)
                                         elapsed_time = time.time() - start_time
                                         
                                         if analysis_result:
@@ -5430,17 +5439,8 @@ Translation examples (Chinese meaning → English visual elements):
                                 self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
                                 self.log(f"   候选模型列表: {', '.join(candidate_models)}")
                                 self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
-                                # 关闭Ollama释放GPU资源（跨平台）
-                                try:
-                                    import subprocess
-                                    if os.name == 'nt':  # Windows
-                                        subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
-                                    else:  # Linux/macOS
-                                        subprocess.run(['pkill', '-f', 'ollama'], capture_output=True)
-                                    time.sleep(1)
-                                    self.log("🧹 Ollama已关闭，GPU资源已释放")
-                                except Exception:
-                                    pass
+                                set_ollama_available_global(False)
+                                self.log("🧹 Ollama标记为不可用，GPU显存将在空闲时自动释放")
                                 analysis_result = ""
                             
                             # 缓存分析结果（即使是空结果也缓存，避免重复失败）
@@ -5574,6 +5574,10 @@ Translation examples (Chinese meaning → English visual elements):
             
             self.log(f"   开始为 {len(final_tasks)} 个分镜生成提示词...")
             
+            if not self.task_running:
+                self.log("❌ 任务已被取消")
+                return
+            
             start_time = time.time()
             
             failed_count = 0
@@ -5665,6 +5669,10 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("正在创建分镜...", 80)
             self.log(f"📝 基于语义片段创建分镜（大模型已预生成提示词）")
             
+            if not self.task_running:
+                self.log("❌ 任务已被取消")
+                return
+            
             global_content_type = theme_info.get('content_type', 'general')
             shot_tasks = []
             for i, task in enumerate(final_tasks):
@@ -5733,7 +5741,7 @@ Translation examples (Chinese meaning → English visual elements):
                 
                 for future in as_completed(futures):
                     try:
-                        idx, shot = future.result()
+                        idx, shot = future.result(timeout=60)
                         with lock:
                             if shot:
                                 shots_dict[idx] = shot
@@ -6029,7 +6037,7 @@ Translation examples (Chinese meaning → English visual elements):
             self.log(f"   用户选择模型: {selected_model}")
             if selected_styles:
                 self.log(f"   风格预设: {', '.join(selected_styles)}")
-            self.log(f"   采样参数: steps=25, cfg=7.0, sampler=DPM++ 2M Karras")
+            self.log(f"   采样参数: steps=28, cfg_scale=7.5, sampler=DPM++ 2M Karras")
             
             # 确保图像目录存在
             if not os.path.exists(self.images_dir):
@@ -6168,7 +6176,12 @@ Translation examples (Chinese meaning → English visual elements):
                 def image_saver():
                     """独立IO线程: 解码base64并保存图片到磁盘"""
                     while True:
-                        item = save_queue.get()
+                        try:
+                            item = save_queue.get(timeout=30)
+                        except queue.Empty:
+                            if not self.task_running:
+                                break
+                            continue
                         if item is None:
                             save_queue.task_done()
                             break
@@ -6177,8 +6190,8 @@ Translation examples (Chinese meaning → English visual elements):
                             img_bytes = base64.b64decode(b64_data)
                             with Image.open(BytesIO(img_bytes)) as image:
                                 image.save(save_path)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
                         finally:
                             save_queue.task_done()
 
@@ -6191,27 +6204,38 @@ Translation examples (Chinese meaning → English visual elements):
                 def sd_producer():
                     """独立请求线程: 连续发送SD生成请求，实现预取"""
                     for idx, (sid, prompt, img_file, img_path, desc, neg) in enumerate(tasks):
-                        # 检查取消
                         if not self.task_running:
-                            result_queue.put((idx, None, None, "cancelled"))
+                            try:
+                                result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                            except queue.Full:
+                                pass
                             break
-                        # 检查暂停
                         if not self.pause_event.is_set():
-                            self.pause_event.wait()
+                            self.pause_event.wait(timeout=5)
+                            if not self.pause_event.is_set() and not self.task_running:
+                                try:
+                                    result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                                except queue.Full:
+                                    pass
+                                break
 
-                        # 检查缓存
                         ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
                         cached = image_cache.get(ck)
                         if cached:
-                            result_queue.put((idx, ck, cached, "cached", img_path))
+                            try:
+                                result_queue.put((idx, ck, cached, "cached", img_path), timeout=30)
+                            except queue.Full:
+                                pass
                             continue
 
-                        # 发送SD请求（含重试）
                         max_retries = 3
                         retry_delay = 5
                         for retry in range(max_retries):
                             if not self.task_running:
-                                result_queue.put((idx, None, None, "cancelled"))
+                                try:
+                                    result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                                except queue.Full:
+                                    pass
                                 break
                             try:
                                 req_start = time.time()
@@ -6234,7 +6258,10 @@ Translation examples (Chinese meaning → English visual elements):
                                     if "images" in rj and rj["images"]:
                                         img_data = rj["images"][0]
                                         image_cache.set(ck, img_data)
-                                        result_queue.put((idx, ck, img_data, "generated", req_time, img_path))
+                                        try:
+                                            result_queue.put((idx, ck, img_data, "generated", req_time, img_path), timeout=30)
+                                        except queue.Full:
+                                            pass
                                         break
                                     else:
                                         if retry < max_retries - 1:
@@ -6243,7 +6270,10 @@ Translation examples (Chinese meaning → English visual elements):
                                     if retry < max_retries - 1:
                                         time.sleep(retry_delay)
                             except requests.exceptions.ConnectionError:
-                                result_queue.put((idx, None, None, "connection_error"))
+                                try:
+                                    result_queue.put((idx, None, None, "connection_error"), timeout=5)
+                                except queue.Full:
+                                    pass
                                 break
                             except requests.exceptions.Timeout:
                                 if retry < max_retries - 1:
@@ -6252,45 +6282,55 @@ Translation examples (Chinese meaning → English visual elements):
                                 if retry < max_retries - 1:
                                     time.sleep(retry_delay)
                         else:
-                            result_queue.put((idx, None, None, "failed"))
-                    # 发送结束信号
-                    result_queue.put(None)
+                            try:
+                                result_queue.put((idx, None, None, "failed"), timeout=5)
+                            except queue.Full:
+                                pass
+                    try:
+                        result_queue.put(None, timeout=5)
+                    except queue.Full:
+                        pass
 
                 producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
                 producer_thread.start()
 
                 # --- 主线程（消费者）: 从队列取结果，更新UI ---
-                results = []
                 generated_count = 0
                 failed_count = 0
                 cached_count = 0
                 batch_start_time = time.time()
                 total_tasks = len(tasks)
                 received = 0
+                task_cancelled = False
 
                 while received < total_tasks:
-                    item = result_queue.get()
+                    try:
+                        item = result_queue.get(timeout=10)
+                    except queue.Empty:
+                        if not self.task_running:
+                            task_cancelled = True
+                            self.log("❌ 任务已被取消")
+                            break
+                        continue
                     if item is None:
                         break
 
                     result_type = item[3] if len(item) > 3 else "unknown"
 
                     if result_type == "cancelled":
+                        task_cancelled = True
                         self.log("❌ 任务已被取消")
                         break
 
                     idx = item[0]
 
-                    # 更新进度
                     progress = 40 + (received / total_tasks) * 50
                     self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
 
-                    # 每5张输出一次日志
                     if received % 5 == 0 or received == total_tasks - 1:
                         elapsed = time.time() - batch_start_time
                         avg_time = elapsed / (received + 1)
                         remaining = (total_tasks - received - 1) * avg_time
-                        _, _, _, shot_id = tasks[idx][:4]
                         self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
 
                     if result_type == "cached":
@@ -6319,15 +6359,21 @@ Translation examples (Chinese meaning → English visual elements):
                     received += 1
                     result_queue.task_done()
 
-                # 等待保存线程完成
+                while not result_queue.empty():
+                    try:
+                        result_queue.get_nowait()
+                        result_queue.task_done()
+                    except queue.Empty:
+                        break
+
                 save_queue.put(None)
                 saver_thread.join(timeout=120)
 
-                # 等待producer结束
                 producer_thread.join(timeout=5)
 
-            self.state_manager['images']['generated'] = True
-            self.state_manager['images']['count'] = generated_count
+            if generated_count + cached_count > 0 and not task_cancelled:
+                self.state_manager['images']['generated'] = True
+            self.state_manager['images']['count'] = generated_count + cached_count
             
         except Exception as e:
             self.log(f"❌ 图像生成失败: {e}")
@@ -6382,6 +6428,7 @@ Translation examples (Chinese meaning → English visual elements):
         
         audio = None
         final_clip = None
+        background = None
         clips = []
         
         def check_cancelled():
@@ -6390,7 +6437,9 @@ Translation examples (Chinese meaning → English visual elements):
                 return True
             if not self.pause_event.is_set():
                 self.log("⏸️ 任务已暂停")
-                self.pause_event.wait()
+                self.pause_event.wait(timeout=5)
+                if not self.pause_event.is_set() and not self.task_running:
+                    return True
             return False
         
         try:
@@ -6599,21 +6648,20 @@ Translation examples (Chinese meaning → English visual elements):
                 if os.path.exists(image_path):
                     from PIL import Image
                     with Image.open(image_path) as orig_img:
-                        # 调整图片尺寸
                         img = self._resize_image_to_fit(orig_img.copy(), width, height)
                     
-                    # 计算图片显示时长（基于原始语音片段时间戳）
                     shot_duration = shot['end'] - shot['start']
-
-
                     
-                    # 边界检查：时长无效时跳过此片段
                     if shot_duration <= 0:
                         self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
                         continue
                     
-                    # 创建视频片段
                     clip = ImageClip(np.array(img)).with_duration(shot_duration)
+                    
+                    try:
+                        img.close()
+                    except Exception:
+                        pass
                     
                     # 应用动画效果（注意：必须在设置起始时间之前调用）
                     if animation_type != "无":
@@ -6700,7 +6748,13 @@ Translation examples (Chinese meaning → English visual elements):
             # 步骤11: 添加音频
             self.update_task_progress("正在添加音频...", 65)
             self.log("\n🔊 添加音频轨道...")
+            old_final_clip = final_clip
             final_clip = final_clip.with_audio(audio)
+            if old_final_clip is not final_clip:
+                try:
+                    old_final_clip.close()
+                except Exception:
+                    pass
             self.log("   ✅ 音频轨道添加成功")
             
             # 步骤12: 渲染视频
@@ -6768,6 +6822,9 @@ Translation examples (Chinese meaning → English visual elements):
         finally:
             for clip in clips:
                 try: clip.close()
+                except: pass
+            if background:
+                try: background.close()
                 except: pass
             if final_clip:
                 try: final_clip.close()
@@ -7387,6 +7444,8 @@ Translation examples (Chinese meaning → English visual elements):
         
         thread = threading.Thread(target=render_video_worker, daemon=True)
         thread.start()
+        with self.task_lock:
+            self.current_task_thread = thread
         self.log("✅ 渲染线程已启动")
     
     def generate_shots_threaded(self):
