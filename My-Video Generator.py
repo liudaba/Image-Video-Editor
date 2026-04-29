@@ -3886,35 +3886,52 @@ Translation examples (Chinese meaning → English visual elements):
         core_theme = theme_info['core_theme']
         theme_elements = theme_info.get('theme_elements', [])
         
-        # 翻译主题元素为英文（用于匹配英文prompt）
         theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
         
-        # 调试日志：显示检查参数
+        core_theme_en = self._translate_theme_elements_to_english([core_theme]) if core_theme else []
+        
         self.log(f"\n🔍 快速预检查调试信息:")
         self.log(f"   core_theme: '{core_theme}'")
+        self.log(f"   core_theme_en: {core_theme_en}")
         self.log(f"   theme_elements: {theme_elements}")
         self.log(f"   theme_elements_en: {theme_elements_en}")
+        
+        all_keywords = []
+        for elem in theme_elements_en:
+            for word in elem.lower().split():
+                if len(word) > 3:
+                    all_keywords.append(word)
+        for elem in core_theme_en:
+            for word in elem.lower().split():
+                if len(word) > 3:
+                    all_keywords.append(word)
+        all_keywords = list(set(all_keywords))
+        
+        self.log(f"   匹配关键词池({len(all_keywords)}个): {all_keywords}")
         
         deviation_count = 0
         
         for i, shot in enumerate(shots):
             prompt = shot.get('prompt_en', '').lower()
+            description = shot.get('description', '').lower()
+            combined = prompt + ' ' + description
             
-            # 检查是否包含任何主题元素
             has_theme_element = False
             
-            # 1. 检查核心主题关键词
-            if core_theme.lower() in prompt:
-                has_theme_element = True
-            
-            # 2. 检查主题元素
             if theme_elements_en:
                 for elem in theme_elements_en:
                     if elem.lower() in prompt:
                         has_theme_element = True
                         break
             
-            # 3. 对于第一个分镜，允许一定的灵活性（可能是开场镜头）
+            if not has_theme_element and all_keywords:
+                keyword_hits = sum(1 for kw in all_keywords if kw in combined)
+                if keyword_hits >= 1:
+                    has_theme_element = True
+            
+            if not has_theme_element and core_theme.lower() in description:
+                has_theme_element = True
+            
             if not has_theme_element and i > 0:
                 deviation_count += 1
         
@@ -3934,36 +3951,57 @@ Translation examples (Chinese meaning → English visual elements):
         theme_elements = theme_info.get('theme_elements', [])
         visual_tone = theme_info.get('visual_tone', '')
         theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
+        
+        all_keywords = []
+        for elem in theme_elements_en:
+            for word in elem.lower().split():
+                if len(word) > 3:
+                    all_keywords.append(word)
+        all_keywords = list(set(all_keywords))
 
         consistency_issues = []
         fixed_count = 0
 
         for i, shot in enumerate(shots):
             prompt = shot.get('prompt_en', '').lower()
+            description = shot.get('description', '').lower()
+            combined = prompt + ' ' + description
+            
+            has_theme_element = False
             
             if theme_elements_en:
-                has_theme_element = any(
-                    elem.lower() in prompt for elem in theme_elements_en
-                )
-                if not has_theme_element and i > 0:
-                    consistency_issues.append(f"分镜{i+1}")
-                    
-                    if is_ollama_available() and shot.get('description'):
-                        try:
-                            dubbing = shot['description']
-                            content_type = shot.get('content_type', 'general')
-                            corrected = self._generate_prompt_with_llm(
-                                dubbing, content_type,
-                                prompt_type=self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词",
-                                core_theme=core_theme,
-                                visual_tone=visual_tone,
-                                theme_elements=theme_elements
-                            )
-                            if corrected and len(corrected) > 30:
-                                shot['prompt_en'] = corrected
-                                fixed_count += 1
-                        except Exception:
-                            pass
+                for elem in theme_elements_en:
+                    if elem.lower() in prompt:
+                        has_theme_element = True
+                        break
+            
+            if not has_theme_element and all_keywords:
+                keyword_hits = sum(1 for kw in all_keywords if kw in combined)
+                if keyword_hits >= 1:
+                    has_theme_element = True
+            
+            if not has_theme_element and core_theme.lower() in description:
+                has_theme_element = True
+            
+            if not has_theme_element and i > 0:
+                consistency_issues.append(f"分镜{i+1}")
+                
+                if is_ollama_available() and shot.get('description'):
+                    try:
+                        dubbing = shot['description']
+                        content_type = shot.get('content_type', 'general')
+                        corrected = self._generate_prompt_with_llm(
+                            dubbing, content_type,
+                            prompt_type=self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词",
+                            core_theme=core_theme,
+                            visual_tone=visual_tone,
+                            theme_elements=theme_elements
+                        )
+                        if corrected and len(corrected) > 30:
+                            shot['prompt_en'] = corrected
+                            fixed_count += 1
+                    except Exception:
+                        pass
 
         if consistency_issues:
             msg = f"发现{len(consistency_issues)}个偏离主题的分镜"
@@ -4726,6 +4764,8 @@ Translation examples (Chinese meaning → English visual elements):
             self.perf_monitor_running = False
             self.cache_cleanup_running = False
             self.task_running = False
+            self._api_heartbeat_running = False
+            self.sd_connected = False
         except Exception:
             pass
 
@@ -4760,6 +4800,18 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
+            for attr in ['_active_audio', '_active_clips', '_active_background', '_active_final_clip']:
+                clip = getattr(self, attr, None)
+                if clip is not None:
+                    try:
+                        clip.close()
+                    except Exception:
+                        pass
+                    setattr(self, attr, None)
+        except Exception:
+            pass
+
+        try:
             import torch
             import gc
 
@@ -4782,11 +4834,18 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
+            from video_generator.config import get_http_session
+            session = get_http_session()
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+
+        try:
             self._thorough_cleanup()
         except Exception:
             pass
 
-        # 将残留文件移动到垃圾桶而非直接删除
         try:
             self._cleanup_residual_files()
         except Exception:
@@ -4861,8 +4920,6 @@ Translation examples (Chinese meaning → English visual elements):
         analysis_result = ""
         theme_info = {}
         
-        # 用于跟踪资源，确保清理
-        resources_to_cleanup = []
         whisper_model_loaded = False
         whisper_used_gpu = False
         
@@ -6181,7 +6238,6 @@ Translation examples (Chinese meaning → English visual elements):
                 saver_thread = threading.Thread(target=image_saver, daemon=True)
                 saver_thread.start()
 
-                # --- 结果队列: producer线程把SD响应放入，主线程消费 ---
                 result_queue = queue.Queue(maxsize=16)
 
                 def sd_producer():
@@ -6349,11 +6405,6 @@ Translation examples (Chinese meaning → English visual elements):
                     except queue.Empty:
                         break
 
-                save_queue.put(None)
-                saver_thread.join(timeout=120)
-
-                producer_thread.join(timeout=5)
-
             if generated_count + cached_count > 0 and not task_cancelled:
                 self.state_manager['images']['generated'] = True
             self.state_manager['images']['count'] = generated_count + cached_count
@@ -6362,6 +6413,19 @@ Translation examples (Chinese meaning → English visual elements):
             self.log(f"❌ 图像生成失败: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            try:
+                save_queue.put(None, timeout=5)
+            except Exception:
+                pass
+            try:
+                saver_thread.join(timeout=10)
+            except Exception:
+                pass
+            try:
+                producer_thread.join(timeout=5)
+            except Exception:
+                pass
     
     # =======================================================================
     # 第十一部分：音视频导入与渲染 (行 9398-10278)
@@ -6530,6 +6594,7 @@ Translation examples (Chinese meaning → English visual elements):
             
             audio = AudioFileClip(self.audio_path)
             audio_duration = audio.duration
+            self._active_audio = audio
             self.log(f"   ✅ 音频加载成功，时长: {audio_duration:.2f}s")
             
             # 验证时间轴（只显示信息，不修改原始时间戳）
@@ -6631,10 +6696,14 @@ Translation examples (Chinese meaning → English visual elements):
             self.log(f"   ✅ 图片预加载完成: {len(shot_img_map)}/{total_shots} 张 (耗时 {load_elapsed:.1f}s)")
             
             processed_shots = 0
+            intermediate_clips = []
             for shot in self.shots_data:
                 if check_cancelled():
                     for img in shot_img_map.values():
                         try: img.close()
+                        except: pass
+                    for ic in intermediate_clips:
+                        try: ic.close()
                         except: pass
                     return
                 
@@ -6662,11 +6731,17 @@ Translation examples (Chinese meaning → English visual elements):
                     pass
                 
                 if animation_type != "无":
+                    old_clip = clip
                     clip = self.apply_animation_effect_prerender(clip)
+                    if clip is not old_clip:
+                        intermediate_clips.append(old_clip)
                 
                 if transition_type == "交叉淡化" and shot_duration > 0.6:
                     crossfade_dur = min(0.3, shot_duration * 0.15)
+                    old_clip = clip
                     clip = clip.crossfadein(crossfade_dur).crossfadeout(crossfade_dur)
+                    if clip is not old_clip:
+                        intermediate_clips.append(old_clip)
                 
                 clip = clip.with_start(shot['start'])
                 clips.append(clip)
@@ -6722,6 +6797,9 @@ Translation examples (Chinese meaning → English visual elements):
             try:
                 background = ColorClip(size=(width, height), color=(0, 0, 0)).with_duration(audio_duration)
                 final_clip = CompositeVideoClip([background] + clips, size=(width, height))
+                self._active_background = background
+                self._active_final_clip = final_clip
+                self._active_clips = clips
                 self.log(f"   ✅ 视频片段合成完成: {len(clips)} 个片段")
             except Exception as e:
                 self.log(f"   ❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
@@ -6832,6 +6910,9 @@ Translation examples (Chinese meaning → English visual elements):
             for clip in clips:
                 try: clip.close()
                 except: pass
+            for ic in intermediate_clips if 'intermediate_clips' in dir() else []:
+                try: ic.close()
+                except: pass
             if background:
                 try: background.close()
                 except: pass
@@ -6841,6 +6922,10 @@ Translation examples (Chinese meaning → English visual elements):
             if audio:
                 try: audio.close()
                 except: pass
+            self._active_audio = None
+            self._active_clips = None
+            self._active_background = None
+            self._active_final_clip = None
             try:
                 import gc
                 gc.collect()
