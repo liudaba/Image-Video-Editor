@@ -2314,7 +2314,10 @@ class DocuMakerLiteV7:
         
         # 从description中提取画面构思（如果包含）
         # description格式：配音内容 + 画面构思 + 视觉元素
-        description_parts = self._parse_description(cleaned_sentence)
+        has_pregenerated = (hasattr(self, '_pregenerated_prompts') 
+                           and shot_id in self._pregenerated_prompts 
+                           and self._pregenerated_prompts.get(shot_id))
+        description_parts = self._parse_description(cleaned_sentence, skip_llm_inference=has_pregenerated)
         
         # 添加核心主题和视觉基调到描述中
         # 优先级：传入的参数 > 用户在高级设置中输入的
@@ -2384,7 +2387,7 @@ class DocuMakerLiteV7:
         
         return shot_data
     
-    def _parse_description(self, description):
+    def _parse_description(self, description, skip_llm_inference=False):
         """解析description，提取各个部分 - 增强版支持多种格式"""
         import re
         
@@ -2396,51 +2399,41 @@ class DocuMakerLiteV7:
             'style': ''
         }
         
-        # 清理元数据标记
         cleaned = re.sub(r'\*+', '', description)
         cleaned = re.sub(r'^\s*-\s*', '', cleaned, flags=re.MULTILINE)
-        cleaned = re.sub(r'[""""]', '', cleaned)  # 移除引号
+        cleaned = re.sub(r'[""""]', '', cleaned)
         cleaned = cleaned.strip()
         
-        # 尝试提取各个部分
         lines = [l.strip() for l in cleaned.split('\n') if l.strip()]
         
         if lines:
-            # 第一行通常是配音内容
             first_line = lines[0]
-            # 如果包含冒号或特定标记，提取后面的内容
             if '：' in first_line or ':' in first_line:
                 result['dubbing'] = re.sub(r'.*?[:：]\s*', '', first_line)
             else:
                 result['dubbing'] = first_line
         
-        # 查找画面构思（支持多种关键词）
         for line in lines:
             if any(keyword in line for keyword in ['画面构思', '镜头', '展示', '场景', '画面']):
                 result['visual_concept'] = re.sub(r'.*?[:：]\s*', '', line)
                 break
         
-        # 查找视觉元素
         for line in lines:
             if any(keyword in line for keyword in ['视觉元素', '元素', '物体', '主体']):
                 result['visual_elements'] = re.sub(r'.*?[:：]\s*', '', line)
                 break
         
-        # 查找风格
         for line in lines:
             if any(keyword in line for keyword in ['风格', '纪实', '摄影', '色调']):
                 result['style'] = re.sub(r'.*?[:：]\s*', '', line)
                 break
         
-        # 如果没有提取到visual_concept，尝试从dubbing智能推断
-        if not result['visual_concept'] and result['dubbing']:
-            result['visual_concept'] = self._infer_visual_concept_from_dubbing(result['dubbing'])
+        if not skip_llm_inference:
+            if not result['visual_concept'] and result['dubbing']:
+                result['visual_concept'] = self._infer_visual_concept_from_dubbing(result['dubbing'])
+            if not result['visual_elements'] and result['dubbing']:
+                result['visual_elements'] = self._infer_visual_elements_from_dubbing(result['dubbing'])
         
-        # 如果没有提取到visual_elements，尝试从dubbing智能推断
-        if not result['visual_elements'] and result['dubbing']:
-            result['visual_elements'] = self._infer_visual_elements_from_dubbing(result['dubbing'])
-        
-        # 如果没有提取到，使用整个description作为dubbing
         if not result['dubbing']:
             result['dubbing'] = cleaned[:200]
         
@@ -6535,14 +6528,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("正在加载音频...", 35)
             self.log("\n📍 步骤 6/10: 加载音频文件")
             
-            # 再次检查音频文件（可能在图片生成期间被删除或移动）
-            if not os.path.exists(self.audio_path):
-                self.log(f"   ❌ 音频文件不存在: {self.audio_path}")
-                self.log("      音频文件可能在图片生成期间被移动或删除")
-                self.log("      请重新导入音频文件")
-                self.update_task_progress("就绪")
-                return
-            
             audio = AudioFileClip(self.audio_path)
             audio_duration = audio.duration
             self.log(f"   ✅ 音频加载成功，时长: {audio_duration:.2f}s")
@@ -6551,27 +6536,36 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("正在验证时间轴...", 40)
             self.log("\n📍 步骤 7/10: 验证时间轴")
             total_shots_duration = 0
-            for shot in self.shots_data:
+            has_gaps = False
+            has_overlap = False
+            total_gaps = 0
+            total_overlap = 0
+            for i, shot in enumerate(self.shots_data):
                 expected_duration = shot['end'] - shot['start']
                 shot['duration'] = expected_duration
                 total_shots_duration += expected_duration
+                if i > 0:
+                    gap = shot['start'] - self.shots_data[i-1]['end']
+                    if gap > 0.05:
+                        has_gaps = True
+                        total_gaps += gap
+                    elif gap < 0:
+                        has_overlap = True
+                        total_overlap += abs(gap)
             
             self.log(f"   📊 音频时长: {audio_duration:.2f}s, 分镜总时长: {total_shots_duration:.2f}s")
-            
-            # 计算时间间隔和重叠
-            total_gaps = 0
-            total_overlap = 0
-            for i in range(1, len(self.shots_data)):
-                gap = self.shots_data[i]['start'] - self.shots_data[i-1]['end']
-                if gap > 0.05:
-                    total_gaps += gap
-                elif gap < 0:
-                    total_overlap += abs(gap)
             
             if total_gaps > 0:
                 self.log(f"      ⏱️ 时间间隔: {total_gaps:.2f}s")
             if total_overlap > 0:
                 self.log(f"      ⚠️ 时间重叠: {total_overlap:.2f}s")
+            
+            if has_gaps:
+                self.log("      ⚠️ 检测到时间间隔，使用精确定位模式")
+            elif has_overlap:
+                self.log("      ⚠️ 检测到时间重叠，使用精确定位模式")
+            else:
+                self.log("      ✅ 时间戳连续，使用精确定位模式")
             
             self.log("      📍 保持原始语音时间戳，确保音画同步")
             
@@ -6593,82 +6587,89 @@ Translation examples (Chinese meaning → English visual elements):
             height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
             self.log(f"   📐 视频分辨率: {width}x{height}")
             
-            # 检测是否有时间间隔或重叠
-            # 始终使用精确定位模式，保持语音时间戳不变
-            # 这样可以确保图片显示时间与语音片段精确对应
-            has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
-                          for i in range(1, len(self.shots_data)))
-            has_overlap = any(self.shots_data[i]['start'] < self.shots_data[i-1]['end'] 
-                             for i in range(1, len(self.shots_data)))
-            
-            if has_gaps:
-                self.log("      ⚠️ 检测到时间间隔，使用精确定位模式")
-            elif has_overlap:
-                self.log("      ⚠️ 检测到时间重叠，使用精确定位模式")
-            else:
-                self.log("      ✅ 时间戳连续，使用精确定位模式")
-            
             self.log("      📍 保持原始语音时间戳，确保音画同步")
             
             if check_cancelled():
                 return
             
-            # 步骤9: 创建视频片段
+            # 步骤9: 创建视频片段（多线程批量加载图片）
             self.update_task_progress("正在创建视频片段...", 50)
             self.log("\n📍 步骤 9/10: 创建视频片段")
             clips = []
             total_shots = len(self.shots_data)
-            processed_shots = 0
             
             self.log(f"   📊 共 {total_shots} 个分镜需要处理...")
             
+            from PIL import Image as PILImage
+            
+            def _load_and_resize_single(shot_item):
+                shot, w, h = shot_item
+                image_path = os.path.join(self.images_dir, shot['image_file'])
+                if not os.path.exists(image_path):
+                    return (shot, None)
+                try:
+                    with PILImage.open(image_path) as orig_img:
+                        img = self._resize_image_to_fit(orig_img.copy(), w, h)
+                    return (shot, img)
+                except Exception:
+                    return (shot, None)
+            
+            load_batch_size = min(16, total_shots)
+            self.log(f"   ⚡ 多线程加载: {load_batch_size}线程并行预加载图片")
+            
+            shot_img_map = {}
+            load_start = time.time()
+            with ThreadPoolExecutor(max_workers=load_batch_size) as loader_pool:
+                load_tasks = [(shot, width, height) for shot in self.shots_data]
+                for shot, img in loader_pool.map(_load_and_resize_single, load_tasks):
+                    if img is not None:
+                        shot_img_map[shot['image_file']] = img
+                    else:
+                        self.log(f"      ⚠️ 图片缺失: {shot['image_file']}")
+            
+            load_elapsed = time.time() - load_start
+            self.log(f"   ✅ 图片预加载完成: {len(shot_img_map)}/{total_shots} 张 (耗时 {load_elapsed:.1f}s)")
+            
+            processed_shots = 0
             for shot in self.shots_data:
                 if check_cancelled():
+                    for img in shot_img_map.values():
+                        try: img.close()
+                        except: pass
                     return
                 
                 processed_shots += 1
-                
-                # 更新进度（50% - 60% 范围）
                 progress = 50 + int((processed_shots / total_shots) * 10)
-                if processed_shots % 10 == 0 or processed_shots == total_shots:  # 每10个分镜更新一次，避免频繁更新
+                if processed_shots % 10 == 0 or processed_shots == total_shots:
                     self.update_task_progress(f"正在创建视频片段 ({processed_shots}/{total_shots})...", progress)
-                    self.log(f"   📸 已处理: {processed_shots}/{total_shots} 个分镜")
                 
-                image_path = os.path.join(self.images_dir, shot['image_file'])
-                if os.path.exists(image_path):
-                    from PIL import Image
-                    with Image.open(image_path) as orig_img:
-                        img = self._resize_image_to_fit(orig_img.copy(), width, height)
-                    
-                    shot_duration = shot['end'] - shot['start']
-                    
-                    if shot_duration <= 0:
-                        self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
-                        continue
-                    
-                    clip = ImageClip(np.array(img)).with_duration(shot_duration)
-                    
-                    try:
-                        img.close()
-                    except Exception:
-                        pass
-                    
-                    # 应用动画效果（注意：必须在设置起始时间之前调用）
-                    if animation_type != "无":
-                        clip = self.apply_animation_effect_prerender(clip)
-                    
-                    # 应用过渡效果
-                    if transition_type == "交叉淡化" and shot_duration > 0.6:
-                        crossfade_dur = min(0.3, shot_duration * 0.15)
-                        clip = clip.crossfadein(crossfade_dur).crossfadeout(crossfade_dur)
-                    
-                    # 精确定位到时间轴位置
-                    # 使用 with_start 方法（兼容 ImageClip 和 ImageSequenceClip）
-                    clip = clip.with_start(shot['start'])
-                    
-                    clips.append(clip)
-                else:
-                    self.log(f"      ⚠️ 图片缺失: {shot['image_file']}")
+                img = shot_img_map.get(shot['image_file'])
+                if img is None:
+                    continue
+                
+                shot_duration = shot['end'] - shot['start']
+                if shot_duration <= 0:
+                    self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
+                    try: img.close()
+                    except: pass
+                    continue
+                
+                clip = ImageClip(np.array(img)).with_duration(shot_duration)
+                
+                try:
+                    img.close()
+                except Exception:
+                    pass
+                
+                if animation_type != "无":
+                    clip = self.apply_animation_effect_prerender(clip)
+                
+                if transition_type == "交叉淡化" and shot_duration > 0.6:
+                    crossfade_dur = min(0.3, shot_duration * 0.15)
+                    clip = clip.crossfadein(crossfade_dur).crossfadeout(crossfade_dur)
+                
+                clip = clip.with_start(shot['start'])
+                clips.append(clip)
             
             if not clips:
                 self.log("❌ 没有有效的图片文件")
@@ -6686,11 +6687,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("正在合成视频...", 60)
             self.log("\n📍 步骤 10/10: 合成视频片段")
             
-            # 检查是否有时间间隔
-            has_gaps = any(self.shots_data[i]['start'] > self.shots_data[i-1]['end'] + 0.05 
-                          for i in range(1, len(self.shots_data)))
-            
-            # 检查第一个片段之前是否有间隔
             first_start = self.shots_data[0]['start'] if self.shots_data else 0
             has_start_gap = first_start > 0.05
             
@@ -6752,41 +6748,62 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("\n🎥 开始渲染视频...")
             output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
             
-            # 检测GPU加速
+            if not hasattr(DocuMakerLiteV7, '_gpu_encoder_cache'):
+                DocuMakerLiteV7._gpu_encoder_cache = None
+            
             use_gpu = False
-            gpu_preset = "p4"  # GPU 编码器预设（质量优先）
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    try:
-                        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
-                        if 'h264_nvenc' in result.stdout:
-                            use_gpu = True
-                            self.log(f"   ⚡ 检测到GPU加速可用 (h264_nvenc)")
-                            self.log(f"      📊 编码器预设: preset='{gpu_preset}' (质量优先)")
-                    except FileNotFoundError:
-                        self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
-                    except Exception as e:
-                        self.log(f"      ⚠️ ffmpeg检测失败: {type(e).__name__} - {str(e)[:100]}")
-            except Exception as e:
-                self.log(f"      ⚠️ GPU检测失败: {type(e).__name__} - {str(e)[:100]}")
-                use_gpu = False
+            gpu_encoder = 'h264_nvenc'
+            gpu_preset = "p4"
+            
+            if DocuMakerLiteV7._gpu_encoder_cache is not None:
+                use_gpu, gpu_encoder, gpu_preset = DocuMakerLiteV7._gpu_encoder_cache
+                if use_gpu:
+                    self.log(f"   ⚡ 使用缓存检测结果: GPU加速 ({gpu_encoder}, preset='{gpu_preset}')")
+                else:
+                    self.log(f"   🖥️ 使用缓存检测结果: CPU渲染 (libx264)")
+            else:
+                try:
+                    result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
+                    if 'h264_nvenc' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_nvenc'
+                        gpu_preset = "p4"
+                        self.log(f"   ⚡ 检测到NVIDIA GPU加速 (h264_nvenc)")
+                    elif 'h264_qsv' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_qsv'
+                        gpu_preset = "medium"
+                        self.log(f"   ⚡ 检测到Intel QuickSync加速 (h264_qsv)")
+                    elif 'h264_amf' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_amf'
+                        gpu_preset = "quality"
+                        self.log(f"   ⚡ 检测到AMD AMF加速 (h264_amf)")
+                    else:
+                        self.log("      🖥️ 未检测到硬件编码器，将使用CPU渲染")
+                except FileNotFoundError:
+                    self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
+                except Exception as e:
+                    self.log(f"      ⚠️ ffmpeg检测失败: {type(e).__name__} - {str(e)[:100]}")
+                
+                DocuMakerLiteV7._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
             
             if not use_gpu:
                 self.log("      🖥️ 将使用CPU渲染 (libx264, preset='veryfast')")
             
-            # 渲染视频
             try:
                 self.log(f"   🔄 正在渲染视频文件...")
                 self.log(f"      输出路径: {os.path.basename(output_path)}")
                 if use_gpu:
-                    final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset=gpu_preset, ffmpeg_params=['-movflags', '+faststart'], logger=None)
+                    hw_params = ['-movflags', '+faststart', '-gpu', '0'] if gpu_encoder == 'h264_nvenc' else ['-movflags', '+faststart']
+                    final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=None)
                 else:
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
             except Exception as e:
                 if use_gpu:
                     self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
                     self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
+                    DocuMakerLiteV7._gpu_encoder_cache = (False, 'libx264', 'veryfast')
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
                 else:
                     raise
@@ -6804,7 +6821,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("\n🧹 释放资源...")
             self.log("   ✅ 资源释放完成")
             
-            import subprocess
             self.log("\n📂 打开输出文件夹...")
             subprocess.Popen(['explorer', os.path.dirname(output_path)])
             
@@ -7030,7 +7046,7 @@ Translation examples (Chinese meaning → English visual elements):
                         scale = 1.0 + 0.05 * (t / original_duration)
                         new_w = int(w * scale)
                         new_h = int(h * scale)
-                        resized = img.resize((new_w, new_h), Image.LANCZOS)
+                        resized = img.resize((new_w, new_h), Image.BILINEAR)
                         
                         if new_w > w:
                             left = (new_w - w) // 2
@@ -7054,31 +7070,17 @@ Translation examples (Chinese meaning → English visual elements):
         from PIL import Image
         import numpy as np
 
-        # 获取原始尺寸
         orig_width, orig_height = img.size
-
-        # 计算缩放比例（保持宽高比）
         scale_w = target_width / orig_width
         scale_h = target_height / orig_height
         scale = min(scale_w, scale_h)
-
-        # 计算缩放后的尺寸
         new_width = int(orig_width * scale)
         new_height = int(orig_height * scale)
-
-        # 缩放图片
-        resized = img.resize((new_width, new_height), Image.LANCZOS)
-
-        # 创建目标尺寸的画布（黑色背景）
+        resized = img.resize((new_width, new_height), Image.BILINEAR)
         new_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
-
-        # 计算居中粘贴位置
         paste_x = (target_width - new_width) // 2
         paste_y = (target_height - new_height) // 2
-
-        # 粘贴缩放后的图片
         new_img.paste(resized, (paste_x, paste_y))
-
         return new_img
 
     def clear_audio(self):
