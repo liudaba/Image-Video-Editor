@@ -608,6 +608,44 @@ class DocuMakerLiteV7:
             self.log("=" * 60)
             self.log("")
         threading.Thread(target=preload_whisper, daemon=True).start()
+        
+        self._api_heartbeat_running = True
+        def api_heartbeat():
+            while self._api_heartbeat_running:
+                time.sleep(30)
+                if not self._api_heartbeat_running:
+                    break
+                self._check_api_heartbeat()
+        threading.Thread(target=api_heartbeat, daemon=True).start()
+    
+    def _check_api_heartbeat(self):
+        """周期性检测API连接状态，发现恢复时自动连接并提示"""
+        try:
+            sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+            sd_connected = getattr(self, '_sd_api_connected', False)
+            
+            if not sd_connected:
+                try:
+                    resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=5)
+                    if resp.status_code == 200:
+                        self._sd_api_connected = True
+                        if hasattr(self, 'sd_api_status_var'):
+                            self.sd_api_status_var.set("✅ 已连接")
+                        if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
+                            self.root.after(0, lambda: self.sd_api_status_label.config(foreground="green"))
+                        self.log("✅ SD API 已自动连接")
+                        if hasattr(self, 'root') and self.root:
+                            self.root.after(0, self._update_model_dropdown)
+                except Exception:
+                    pass
+            
+            ollama_connected = is_ollama_available()
+            if not ollama_connected:
+                if check_ollama_available():
+                    set_ollama_available_global(True)
+                    self.log("✅ Ollama服务已自动连接")
+        except Exception:
+            pass
     
     def auto_connect_ollama(self):
         """启动时自动检测并连接Ollama服务 - 失败时弹窗提醒"""
@@ -1687,6 +1725,7 @@ class DocuMakerLiteV7:
             response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
             if response.status_code == 200:
                 self.log("✅ SD API 连接成功！")
+                self._sd_api_connected = True
                 
                 # 更新状态变量（即使 label 还不存在也要更新，这样面板打开时能显示正确状态）
                 if hasattr(self, 'sd_api_status_var'):
@@ -1707,6 +1746,7 @@ class DocuMakerLiteV7:
                 return True
             else:
                 self.log(f"❌ SD API 连接失败: 状态码 {response.status_code}")
+                self._sd_api_connected = False
                 
                 # 更新状态变量
                 if hasattr(self, 'sd_api_status_var'):
@@ -1722,6 +1762,7 @@ class DocuMakerLiteV7:
                 return False
         except Exception as e:
             self.log(f"❌ SD API 连接异常: {str(e)}")
+            self._sd_api_connected = False
             
             # 更新状态变量
             if hasattr(self, 'sd_api_status_var'):
