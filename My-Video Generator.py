@@ -476,8 +476,9 @@ class DocuMakerLiteV7:
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")
         
-        # 风格预设 - 初始空列表，由高级设置面板填充
-        self.dlr_vars = []
+        # 风格预设 - 预创建变量，确保load_config能恢复风格设置
+        style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
+        self.dlr_vars = [(opt, tk.BooleanVar()) for opt in style_options]
         
         # 模型下拉菜单（分镜脚本窗口已移除，这些frame暂不挂载到UI）
         self.model_dropdown_frame = ttk.Frame(self.log_frame_container)
@@ -883,22 +884,20 @@ class DocuMakerLiteV7:
         # 创建风格预设复选框网格
         style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
         
-        # 检查是否需要重新创建dlr_vars
-        if not hasattr(self, 'dlr_vars'):
-            self.dlr_vars = []
-        else:
-            # 清空现有列表
-            self.dlr_vars.clear()
+        # 复用__init__中已创建的dlr_vars（保留load_config恢复的值）
+        existing_vars = {name: var for name, var in self.dlr_vars}
         
         # 3列网格布局
         for i, opt in enumerate(style_options):
-            var = tk.BooleanVar()
+            if opt in existing_vars:
+                var = existing_vars[opt]
+            else:
+                var = tk.BooleanVar()
+                self.dlr_vars.append((opt, var))
             row = i // 3
             col = i % 3
             chk = ttk.Checkbutton(self.style_grid, text=opt, variable=var)
-            # ttk.Checkbutton不支持font参数，需要通过style设置
             chk.grid(row=row, column=col, sticky=tk.W, padx=10, pady=8)
-            self.dlr_vars.append((opt, var))
         
         # 加载保存的风格设置
         try:
