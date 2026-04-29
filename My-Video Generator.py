@@ -12,6 +12,7 @@ import hashlib
 import re
 import gc
 import subprocess
+import shutil
 import traceback
 import requests
 import whisper
@@ -4534,7 +4535,7 @@ Translation examples (Chinese meaning → English visual elements):
         threading.Thread(target=run_task, daemon=True, name=f"Task-{task_id}").start()
     
     def _thorough_cleanup(self):
-        """启动时清理上次可能残留的磁盘文件"""
+        """彻底清理所有分镜脚本数据和缓存 - 确保无残留（含磁盘文件+内存数据）"""
         try:
             if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
@@ -4560,8 +4561,6 @@ Translation examples (Chinese meaning → English visual elements):
         except Exception:
             pass
 
-    def _thorough_cleanup(self):
-        """彻底清理所有分镜脚本数据和缓存 - 确保无残留"""
         try:
             self.shots_data = []
         except Exception:
@@ -4666,15 +4665,6 @@ Translation examples (Chinese meaning → English visual elements):
         except Exception:
             pass
 
-        try:
-            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                # 注意：不在这里直接删除文件，而是由 _cleanup_residual_files() 移动到垃圾桶
-                # 这样可以保留生成的文件供用户查看和恢复
-                pass
-        except Exception:
-            pass
-            pass
-
     def _cleanup_residual_files(self):
         """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
         try:
@@ -4697,7 +4687,7 @@ Translation examples (Chinese meaning → English visual elements):
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
                     dest = os.path.join(trash_session_dir, "shots_data.json")
-                    os.rename(shots_file, dest)
+                    shutil.move(shots_file, dest)
                     moved_count += 1
 
                 # 2. 移动images文件夹内的所有图片文件
@@ -4710,7 +4700,7 @@ Translation examples (Chinese meaning → English visual elements):
                         if os.path.isfile(fp):
                             try:
                                 dest = os.path.join(images_trash_dir, f)
-                                os.rename(fp, dest)
+                                shutil.move(fp, dest)
                                 moved_count += 1
                             except Exception as e:
                                 self.log(f"⚠️ 移动图片文件失败 {f}: {e}")
@@ -4721,7 +4711,7 @@ Translation examples (Chinese meaning → English visual elements):
                     if os.path.isfile(fp):
                         try:
                             dest = os.path.join(trash_session_dir, f)
-                            os.rename(fp, dest)
+                            shutil.move(fp, dest)
                             moved_count += 1
                         except Exception as e:
                             self.log(f"⚠️ 移动文件失败 {f}: {e}")
@@ -6734,7 +6724,7 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"      ✅ 已修复时间间隔: {len(clips)} 个片段")
             
             try:
-                background = ColorClip(size=(width, height), color=(0, 0, 0), duration=audio_duration)
+                background = ColorClip(size=(width, height), color=(0, 0, 0)).with_duration(audio_duration)
                 final_clip = CompositeVideoClip([background] + clips, size=(width, height))
                 self.log(f"   ✅ 视频片段合成完成: {len(clips)} 个片段")
             except Exception as e:
@@ -6767,13 +6757,17 @@ Translation examples (Chinese meaning → English visual elements):
             gpu_preset = "p4"  # GPU 编码器预设（质量优先）
             try:
                 import torch
-                import subprocess
                 if torch.cuda.is_available():
-                    result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
-                    if 'h264_nvenc' in result.stdout:
-                        use_gpu = True
-                        self.log(f"   ⚡ 检测到GPU加速可用 (h264_nvenc)")
-                        self.log(f"      📊 编码器预设: preset='{gpu_preset}' (质量优先)")
+                    try:
+                        result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
+                        if 'h264_nvenc' in result.stdout:
+                            use_gpu = True
+                            self.log(f"   ⚡ 检测到GPU加速可用 (h264_nvenc)")
+                            self.log(f"      📊 编码器预设: preset='{gpu_preset}' (质量优先)")
+                    except FileNotFoundError:
+                        self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
+                    except Exception as e:
+                        self.log(f"      ⚠️ ffmpeg检测失败: {type(e).__name__} - {str(e)[:100]}")
             except Exception as e:
                 self.log(f"      ⚠️ GPU检测失败: {type(e).__name__} - {str(e)[:100]}")
                 use_gpu = False
@@ -6786,15 +6780,14 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"   🔄 正在渲染视频文件...")
                 self.log(f"      输出路径: {os.path.basename(output_path)}")
                 if use_gpu:
-                    # 使用 p4 预设（质量优先），适合高质量输出
-                    final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset=gpu_preset, logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='h264_nvenc', audio_codec='aac', preset=gpu_preset, ffmpeg_params=['-movflags', '+faststart'], logger=None)
                 else:
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
             except Exception as e:
                 if use_gpu:
                     self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
                     self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
                 else:
                     raise
             
@@ -6813,7 +6806,7 @@ Translation examples (Chinese meaning → English visual elements):
             
             import subprocess
             self.log("\n📂 打开输出文件夹...")
-            subprocess.Popen(f'explorer "{os.path.dirname(output_path)}"')
+            subprocess.Popen(['explorer', os.path.dirname(output_path)])
             
         except Exception as e:
             self.log(f"\n❌ 视频生成失败: {e}")
@@ -7521,7 +7514,7 @@ Translation examples (Chinese meaning → English visual elements):
         output_folder = os.path.join(self.base_dir, "output_project")
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        subprocess.Popen(f'explorer "{output_folder}"')
+        subprocess.Popen(['explorer', output_folder])
     
     def setup_script_area(self):
         """设置脚本区域 - 已移除分镜脚本窗口，仅保留内部变量兼容性"""
