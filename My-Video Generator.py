@@ -4019,7 +4019,13 @@ Translation examples (Chinese meaning → English visual elements):
             return True
 
     def check_and_update_dependencies(self):
-        """检查并更新依赖项"""
+        """检查并更新依赖项（子线程执行，避免阻塞GUI）"""
+        def _worker():
+            self._check_and_update_dependencies_impl()
+        threading.Thread(target=_worker, daemon=True).start()
+    
+    def _check_and_update_dependencies_impl(self):
+        """检查并更新依赖项的实际实现"""
         self.log("====================================")
         self.log("🔧 开始检查并更新依赖项")
         self.log("====================================")
@@ -4028,11 +4034,11 @@ Translation examples (Chinese meaning → English visual elements):
         dependencies = [
             ("requests", ["urllib3", "chardet", "charset_normalizer", "idna", "certifi"]),
             ("Pillow", []),
+            ("numpy", []),
+            ("torch", []),
             ("whisper", []),
             ("moviepy", []),
-            ("ollama", []),
             ("psutil", []),
-            ("GPUtil", []),
         ]
         
         import subprocess
@@ -4193,7 +4199,8 @@ Translation examples (Chinese meaning → English visual elements):
             msg += f"❌ 失败: {failed_count} 个\n"
         msg += f"\n已自动处理子依赖版本兼容性。"
         
-        messagebox.showinfo("成功", msg)
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, lambda: messagebox.showinfo("成功", msg))
     
     def monitor_performance(self):
         """监控系统性能 - 优化版（非阻塞）"""
