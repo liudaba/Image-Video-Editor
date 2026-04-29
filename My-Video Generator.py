@@ -5888,16 +5888,8 @@ Translation examples (Chinese meaning → English visual elements):
             except Exception:
                 pass
             
-            # 关闭Ollama释放GPU显存（分镜任务不再需要大模型）
-            try:
-                import subprocess
-                if os.name == 'nt':
-                    subprocess.run(['taskkill', '/F', '/IM', 'ollama.exe'], capture_output=True)
-                else:
-                    subprocess.run(['pkill', '-f', 'ollama'], capture_output=True)
-                self.log("🧹 Ollama已关闭，GPU显存已释放")
-            except Exception:
-                pass
+            set_ollama_available_global(False)
+            self.log("🧹 Ollama标记为闲置，GPU显存将在空闲时自动释放")
             
             # 更新进度为完成
             self.update_task_progress("分镜生成完成", 100)
@@ -6176,8 +6168,8 @@ Translation examples (Chinese meaning → English visual elements):
                         try:
                             _, save_path, b64_data = item
                             img_bytes = base64.b64decode(b64_data)
-                            image = Image.open(BytesIO(img_bytes))
-                            image.save(save_path)
+                            with Image.open(BytesIO(img_bytes)) as image:
+                                image.save(save_path)
                         except Exception:
                             pass
                         finally:
