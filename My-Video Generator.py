@@ -6786,6 +6786,12 @@ Translation examples (Chinese meaning → English visual elements):
         self.log("📂 开始导入音频...")
         try:
             import os
+            with self.task_lock:
+                if self.task_running:
+                    self.log("⚠️ 有任务正在运行，请等待任务完成后再导入音频")
+                    messagebox.showwarning("任务运行中", "有任务正在运行，请等待任务完成后再导入音频！")
+                    return
+            
             # 打开文件选择对话框
             file_path = filedialog.askopenfilename(
                 title="选择音频文件",
@@ -6823,12 +6829,51 @@ Translation examples (Chinese meaning → English visual elements):
             if hasattr(self, '_shot_texts_for_context'):
                 delattr(self, '_shot_texts_for_context')
             
+            # 释放Whisper GPU资源（如果上次任务异常退出未释放）
+            try:
+                if self.whisper_model is not None:
+                    import torch
+                    if torch.cuda.is_available():
+                        self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.empty_cache()
+                        self.log("   🧹 Whisper GPU资源已释放")
+            except Exception:
+                pass
+            
             # 删除旧的分镜脚本文件
             try:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
                     os.remove(shots_file)
                     self.log("   🗑️ 已删除旧的shots_data.json")
+            except Exception:
+                pass
+            
+            # 删除旧的图片文件
+            try:
+                if os.path.exists(self.images_dir):
+                    for f in os.listdir(self.images_dir):
+                        fp = os.path.join(self.images_dir, f)
+                        if os.path.isfile(fp):
+                            try:
+                                os.remove(fp)
+                            except Exception:
+                                pass
+                    self.log("   🗑️ 已清除旧图片文件")
+            except Exception:
+                pass
+            
+            # 删除旧的视频文件和输出目录中的所有生成文件
+            try:
+                if os.path.exists(self.output_dir):
+                    for f in os.listdir(self.output_dir):
+                        fp = os.path.join(self.output_dir, f)
+                        if os.path.isfile(fp):
+                            try:
+                                os.remove(fp)
+                            except Exception:
+                                pass
+                    self.log("   🗑️ 已清除输出目录中的旧文件")
             except Exception:
                 pass
             
@@ -6860,6 +6905,31 @@ Translation examples (Chinese meaning → English visual elements):
                         self.state_manager['video']['path'] = None
             except Exception:
                 pass
+            
+            try:
+                if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
+                    self.data_bus.clear()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
+                    self.event_system.clear()
+            except Exception:
+                pass
+            
+            if hasattr(self, 'txt_script') and self.txt_script:
+                def clear_script():
+                    try:
+                        self.txt_script.delete(1.0, tk.END)
+                        self.txt_script.insert(tk.END, "# 分镜脚本将在此显示\n")
+                    except Exception:
+                        pass
+                if hasattr(self, 'root') and self.root:
+                    self.root.after(0, clear_script)
+            
+            import gc
+            gc.collect()
             
             self.log("✅ 旧数据已清除，新音频将使用全新转录结果")
             
