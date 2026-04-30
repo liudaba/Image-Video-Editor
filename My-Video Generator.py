@@ -5655,9 +5655,7 @@ Translation examples (Chinese meaning → English visual elements):
             
             # 步骤2.5: 使用原始语音片段（确保时间戳准确性，实现100%语音同步）
             self.log("\n📍 步骤 2.5/4: 使用原始语音片段")
-            self.update_task_progress("正在处理原始语音片段...", 65)
             
-            # 直接使用原始语音片段，不进行语义合并以保持时间戳准确性
             final_tasks = original_shot_tasks
             self.log(f"📝 使用原始语音片段: {len(final_tasks)} 个分镜")
             
@@ -5665,6 +5663,7 @@ Translation examples (Chinese meaning → English visual elements):
             pregenerated_prompts = {}
             
             self.log("\n🎨 预先为原始分镜生成提示词...")
+            self.update_task_progress(f"正在生成分镜提示词 (0/{len(final_tasks)})...", 65)
             
             if not final_tasks:
                 self.log("   ⚠️ 没有分镜数据")
@@ -5750,17 +5749,27 @@ Translation examples (Chinese meaning → English visual elements):
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
 
+            completed_count = 0
             with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
-                results = list(executor.map(generate_single_prompt, enumerate(final_tasks)))
-                
-                for idx, prompt, error in results:
-                    if error:
+                future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
+                for future in as_completed(future_to_idx):
+                    try:
+                        idx, prompt, error = future.result()
+                        if error:
+                            failed_count += 1
+                            error_display = error[:200] if len(error) > 200 else error
+                            self.log(f"   ⚠️ 第{idx+1}个生成失败: {error_display}")
+                            pregenerated_prompts[idx] = ""
+                        else:
+                            pregenerated_prompts[idx] = prompt
+                    except Exception as e:
+                        idx = future_to_idx[future]
                         failed_count += 1
-                        error_display = error[:200] if len(error) > 200 else error
-                        self.log(f"   ⚠️ 第{idx+1}个生成失败: {error_display}")
                         pregenerated_prompts[idx] = ""
-                    else:
-                        pregenerated_prompts[idx] = prompt
+                        self.log(f"   ⚠️ 第{idx+1}个生成异常: {str(e)[:100]}")
+                    completed_count += 1
+                    progress_pct = 65 + int((completed_count / total_tasks) * 15)
+                    self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
             
             elapsed = time.time() - start_time
             speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
