@@ -204,7 +204,7 @@ class LLMConfig:
 
 
 # ============ 统一 Ollama 调用函数 ============
-_ollama_call_lock = threading.Lock()
+_ollama_call_semaphore = threading.Semaphore(3)
 
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
@@ -265,7 +265,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             if log_callback:
                 log_callback(f"   尝试模型: {model}")
 
-            with _ollama_call_lock:
+            with _ollama_call_semaphore:
                 response = get_http_session().post(
                     f"{Config.OLLAMA_BASE_URL}/api/chat",
                     json={
@@ -346,7 +346,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
         }
 
     try:
-        with _ollama_call_lock:
+        with _ollama_call_semaphore:
             response = get_http_session().post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
                 json={
@@ -394,7 +394,7 @@ def warmup_model(model, log_callback=None):
         bool: 是否成功
     """
     try:
-        with _ollama_call_lock:
+        with _ollama_call_semaphore:
             response = get_http_session().post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
                 json={

@@ -2759,7 +2759,7 @@ class DocuMakerLiteV7:
         
         return prompt_text
 
-    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text=""):
+    def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text="", shot_index=-1):
         """使用大模型生成提示词 - 只给规则不给案例，让大模型自主创作"""
         if theme_elements is None:
             theme_elements = []
@@ -2792,7 +2792,7 @@ class DocuMakerLiteV7:
             if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
                 shot_texts = self._shot_texts_for_context
                 try:
-                    idx = shot_texts.index(dubbing) if dubbing in shot_texts else -1
+                    idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
                     if idx >= 0:
                         # 添加全局内容摘要（帮助理解整体主题）
                         if full_text and len(full_text) > 50:
@@ -2835,7 +2835,7 @@ class DocuMakerLiteV7:
             if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
                 shot_texts = self._shot_texts_for_context
                 try:
-                    idx = shot_texts.index(dubbing) if dubbing in shot_texts else -1
+                    idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
                     if idx >= 0:
                         prev_texts = [shot_texts[j] for j in range(max(0, idx-2), idx)]
                         next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+3))]
@@ -5290,6 +5290,7 @@ Translation examples (Chinese meaning → English visual elements):
             }
             user_custom_theme = ""
             user_custom_tone = ""
+            _ollama_model_already_loaded = False
             
             # 检查缓存中是否有大模型分析结果
             cached_analysis = self.cache_get('analysis', analysis_key)
@@ -5335,6 +5336,7 @@ Translation examples (Chinese meaning → English visual elements):
                     self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
+                _ollama_model_already_loaded = is_ollama_available()
             else:
                 if len(full_text) > 100:
                     ollama_connected = False
@@ -5412,7 +5414,6 @@ Translation examples (Chinese meaning → English visual elements):
                             
                             def call_ollama_with_model(model_name):
                                 """使用指定模型调用Ollama - 通篇分析提取主题"""
-                                global ollama_lock
                                 try:
                                     custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
                                     custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
@@ -5576,6 +5577,7 @@ Translation examples (Chinese meaning → English visual elements):
                                 self.log("✅ 主题分析完成，纠错结果将应用到分镜文本")
                             else:
                                 self.log("✅ 主题分析完成，文本无需纠错")
+                            _ollama_model_already_loaded = True
                         
                         except Exception as e:
                             self.log(f"   ⚠️ 大模型分析过程出错: {str(e)[:100]}")
@@ -5621,18 +5623,20 @@ Translation examples (Chinese meaning → English visual elements):
             
             self.log(f"💬 提示词类型: {user_prompt_type}")
             
-            # 预热模型 - 发送简单请求加载模型到GPU
-            self.log("🔥 预热模型中...")
-            try:
-                model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-                if not model:
-                    model = "gemma3:4b"
-                warmup_start = time.time()
-                warmup_model(model)
-                warmup_time = time.time() - warmup_start
-                self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
-            except Exception as e:
-                self.log(f"⚠️ 模型预热失败: {str(e)[:50]}")
+            if _ollama_model_already_loaded:
+                self.log("✅ 模型已在GPU中（主题分析阶段已加载），跳过预热")
+            else:
+                self.log("🔥 预热模型中...")
+                try:
+                    model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                    if not model:
+                        model = "gemma3:4b"
+                    warmup_start = time.time()
+                    warmup_model(model)
+                    warmup_time = time.time() - warmup_start
+                    self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
+                except Exception as e:
+                    self.log(f"⚠️ 模型预热失败: {str(e)[:50]}")
             
             # 获取用户预设的风格（高级设置面板）
             user_selected_styles = self.get_selected_styles()
@@ -5676,7 +5680,8 @@ Translation examples (Chinese meaning → English visual elements):
                             theme_elements=theme_info.get('theme_elements', []),
                             visual_style=effective_visual_style,
                             original_dubbing=dubbing,
-                            full_text=full_text
+                            full_text=full_text,
+                            shot_index=idx
                         )
                         return (idx, prompt, None)
                     return (idx, "", None)
@@ -5711,12 +5716,40 @@ Translation examples (Chinese meaning → English visual elements):
             self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
             
             if failed_count > 0:
-                self.log(f"❌ 错误: {failed_count} 个提示词生成失败，任务终止")
-                return
+                self.log(f"⚠️ {failed_count} 个提示词生成失败，使用内置逻辑回退生成")
+                for idx, task in enumerate(final_tasks):
+                    if idx in pregenerated_prompts and not pregenerated_prompts[idx]:
+                        dubbing = task.get('text', '')
+                        if dubbing:
+                            if user_prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
+                                pregenerated_prompts[idx] = self._generate_arv_format_prompt(dubbing, theme_info.get('content_type', ''), 0)
+                            elif user_prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
+                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''))
+                            else:
+                                pregenerated_prompts[idx] = self._analyze_and_generate_sd_prompt(dubbing, theme_info.get('content_type', ''))
+                            if pregenerated_prompts[idx]:
+                                self.log(f"   🔄 第{idx+1}个提示词已通过内置逻辑回退生成")
+                                failed_count -= 1
             
             self.log(f"✅ 提示词预生成完成 ({len(pregenerated_prompts)} 个)")
             
             self._pregenerated_prompts = pregenerated_prompts
+            
+            try:
+                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
+                if ollama_model and _ollama_model_already_loaded:
+                    resp = get_http_session().post(
+                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                        timeout=30
+                    )
+                    if resp.status_code == 200:
+                        time.sleep(2)
+                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
+                    else:
+                        self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
+            except Exception as e:
+                self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
             
             # 步骤3: 解析和校准分镜
             self.log("\n📍 步骤 3/4: 解析和校准分镜")
