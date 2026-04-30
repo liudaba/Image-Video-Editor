@@ -15,7 +15,6 @@ import subprocess
 import shutil
 import traceback
 import requests
-import whisper
 
 # ============ 从子模块统一导入（唯一来源） ============
 from video_generator.config import Config, get_http_session
@@ -436,6 +435,7 @@ class DocuMakerLiteV7:
         self.total_audio_duration = 0
         self.MIN_SHOT_DURATION = DEFAULT_MIN_SHOT_DURATION
         self.whisper_model = None
+        self._whisper_on_gpu = False
         
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
@@ -681,6 +681,7 @@ class DocuMakerLiteV7:
     def preload_whisper_model(self):
         """预加载Whisper模型 - 仅加载到CPU，使用时再按需移至GPU，节省显存"""
         try:
+            import whisper
             
             whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
             
@@ -1491,6 +1492,34 @@ class DocuMakerLiteV7:
         if not is_sd and hasattr(self, 'style_dropdown_frame') and self.style_dropdown_visible:
             self.style_dropdown_frame.pack_forget()
             self.style_dropdown_visible = False
+    
+    def _safe_release_whisper_gpu(self):
+        """安全释放Whisper GPU显存 - 仅在Whisper确实在GPU上时才调用torch.cuda
+        
+        避免在Whisper不在GPU上时调用torch.cuda.is_available()，
+        因为该调用会触发CUDA Context创建，导致显存被永久占用。
+        """
+        if not self._whisper_on_gpu or self.whisper_model is None:
+            return
+        
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = next(self.whisper_model.parameters()).device
+                if device.type == "cuda":
+                    self.whisper_model = self.whisper_model.to("cpu")
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                    self._whisper_on_gpu = False
+        except (StopIteration, Exception):
+            try:
+                import torch
+                self.whisper_model = self.whisper_model.to("cpu")
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                self._whisper_on_gpu = False
+            except Exception:
+                pass
     
     def update_task_progress(self, message, progress=None):
         """更新任务进度"""
@@ -4889,23 +4918,20 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
-            import torch
-
             if self.whisper_model is not None:
-                try:
-                    self.whisper_model = self.whisper_model.to("cpu")
-                except Exception:
-                    pass
+                if self._whisper_on_gpu:
+                    try:
+                        import torch
+                        self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.synchronize()
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    self._whisper_on_gpu = False
                 del self.whisper_model
                 self.whisper_model = None
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-
             gc.collect()
-        except ImportError:
-            pass
         except Exception:
             pass
 
@@ -5110,29 +5136,17 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"   识别片段数: {len(segments)}")
 
                 if self.whisper_model is not None:
-                    try:
-                        import torch
-                        if torch.cuda.is_available():
-                            try:
-                                device = next(self.whisper_model.parameters()).device
-                                if device.type == "cuda":
-                                    self.whisper_model = self.whisper_model.to("cpu")
-                                    torch.cuda.synchronize()
-                                    torch.cuda.empty_cache()
-                                    self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
-                            except (StopIteration, Exception):
-                                pass
-                    except ImportError:
-                        pass
+                    self._safe_release_whisper_gpu()
+                    if not self._whisper_on_gpu:
+                        self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
                 whisper_used_gpu = False
             else:
                 # 加载Whisper模型进行语音识别
                 self.update_task_progress("正在加载Whisper模型...", 20)
                 
-                # 检查Ollama是否有模型残留占用GPU显存（上次任务异常退出时可能残留）
+                # 检查Ollama是否有模型残留占用GPU显存，确保Whisper独占GPU
                 try:
-                    ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
-                    if ollama_model and is_ollama_available():
+                    if is_ollama_available():
                         try:
                             status_resp = get_http_session().get(
                                 f"{Config.OLLAMA_BASE_URL}/api/ps",
@@ -5140,14 +5154,20 @@ Translation examples (Chinese meaning → English visual elements):
                             )
                             if status_resp.status_code == 200:
                                 loaded_models = status_resp.json().get('models', [])
-                                if any(m.get('name', '').startswith(ollama_model.split(':')[0]) for m in loaded_models):
-                                    resp = get_http_session().post(
-                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                                        timeout=15
-                                    )
-                                    if resp.status_code == 200:
-                                        self.log("🧹 已卸载残留的Ollama模型，为Whisper释放GPU显存")
+                                for m in loaded_models:
+                                    model_name = m.get('name', '')
+                                    if model_name:
+                                        try:
+                                            get_http_session().post(
+                                                f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                                json={"model": model_name, "keep_alive": 0, "stream": False},
+                                                timeout=15
+                                            )
+                                        except Exception:
+                                            pass
+                                if loaded_models:
+                                    time.sleep(2)
+                                    self.log(f"🧹 已卸载 {len(loaded_models)} 个残留Ollama模型，为Whisper释放GPU显存")
                         except Exception:
                             pass
                 except Exception:
@@ -5160,22 +5180,14 @@ Translation examples (Chinese meaning → English visual elements):
                     current_model_size = getattr(self, '_whisper_model_size', None)
                     if current_model_size and current_model_size != whisper_model_size:
                         self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
-                        try:
-                            import torch
-                            if torch.cuda.is_available():
-                                try:
-                                    self.whisper_model = self.whisper_model.to("cpu")
-                                    torch.cuda.empty_cache()
-                                except Exception:
-                                    pass
-                        except ImportError:
-                            pass
+                        self._safe_release_whisper_gpu()
                         del self.whisper_model
                         self.whisper_model = None
                         gc.collect()
                     if self.whisper_model is None:
                         try:
                             import torch
+                            import whisper
                             device = "cuda" if torch.cuda.is_available() else "cpu"
                             if device == "cuda":
                                 gpu_name = torch.cuda.get_device_name(0)
@@ -5183,7 +5195,8 @@ Translation examples (Chinese meaning → English visual elements):
                                 self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
                             self.whisper_model = whisper.load_model(whisper_model_size, device=device)
                             self._whisper_model_size = whisper_model_size
-                            whisper_used_gpu = device == "cuda"
+                            self._whisper_on_gpu = (device == "cuda")
+                            whisper_used_gpu = (device == "cuda")
                             self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
                         except Exception as e:
                             self.log(f"⚠️ Whisper加载失败: {e}")
@@ -5195,6 +5208,7 @@ Translation examples (Chinese meaning → English visual elements):
                                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
                                 self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
                                 self.whisper_model = self.whisper_model.to("cuda")
+                                self._whisper_on_gpu = True
                                 whisper_used_gpu = True
                                 self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
                             else:
@@ -5206,6 +5220,7 @@ Translation examples (Chinese meaning → English visual elements):
                     self.log("📦 正在加载Whisper模型...")
                     try:
                         import torch
+                        import whisper
                         
                         whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                         
@@ -5225,6 +5240,7 @@ Translation examples (Chinese meaning → English visual elements):
                         
                         self.whisper_model = whisper.load_model(whisper_model_size, device=device)
                         whisper_model_loaded = True
+                        self._whisper_on_gpu = (device == "cuda")
                         
                         if torch.cuda.is_available():
                             whisper_used_gpu = True
@@ -5292,15 +5308,9 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("✅ 音频分析结果已缓存")
 
                 # Whisper 转录完成，主动释放 GPU 资源（关键优化）
-                try:
-                    import torch
-                    if self.whisper_model is not None and torch.cuda.is_available():
-                        self.whisper_model = self.whisper_model.to("cpu")
-                        torch.cuda.synchronize()
-                        torch.cuda.empty_cache()
-                        self.log("   ✅ Whisper 模型 GPU 资源已释放")
-                except Exception as e:
-                    self.log(f"   ⚠️ Whisper GPU 释放失败: {e}")
+                self._safe_release_whisper_gpu()
+                if not self._whisper_on_gpu:
+                    self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
@@ -5981,16 +5991,27 @@ Translation examples (Chinese meaning → English visual elements):
 
             # 主题一致性检查完成后，卸载Ollama释放GPU（后续步骤不再需要Ollama）
             try:
-                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
-                if ollama_model and _ollama_model_already_loaded:
-                    resp = get_http_session().post(
-                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                        timeout=30
+                if is_ollama_available():
+                    status_resp = get_http_session().get(
+                        f"{Config.OLLAMA_BASE_URL}/api/ps",
+                        timeout=5
                     )
-                    if resp.status_code == 200:
-                        time.sleep(2)
-                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
+                    if status_resp.status_code == 200:
+                        loaded_models = status_resp.json().get('models', [])
+                        for m in loaded_models:
+                            model_name = m.get('name', '')
+                            if model_name:
+                                try:
+                                    get_http_session().post(
+                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                        json={"model": model_name, "keep_alive": 0, "stream": False},
+                                        timeout=15
+                                    )
+                                except Exception:
+                                    pass
+                        if loaded_models:
+                            time.sleep(2)
+                            self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
             except Exception:
                 pass
 
@@ -6071,22 +6092,31 @@ Translation examples (Chinese meaning → English visual elements):
             
             gc.collect()
             
-            # 先尝试卸载Ollama模型释放GPU显存，再更新全局状态
+            # 兜底卸载Ollama模型释放GPU显存
             try:
-                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
-                if ollama_model:
-                    resp = get_http_session().post(
-                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                        timeout=30
+                if is_ollama_available():
+                    status_resp = get_http_session().get(
+                        f"{Config.OLLAMA_BASE_URL}/api/ps",
+                        timeout=5
                     )
-                    if resp.status_code == 200:
-                        time.sleep(3)
-                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
-                    else:
-                        self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
-            except Exception as e:
-                self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
+                    if status_resp.status_code == 200:
+                        loaded_models = status_resp.json().get('models', [])
+                        for m in loaded_models:
+                            model_name = m.get('name', '')
+                            if model_name:
+                                try:
+                                    get_http_session().post(
+                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                        json={"model": model_name, "keep_alive": 0, "stream": False},
+                                        timeout=15
+                                    )
+                                except Exception:
+                                    pass
+                        if loaded_models:
+                            time.sleep(3)
+                            self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
+            except Exception:
+                pass
             
             set_ollama_available_global(False)
             
@@ -6104,32 +6134,15 @@ Translation examples (Chinese meaning → English visual elements):
             return []
         finally:
             if hasattr(self, 'whisper_model') and self.whisper_model:
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        try:
-                            device = next(self.whisper_model.parameters()).device
-                            if device.type == "cuda":
-                                self.whisper_model = self.whisper_model.to("cpu")
-                                torch.cuda.synchronize()
-                                torch.cuda.empty_cache()
-                                self.log("🧹 Whisper GPU显存已释放")
-                        except (StopIteration, Exception):
-                            try:
-                                self.whisper_model = self.whisper_model.to("cpu")
-                                torch.cuda.synchronize()
-                                torch.cuda.empty_cache()
-                            except Exception:
-                                pass
-                    if whisper_model_loaded:
-                        del self.whisper_model
-                        self.whisper_model = None
-                        gc.collect()
-                        self.log("🧹 Whisper模型已完全卸载，内存已释放")
-                except ImportError:
-                    pass
-                except Exception:
-                    pass
+                self._safe_release_whisper_gpu()
+                if not self._whisper_on_gpu:
+                    self.log("🧹 Whisper GPU显存已释放")
+                if whisper_model_loaded:
+                    del self.whisper_model
+                    self.whisper_model = None
+                    self._whisper_on_gpu = False
+                    gc.collect()
+                    self.log("🧹 Whisper模型已完全卸载，内存已释放")
     
     def generate_images(self):
         """生成图像"""
@@ -6342,41 +6355,34 @@ Translation examples (Chinese meaning → English visual elements):
             # ========== 步骤4: 预取流水线生成图像 ==========
             if tasks:
                 self.log("")
-                try:
-                    import torch
-                    if self.whisper_model is not None and torch.cuda.is_available():
-                        try:
-                            device = next(self.whisper_model.parameters()).device
-                            if device.type == "cuda":
-                                self.whisper_model = self.whisper_model.to("cpu")
-                                torch.cuda.synchronize()
-                                torch.cuda.empty_cache()
-                                self.log("   🧹 Whisper GPU 显存已释放")
-                        except (StopIteration, Exception):
-                            self.whisper_model = self.whisper_model.to("cpu")
-                            torch.cuda.synchronize()
-                            torch.cuda.empty_cache()
-                            self.log("   🧹 Whisper GPU 显存已释放")
-                except ImportError:
-                    pass
-                except Exception:
-                    pass
+                self._safe_release_whisper_gpu()
+                if not self._whisper_on_gpu:
+                    self.log("   🧹 Whisper GPU 显存已释放")
                 
                 try:
-                    ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
-                    if ollama_model:
-                        resp = get_http_session().post(
-                            f"{Config.OLLAMA_BASE_URL}/api/generate",
-                            json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                            timeout=30
+                    if is_ollama_available():
+                        status_resp = get_http_session().get(
+                            f"{Config.OLLAMA_BASE_URL}/api/ps",
+                            timeout=5
                         )
-                        if resp.status_code == 200:
-                            time.sleep(3)
-                            self.log("   🧹 Ollama 模型已卸载，GPU 显存释放给 SD 使用")
-                        else:
-                            self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
-                except Exception as e:
-                    self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
+                        if status_resp.status_code == 200:
+                            loaded_models = status_resp.json().get('models', [])
+                            for m in loaded_models:
+                                model_name = m.get('name', '')
+                                if model_name:
+                                    try:
+                                        get_http_session().post(
+                                            f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                            json={"model": model_name, "keep_alive": 0, "stream": False},
+                                            timeout=15
+                                        )
+                                    except Exception:
+                                        pass
+                            if loaded_models:
+                                time.sleep(3)
+                                self.log(f"   🧹 已卸载 {len(loaded_models)} 个Ollama模型，GPU显存释放给SD使用")
+                except Exception:
+                    pass
                 self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
                 self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
                 self.log("")
@@ -6461,8 +6467,12 @@ Translation examples (Chinese meaning → English visual elements):
                                         "negative_prompt": neg or "",
                                         "width": width, "height": height,
                                         "steps": 28, "cfg_scale": 7.5,
-                                        "sampler_name": "DPM++ 2M Karras",
-                                        "seed": -1, "batch_size": 1
+                                        "sampler_name": "DPM++ 2M",
+                                        "scheduler": "Karras",
+                                        "seed": -1, "batch_size": 1,
+                                        "override_settings": {
+                                            "sd_vae": "vae-ft-mse-840000-ema-pruned.safetensors"
+                                        }
                                     },
                                     timeout=Config.API_TIMEOUT_LONG
                                 )
@@ -7343,16 +7353,9 @@ Translation examples (Chinese meaning → English visual elements):
                 delattr(self, '_shot_texts_for_context')
             
             # 释放Whisper GPU资源（如果上次任务异常退出未释放）
-            try:
-                if self.whisper_model is not None:
-                    import torch
-                    if torch.cuda.is_available():
-                        self.whisper_model = self.whisper_model.to("cpu")
-                        torch.cuda.synchronize()
-                        torch.cuda.empty_cache()
-                        self.log("   🧹 Whisper GPU资源已释放")
-            except Exception:
-                pass
+            self._safe_release_whisper_gpu()
+            if not self._whisper_on_gpu:
+                self.log("   🧹 Whisper GPU资源已释放")
             
             self._move_output_to_trash(reason="导入新音频")
             
@@ -7518,24 +7521,11 @@ Translation examples (Chinese meaning → English visual elements):
         try:
             if self.whisper_model is not None:
                 self.log("🔄 释放Whisper模型内存...")
-                import torch
-                if torch.cuda.is_available():
-                    try:
-                        device = next(self.whisper_model.parameters()).device
-                        if device.type == "cuda":
-                            self.whisper_model = self.whisper_model.to("cpu")
-                            torch.cuda.synchronize()
-                            torch.cuda.empty_cache()
-                    except (StopIteration, Exception):
-                        try:
-                            self.whisper_model = self.whisper_model.to("cpu")
-                            torch.cuda.synchronize()
-                            torch.cuda.empty_cache()
-                        except Exception:
-                            pass
+                self._safe_release_whisper_gpu()
                 del self.whisper_model
                 self.whisper_model = None
                 self._whisper_model_size = None
+                self._whisper_on_gpu = False
                 gc.collect()
                 self.log("✅ Whisper模型内存已释放")
             

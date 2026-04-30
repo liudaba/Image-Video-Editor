@@ -93,7 +93,11 @@ class BatchSDGenerator:
                                 "steps": steps,
                                 "cfg_scale": cfg_scale,
                                 "batch_size": 1,
-                                "sampler_name": "DPM++ 2M Karras",
+                                "sampler_name": "DPM++ 2M",
+                                "scheduler": "Karras",
+                                "override_settings": {
+                                    "sd_vae": "vae-ft-mse-840000-ema-pruned.safetensors"
+                                }
                             },
                             timeout=180  # 增加到180秒超时
                         )
