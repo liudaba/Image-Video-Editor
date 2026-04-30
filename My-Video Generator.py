@@ -686,6 +686,7 @@ class DocuMakerLiteV7:
             
             self.log(f"🔄 预加载 Whisper {whisper_model_size} 模型到内存...")
             self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
+            self._whisper_model_size = whisper_model_size
             self.log(f"✅ Whisper {whisper_model_size} 模型预加载完成 (CPU，使用时自动加载到GPU)")
                 
         except Exception as e:
@@ -5131,6 +5132,7 @@ Translation examples (Chinese meaning → English visual elements):
                                 device = next(self.whisper_model.parameters()).device
                                 if device.type == "cuda":
                                     self.whisper_model = self.whisper_model.to("cpu")
+                                    torch.cuda.synchronize()
                                     torch.cuda.empty_cache()
                                     self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
                             except (StopIteration, Exception):
@@ -5145,21 +5147,51 @@ Translation examples (Chinese meaning → English visual elements):
                 warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                 
                 if self.whisper_model:
-                    # 模型已预加载（在CPU上），按需移至GPU
-                    try:
-                        import torch
-                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                        if torch.cuda.is_available():
-                            gpu_name = torch.cuda.get_device_name(0)
-                            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                            self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-                            self.whisper_model = self.whisper_model.to("cuda")
-                            whisper_used_gpu = True
-                            self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
-                        else:
-                            self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                    except Exception as e:
-                        self.log(f"⚠️ Whisper移至GPU失败，使用CPU: {e}")
+                    whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
+                    current_model_size = getattr(self, '_whisper_model_size', None)
+                    if current_model_size and current_model_size != whisper_model_size:
+                        self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                try:
+                                    self.whisper_model = self.whisper_model.to("cpu")
+                                    torch.cuda.empty_cache()
+                                except Exception:
+                                    pass
+                        except ImportError:
+                            pass
+                        del self.whisper_model
+                        self.whisper_model = None
+                        gc.collect()
+                    if self.whisper_model is None:
+                        try:
+                            import torch
+                            device = "cuda" if torch.cuda.is_available() else "cpu"
+                            if device == "cuda":
+                                gpu_name = torch.cuda.get_device_name(0)
+                                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                            self.whisper_model = whisper.load_model(whisper_model_size, device=device)
+                            self._whisper_model_size = whisper_model_size
+                            whisper_used_gpu = device == "cuda"
+                            self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
+                        except Exception as e:
+                            self.log(f"⚠️ Whisper加载失败: {e}")
+                    else:
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                gpu_name = torch.cuda.get_device_name(0)
+                                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                                self.whisper_model = self.whisper_model.to("cuda")
+                                whisper_used_gpu = True
+                                self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
+                            else:
+                                self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
+                        except Exception as e:
+                            self.log(f"⚠️ Whisper移至GPU失败，使用CPU: {e}")
                 else:
                     # 模型未预加载，全新加载
                     self.log("📦 正在加载Whisper模型...")
@@ -5255,6 +5287,7 @@ Translation examples (Chinese meaning → English visual elements):
                     import torch
                     if self.whisper_model is not None and torch.cuda.is_available():
                         self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.synchronize()
                         torch.cuda.empty_cache()
                         self.log("   ✅ Whisper 模型 GPU 资源已释放")
                 except Exception as e:
@@ -6048,17 +6081,18 @@ Translation examples (Chinese meaning → English visual elements):
             if hasattr(self, 'whisper_model') and self.whisper_model:
                 try:
                     import torch
-                    # 统一逻辑：先移到CPU释放GPU显存，再决定是否完全卸载
                     if torch.cuda.is_available():
                         try:
                             device = next(self.whisper_model.parameters()).device
                             if device.type == "cuda":
                                 self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.synchronize()
                                 torch.cuda.empty_cache()
                                 self.log("🧹 Whisper GPU显存已释放")
                         except (StopIteration, Exception):
                             try:
                                 self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.synchronize()
                                 torch.cuda.empty_cache()
                             except Exception:
                                 pass
@@ -6290,10 +6324,12 @@ Translation examples (Chinese meaning → English visual elements):
                             device = next(self.whisper_model.parameters()).device
                             if device.type == "cuda":
                                 self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.synchronize()
                                 torch.cuda.empty_cache()
                                 self.log("   🧹 Whisper GPU 显存已释放")
                         except (StopIteration, Exception):
                             self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.synchronize()
                             torch.cuda.empty_cache()
                             self.log("   🧹 Whisper GPU 显存已释放")
                 except ImportError:
@@ -7208,6 +7244,7 @@ Translation examples (Chinese meaning → English visual elements):
                     import torch
                     if torch.cuda.is_available():
                         self.whisper_model = self.whisper_model.to("cpu")
+                        torch.cuda.synchronize()
                         torch.cuda.empty_cache()
                         self.log("   🧹 Whisper GPU资源已释放")
             except Exception:
@@ -7413,21 +7450,23 @@ Translation examples (Chinese meaning → English visual elements):
             if self.whisper_model is not None:
                 self.log("🔄 释放Whisper模型内存...")
                 import torch
-                # 先移到CPU释放GPU显存，再完全卸载
                 if torch.cuda.is_available():
                     try:
                         device = next(self.whisper_model.parameters()).device
                         if device.type == "cuda":
                             self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.synchronize()
                             torch.cuda.empty_cache()
                     except (StopIteration, Exception):
                         try:
                             self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.synchronize()
                             torch.cuda.empty_cache()
                         except Exception:
                             pass
                 del self.whisper_model
                 self.whisper_model = None
+                self._whisper_model_size = None
                 gc.collect()
                 self.log("✅ Whisper模型内存已释放")
             
