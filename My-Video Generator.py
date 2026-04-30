@@ -3859,10 +3859,10 @@ Translation examples (Chinese meaning → English visual elements):
         """快速主题一致性预检查（轻量级，不调用LLM）
         
         只检查关键词匹配，用于快速发现明显偏离的分镜
-        返回: (是否一致, 偏离数量, 总检查数)
+        返回: (是否一致, 偏离数量, 总检查数, 偏离索引列表)
         """
         if not theme_info.get('core_theme'):
-            return True, 0, len(shots)
+            return True, 0, len(shots), []
         
         core_theme = theme_info['core_theme']
         theme_elements = theme_info.get('theme_elements', [])
@@ -3891,6 +3891,7 @@ Translation examples (Chinese meaning → English visual elements):
         self.log(f"   匹配关键词池({len(all_keywords)}个): {all_keywords}")
         
         deviation_count = 0
+        deviation_indices = []
         
         for i, shot in enumerate(shots):
             prompt = shot.get('prompt_en', '').lower()
@@ -3915,74 +3916,91 @@ Translation examples (Chinese meaning → English visual elements):
             
             if not has_theme_element and i > 0:
                 deviation_count += 1
+                deviation_indices.append(i)
         
         total_checked = len(shots)
         is_consistent = deviation_count == 0
         
         self.log(f"📊 检查结果: {deviation_count}/{total_checked} 偏离")
         
-        return is_consistent, deviation_count, total_checked
+        return is_consistent, deviation_count, total_checked, deviation_indices
     
-    def validate_theme_consistency(self, shots, theme_info):
-        """验证分镜的主题一致性，偏离时自动修正提示词"""
+    def validate_theme_consistency(self, shots, theme_info, deviation_indices=None):
+        """验证分镜的主题一致性，偏离时自动修正提示词
+        
+        Args:
+            shots: 分镜列表
+            theme_info: 主题信息字典
+            deviation_indices: 预检查已识别的偏离索引列表，若提供则直接修正这些分镜
+        """
         if not theme_info.get('core_theme'):
             return True, "未提取到主题信息，跳过一致性检查"
 
         core_theme = theme_info['core_theme']
         theme_elements = theme_info.get('theme_elements', [])
         visual_tone = theme_info.get('visual_tone', '')
-        theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
-        
-        all_keywords = []
-        for elem in theme_elements_en:
-            for word in elem.lower().split():
-                if len(word) > 3:
-                    all_keywords.append(word)
-        all_keywords = list(set(all_keywords))
 
         consistency_issues = []
         fixed_count = 0
 
-        for i, shot in enumerate(shots):
-            prompt = shot.get('prompt_en', '').lower()
-            description = shot.get('description', '').lower()
-            combined = prompt + ' ' + description
-            
-            has_theme_element = False
-            
-            if theme_elements_en:
-                for elem in theme_elements_en:
-                    if elem.lower() in prompt:
-                        has_theme_element = True
-                        break
-            
-            if not has_theme_element and all_keywords:
-                keyword_hits = sum(1 for kw in all_keywords if kw in combined)
-                if keyword_hits >= 1:
-                    has_theme_element = True
-            
-            if not has_theme_element and core_theme.lower() in description:
-                has_theme_element = True
-            
-            if not has_theme_element and i > 0:
-                consistency_issues.append(f"分镜{i+1}")
+        if deviation_indices is not None:
+            indices_to_fix = deviation_indices
+        else:
+            theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
+            all_keywords = []
+            for elem in theme_elements_en:
+                for word in elem.lower().split():
+                    if len(word) > 3:
+                        all_keywords.append(word)
+            all_keywords = list(set(all_keywords))
+
+            indices_to_fix = []
+            for i, shot in enumerate(shots):
+                prompt = shot.get('prompt_en', '').lower()
+                description = shot.get('description', '').lower()
+                combined = prompt + ' ' + description
                 
-                if is_ollama_available() and shot.get('description'):
-                    try:
-                        dubbing = shot['description']
-                        content_type = shot.get('content_type', 'general')
-                        corrected = self._generate_prompt_with_llm(
-                            dubbing, content_type,
-                            prompt_type=self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词",
-                            core_theme=core_theme,
-                            visual_tone=visual_tone,
-                            theme_elements=theme_elements
-                        )
-                        if corrected and len(corrected) > 30:
-                            shot['prompt_en'] = corrected
-                            fixed_count += 1
-                    except Exception:
-                        pass
+                has_theme_element = False
+                
+                if theme_elements_en:
+                    for elem in theme_elements_en:
+                        if elem.lower() in prompt:
+                            has_theme_element = True
+                            break
+                
+                if not has_theme_element and all_keywords:
+                    keyword_hits = sum(1 for kw in all_keywords if kw in combined)
+                    if keyword_hits >= 1:
+                        has_theme_element = True
+                
+                if not has_theme_element and core_theme.lower() in description:
+                    has_theme_element = True
+                
+                if not has_theme_element and i > 0:
+                    indices_to_fix.append(i)
+
+        for i in indices_to_fix:
+            if i >= len(shots):
+                continue
+            shot = shots[i]
+            consistency_issues.append(f"分镜{i+1}")
+            
+            if is_ollama_available() and shot.get('description'):
+                try:
+                    dubbing = shot['description']
+                    content_type = shot.get('content_type', 'general')
+                    corrected = self._generate_prompt_with_llm(
+                        dubbing, content_type,
+                        prompt_type=self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词",
+                        core_theme=core_theme,
+                        visual_tone=visual_tone,
+                        theme_elements=theme_elements
+                    )
+                    if corrected and len(corrected) > 30:
+                        shot['prompt_en'] = corrected
+                        fixed_count += 1
+                except Exception:
+                    pass
 
         if consistency_issues:
             msg = f"发现{len(consistency_issues)}个偏离主题的分镜"
@@ -5901,7 +5919,7 @@ Translation examples (Chinese meaning → English visual elements):
                             self.log(f"   ✅ 修正后的分镜数据已重新保存")
                 else:
                     # 自动模式：先执行快速预检查，根据偏离率决定是否深度修正
-                    is_consistent, deviation_count, total_checked = self.quick_theme_consistency_check(shots, theme_info)
+                    is_consistent, deviation_count, total_checked, deviation_indices = self.quick_theme_consistency_check(shots, theme_info)
                     
                     if deviation_count == 0:
                         self.log(f"✅ 主题一致性检查通过")
@@ -5916,7 +5934,7 @@ Translation examples (Chinese meaning → English visual elements):
                         else:
                             # 偏离率较高，执行完整的主题一致性检查和自动修正
                             self.log(f"\n⚠️ 偏离率较高({deviation_ratio:.1f}%)，正在执行深度检查与自动修正...")
-                            is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
+                            is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info, deviation_indices)
                             if is_consistent:
                                 self.log(f"✅ {consistency_msg}")
                             else:
@@ -7074,7 +7092,7 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"   🔄 正在渲染视频文件...")
                 self.log(f"      输出路径: {os.path.basename(output_path)}")
                 if use_gpu:
-                    hw_params = ['-movflags', '+faststart', '-threads', '0', '-gpu', '0'] if gpu_encoder == 'h264_nvenc' else ['-movflags', '+faststart', '-threads', '0']
+                    hw_params = ['-movflags', '+faststart', '-threads', '0']
                     if gpu_encoder == 'h264_nvenc':
                         hw_params.extend(['-cq', '23', '-rc', 'vbr'])
                     final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=None)

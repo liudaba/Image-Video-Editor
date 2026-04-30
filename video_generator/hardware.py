@@ -47,8 +47,11 @@ class HardwareAcceleratedRenderer:
 
     def _check_cuda(self):
         try:
-            import torch
-            return torch.cuda.is_available()
+            result = subprocess.run(
+                ['ffmpeg', '-encoders'],
+                capture_output=True, text=True, timeout=3
+            )
+            return 'h264_nvenc' in result.stdout
         except Exception:
             return False
 
