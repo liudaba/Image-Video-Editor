@@ -5144,17 +5144,27 @@ Translation examples (Chinese meaning → English visual elements):
                 # 加载Whisper模型进行语音识别
                 self.update_task_progress("正在加载Whisper模型...", 20)
                 
-                # 先卸载Ollama模型释放GPU显存，避免与Whisper冲突
+                # 检查Ollama是否有模型残留占用GPU显存（上次任务异常退出时可能残留）
                 try:
                     ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
                     if ollama_model and is_ollama_available():
-                        resp = get_http_session().post(
-                            f"{Config.OLLAMA_BASE_URL}/api/generate",
-                            json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                            timeout=15
-                        )
-                        if resp.status_code == 200:
-                            self.log("🧹 已卸载Ollama模型，为Whisper释放GPU显存")
+                        try:
+                            status_resp = get_http_session().get(
+                                f"{Config.OLLAMA_BASE_URL}/api/ps",
+                                timeout=5
+                            )
+                            if status_resp.status_code == 200:
+                                loaded_models = status_resp.json().get('models', [])
+                                if any(m.get('name', '').startswith(ollama_model.split(':')[0]) for m in loaded_models):
+                                    resp = get_http_session().post(
+                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                                        timeout=15
+                                    )
+                                    if resp.status_code == 200:
+                                        self.log("🧹 已卸载残留的Ollama模型，为Whisper释放GPU显存")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 
@@ -5809,22 +5819,6 @@ Translation examples (Chinese meaning → English visual elements):
             
             self._pregenerated_prompts = pregenerated_prompts
             
-            try:
-                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
-                if ollama_model and _ollama_model_already_loaded:
-                    resp = get_http_session().post(
-                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
-                        timeout=30
-                    )
-                    if resp.status_code == 200:
-                        time.sleep(2)
-                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
-                    else:
-                        self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
-            except Exception as e:
-                self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
-            
             # 步骤3: 解析和校准分镜
             self.log("\n📍 步骤 3/4: 解析和校准分镜")
 
@@ -5999,6 +5993,21 @@ Translation examples (Chinese meaning → English visual elements):
                                     with open(shots_file, 'w', encoding='utf-8') as f:
                                         json.dump(shots, f, ensure_ascii=False, indent=2)
                                     self.log(f"   ✅ 修正后的分镜数据已重新保存")
+
+            # 主题一致性检查完成后，卸载Ollama释放GPU（后续步骤不再需要Ollama）
+            try:
+                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
+                if ollama_model and _ollama_model_already_loaded:
+                    resp = get_http_session().post(
+                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                        timeout=30
+                    )
+                    if resp.status_code == 200:
+                        time.sleep(2)
+                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
+            except Exception:
+                pass
 
             # 检查分镜是否为空
             if not shots:
