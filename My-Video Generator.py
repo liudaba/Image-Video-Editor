@@ -4562,30 +4562,7 @@ Translation examples (Chinese meaning → English visual elements):
     
     def _thorough_cleanup(self):
         """彻底清理所有分镜脚本数据和缓存 - 确保无残留（含磁盘文件+内存数据）"""
-        try:
-            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    os.remove(shots_file)
-
-                if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-
-                for f in os.listdir(self.output_dir):
-                    fp = os.path.join(self.output_dir, f)
-                    if os.path.isfile(fp):
-                        try:
-                            os.remove(fp)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+        self._move_output_to_trash(reason="彻底清理")
 
         try:
             self.shots_data = []
@@ -4763,61 +4740,89 @@ Translation examples (Chinese meaning → English visual elements):
         except Exception:
             pass
 
-    def _cleanup_residual_files(self):
-        """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
+    def _move_to_trash(self, file_path, trash_session_dir=None):
+        """将文件移动到垃圾桶而非直接删除
+        
+        Args:
+            file_path: 要移动的文件路径
+            trash_session_dir: 垃圾桶会话目录，如果为None则自动创建
+        Returns:
+            bool: 是否成功移动
+        """
         try:
-            # 创建垃圾桶文件夹（如果不存在）
+            if not os.path.exists(file_path):
+                return False
+            
             trash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
-                self.log(f"🗑️ 已创建垃圾桶文件夹: {trash_dir}")
             
-            # 为本次清理创建一个带时间戳的子文件夹
+            if trash_session_dir is None:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
+            if not os.path.exists(trash_session_dir):
+                os.makedirs(trash_session_dir)
+            
+            filename = os.path.basename(file_path)
+            dest = os.path.join(trash_session_dir, filename)
+            if os.path.exists(dest):
+                name, ext = os.path.splitext(filename)
+                dest = os.path.join(trash_session_dir, f"{name}_{int(time.time()*1000)}{ext}")
+            
+            shutil.move(file_path, dest)
+            return True
+        except Exception:
+            return False
+
+    def _move_output_to_trash(self, reason="清理"):
+        """将output_project中的所有文件移动到垃圾桶
+        
+        Args:
+            reason: 清理原因，用于日志和子文件夹命名
+        Returns:
+            int: 移动的文件数量
+        """
+        moved_count = 0
+        try:
+            trash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "垃圾桶")
+            if not os.path.exists(trash_dir):
+                os.makedirs(trash_dir)
+            
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
+            trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
             os.makedirs(trash_session_dir)
             
             if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                moved_count = 0
-                
-                # 1. 移动分镜脚本文件
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
-                    dest = os.path.join(trash_session_dir, "shots_data.json")
-                    shutil.move(shots_file, dest)
-                    moved_count += 1
+                    if self._move_to_trash(shots_file, trash_session_dir):
+                        moved_count += 1
 
-                # 2. 移动images文件夹内的所有图片文件
                 if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
                     images_trash_dir = os.path.join(trash_session_dir, "images")
-                    os.makedirs(images_trash_dir)
-                    
+                    os.makedirs(images_trash_dir, exist_ok=True)
                     for f in os.listdir(self.images_dir):
                         fp = os.path.join(self.images_dir, f)
                         if os.path.isfile(fp):
-                            try:
-                                dest = os.path.join(images_trash_dir, f)
-                                shutil.move(fp, dest)
+                            if self._move_to_trash(fp, images_trash_dir):
                                 moved_count += 1
-                            except Exception as e:
-                                self.log(f"⚠️ 移动图片文件失败 {f}: {e}")
 
-                # 3. 移动output_dir下的其他文件（视频文件等）
                 for f in os.listdir(self.output_dir):
                     fp = os.path.join(self.output_dir, f)
                     if os.path.isfile(fp):
-                        try:
-                            dest = os.path.join(trash_session_dir, f)
-                            shutil.move(fp, dest)
+                        if self._move_to_trash(fp, trash_session_dir):
                             moved_count += 1
-                        except Exception as e:
-                            self.log(f"⚠️ 移动文件失败 {f}: {e}")
-                
-                if moved_count > 0:
-                    self.log(f"🗑️ 已将 {moved_count} 个文件移至垃圾桶: {trash_session_dir}")
-                    
+            
+            if moved_count > 0:
+                self.log(f"🗑️ 已将 {moved_count} 个文件移至垃圾桶: {trash_session_dir}")
         except Exception as e:
-            self.log(f"⚠️ 清理文件到垃圾桶失败: {e}")
+            self.log(f"⚠️ 移动文件到垃圾桶失败: {e}")
+        
+        return moved_count
+
+    def _cleanup_residual_files(self):
+        """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
+        self._move_output_to_trash(reason="启动清理")
 
     def on_close(self):
         """关闭窗口时的处理 - 增强版，确保快速退出并彻底清除所有残留数据"""
@@ -5079,29 +5084,7 @@ Translation examples (Chinese meaning → English visual elements):
             
             self.shots_data = []
             
-            try:
-                old_shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(old_shots_file):
-                    os.remove(old_shots_file)
-                    self.log("🗑️ 已删除旧的分镜脚本文件")
-                if os.path.exists(self.images_dir):
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-                if os.path.exists(self.output_dir):
-                    for f in os.listdir(self.output_dir):
-                        fp = os.path.join(self.output_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+            self._move_output_to_trash(reason="一键生成分镜")
             
             # 步骤1: 音频分析
             self.log("\n📍 步骤 1/4: 音频语音识别")
@@ -6619,31 +6602,8 @@ Translation examples (Chinese meaning → English visual elements):
     def clear_images_and_videos(self):
         """清除图片和视频文件"""
         self.log("🗑️ 开始清除图片和视频文件...")
-        try:
-            
-            if os.path.exists(self.images_dir):
-                for file in os.listdir(self.images_dir):
-                    file_path = os.path.join(self.images_dir, file)
-                    if os.path.isfile(file_path):
-                        try:
-                            os.remove(file_path)
-                            self.log(f"✅ 已删除图片: {file}")
-                        except Exception:
-                            pass
-            
-            if os.path.exists(self.output_dir):
-                for file in os.listdir(self.output_dir):
-                    file_path = os.path.join(self.output_dir, file)
-                    if os.path.isfile(file_path):
-                        try:
-                            os.remove(file_path)
-                            self.log(f"✅ 已删除文件: {file}")
-                        except Exception:
-                            pass
-            
-            self.log("✅ 图片和视频文件清除完成")
-        except Exception as e:
-            self.log(f"❌ 清除图片和视频文件失败: {e}")
+        self._move_output_to_trash(reason="清除图片视频")
+        self.log("✅ 图片和视频文件已移至垃圾桶")
     
     def generate_video(self, skip_clear=False, use_original_resolution=False, skip_image_check=False):
         """生成视频
@@ -7282,42 +7242,7 @@ Translation examples (Chinese meaning → English visual elements):
             except Exception:
                 pass
             
-            # 删除旧的分镜脚本文件
-            try:
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    os.remove(shots_file)
-                    self.log("   🗑️ 已删除旧的shots_data.json")
-            except Exception:
-                pass
-            
-            # 删除旧的图片文件
-            try:
-                if os.path.exists(self.images_dir):
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-                    self.log("   🗑️ 已清除旧图片文件")
-            except Exception:
-                pass
-            
-            # 删除旧的视频文件和输出目录中的所有生成文件
-            try:
-                if os.path.exists(self.output_dir):
-                    for f in os.listdir(self.output_dir):
-                        fp = os.path.join(self.output_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-                    self.log("   🗑️ 已清除输出目录中的旧文件")
-            except Exception:
-                pass
+            self._move_output_to_trash(reason="导入新音频")
             
             # 清除所有缓存（音频分析、提示词等），强制重新转录
             self.cache_clear()
@@ -7511,28 +7436,7 @@ Translation examples (Chinese meaning → English visual elements):
             if hasattr(self, '_shot_texts_for_context'):
                 delattr(self, '_shot_texts_for_context')
             
-            try:
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    os.remove(shots_file)
-                if os.path.exists(self.images_dir):
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-                if os.path.exists(self.output_dir):
-                    for f in os.listdir(self.output_dir):
-                        fp = os.path.join(self.output_dir, f)
-                        if os.path.isfile(fp):
-                            try:
-                                os.remove(fp)
-                            except Exception:
-                                pass
-            except Exception:
-                pass
+            self._move_output_to_trash(reason="清除音频")
             
             self.cache_clear()
 
@@ -7758,10 +7662,7 @@ Translation examples (Chinese meaning → English visual elements):
                     if hasattr(self, '_shot_texts_for_context'):
                         delattr(self, '_shot_texts_for_context')
                     
-                    # 删除旧的分镜脚本文件
-                    if os.path.exists(shots_file):
-                        os.remove(shots_file)
-                        self.log("   🗑️ 已删除旧的shots_data.json")
+                    self._move_output_to_trash(reason="一键生成视频")
                     
                     # 清除音频分析缓存，强制重新转录
                     self.cache_clear()
