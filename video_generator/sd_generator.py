@@ -48,9 +48,6 @@ class BatchSDGenerator:
         Returns:
             按索引排列的图像数据列表
         """
-        import time
-        import threading
-        
         results = [None] * len(prompts_data)
         completed = 0
         total = len(prompts_data)

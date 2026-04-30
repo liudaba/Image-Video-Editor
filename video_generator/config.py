@@ -8,7 +8,7 @@ import threading
 
 class Config:
     OLLAMA_BASE_URL = "http://localhost:11434"
-    SD_API_BASE_URL = "http://127.0.0.1:7860"
+    SD_API_BASE_URL = "http://127.0.0.1:8080"
     API_TIMEOUT_SHORT = 3
     API_TIMEOUT_MEDIUM = 5
     API_TIMEOUT_LONG = 180

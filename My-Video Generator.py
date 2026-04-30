@@ -439,7 +439,7 @@ class DocuMakerLiteV7:
         
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
-        self.sd_api_url_var = tk.StringVar(value="http://localhost:7860")
+        self.sd_api_url_var = tk.StringVar(value="http://127.0.0.1:8080")
         self.sd_api_status_var = tk.StringVar(value="❌ 未连接")  # SD API 连接状态（提前初始化）
         
         # 大模型设置
@@ -681,7 +681,6 @@ class DocuMakerLiteV7:
     def preload_whisper_model(self):
         """预加载Whisper模型 - 仅加载到CPU，使用时再按需移至GPU，节省显存"""
         try:
-            import whisper
             
             whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
             
@@ -940,7 +939,6 @@ class DocuMakerLiteV7:
         
         # 加载保存的风格设置
         try:
-            import os
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
@@ -1357,7 +1355,7 @@ class DocuMakerLiteV7:
             model = self.model_var.get() if hasattr(self, 'model_var') else '使用当前模型'
             width = self.width_var.get() if hasattr(self, 'width_var') else '768'
             height = self.height_var.get() if hasattr(self, 'height_var') else '512'
-            api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else 'http://localhost:7860'
+            api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
             ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'
             llm_preset = self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先'
             whisper_model = 'medium'
@@ -1589,7 +1587,6 @@ class DocuMakerLiteV7:
     
     def _clean_style_output(self, raw_output):
         """清洗风格描述输出，只保留关键词"""
-        import re
         
         text = raw_output.strip()
         
@@ -1667,7 +1664,7 @@ class DocuMakerLiteV7:
             confirm_msg += f"风格预设: {', '.join(selected_styles)}\n"
         else:
             confirm_msg += "风格预设: 无\n"
-        confirm_msg += f"SD API地址: {self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else 'http://127.0.0.1:7860'}\n"
+        confirm_msg += f"SD API地址: {self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL}\n"
         confirm_msg += f"Ollama模型: {self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'}\n"
         confirm_msg += f"语音模型: {self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'}\n"
         confirm_msg += f"配置模式: {self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先'}\n"
@@ -1822,7 +1819,6 @@ class DocuMakerLiteV7:
                 pass  # 静默失败
         
         # 在后台线程中执行
-        import threading
         thread = threading.Thread(target=_fetch_and_update, daemon=True)
         thread.start()
     
@@ -1864,7 +1860,6 @@ class DocuMakerLiteV7:
         if not text:
             return ""
         
-        import re
         text = re.sub(r'\s+', ' ', text)
         text = text.strip()
         
@@ -1985,7 +1980,6 @@ class DocuMakerLiteV7:
     def calculate_semantic_weight(self, sentence):
         """计算语义权重"""
         # 基于关键词、句子长度、内容类型等因素计算语义权重
-        import re
         
         # 关键词权重
         keyword_weights = {
@@ -2110,8 +2104,6 @@ class DocuMakerLiteV7:
             
             raw_output = result_text.strip()
             
-            import re
-            import json
             
             json_match = re.search(r'\[.*\]', raw_output, re.DOTALL)
             if not json_match:
@@ -2306,7 +2298,6 @@ class DocuMakerLiteV7:
             end_time = start_time + shot_duration
         
         # 清理句子，确保语义清晰
-        import re
         cleaned_sentence = re.sub(r'[\s\n\r]+', ' ', sentence).strip()
         
         # 清洗和修正文本，修正错别字和语句不通顺的地方
@@ -2389,7 +2380,6 @@ class DocuMakerLiteV7:
     
     def _parse_description(self, description, skip_llm_inference=False):
         """解析description，提取各个部分 - 增强版支持多种格式"""
-        import re
         
         result = {
             'dubbing': '',
@@ -2594,7 +2584,6 @@ class DocuMakerLiteV7:
         if not raw_output:
             return ""
         
-        import re
         
         # 转为字符串
         text = str(raw_output).strip()
@@ -3216,7 +3205,6 @@ Translation examples (Chinese meaning → English visual elements):
     
     def _translate_to_english(self, chinese_text):
         """简单的中文到英文翻译"""
-        import re
         
         # 常见词汇映射 - 扩展版本
         mapping = {
@@ -3348,8 +3336,6 @@ Translation examples (Chinese meaning → English visual elements):
         
         返回: (applied_count, log_message)
         """
-        import json
-        import re
         
         applied_count = 0
         log_message = ""
@@ -3573,10 +3559,8 @@ Translation examples (Chinese meaning → English visual elements):
             )
             
             if result_text:
-                import re
                 json_match = re.search(r'\{[^}]+\}', result_text)
                 if json_match:
-                    import json
                     translated_dict = json.loads(json_match.group())
                     return translated_dict
             
@@ -3599,7 +3583,6 @@ Translation examples (Chinese meaning → English visual elements):
         Returns:
             切分后的片段列表
         """
-        import re
         
         if not words:
             return []
@@ -3651,7 +3634,6 @@ Translation examples (Chinese meaning → English visual elements):
         if not theme_text:
             return theme_text
         
-        import re
         
         prefixes_to_remove = [
             '这是一段关于', '本文讨论的是', '主要讲述', '主要内容是',
@@ -3684,7 +3666,6 @@ Translation examples (Chinese meaning → English visual elements):
             return theme_info
 
         try:
-            import re
             # 清理各种格式标记
             cleaned_result = analysis_result.replace('**', '').replace('【', '').replace('】', '')
             cleaned_result = cleaned_result.replace('*', '')
@@ -4073,9 +4054,6 @@ Translation examples (Chinese meaning → English visual elements):
             ("psutil", []),
         ]
         
-        import subprocess
-        import sys
-        import re
         
         # 统计信息
         total_deps = len(dependencies)
@@ -4164,8 +4142,8 @@ Translation examples (Chinese meaning → English visual elements):
                     
                     # 如果有警告信息，显示出来
                     if "WARNING" in stdout:
-                        warnings = [line for line in stdout.split('\n') if 'WARNING' in line]
-                        for warning in warnings[:2]:  # 最多显示2条警告
+                        warning_lines = [line for line in stdout.split('\n') if 'WARNING' in line]
+                        for warning in warning_lines[:2]:  # 最多显示2条警告
                             self.log(f"   ⚠️  {warning.strip()}")
                 else:
                     self.log(f"   ❌ 更新 {dep} 时出现错误")
@@ -4475,7 +4453,6 @@ Translation examples (Chinese meaning → English visual elements):
     def init_thread_pool(self):
         """初始化线程池"""
         # 基于CPU核心数和系统内存动态调整线程池大小
-        import os
         try:
             import psutil
             # 获取CPU核心数
@@ -4491,7 +4468,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.max_workers = min(os.cpu_count() or 4, 4)
         
         # 初始化线程池
-        from concurrent.futures import ThreadPoolExecutor
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
         self.thread_pool = {
             'executor': self.executor,
@@ -4778,7 +4754,6 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"🗑️ 已创建垃圾桶文件夹: {trash_dir}")
             
             # 为本次清理创建一个带时间戳的子文件夹
-            import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
             os.makedirs(trash_session_dir)
@@ -4891,7 +4866,6 @@ Translation examples (Chinese meaning → English visual elements):
 
         try:
             import torch
-            import gc
 
             if self.whisper_model is not None:
                 try:
@@ -4929,7 +4903,6 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
-            import gc
             gc.collect()
         except Exception:
             pass
@@ -4955,12 +4928,10 @@ Translation examples (Chinese meaning → English visual elements):
                     sys.stderr.close()
                 except Exception:
                     pass
-            import ctypes
             ctypes.windll.kernel32.FreeConsole()
         except Exception:
             pass
 
-        import os
         os._exit(0)
     
     # =======================================================================
@@ -4982,9 +4953,6 @@ Translation examples (Chinese meaning → English visual elements):
             auto_mode: 自动模式，为True时不显示完成弹窗（用于自动化流程）
         """
         # 确保在函数开始时就导入必要的模块
-        import os
-        import hashlib
-        import gc
         
         # 初始化变量，防止 NameError
         analysis_result = ""
@@ -5156,7 +5124,6 @@ Translation examples (Chinese meaning → English visual elements):
                 # 加载Whisper模型进行语音识别
                 self.update_task_progress("正在加载Whisper模型...", 20)
                 
-                import warnings
                 warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                 
                 if self.whisper_model:
@@ -5221,7 +5188,6 @@ Translation examples (Chinese meaning → English visual elements):
                 self.update_task_progress("正在进行语音识别...", 30)
                 try:
                     # 使用线程池添加超时控制
-                    import concurrent.futures
                     
                     if not self.task_running:
                         self.log("❌ 任务已被取消")
@@ -5443,7 +5409,6 @@ Translation examples (Chinese meaning → English visual elements):
                                 self.log(f"   💡 提示: 可在高级设置中自定义主题和基调")
                             
                             # 使用线程池执行大模型调用
-                            import concurrent.futures
                             
                             def call_ollama_with_model(model_name):
                                 """使用指定模型调用Ollama - 通篇分析提取主题"""
@@ -5497,7 +5462,7 @@ Translation examples (Chinese meaning → English visual elements):
                                 self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
                                 
                                 try:
-                                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                                    with ThreadPoolExecutor() as executor:
                                         future = executor.submit(call_ollama_with_model, current_model)
                                         self.log(f"   等待模型响应中...")
                                         
@@ -5521,7 +5486,7 @@ Translation examples (Chinese meaning → English visual elements):
                                             self.log(f"   🔍 请检查上方的调试日志以了解详情")
                                             current_model_index += 1
                                             
-                                except concurrent.futures.TimeoutError:
+                                except TimeoutError:
                                     self.log(f"⚠️ 模型 {current_model} 响应超时（超过120秒）")
                                     self.log(f"   可能原因: 模型计算量大或GPU资源不足")
                                     current_model_index += 1
@@ -5716,7 +5681,6 @@ Translation examples (Chinese meaning → English visual elements):
                         return (idx, prompt, None)
                     return (idx, "", None)
                 except Exception as e:
-                    import traceback
                     full_error = f"{str(e)}\n{traceback.format_exc()}"
                     return (idx, "", full_error)
             
@@ -5730,7 +5694,7 @@ Translation examples (Chinese meaning → English visual elements):
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
+            with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
                 results = list(executor.map(generate_single_prompt, enumerate(final_tasks)))
                 
                 for idx, prompt, error in results:
@@ -5802,8 +5766,6 @@ Translation examples (Chinese meaning → English visual elements):
                 ))
             
             # 使用线程池并行创建分镜
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            import os
             
             # 获取用户设置的线程数（默认16）
             if hasattr(self, 'thread_count_var'):
@@ -6002,7 +5964,6 @@ Translation examples (Chinese meaning → English visual elements):
             if hasattr(self, '_pregenerated_prompts'):
                 delattr(self, '_pregenerated_prompts')
             
-            import gc
             gc.collect()
             
             # 先尝试卸载Ollama模型释放GPU显存，再更新全局状态
@@ -6015,7 +5976,6 @@ Translation examples (Chinese meaning → English visual elements):
                         timeout=30
                     )
                     if resp.status_code == 200:
-                        import time
                         time.sleep(3)
                         self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
                     else:
@@ -6030,7 +5990,6 @@ Translation examples (Chinese meaning → English visual elements):
         
         except Exception as e:
             self.log(f"❌ 生成分镜失败: {e}")
-            import traceback
             traceback.print_exc()
             self.update_task_progress("生成失败", 0)
             return []
@@ -6066,7 +6025,6 @@ Translation examples (Chinese meaning → English visual elements):
         """生成图像"""
         self.log("🖼️ 开始生成图像...")
         try:
-            import os
             from PIL import Image
             from io import BytesIO
             
@@ -6097,7 +6055,7 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("正在连接SD服务...", 10)
             
             # 检查SD API连接状态
-            api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else "http://127.0.0.1:7860"
+            api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
             current_sd_model = "未知"  # 当前实际使用的SD模型
             
             # 获取用户设置的像素尺寸
@@ -6301,7 +6259,6 @@ Translation examples (Chinese meaning → English visual elements):
                             timeout=30
                         )
                         if resp.status_code == 200:
-                            import time
                             time.sleep(3)
                             self.log("   🧹 Ollama 模型已卸载，GPU 显存释放给 SD 使用")
                         else:
@@ -6518,7 +6475,6 @@ Translation examples (Chinese meaning → English visual elements):
             
         except Exception as e:
             self.log(f"❌ 图像生成失败: {e}")
-            import traceback
             traceback.print_exc()
         finally:
             if 'save_queue' in locals():
@@ -6545,7 +6501,6 @@ Translation examples (Chinese meaning → English visual elements):
         """清除图片和视频文件"""
         self.log("🗑️ 开始清除图片和视频文件...")
         try:
-            import os
             
             if os.path.exists(self.images_dir):
                 for file in os.listdir(self.images_dir):
@@ -6601,7 +6556,6 @@ Translation examples (Chinese meaning → English visual elements):
             return False
         
         try:
-            import os
             from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip
             import numpy as np
             
@@ -7120,7 +7074,6 @@ Translation examples (Chinese meaning → English visual elements):
             
         except Exception as e:
             self.log(f"\n❌ 视频生成失败: {e}")
-            import traceback
             traceback.print_exc()
         finally:
             for clip in clips:
@@ -7147,7 +7100,6 @@ Translation examples (Chinese meaning → English visual elements):
             self._active_background = None
             self._active_final_clip = None
             try:
-                import gc
                 gc.collect()
             except Exception:
                 pass
@@ -7156,7 +7108,6 @@ Translation examples (Chinese meaning → English visual elements):
         """导入音频"""
         self.log("📂 开始导入音频...")
         try:
-            import os
             with self.task_lock:
                 if self.task_running:
                     self.log("⚠️ 有任务正在运行，请等待任务完成后再导入音频")
@@ -7299,7 +7250,6 @@ Translation examples (Chinese meaning → English visual elements):
                 if hasattr(self, 'root') and self.root:
                     self.root.after(0, clear_script)
             
-            import gc
             gc.collect()
             
             self.log("✅ 旧数据已清除，新音频将使用全新转录结果")
@@ -7319,7 +7269,6 @@ Translation examples (Chinese meaning → English visual elements):
         except Exception as e:
             self.log(f"❌ 音频导入失败: {e}")
             messagebox.showerror("错误", f"音频导入失败: {str(e)}")
-            import traceback
             traceback.print_exc()
     
     def apply_animation_effect_prerender(self, clip):
@@ -7412,7 +7361,6 @@ Translation examples (Chinese meaning → English visual elements):
         try:
             if self.whisper_model is not None:
                 self.log("🔄 释放Whisper模型内存...")
-                import gc
                 import torch
                 # 先移到CPU释放GPU显存，再完全卸载
                 if torch.cuda.is_available():
@@ -7520,13 +7468,11 @@ Translation examples (Chinese meaning → English visual elements):
                     self.root.after(0, update_ui)
             
             # 清理内存
-            import gc
             gc.collect()
             
             self.log("✅ 音频清除完成")
         except Exception as e:
             self.log(f"❌ 音频清除失败: {e}")
-            import traceback
             traceback.print_exc()
     
     def render_video_threaded(self):
@@ -7643,7 +7589,6 @@ Translation examples (Chinese meaning → English visual elements):
             
         except Exception as e:
             self.log(f"❌ 渲染视频线程启动失败: {e}")
-            import traceback
             traceback.print_exc()
     
     def _start_render_thread(self, mode="full_generation"):
@@ -7739,7 +7684,6 @@ Translation examples (Chinese meaning → English visual elements):
                             self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                         except Exception as e:
                             self.log(f"❌ 加载分镜数据失败: {e}")
-                            import traceback
                             traceback.print_exc()
                     
                     if not self.shots_data:
@@ -7776,7 +7720,6 @@ Translation examples (Chinese meaning → English visual elements):
                 
             except Exception as e:
                 self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
-                import traceback
                 traceback.print_exc()
             finally:
                 with self.task_lock:
@@ -7833,7 +7776,6 @@ Translation examples (Chinese meaning → English visual elements):
                     self.generate_shots()
                 except Exception as e:
                     self.log(f"❌ 生成分镜过程中出错: {e}")
-                    import traceback
                     traceback.print_exc()
                 finally:
                     with self.task_lock:
@@ -7851,7 +7793,6 @@ Translation examples (Chinese meaning → English visual elements):
                 
         except Exception as e:
             self.log(f"❌ 生成分镜线程启动失败: {e}")
-            import traceback
             traceback.print_exc()
             with self.task_lock:
                 self.task_running = False
@@ -7859,8 +7800,6 @@ Translation examples (Chinese meaning → English visual elements):
     @staticmethod
     def _open_folder(path):
         """跨平台打开文件夹"""
-        import subprocess
-        import sys
         try:
             if sys.platform == 'win32':
                 os.startfile(path)
@@ -7873,8 +7812,6 @@ Translation examples (Chinese meaning → English visual elements):
 
     def open_output_folder(self):
         """打开输出文件夹"""
-        import os
-        import subprocess
         output_folder = os.path.join(self.base_dir, "output_project")
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -7977,7 +7914,6 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("✅ 日志清除完成")
         except Exception as e:
             self.log(f"❌ 日志清除失败: {e}")
-            import traceback
             traceback.print_exc()
     
     def show_performance_stats(self):
@@ -8048,13 +7984,11 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("✅ 脚本清除完成")
         except Exception as e:
             self.log(f"❌ 脚本清除失败: {e}")
-            import traceback
             traceback.print_exc()
     
     def load_config(self):
         """加载配置"""
         try:
-            import os
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
@@ -8152,7 +8086,6 @@ Translation examples (Chinese meaning → English visual elements):
     def save_config(self):
         """保存配置"""
         try:
-            import os
             # 获取用户选择的风格预设
             selected_styles = self.get_selected_styles()
             
