@@ -7,6 +7,7 @@ import tempfile
 import shutil
 import json
 import re
+import time
 from typing import Dict
 
 
@@ -123,7 +124,7 @@ class HardwareAcceleratedRenderer:
             output_file: 输出视频路径
             fps: 帧率
             transition_type: 转场类型 (hard_cut/crossfade)
-            progress_callback: 进度回调 (percent: float)
+            progress_callback: 进度回调 (percent: float, info: dict)
             log_callback: 日志回调 (message: str)
             shot_durations: 每张图片的持续时间列表(秒)，None则等分音频时长
 
@@ -137,6 +138,9 @@ class HardwareAcceleratedRenderer:
             encoder_config = self.preferred_encoder
             if log_callback:
                 log_callback(f"🎬 使用编码器: {encoder_config['vcodec']}")
+                hw_desc = {"h264_nvenc": "NVIDIA GPU", "h264_qsv": "Intel QuickSync",
+                           "h264_amf": "AMD AMF"}.get(encoder_config['vcodec'], "CPU")
+                log_callback(f"   硬件加速: {hw_desc}")
 
             audio_duration = self._get_audio_duration(audio_file)
             if audio_duration <= 0:
@@ -148,8 +152,10 @@ class HardwareAcceleratedRenderer:
                 shot_durations=shot_durations
             )
 
+            total_frames = int(audio_duration * fps)
             if log_callback:
-                log_callback(f"🎬 开始渲染: {len(image_files)}张图片, {audio_duration:.1f}秒音频")
+                log_callback(f"🎬 开始渲染: {len(image_files)}张图片, "
+                             f"{audio_duration:.1f}秒音频, {total_frames}帧")
 
             self._render_process = subprocess.Popen(
                 cmd,
@@ -158,9 +164,16 @@ class HardwareAcceleratedRenderer:
                 universal_newlines=True
             )
 
-            total_frames = int(audio_duration * fps)
             duration_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.\d+)')
+            frame_pattern = re.compile(r'frame=\s*(\d+)')
+            speed_pattern = re.compile(r'speed=\s*([\d.]+)x')
+            size_pattern = re.compile(r'size=\s*(\d+\w+)')
+            bitrate_pattern = re.compile(r'bitrate=\s*([\d.]+\w+/s)')
+
             last_progress = 0.0
+            last_log_time = 0.0
+            render_start_time = time.time()
+            last_update_time = render_start_time
 
             for line in self._render_process.stderr:
                 if self._cancel_requested:
@@ -177,13 +190,63 @@ class HardwareAcceleratedRenderer:
                     current_time = hours * 3600 + minutes * 60 + seconds
                     progress = min(100.0, (current_time / audio_duration) * 100)
 
-                    if progress - last_progress >= 1.0:
+                    frame_match = frame_pattern.search(line)
+                    speed_match = speed_pattern.search(line)
+                    size_match = size_pattern.search(line)
+                    bitrate_match = bitrate_pattern.search(line)
+
+                    current_frame = int(frame_match.group(1)) if frame_match else None
+                    speed = float(speed_match.group(1)) if speed_match else None
+                    size = size_match.group(1) if size_match else None
+                    bitrate = bitrate_match.group(1) if bitrate_match else None
+
+                    elapsed = time.time() - render_start_time
+                    eta = None
+                    if progress > 0 and elapsed > 0:
+                        remaining_pct = 100.0 - progress
+                        eta = (remaining_pct / progress) * elapsed
+
+                    info = {
+                        'current_time': current_time,
+                        'total_time': audio_duration,
+                        'current_frame': current_frame,
+                        'total_frames': total_frames,
+                        'speed': speed,
+                        'size': size,
+                        'bitrate': bitrate,
+                        'eta': eta,
+                        'elapsed': elapsed,
+                    }
+
+                    now = time.time()
+                    if progress - last_progress >= 0.5 or (now - last_update_time >= 2.0 and progress > last_progress):
                         last_progress = progress
+                        last_update_time = now
                         if progress_callback:
                             try:
-                                progress_callback(progress)
-                            except Exception:
-                                pass
+                                progress_callback(progress, info)
+                            except TypeError:
+                                try:
+                                    progress_callback(progress)
+                                except Exception:
+                                    pass
+
+                    if log_callback and (now - last_log_time >= 5.0) and progress > 1.0:
+                        last_log_time = now
+                        time_str = f"{int(current_time//60):02d}:{int(current_time%60):02d}"
+                        total_str = f"{int(audio_duration//60):02d}:{int(audio_duration%60):02d}"
+                        log_parts = [f"   📊 {progress:.1f}% ({time_str}/{total_str})"]
+                        if current_frame is not None:
+                            log_parts.append(f"帧:{current_frame}/{total_frames}")
+                        if speed is not None:
+                            log_parts.append(f"速度:{speed:.1f}x")
+                        if eta is not None and eta > 0:
+                            eta_min = int(eta // 60)
+                            eta_sec = int(eta % 60)
+                            log_parts.append(f"剩余:{eta_min}:{eta_sec:02d}")
+                        if size is not None:
+                            log_parts.append(f"大小:{size}")
+                        log_callback(" ".join(log_parts))
 
             self._render_process.wait()
             self._render_process = None
@@ -192,10 +255,25 @@ class HardwareAcceleratedRenderer:
                 return False
 
             if self._render_process is None and os.path.exists(output_file):
+                elapsed = time.time() - render_start_time
+                file_size = os.path.getsize(output_file)
+                size_mb = file_size / (1024 * 1024)
                 if progress_callback:
-                    progress_callback(100.0)
+                    try:
+                        progress_callback(100.0, {'current_time': audio_duration,
+                                                   'total_time': audio_duration,
+                                                   'current_frame': total_frames,
+                                                   'total_frames': total_frames,
+                                                   'speed': None, 'size': None,
+                                                   'bitrate': None, 'eta': 0,
+                                                   'elapsed': elapsed})
+                    except TypeError:
+                        try:
+                            progress_callback(100.0)
+                        except Exception:
+                            pass
                 if log_callback:
-                    log_callback("✅ 视频渲染完成")
+                    log_callback(f"✅ 视频渲染完成 (耗时{elapsed:.1f}s, 文件{size_mb:.1f}MB)")
                 return True
             else:
                 if log_callback:

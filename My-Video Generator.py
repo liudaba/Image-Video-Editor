@@ -4985,6 +4985,8 @@ Translation examples (Chinese meaning → English visual elements):
         whisper_model_loaded = False
         whisper_used_gpu = False
         
+        _shots_start_time = time.time()
+        
         try:
             # 检查是否有音频文件
             if not self.audio_path:
@@ -6027,9 +6029,13 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"   ✅ 时间戳连续无间隔")
             
             # 显示完成信息
+            _shots_elapsed = time.time() - _shots_start_time
+            _shots_min = int(_shots_elapsed // 60)
+            _shots_sec = int(_shots_elapsed % 60)
             self.log("=" * 50)
             self.log("✅ 分镜脚本生成完成！")
             self.log(f"   📊 共 {len(shots)} 个分镜")
+            self.log(f"   ⏱️ 总耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
             self.log(f"   📁 保存位置: {shots_file}")
             self.log("")
             self.log("📋 下一步操作：")
@@ -6088,7 +6094,11 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("分镜生成完成", 100)
         
         except Exception as e:
+            _shots_elapsed = time.time() - _shots_start_time
+            _shots_min = int(_shots_elapsed // 60)
+            _shots_sec = int(_shots_elapsed % 60)
             self.log(f"❌ 生成分镜失败: {e}")
+            self.log(f"   ⏱️ 已耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
             traceback.print_exc()
             self.update_task_progress("生成失败", 0)
             return []
@@ -6617,6 +6627,8 @@ Translation examples (Chinese meaning → English visual elements):
         self.log("🎞️ 开始生成视频...")
         self.log("=" * 60)
         
+        _video_start_time = time.time()
+        
         audio = None
         final_clip = None
         background = None
@@ -6862,13 +6874,28 @@ Translation examples (Chinese meaning → English visual elements):
                     
                     output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
                     
-                    def _ffmpeg_progress(pct):
+                    _ffmpeg_render_start = time.time()
+                    
+                    def _ffmpeg_progress(pct, info=None):
                         progress = 60 + int(pct * 0.35)
-                        self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
+                        if info:
+                            time_str = f"{int(info.get('current_time', 0)//60):02d}:{int(info.get('current_time', 0)%60):02d}"
+                            total_str = f"{int(info.get('total_time', 0)//60):02d}:{int(info.get('total_time', 0)%60):02d}"
+                            desc = f"FFmpeg渲染 {pct:.0f}% ({time_str}/{total_str})"
+                            eta = info.get('eta')
+                            if eta and eta > 0:
+                                eta_min = int(eta // 60)
+                                eta_sec = int(eta % 60)
+                                desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                            speed = info.get('speed')
+                            if speed:
+                                desc += f" {speed:.1f}x"
+                            self.update_task_progress(desc, progress)
+                        else:
+                            self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
                     
                     def _ffmpeg_log(msg):
-                        if '使用编码器' in msg or '开始渲染' in msg:
-                            self.log(f"   {msg}")
+                        self.log(f"   {msg}")
                     
                     success = self.video_renderer.render(
                         resized_images, self.audio_path, output_path,
@@ -6880,9 +6907,13 @@ Translation examples (Chinese meaning → English visual elements):
                     shutil.rmtree(temp_render_dir, ignore_errors=True)
                     
                     if success:
+                        _video_elapsed = time.time() - _video_start_time
+                        _video_min = int(_video_elapsed // 60)
+                        _video_sec = int(_video_elapsed % 60)
                         self.update_task_progress("视频生成完成", 100)
                         self.log("\n" + "=" * 60)
                         self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
+                        self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
                         self.log(f"   📁 保存位置: {output_path}")
                         self.log("=" * 60)
                         
@@ -6956,7 +6987,7 @@ Translation examples (Chinese meaning → English visual elements):
                 
                 processed_shots += 1
                 progress = 50 + int((processed_shots / total_shots) * 10)
-                if processed_shots % 10 == 0 or processed_shots == total_shots:
+                if processed_shots % 5 == 0 or processed_shots == total_shots:
                     self.update_task_progress(f"正在创建视频片段 ({processed_shots}/{total_shots})...", progress)
                 
                 img = shot_img_map.get(shot['image_file'])
@@ -7117,28 +7148,105 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("      🖥️ 将使用CPU渲染 (libx264, preset='veryfast')")
             
             try:
+                from proglog import ProgressBarLogger
+                
+                _moviepy_render_start = time.time()
+                _moviepy_total_frames = int(audio_duration * 30)
+                _moviepy_last_log_time = 0.0
+                
+                class _MoviePyProgressLogger(ProgressBarLogger):
+                    def __init__(self, app_ref):
+                        super().__init__(min_time_interval=0.5)
+                        self.app = app_ref
+                        self._last_progress_pct = 0.0
+                        self._phase = "video"
+                    
+                    def bars_callback(self, bar, attr, value, old_value=None):
+                        try:
+                            bar_data = self.bars.get(bar, {})
+                            index = bar_data.get('index', 0)
+                            total = bar_data.get('total', 0)
+                            
+                            if total > 0 and attr == 'index':
+                                pct = (index / total) * 100
+                                progress_val = 70 + int((index / total) * 25)
+                                
+                                if self._phase == "audio":
+                                    phase_label = "音频编码"
+                                    progress_val = 70 + int((index / total) * 10)
+                                else:
+                                    phase_label = "视频编码"
+                                    progress_val = 80 + int((index / total) * 20)
+                                
+                                desc = f"{phase_label} {pct:.0f}%"
+                                
+                                elapsed = time.time() - _moviepy_render_start
+                                if pct > 5 and elapsed > 0:
+                                    remaining_pct = 100.0 - pct
+                                    eta = (remaining_pct / pct) * elapsed
+                                    if eta > 0:
+                                        eta_min = int(eta // 60)
+                                        eta_sec = int(eta % 60)
+                                        desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                                
+                                self.app.update_task_progress(desc, progress_val)
+                                
+                                now = time.time()
+                                nonlocal _moviepy_last_log_time
+                                if now - _moviepy_last_log_time >= 5.0 and pct > 1.0:
+                                    _moviepy_last_log_time = now
+                                    if self._phase == "audio":
+                                        self.app.log(f"   📊 音频编码: {pct:.0f}% ({index}/{total})")
+                                    else:
+                                        self.app.log(f"   📊 视频编码: {pct:.0f}% ({index}/{total}帧)")
+                                
+                                self._last_progress_pct = pct
+                        except Exception:
+                            pass
+                    
+                    def callback(self, **kw):
+                        pass
+                
+                _moviepy_logger = _MoviePyProgressLogger(self)
+                
+                encoder_desc = gpu_encoder if use_gpu else 'libx264'
+                total_frames_desc = _moviepy_total_frames
                 self.log(f"   🔄 正在渲染视频文件...")
-                self.log(f"      输出路径: {os.path.basename(output_path)}")
+                self.log(f"      编码器: {encoder_desc}, 总帧数: {total_frames_desc}, 输出: {os.path.basename(output_path)}")
+                
                 if use_gpu:
                     hw_params = ['-movflags', '+faststart', '-threads', '0']
                     if gpu_encoder == 'h264_nvenc':
                         hw_params.extend(['-cq', '23', '-rc', 'vbr'])
-                    final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=_moviepy_logger)
                 else:
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_moviepy_logger)
             except Exception as e:
                 if use_gpu:
                     self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
                     self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
                     DocuMakerLiteV7._gpu_encoder_cache = (False, 'libx264', 'veryfast')
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=None)
+                    try:
+                        from proglog import ProgressBarLogger as _PBL2
+                        _fallback_logger = _MoviePyProgressLogger(self)
+                    except Exception:
+                        _fallback_logger = None
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_fallback_logger)
                 else:
                     raise
             
             # 完成
+            _video_elapsed = time.time() - _video_start_time
+            _video_min = int(_video_elapsed // 60)
+            _video_sec = int(_video_elapsed % 60)
+            _render_elapsed = time.time() - _moviepy_render_start
+            file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            size_mb = file_size / (1024 * 1024)
             self.update_task_progress("视频生成完成", 100)
             self.log("\n" + "=" * 60)
-            self.log("✅ 视频生成完成！")
+            self.log(f"✅ 视频生成完成！")
+            self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
+            self.log(f"   🎥 渲染耗时: {_render_elapsed:.1f}s, 文件{size_mb:.1f}MB")
             self.log(f"   📁 保存位置: {output_path}")
             self.log("=" * 60)
             
@@ -7152,7 +7260,11 @@ Translation examples (Chinese meaning → English visual elements):
             self._open_folder(os.path.dirname(output_path))
             
         except Exception as e:
+            _video_elapsed = time.time() - _video_start_time
+            _video_min = int(_video_elapsed // 60)
+            _video_sec = int(_video_elapsed % 60)
             self.log(f"\n❌ 视频生成失败: {e}")
+            self.log(f"   ⏱️ 已耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
             traceback.print_exc()
         finally:
             for clip in clips:
