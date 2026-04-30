@@ -522,7 +522,7 @@ class VideoRendererOptimizer:
                 'h264_nvenc': ('NVIDIA NVENC H.264', 'p4'),
                 'hevc_nvenc': ('NVIDIA NVENC HEVC', 'p4'),
                 'h264_amf': ('AMD AMF H.264', 'quality'),
-                'h264_qsv': ('Intel QuickSync H.264', 'veryslow')
+                'h264_qsv': ('Intel QuickSync H.264', 'medium')
             }
             for encoder_name, (desc, preset) in encoders.items():
                 if encoder_name in result.stdout:

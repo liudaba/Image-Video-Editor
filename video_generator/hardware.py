@@ -111,7 +111,7 @@ class HardwareAcceleratedRenderer:
 
     def render(self, image_files, audio_file, output_file, fps=30,
                transition_type="hard_cut", progress_callback=None,
-               log_callback=None):
+               log_callback=None, shot_durations=None):
         """渲染视频（带实时进度监控和取消支持）
 
         Args:
@@ -122,6 +122,7 @@ class HardwareAcceleratedRenderer:
             transition_type: 转场类型 (hard_cut/crossfade)
             progress_callback: 进度回调 (percent: float)
             log_callback: 日志回调 (message: str)
+            shot_durations: 每张图片的持续时间列表(秒)，None则等分音频时长
 
         Returns:
             bool: 是否成功
@@ -140,7 +141,8 @@ class HardwareAcceleratedRenderer:
 
             cmd = self._build_hardcut_cmd(
                 image_files, audio_file, output_file,
-                fps, encoder_config, temp_dir, audio_duration
+                fps, encoder_config, temp_dir, audio_duration,
+                shot_durations=shot_durations
             )
 
             if log_callback:
@@ -205,16 +207,22 @@ class HardwareAcceleratedRenderer:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _build_hardcut_cmd(self, image_files, audio_file, output_file,
-                           fps, encoder_config, temp_dir, audio_duration=None):
+                           fps, encoder_config, temp_dir, audio_duration=None,
+                           shot_durations=None):
         if audio_duration is None:
             audio_duration = self._get_audio_duration(audio_file)
-        duration_per_image = audio_duration / len(image_files) if image_files else 5.0
+
+        if shot_durations and len(shot_durations) == len(image_files):
+            durations = shot_durations
+        else:
+            duration_per_image = audio_duration / len(image_files) if image_files else 5.0
+            durations = [duration_per_image] * len(image_files)
 
         concat_file = os.path.join(temp_dir, "concat.txt")
         with open(concat_file, 'w', encoding='utf-8') as f:
-            for img_file in image_files:
+            for img_file, duration in zip(image_files, durations):
                 f.write(f"file '{img_file}'\n")
-                f.write(f"duration {duration_per_image}\n")
+                f.write(f"duration {duration}\n")
             if image_files:
                 f.write(f"file '{image_files[-1]}'\n")
 
@@ -227,6 +235,7 @@ class HardwareAcceleratedRenderer:
             '-c:a', 'aac', '-b:a', '192k',
             '-r', str(fps),
             '-pix_fmt', 'yuv420p',
+            '-threads', '0',
             '-movflags', '+faststart',
             '-stats_period', '1',
         ]

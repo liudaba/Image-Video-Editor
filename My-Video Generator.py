@@ -4696,6 +4696,78 @@ Translation examples (Chinese meaning → English visual elements):
         except Exception:
             pass
 
+    def _release_memory_resources(self):
+        """只释放内存资源，不删除磁盘文件（用于程序退出时）"""
+        try:
+            self.shots_data = []
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, '_pregenerated_prompts'):
+                delattr(self, '_pregenerated_prompts')
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, '_shot_texts_for_context'):
+                delattr(self, '_shot_texts_for_context')
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
+                for key in self.state_manager:
+                    if isinstance(self.state_manager[key], dict):
+                        if 'data' in self.state_manager[key]:
+                            self.state_manager[key]['data'] = []
+                        if 'path' in self.state_manager[key]:
+                            self.state_manager[key]['path'] = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'audio_path'):
+                self.audio_path = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'cache_system') and isinstance(self.cache_system, dict):
+                for cat in list(self.cache_system.keys()):
+                    self.cache_system[cat] = {}
+        except Exception:
+            pass
+
+        try:
+            prompt_cache.clear()
+        except Exception:
+            pass
+
+        try:
+            image_cache.clear()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'arv_prompter') and self.arv_prompter is not None:
+                del self.arv_prompter
+                self.arv_prompter = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
+                self.data_bus.clear()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
+                self.event_system.clear()
+        except Exception:
+            pass
+
     def _cleanup_residual_files(self):
         """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
         try:
@@ -4800,7 +4872,7 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
-            for attr in ['_active_audio', '_active_clips', '_active_background', '_active_final_clip']:
+            for attr in ['_active_audio', '_active_background', '_active_final_clip']:
                 clip = getattr(self, attr, None)
                 if clip is not None:
                     try:
@@ -4808,6 +4880,12 @@ Translation examples (Chinese meaning → English visual elements):
                     except Exception:
                         pass
                     setattr(self, attr, None)
+            active_clips = getattr(self, '_active_clips', None)
+            if active_clips is not None:
+                for c in active_clips:
+                    try: c.close()
+                    except: pass
+                self._active_clips = None
         except Exception:
             pass
 
@@ -4834,7 +4912,6 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
-            from video_generator.config import get_http_session
             session = get_http_session()
             if session is not None:
                 session.close()
@@ -4842,7 +4919,7 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
-            self._thorough_cleanup()
+            self._release_memory_resources()
         except Exception:
             pass
 
@@ -4880,13 +4957,6 @@ Translation examples (Chinese meaning → English visual elements):
                     pass
             import ctypes
             ctypes.windll.kernel32.FreeConsole()
-        except Exception:
-            pass
-
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
         except Exception:
             pass
 
@@ -5067,19 +5137,21 @@ Translation examples (Chinese meaning → English visual elements):
                 full_text = cached_result.get('full_text', "")
                 self.log(f"   识别片段数: {len(segments)}")
 
-                # 缓存命中，释放 Whisper 占用的 GPU
-                try:
-                    import torch
-                    if self.whisper_model is not None and torch.cuda.is_available():
-                        try:
-                            self.whisper_model = self.whisper_model.to("cpu")
-                            torch.cuda.empty_cache()
-                            whisper_used_gpu = False
-                            self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
-                        except Exception:
-                            pass
-                except ImportError:
-                    pass
+                if self.whisper_model is not None:
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            try:
+                                device = next(self.whisper_model.parameters()).device
+                                if device.type == "cuda":
+                                    self.whisper_model = self.whisper_model.to("cpu")
+                                    torch.cuda.empty_cache()
+                                    self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
+                            except (StopIteration, Exception):
+                                pass
+                    except ImportError:
+                        pass
+                whisper_used_gpu = False
             else:
                 # 加载Whisper模型进行语音识别
                 self.update_task_progress("正在加载Whisper模型...", 20)
@@ -5930,21 +6002,28 @@ Translation examples (Chinese meaning → English visual elements):
             if hasattr(self, '_pregenerated_prompts'):
                 delattr(self, '_pregenerated_prompts')
             
-            # 清理内存
             import gc
             gc.collect()
             
-            # 分镜任务完成后立即释放显存
+            # 先尝试卸载Ollama模型释放GPU显存，再更新全局状态
             try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    self.log("🧹 分镜任务完成，GPU显存已释放")
-            except Exception:
-                pass
+                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
+                if ollama_model:
+                    resp = get_http_session().post(
+                        f"{Config.OLLAMA_BASE_URL}/api/generate",
+                        json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                        timeout=30
+                    )
+                    if resp.status_code == 200:
+                        import time
+                        time.sleep(3)
+                        self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
+                    else:
+                        self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
+            except Exception as e:
+                self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
             
             set_ollama_available_global(False)
-            self.log("🧹 Ollama标记为闲置，GPU显存将在空闲时自动释放")
             
             # 更新进度为完成
             self.update_task_progress("分镜生成完成", 100)
@@ -5956,29 +6035,32 @@ Translation examples (Chinese meaning → English visual elements):
             self.update_task_progress("生成失败", 0)
             return []
         finally:
-            # 释放Whisper占用的GPU显存
-            if whisper_used_gpu and hasattr(self, 'whisper_model') and self.whisper_model:
+            if hasattr(self, 'whisper_model') and self.whisper_model:
                 try:
                     import torch
+                    # 统一逻辑：先移到CPU释放GPU显存，再决定是否完全卸载
                     if torch.cuda.is_available():
-                        self.whisper_model = self.whisper_model.to("cpu")
-                        torch.cuda.empty_cache()
-                        self.log("🧹 Whisper GPU显存已释放，模型保留在CPU内存中")
-                except Exception as e:
-                    self.log(f"⚠️ 释放Whisper GPU显存失败: {e}")
-            
-            # 如果模型是本次加载的（非预加载），完全卸载释放内存
-            if whisper_model_loaded and hasattr(self, 'whisper_model') and self.whisper_model:
-                try:
-                    import torch
-                    del self.whisper_model
-                    self.whisper_model = None
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    self.log("🧹 Whisper模型已完全卸载，内存已释放")
-                except Exception as e:
-                    self.log(f"⚠️ 卸载Whisper模型失败: {e}")
+                        try:
+                            device = next(self.whisper_model.parameters()).device
+                            if device.type == "cuda":
+                                self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.empty_cache()
+                                self.log("🧹 Whisper GPU显存已释放")
+                        except (StopIteration, Exception):
+                            try:
+                                self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.empty_cache()
+                            except Exception:
+                                pass
+                    if whisper_model_loaded:
+                        del self.whisper_model
+                        self.whisper_model = None
+                        gc.collect()
+                        self.log("🧹 Whisper模型已完全卸载，内存已释放")
+                except ImportError:
+                    pass
+                except Exception:
+                    pass
     
     def generate_images(self):
         """生成图像"""
@@ -6192,15 +6274,40 @@ Translation examples (Chinese meaning → English visual elements):
             # ========== 步骤4: 预取流水线生成图像 ==========
             if tasks:
                 self.log("")
-                # SD 生成前释放 Whisper 占用的 GPU
                 try:
                     import torch
                     if self.whisper_model is not None and torch.cuda.is_available():
-                        self.whisper_model = self.whisper_model.to("cpu")
-                        torch.cuda.empty_cache()
-                        self.log("   🧹 Whisper GPU 显存已释放，准备 SD 生成")
+                        try:
+                            device = next(self.whisper_model.parameters()).device
+                            if device.type == "cuda":
+                                self.whisper_model = self.whisper_model.to("cpu")
+                                torch.cuda.empty_cache()
+                                self.log("   🧹 Whisper GPU 显存已释放")
+                        except (StopIteration, Exception):
+                            self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.empty_cache()
+                            self.log("   🧹 Whisper GPU 显存已释放")
+                except ImportError:
+                    pass
+                except Exception:
+                    pass
+                
+                try:
+                    ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
+                    if ollama_model:
+                        resp = get_http_session().post(
+                            f"{Config.OLLAMA_BASE_URL}/api/generate",
+                            json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                            timeout=30
+                        )
+                        if resp.status_code == 200:
+                            import time
+                            time.sleep(3)
+                            self.log("   🧹 Ollama 模型已卸载，GPU 显存释放给 SD 使用")
+                        else:
+                            self.log(f"   ⚠️ Ollama 卸载返回: {resp.status_code}")
                 except Exception as e:
-                    self.log(f"   ⚠️ GPU 显存释放失败: {e}")
+                    self.log(f"   ⚠️ Ollama 卸载跳过: {type(e).__name__}")
                 self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
                 self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
                 self.log("")
@@ -6414,18 +6521,21 @@ Translation examples (Chinese meaning → English visual elements):
             import traceback
             traceback.print_exc()
         finally:
-            try:
-                save_queue.put(None, timeout=5)
-            except Exception:
-                pass
-            try:
-                saver_thread.join(timeout=10)
-            except Exception:
-                pass
-            try:
-                producer_thread.join(timeout=5)
-            except Exception:
-                pass
+            if 'save_queue' in locals():
+                try:
+                    save_queue.put(None, timeout=5)
+                except Exception:
+                    pass
+            if 'saver_thread' in locals():
+                try:
+                    saver_thread.join(timeout=10)
+                except Exception:
+                    pass
+            if 'producer_thread' in locals():
+                try:
+                    producer_thread.join(timeout=5)
+                except Exception:
+                    pass
     
     # =======================================================================
     # 第十一部分：音视频导入与渲染 (行 9398-10278)
@@ -6477,6 +6587,7 @@ Translation examples (Chinese meaning → English visual elements):
         final_clip = None
         background = None
         clips = []
+        intermediate_clips = []
         
         def check_cancelled():
             if not self.task_running:
@@ -6565,8 +6676,7 @@ Translation examples (Chinese meaning → English visual elements):
                     
                     # 记录耗时
                     img_elapsed = time.time() - img_start_time
-                    self.log(f"   ✅ 图像生成完成 (耗时: {img_elapsed:.1f}s)")
-                    self.log("   🎬 所有图片已就绪，开始视频合成...")
+                    self.log(f"   ✅ 图像生成流程完成 (耗时: {img_elapsed:.1f}s)")
                     
                     # 再次检查
                     missing_count = sum(1 for shot in self.shots_data 
@@ -6656,6 +6766,110 @@ Translation examples (Chinese meaning → English visual elements):
             
             if check_cancelled():
                 return
+            
+            # ========== 快速路径: 无动画+硬切 → FFmpeg直接渲染 ==========
+            if self.video_renderer is None:
+                try:
+                    self.video_renderer = HardwareAcceleratedRenderer()
+                except Exception:
+                    self.video_renderer = None
+            
+            use_ffmpeg_direct = (
+                animation_type == "无" and
+                transition_type == "硬切" and
+                not has_overlap and
+                self.video_renderer is not None
+            )
+            
+            if use_ffmpeg_direct:
+                self.log("")
+                self.log("⚡ 检测到简单场景（无动画/硬切），启用FFmpeg直接渲染模式")
+                self.log("   🚀 跳过moviepy，由FFmpeg原生处理，速度大幅提升")
+                
+                try:
+                    import tempfile
+                    from PIL import Image as PILImageForResize
+                    
+                    temp_render_dir = tempfile.mkdtemp(prefix="vg_render_")
+                    resized_images = []
+                    shot_durations = []
+                    
+                    prev_end = 0.0
+                    for shot in self.shots_data:
+                        image_path = os.path.join(self.images_dir, shot['image_file'])
+                        if not os.path.exists(image_path):
+                            self.log(f"   ⚠️ 图片缺失: {shot['image_file']}")
+                            continue
+                        
+                        shot_dur = shot['end'] - shot['start']
+                        gap = shot['start'] - prev_end
+                        if gap > 0.05 and prev_end > 0:
+                            shot_dur += gap
+                        
+                        resized_name = f"resized_{len(resized_images):04d}.png"
+                        resized_path = os.path.join(temp_render_dir, resized_name)
+                        
+                        with PILImageForResize.open(image_path) as orig_img:
+                            fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
+                            fitted.save(resized_path, 'PNG')
+                        
+                        resized_images.append(resized_path)
+                        shot_durations.append(shot_dur)
+                        prev_end = shot['end']
+                    
+                    if not resized_images:
+                        self.log("❌ 没有可用的图片文件")
+                        self.update_task_progress("就绪")
+                        shutil.rmtree(temp_render_dir, ignore_errors=True)
+                        return
+                    
+                    self.update_task_progress("正在渲染视频...", 60)
+                    self.log(f"\n🎥 开始FFmpeg直接渲染...")
+                    self.log(f"   📊 {len(resized_images)} 张图片, 总时长 {sum(shot_durations):.1f}s")
+                    
+                    output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+                    
+                    def _ffmpeg_progress(pct):
+                        progress = 60 + int(pct * 0.35)
+                        self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
+                    
+                    def _ffmpeg_log(msg):
+                        if '使用编码器' in msg or '开始渲染' in msg:
+                            self.log(f"   {msg}")
+                    
+                    success = self.video_renderer.render(
+                        resized_images, self.audio_path, output_path,
+                        fps=30, shot_durations=shot_durations,
+                        progress_callback=_ffmpeg_progress,
+                        log_callback=_ffmpeg_log
+                    )
+                    
+                    shutil.rmtree(temp_render_dir, ignore_errors=True)
+                    
+                    if success:
+                        self.update_task_progress("视频生成完成", 100)
+                        self.log("\n" + "=" * 60)
+                        self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
+                        self.log(f"   📁 保存位置: {output_path}")
+                        self.log("=" * 60)
+                        
+                        self.state_manager['video']['generated'] = True
+                        self.state_manager['video']['path'] = output_path
+                        
+                        self.log("\n📂 打开输出文件夹...")
+                        self._open_folder(os.path.dirname(output_path))
+                        return
+                    else:
+                        self.log("⚠️ FFmpeg直接渲染失败，回退到moviepy渲染...")
+                
+                except Exception as e:
+                    self.log(f"⚠️ FFmpeg直接渲染异常: {type(e).__name__} - {str(e)[:100]}")
+                    self.log("   🔄 回退到moviepy渲染...")
+                    if 'temp_render_dir' in locals():
+                        try:
+                            shutil.rmtree(temp_render_dir, ignore_errors=True)
+                        except Exception:
+                            pass
             
             # 步骤9: 创建视频片段（多线程批量加载图片）
             self.update_task_progress("正在创建视频片段...", 50)
@@ -6873,16 +7087,18 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log(f"   🔄 正在渲染视频文件...")
                 self.log(f"      输出路径: {os.path.basename(output_path)}")
                 if use_gpu:
-                    hw_params = ['-movflags', '+faststart', '-gpu', '0'] if gpu_encoder == 'h264_nvenc' else ['-movflags', '+faststart']
+                    hw_params = ['-movflags', '+faststart', '-threads', '0', '-gpu', '0'] if gpu_encoder == 'h264_nvenc' else ['-movflags', '+faststart', '-threads', '0']
+                    if gpu_encoder == 'h264_nvenc':
+                        hw_params.extend(['-cq', '23', '-rc', 'vbr'])
                     final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=None)
                 else:
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=None)
             except Exception as e:
                 if use_gpu:
                     self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
                     self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
                     DocuMakerLiteV7._gpu_encoder_cache = (False, 'libx264', 'veryfast')
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart'], logger=None)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=None)
                 else:
                     raise
             
@@ -6900,7 +7116,7 @@ Translation examples (Chinese meaning → English visual elements):
             self.log("   ✅ 资源释放完成")
             
             self.log("\n📂 打开输出文件夹...")
-            subprocess.Popen(['explorer', os.path.dirname(output_path)])
+            self._open_folder(os.path.dirname(output_path))
             
         except Exception as e:
             self.log(f"\n❌ 视频生成失败: {e}")
@@ -6910,7 +7126,7 @@ Translation examples (Chinese meaning → English visual elements):
             for clip in clips:
                 try: clip.close()
                 except: pass
-            for ic in intermediate_clips if 'intermediate_clips' in dir() else []:
+            for ic in intermediate_clips:
                 try: ic.close()
                 except: pass
             if background:
@@ -6922,6 +7138,10 @@ Translation examples (Chinese meaning → English visual elements):
             if audio:
                 try: audio.close()
                 except: pass
+            if 'shot_img_map' in locals():
+                for img in shot_img_map.values():
+                    try: img.close()
+                    except: pass
             self._active_audio = None
             self._active_clips = None
             self._active_background = None
@@ -7103,7 +7323,12 @@ Translation examples (Chinese meaning → English visual elements):
             traceback.print_exc()
     
     def apply_animation_effect_prerender(self, clip):
-        """预渲染缩放动画效果 - 使用更高效的帧生成方式
+        """预渲染缩放动画效果 - 真正预计算缩放帧，渲染时仅做numpy切片
+        
+        优化策略：
+        1. 预先获取静态帧（ImageClip每帧相同）
+        2. 一次性渲染最大缩放帧（1.05x），后续每帧只需numpy裁剪
+        3. 避免每帧重复PIL转换+resize，渲染速度提升10倍以上
         
         注意：此函数返回新片段，会丢失原片段的 start 属性
               调用方必须在调用此函数后重新设置 with_start()
@@ -7111,6 +7336,7 @@ Translation examples (Chinese meaning → English visual elements):
         try:
             import numpy as np
             from moviepy import VideoClip
+            from PIL import Image
             
             original_duration = clip.duration
             
@@ -7120,28 +7346,40 @@ Translation examples (Chinese meaning → English visual elements):
             
             w, h = clip.size
             
+            base_frame = clip.get_frame(0)
+            
+            max_scale = 1.05
+            max_w = int(w * max_scale)
+            max_h = int(h * max_scale)
+            base_img = Image.fromarray(base_frame)
+            max_zoomed_img = base_img.resize((max_w, max_h), Image.BILINEAR)
+            max_zoomed_array = np.array(max_zoomed_img)
+            base_img.close()
+            max_zoomed_img.close()
+            
             def make_frame(t):
                 try:
-                    original_frame = clip.get_frame(t)
+                    progress = min(t / original_duration, 1.0)
+                    scale = 1.0 + 0.05 * progress
                     
-                    if isinstance(original_frame, np.ndarray):
-                        from PIL import Image
-                        img = Image.fromarray(original_frame)
-                        
-                        scale = 1.0 + 0.05 * (t / original_duration)
-                        new_w = int(w * scale)
-                        new_h = int(h * scale)
-                        resized = img.resize((new_w, new_h), Image.BILINEAR)
-                        
-                        if new_w > w:
-                            left = (new_w - w) // 2
-                            top = (new_h - h) // 2
-                            resized = resized.crop((left, top, left + w, top + h))
-                        
-                        return np.array(resized)
-                    return original_frame
+                    crop_w = int(w * max_scale / scale)
+                    crop_h = int(h * max_scale / scale)
+                    crop_w = min(crop_w, max_w)
+                    crop_h = min(crop_h, max_h)
+                    
+                    left = (max_w - crop_w) // 2
+                    top = (max_h - crop_h) // 2
+                    
+                    cropped = max_zoomed_array[top:top+crop_h, left:left+crop_w]
+                    
+                    if crop_w != w or crop_h != h:
+                        y_indices = np.linspace(0, crop_h - 1, h).astype(np.intp)
+                        x_indices = np.linspace(0, crop_w - 1, w).astype(np.intp)
+                        return cropped[np.ix_(y_indices, x_indices)]
+                    
+                    return cropped
                 except Exception:
-                    return clip.get_frame(0) if t > 0 else clip.get_frame(0)
+                    return base_frame
             
             animated_clip = VideoClip(make_frame, duration=original_duration)
             
@@ -7176,11 +7414,22 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("🔄 释放Whisper模型内存...")
                 import gc
                 import torch
+                # 先移到CPU释放GPU显存，再完全卸载
+                if torch.cuda.is_available():
+                    try:
+                        device = next(self.whisper_model.parameters()).device
+                        if device.type == "cuda":
+                            self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.empty_cache()
+                    except (StopIteration, Exception):
+                        try:
+                            self.whisper_model = self.whisper_model.to("cpu")
+                            torch.cuda.empty_cache()
+                        except Exception:
+                            pass
                 del self.whisper_model
                 self.whisper_model = None
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
                 self.log("✅ Whisper模型内存已释放")
             
             self.audio_path = None
@@ -7507,8 +7756,21 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("🖼️ 阶段2/3: 生成图像")
                 self.log("=" * 60)
                 
-                # 注意: skip_clear=True 避免删除已有图片
-                self.generate_video(skip_clear=True, skip_image_check=False)
+                self.generate_images()
+                
+                if not self.task_running:
+                    self.log("❌ 任务已被取消")
+                    return
+
+                self.log("✅ 阶段2完成: 图像生成结束")
+
+                # ========== 阶段3: 合成视频 ==========
+                self.log("")
+                self.log("=" * 60)
+                self.log("🎞️ 阶段3/3: 合成视频")
+                self.log("=" * 60)
+                
+                self.generate_video(skip_clear=True, skip_image_check=True)
                 
                 self.log("✅ 所有阶段完成")
                 
@@ -7593,7 +7855,22 @@ Translation examples (Chinese meaning → English visual elements):
             traceback.print_exc()
             with self.task_lock:
                 self.task_running = False
-    
+
+    @staticmethod
+    def _open_folder(path):
+        """跨平台打开文件夹"""
+        import subprocess
+        import sys
+        try:
+            if sys.platform == 'win32':
+                os.startfile(path)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', path])
+            else:
+                subprocess.Popen(['xdg-open', path])
+        except Exception:
+            pass
+
     def open_output_folder(self):
         """打开输出文件夹"""
         import os
@@ -7601,7 +7878,7 @@ Translation examples (Chinese meaning → English visual elements):
         output_folder = os.path.join(self.base_dir, "output_project")
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        subprocess.Popen(['explorer', output_folder])
+        self._open_folder(output_folder)
     
     def setup_script_area(self):
         """设置脚本区域 - 已移除分镜脚本窗口，仅保留内部变量兼容性"""

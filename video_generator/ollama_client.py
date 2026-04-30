@@ -356,6 +356,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
                         {"role": "user", "content": user_prompt}
                     ],
                     "stream": False,
+                    "keep_alive": 60,
                     "options": options
                 },
                 timeout=120
