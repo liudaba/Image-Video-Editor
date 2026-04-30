@@ -5144,6 +5144,20 @@ Translation examples (Chinese meaning → English visual elements):
                 # 加载Whisper模型进行语音识别
                 self.update_task_progress("正在加载Whisper模型...", 20)
                 
+                # 先卸载Ollama模型释放GPU显存，避免与Whisper冲突
+                try:
+                    ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ""
+                    if ollama_model and is_ollama_available():
+                        resp = get_http_session().post(
+                            f"{Config.OLLAMA_BASE_URL}/api/generate",
+                            json={"model": ollama_model, "keep_alive": 0, "stream": False},
+                            timeout=15
+                        )
+                        if resp.status_code == 200:
+                            self.log("🧹 已卸载Ollama模型，为Whisper释放GPU显存")
+                except Exception:
+                    pass
+                
                 warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                 
                 if self.whisper_model:

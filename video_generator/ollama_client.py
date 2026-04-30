@@ -275,6 +275,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                             {"role": "user", "content": user_prompt}
                         ],
                         "stream": False,
+                        "keep_alive": 60,
                         "options": options
                     },
                     timeout=120
@@ -403,6 +404,7 @@ def warmup_model(model, log_callback=None):
                         {"role": "user", "content": "ok"}
                     ],
                     "stream": False,
+                    "keep_alive": 60,
                     "options": {
                         "num_predict": 1,
                         "temperature": 0.1
