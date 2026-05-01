@@ -2216,7 +2216,12 @@ Requirements:
     def quick_theme_consistency_check(self, shots, theme_info):
         """快速主题一致性预检查（轻量级，不调用LLM）
         
-        只检查关键词匹配，用于快速发现明显偏离的分镜
+        检查策略：
+        1. 中文主题关键词在description中匹配
+        2. 英文主题关键词在prompt中匹配
+        3. 内容类型关键词匹配
+        4. 只要命中任一即视为一致
+        
         返回: (是否一致, 偏离数量, 总检查数, 偏离索引列表)
         """
         if not theme_info.get('core_theme'):
@@ -2224,29 +2229,54 @@ Requirements:
         
         core_theme = theme_info['core_theme']
         theme_elements = theme_info.get('theme_elements', [])
+        content_type = theme_info.get('content_type', '')
         
-        theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
+        check_keywords_cn = []
+        for elem in theme_elements:
+            for word in elem.split():
+                if len(word) >= 2:
+                    check_keywords_cn.append(word)
+        for word in core_theme.split():
+            if len(word) >= 2:
+                check_keywords_cn.append(word)
+        check_keywords_cn = list(set(check_keywords_cn))
         
-        core_theme_en = self._translate_theme_elements_to_english([core_theme]) if core_theme else []
+        check_keywords_en = []
+        if theme_elements:
+            theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
+            for elem in theme_elements_en:
+                for word in elem.lower().split():
+                    if len(word) > 3:
+                        check_keywords_en.append(word)
+        if core_theme:
+            core_theme_en = self._translate_theme_elements_to_english([core_theme])
+            for elem in core_theme_en:
+                for word in elem.lower().split():
+                    if len(word) > 3:
+                        check_keywords_en.append(word)
+        check_keywords_en = list(set(check_keywords_en))
         
-        self.log(f"\n🔍 快速预检查调试信息:")
+        content_type_keywords = {
+            '军事': ['military', 'soldier', 'war', 'weapon', 'combat', 'tank', 'missile', 'navy', 'army'],
+            '新闻': ['news', 'press', 'journalist', 'reporter', 'broadcast', 'media'],
+            '科普': ['science', 'laboratory', 'research', 'experiment', 'technology', 'data'],
+            '历史': ['historical', 'ancient', 'heritage', 'classical', 'period', 'dynasty'],
+            '财经': ['business', 'economy', 'finance', 'stock', 'market', 'corporate'],
+            '文化': ['culture', 'art', 'museum', 'tradition', 'heritage', 'literature'],
+            '自然': ['nature', 'landscape', 'wildlife', 'environment', 'mountain', 'ocean'],
+            '体育': ['sport', 'athlete', 'competition', 'stadium', 'game', 'race'],
+        }
+        content_en = []
+        for ct_key, ct_words in content_type_keywords.items():
+            if ct_key in content_type:
+                content_en.extend(ct_words)
+        content_en = list(set(content_en))
+        
+        self.log(f"\n🔍 快速预检查:")
         self.log(f"   core_theme: '{core_theme}'")
-        self.log(f"   core_theme_en: {core_theme_en}")
-        self.log(f"   theme_elements: {theme_elements}")
-        self.log(f"   theme_elements_en: {theme_elements_en}")
-        
-        all_keywords = []
-        for elem in theme_elements_en:
-            for word in elem.lower().split():
-                if len(word) > 3:
-                    all_keywords.append(word)
-        for elem in core_theme_en:
-            for word in elem.lower().split():
-                if len(word) > 3:
-                    all_keywords.append(word)
-        all_keywords = list(set(all_keywords))
-        
-        self.log(f"   匹配关键词池({len(all_keywords)}个): {all_keywords}")
+        self.log(f"   中文关键词({len(check_keywords_cn)}个): {check_keywords_cn[:10]}")
+        self.log(f"   英文关键词({len(check_keywords_en)}个): {check_keywords_en[:10]}")
+        self.log(f"   内容类型关键词({len(content_en)}个): {content_en[:8]}")
         
         deviation_count = 0
         deviation_indices = []
@@ -2258,18 +2288,13 @@ Requirements:
             
             has_theme_element = False
             
-            if theme_elements_en:
-                for elem in theme_elements_en:
-                    if elem.lower() in prompt:
-                        has_theme_element = True
-                        break
+            if any(kw in description for kw in check_keywords_cn):
+                has_theme_element = True
             
-            if not has_theme_element and all_keywords:
-                keyword_hits = sum(1 for kw in all_keywords if kw in combined)
-                if keyword_hits >= 1:
-                    has_theme_element = True
+            if not has_theme_element and any(kw in combined for kw in check_keywords_en):
+                has_theme_element = True
             
-            if not has_theme_element and core_theme.lower() in description:
+            if not has_theme_element and any(kw in prompt for kw in content_en):
                 has_theme_element = True
             
             if not has_theme_element:
@@ -2287,10 +2312,7 @@ Requirements:
     def validate_theme_consistency(self, shots, theme_info, deviation_indices=None):
         """验证分镜的主题一致性，偏离时自动修正提示词
         
-        Args:
-            shots: 分镜列表
-            theme_info: 主题信息字典
-            deviation_indices: 预检查已识别的偏离索引列表，若提供则直接修正这些分镜
+        限制：最多修正10个分镜，避免无限循环
         """
         if not theme_info.get('core_theme'):
             return True, "未提取到主题信息，跳过一致性检查"
@@ -2303,40 +2325,15 @@ Requirements:
         fixed_count = 0
 
         if deviation_indices is not None:
-            indices_to_fix = deviation_indices
+            indices_to_fix = list(deviation_indices)
         else:
-            theme_elements_en = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
-            all_keywords = []
-            for elem in theme_elements_en:
-                for word in elem.lower().split():
-                    if len(word) > 3:
-                        all_keywords.append(word)
-            all_keywords = list(set(all_keywords))
-
             indices_to_fix = []
-            for i, shot in enumerate(shots):
-                prompt = shot.get('prompt_en', '').lower()
-                description = shot.get('description', '').lower()
-                combined = prompt + ' ' + description
-                
-                has_theme_element = False
-                
-                if theme_elements_en:
-                    for elem in theme_elements_en:
-                        if elem.lower() in prompt:
-                            has_theme_element = True
-                            break
-                
-                if not has_theme_element and all_keywords:
-                    keyword_hits = sum(1 for kw in all_keywords if kw in combined)
-                    if keyword_hits >= 1:
-                        has_theme_element = True
-                
-                if not has_theme_element and core_theme.lower() in description:
-                    has_theme_element = True
-                
-                if not has_theme_element:
-                    indices_to_fix.append(i)
+
+        MAX_FIX_COUNT = 10
+        indices_to_fix = indices_to_fix[:MAX_FIX_COUNT]
+
+        if len(deviation_indices or []) > MAX_FIX_COUNT:
+            self.log(f"   ⚠️ 偏离数量过多({len(deviation_indices)}个)，仅修正前{MAX_FIX_COUNT}个以避免耗时过长")
 
         for i in indices_to_fix:
             if i >= len(shots):
@@ -2358,37 +2355,17 @@ Requirements:
                     if corrected and len(corrected) > 20:
                         shot['prompt_en'] = corrected
                         fixed_count += 1
+                        self.log(f"   ✅ 分镜{i+1}已修正")
                 except Exception:
                     pass
 
-        if consistency_issues and fixed_count > 0:
-            self.log(f"   🔍 修正后重新验证...")
-            still_deviant = 0
-            for i in indices_to_fix:
-                if i >= len(shots):
-                    continue
-                shot = shots[i]
-                prompt = shot.get('prompt_en', '').lower()
-                description = shot.get('description', '').lower()
-                combined = prompt + ' ' + description
-                has_theme = False
-                if theme_elements:
-                    theme_elements_en_check = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
-                    for elem in theme_elements_en_check:
-                        if elem.lower() in prompt:
-                            has_theme = True
-                            break
-                if not has_theme and core_theme.lower() in description:
-                    has_theme = True
-                if not has_theme:
-                    still_deviant += 1
-            if still_deviant > 0:
-                self.log(f"   ⚠️ 修正后仍有 {still_deviant} 个分镜偏离主题")
-
         if consistency_issues:
-            msg = f"发现{len(consistency_issues)}个偏离主题的分镜"
+            total_deviant = len(deviation_indices) if deviation_indices else len(indices_to_fix)
+            msg = f"发现{total_deviant}个偏离主题的分镜"
             if fixed_count > 0:
                 msg += f"，已自动修正{fixed_count}个"
+            if total_deviant > MAX_FIX_COUNT:
+                msg += f"（仅修正前{MAX_FIX_COUNT}个）"
             return False, msg
 
         return True, "主题一致性检查通过"
