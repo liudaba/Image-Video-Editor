@@ -110,6 +110,12 @@ MODEL_PROFILES = {
 def detect_model_type(model_name):
     """根据模型名称检测模型类型
 
+    支持的模型名称模式：
+    - Flux系列: flux, flx, schnell, dev
+    - SDXL系列: sdxl, xl, ssd-1, juggernaut xl, dreamshaper xl, realvis xl
+    - SD3系列: sd3, sd 3, stable diffusion 3, sd_3
+    - SD1.5系列: 其他所有（默认）
+
     Args:
         model_name: SD WebUI 中的模型名称，如 "Flux Dev", "SDXL 1.0" 等
 
@@ -121,20 +127,57 @@ def detect_model_type(model_name):
 
     name_lower = model_name.lower()
 
-    # Flux 系列（优先检测，因为名称最独特）
-    if "flux" in name_lower:
+    if name_lower.startswith('[sdxl]'):
+        return MODEL_TYPE_SDXL
+    if name_lower.startswith('[flux]'):
+        return MODEL_TYPE_FLUX
+    if name_lower.startswith('[sd3]'):
+        return MODEL_TYPE_SD3
+    if name_lower.startswith('[sd1.5]'):
+        return MODEL_TYPE_SD15
+
+    import re
+    clean_name = re.sub(r'^\[SD1\.5\]\s*|\[SDXL\]\s*|\[Flux\]\s*|\[SD3\]\s*', '', name_lower).strip()
+    if clean_name != name_lower:
+        name_lower = clean_name
+
+    if any(kw in name_lower for kw in ['flux', 'flx', 'schnell']):
         return MODEL_TYPE_FLUX
 
-    # SDXL 系列
-    if "sdxl" in name_lower or "xl" in name_lower:
+    if any(kw in name_lower for kw in ['sdxl', 'xl', 'ssd-1']):
         return MODEL_TYPE_SDXL
 
-    # SD3 系列
-    if "sd3" in name_lower or "stable diffusion 3" in name_lower or "sd_3" in name_lower:
+    if any(kw in name_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3', 'sd_3']):
         return MODEL_TYPE_SD3
 
-    # 默认 SD 1.5
+    sdxl_model_hints = [
+        'juggernaut', 'dreamshaper', 'realvis', 'dynavision',
+        'xlcast', 'xlmore', 'pony', 'animagine',
+    ]
+    for hint in sdxl_model_hints:
+        if hint in name_lower:
+            return MODEL_TYPE_SDXL
+
     return MODEL_TYPE_SD15
+
+
+def get_model_type_label(model_name):
+    """获取模型类型标签（用于UI显示）
+
+    Args:
+        model_name: SD WebUI 中的模型名称
+
+    Returns:
+        类型标签字符串，如 "[SD1.5]", "[SDXL]", "[Flux]", "[SD3]"
+    """
+    model_type = detect_model_type(model_name)
+    labels = {
+        MODEL_TYPE_SD15: "[SD1.5]",
+        MODEL_TYPE_SDXL: "[SDXL]",
+        MODEL_TYPE_FLUX: "[Flux]",
+        MODEL_TYPE_SD3: "[SD3]",
+    }
+    return labels.get(model_type, "[SD1.5]")
 
 
 def get_model_profile(model_name):

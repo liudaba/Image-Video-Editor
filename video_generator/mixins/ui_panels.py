@@ -170,23 +170,23 @@ class UIPanelsMixin:
         model_frame.pack(fill=tk.X, pady=3)
         ttk.Label(model_frame, text="模型:", width=12, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=5)
         
-        # 如果变量不存在，则初始化（保持与已加载配置的一致性）
         if not hasattr(self, 'model_var') or self.model_var.get() == "":
             self.model_var = tk.StringVar(value="使用当前模型")
         
-        # 默认模型列表（当 SD API 未连接时使用）
         self._default_models = ["使用当前模型", "Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3"]
         
-        # 先使用默认列表快速显示窗口，避免阻塞
         models = self._default_models
         
         model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=models, state="readonly", font=("Microsoft YaHei", large_font_size))
-        model_combo.pack(fill=tk.X, padx=5, pady=2)
+        model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
         
-        # 保存下拉菜单引用，以便后续更新
         self.model_combo = model_combo
         
-        # 异步获取 SD 模型列表（不阻塞 UI）
+        refresh_btn = ttk.Button(model_frame, text="🔄", width=3,
+            command=self._refresh_model_list, style="Accent.TButton")
+        refresh_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        self._model_refresh_btn = refresh_btn
+        
         self._async_update_sd_models()
         
         # 图片像素设置

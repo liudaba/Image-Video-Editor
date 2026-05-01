@@ -578,22 +578,69 @@ class UIHandlersMixin:
             try:
                 sd_models = self._get_sd_models_from_api()
                 if sd_models and hasattr(self, 'model_combo'):
-                    # 在主线程中更新 UI
                     def update_ui():
                         try:
-                            models = ["使用当前模型"] + sd_models
+                            labeled_models = self._add_model_type_labels(sd_models)
+                            models = ["使用当前模型"] + labeled_models
                             self.model_combo['values'] = models
                         except Exception:
                             pass
                     if hasattr(self, 'root') and self.root:
                         self.root.after(0, update_ui)
             except Exception:
-                pass  # 静默失败
+                pass
         
-        # 在后台线程中执行
         thread = threading.Thread(target=_fetch_and_update, daemon=True)
         thread.start()
     
+    def _refresh_model_list(self):
+        """手动刷新模型列表（用户点击刷新按钮时调用）"""
+        if hasattr(self, '_model_refresh_btn'):
+            self._model_refresh_btn.config(state='disabled')
+        
+        self.log("🔄 正在刷新模型列表...")
+        
+        def _do_refresh():
+            try:
+                sd_models = self._get_sd_models_from_api()
+                def update_ui():
+                    try:
+                        if sd_models:
+                            labeled_models = self._add_model_type_labels(sd_models)
+                            models = ["使用当前模型"] + labeled_models
+                            self.model_combo['values'] = models
+                            self.log(f"✅ 模型列表已刷新，共 {len(sd_models)} 个模型")
+                        else:
+                            self.log("⚠️ 未获取到模型列表，请检查SD API连接")
+                    except Exception as e:
+                        self.log(f"⚠️ 刷新模型列表失败: {str(e)[:60]}")
+                    finally:
+                        if hasattr(self, '_model_refresh_btn'):
+                            self._model_refresh_btn.config(state='normal')
+                if hasattr(self, 'root') and self.root:
+                    self.root.after(0, update_ui)
+            except Exception as e:
+                self.log(f"⚠️ 刷新模型列表失败: {str(e)[:60]}")
+                if hasattr(self, 'root') and self.root:
+                    self.root.after(0, lambda: self._model_refresh_btn.config(state='normal') if hasattr(self, '_model_refresh_btn') else None)
+        
+        thread = threading.Thread(target=_do_refresh, daemon=True)
+        thread.start()
+
+    def _add_model_type_labels(self, model_names):
+        """为模型名称添加类型标签
+        
+        例如: "Flux Dev" → "[Flux] Flux Dev"
+              "dreamshaperXL" → "[SDXL] dreamshaperXL"
+              "realisticVisionV51" → "[SD1.5] realisticVisionV51"
+        """
+        from video_generator.model_profiles import get_model_type_label
+        labeled = []
+        for name in model_names:
+            label = get_model_type_label(name)
+            labeled.append(f"{label} {name}")
+        return labeled
+
 
     def _update_model_dropdown(self):
         """更新模型下拉菜单（在 SD API 连接成功后调用）"""
@@ -602,9 +649,9 @@ class UIHandlersMixin:
         
         sd_models = self._get_sd_models_from_api()
         if sd_models:
-            models = ["使用当前模型"] + sd_models
+            labeled_models = self._add_model_type_labels(sd_models)
+            models = ["使用当前模型"] + labeled_models
             self.model_combo['values'] = models
-            # 如果当前选择的是旧的默认模型，重置为"使用当前模型"
             if self.model_var.get() in ["Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]:
                 self.model_var.set("使用当前模型")
     

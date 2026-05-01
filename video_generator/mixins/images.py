@@ -275,8 +275,10 @@ class ImagesMixin:
                 self.log(f"   当前模型: {current_sd_model}")
                 
                 try:
-                    # 直接使用用户选择的模型名称（已从 SD API 获取）
                     sd_model_name = selected_model
+                    
+                    import re as _re
+                    sd_model_name = _re.sub(r'^\[SD1\.5\]\s*|\[SDXL\]\s*|\[Flux\]\s*|\[SD3\]\s*', '', sd_model_name).strip()
                     
                     if len(available_models) == 0:
                         models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_LONG)

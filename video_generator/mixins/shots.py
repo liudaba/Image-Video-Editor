@@ -838,8 +838,8 @@ Requirements:
         }
 
         sd_model_name = ""
-        if hasattr(self, 'sd_model_var'):
-            sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+        if hasattr(self, 'model_var'):
+            sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
         shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'], sd_model_name)
         
         return shot_data
@@ -1216,8 +1216,8 @@ Requirements:
             return raw_output.strip()
         
         sd_model_name = ""
-        if hasattr(self, 'sd_model_var'):
-            sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+        if hasattr(self, 'model_var'):
+            sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
         text = self._build_final_prompt(text, sd_model_name)
 
         return text.strip()
@@ -1354,8 +1354,8 @@ Requirements:
             template_key = "shot_prompt_sd"
         else:
             sd_model_name = ""
-            if hasattr(self, 'sd_model_var'):
-                sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+            if hasattr(self, 'model_var'):
+                sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
             template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
         
         template = PromptTemplates.get_template(template_key, **template_params)
