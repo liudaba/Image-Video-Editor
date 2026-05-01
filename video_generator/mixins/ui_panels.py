@@ -515,13 +515,14 @@ class UIPanelsMixin:
         self.txt_log = tk.Text(log_frame, wrap=tk.WORD, bg="#1e1e1e", fg="#d4d4d4", font=('Microsoft YaHei', self.font_size + 4))
         self.txt_log.pack(fill=tk.BOTH, expand=True)
         
-        # 添加滚动条
-        scrollbar = ttk.Scrollbar(self.txt_log, command=self.txt_log.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._log_scrollbar = ttk.Scrollbar(self.txt_log, command=self._smart_yview if hasattr(self, '_smart_yview') else self.txt_log.yview)
+        self._log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.txt_log.config(yscrollcommand=scrollbar.set)
+        self.txt_log.config(yscrollcommand=self._log_scrollbar.set)
         
-        # 添加初始日志
+        if hasattr(self, '_setup_smart_scroll'):
+            self._setup_smart_scroll()
+        
         self.log("📋 日志区域初始化完成")
     
 
