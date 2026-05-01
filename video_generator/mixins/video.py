@@ -1,0 +1,1238 @@
+"""Video rendering mixin - moviepy composition, animation effects."""
+import os
+import sys
+import json
+import time
+import gc
+import datetime
+import traceback
+import threading
+import subprocess
+import tempfile
+import shutil
+import numpy as np
+import tkinter as tk
+from tkinter import messagebox
+from concurrent.futures import ThreadPoolExecutor
+
+class VideoMixin:
+    def _check_and_update_dependencies_impl(self):
+        """检查并更新依赖项的实际实现"""
+        self.log("====================================")
+        self.log("🔧 开始检查并更新依赖项")
+        self.log("====================================")
+        
+        # 定义需要的依赖项及其子依赖（用于解决版本兼容性问题）
+        dependencies = [
+            ("requests", ["urllib3", "chardet", "charset_normalizer", "idna", "certifi"]),
+            ("Pillow", []),
+            ("numpy", []),
+            ("torch", []),
+            ("whisper", []),
+            ("moviepy", []),
+            ("psutil", []),
+        ]
+        
+        
+        # 统计信息
+        total_deps = len(dependencies)
+        updated_count = 0
+        already_latest_count = 0
+        installed_count = 0
+        failed_count = 0
+        
+        self.log(f"📋 待检查依赖项: {total_deps} 个主包")
+        self.log("")
+        
+        # 检查并更新每个依赖项
+        for index, (dep, sub_deps) in enumerate(dependencies, 1):
+            self.log(f"[{index}/{total_deps}] 🔍 检查 {dep}...")
+            
+            # 获取当前版本信息
+            try:
+                module = __import__(dep.replace("Pillow", "PIL"))
+                current_version = getattr(module, "__version__", "未知版本")
+                self.log(f"   📌 当前版本: {current_version}")
+            except Exception:
+                current_version = "未安装"
+                self.log(f"   📌 当前状态: {current_version}")
+            
+            try:
+                # 尝试导入依赖项
+                __import__(dep.replace("Pillow", "PIL"))
+                
+                # 构建更新命令：主依赖 + 子依赖
+                packages_to_update = [dep] + sub_deps
+                
+                if sub_deps:
+                    self.log(f"   📦 关联子依赖: {', '.join(sub_deps)}")
+                
+                self.log(f"   ⬆️  正在检查更新...")
+                
+                # 尝试更新依赖项及其子依赖
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade"] + packages_to_update,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    # 解析pip输出，提取版本信息
+                    stdout = result.stdout
+                    
+                    # 检查是否有实际更新
+                    if "already up-to-date" in stdout or "already satisfied" in stdout:
+                        self.log(f"   ✅ {dep} 已是最新版本")
+                        already_latest_count += 1
+                    elif "Successfully installed" in stdout:
+                        # 提取安装的版本信息
+                        installed_packages = []
+                        # 匹配 "Successfully installed package-1.0.0"
+                        match = re.search(r'Successfully installed (.+)', stdout)
+                        if match:
+                            packages_str = match.group(1)
+                            # 提取每个包的名称和版本
+                            for pkg in packages_str.split():
+                                # 移除末尾的换行符等
+                                pkg = pkg.strip()
+                                if pkg:
+                                    installed_packages.append(pkg)
+                        
+                        if installed_packages:
+                            self.log(f"   ✅ 成功更新:")
+                            for pkg in installed_packages:
+                                self.log(f"      📦 {pkg}")
+                        else:
+                            self.log(f"   ✅ {dep} 已更新")
+                        
+                        updated_count += 1
+                    else:
+                        # 可能有部分更新或其他情况
+                        self.log(f"   ✅ {dep} 检查完成")
+                        
+                        # 尝试从输出中提取版本信息
+                        version_matches = re.findall(r'([a-zA-Z0-9_-]+)-(\d+\.\d+[^\s]*)', stdout)
+                        if version_matches:
+                            self.log(f"   📋 涉及包版本:")
+                            for pkg_name, version in version_matches[:5]:  # 最多显示5个
+                                self.log(f"      • {pkg_name} {version}")
+                        
+                        already_latest_count += 1
+                    
+                    # 如果有警告信息，显示出来
+                    if "WARNING" in stdout:
+                        warning_lines = [line for line in stdout.split('\n') if 'WARNING' in line]
+                        for warning in warning_lines[:2]:  # 最多显示2条警告
+                            self.log(f"   ⚠️  {warning.strip()}")
+                else:
+                    self.log(f"   ❌ 更新 {dep} 时出现错误")
+                    error_msg = result.stderr.strip()
+                    if error_msg:
+                        # 只显示错误的前100个字符
+                        self.log(f"      错误: {error_msg[:100]}")
+                    failed_count += 1
+                    
+            except ImportError:
+                # 依赖项未安装，进行安装
+                self.log(f"   ⚠️  {dep} 未安装，开始安装...")
+                packages_to_install = [dep] + sub_deps
+                
+                if sub_deps:
+                    self.log(f"   📦 将同时安装子依赖: {', '.join(sub_deps)}")
+                
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install"] + packages_to_install,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    self.log(f"   ✅ {dep} 安装成功")
+                    
+                    # 尝试显示安装的版本
+                    match = re.search(r'Successfully installed ([^\n]+)', result.stdout)
+                    if match:
+                        installed = match.group(1).strip()
+                        self.log(f"      📦 安装详情: {installed}")
+                    
+                    installed_count += 1
+                else:
+                    self.log(f"   ❌ 安装 {dep} 失败")
+                    error_msg = result.stderr.strip()
+                    if error_msg:
+                        self.log(f"      错误: {error_msg[:100]}")
+                    failed_count += 1
+            
+            self.log("")  # 空行分隔
+        
+        # 显示统计总结
+        self.log("====================================")
+        self.log("📊 依赖项检查和更新统计")
+        self.log("====================================")
+        self.log(f"   ✅ 已更新: {updated_count} 个")
+        self.log(f"   ✓  已是最新: {already_latest_count} 个")
+        self.log(f"   📥 新安装: {installed_count} 个")
+        if failed_count > 0:
+            self.log(f"   ❌ 失败: {failed_count} 个")
+        self.log("====================================")
+        self.log("🔧 依赖项检查和更新完成")
+        self.log("   💡 提示：已自动同步更新子依赖包")
+        self.log("====================================")
+        
+        # 构建提示消息
+        msg = f"依赖项检查和更新完成！\n\n"
+        msg += f"✅ 已更新: {updated_count} 个\n"
+        msg += f"✓  已是最新: {already_latest_count} 个\n"
+        msg += f"📥 新安装: {installed_count} 个\n"
+        if failed_count > 0:
+            msg += f"❌ 失败: {failed_count} 个\n"
+        msg += f"\n已自动处理子依赖版本兼容性。"
+        
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, lambda: messagebox.showinfo("成功", msg))
+    
+
+    def generate_video(self, skip_clear=False, use_original_resolution=False, skip_image_check=False):
+        """生成视频
+        
+        Args:
+            skip_clear: 是否跳过清除旧文件（跑图模式设为True）
+            use_original_resolution: 是否使用原始图片分辨率
+            skip_image_check: 是否跳过图片检查（直接渲染模式设为True）
+        """
+        self.log("=" * 60)
+        self.log("🎞️ 开始生成视频...")
+        self.log("=" * 60)
+        
+        _video_start_time = time.time()
+        
+        audio = None
+        final_clip = None
+        background = None
+        clips = []
+        intermediate_clips = []
+        
+        def check_cancelled():
+            if not self.task_running:
+                self.log("❌ 任务已被取消")
+                return True
+            if not self.pause_event.is_set():
+                self.log("⏸️ 任务已暂停")
+                self.pause_event.wait(timeout=5)
+                if not self.pause_event.is_set() and not self.task_running:
+                    return True
+            return False
+        
+        try:
+            from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip, vfx
+            import numpy as np
+            
+            # 步骤1: 准备阶段
+            self.update_task_progress("正在准备...", 10)
+            self.log("\n📍 步骤 1/10: 准备工作")
+            
+            if check_cancelled():
+                return
+            
+            # 步骤2: 清理旧文件（可选）
+            if not skip_clear:
+                self.update_task_progress("正在清理旧文件...", 15)
+                self.log("\n📍 步骤 2/10: 清理旧文件")
+                self.clear_images_and_videos()
+                self.log("   ✅ 旧文件清理完成")
+            
+            if check_cancelled():
+                return
+            
+            # 步骤3: 加载分镜数据
+            self.update_task_progress("正在加载分镜数据...", 20)
+            self.log("\n📍 步骤 3/10: 加载分镜数据")
+            if not self.shots_data:
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                if os.path.exists(shots_file):
+                    with open(shots_file, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                    with self.resource_lock:
+                        self.shots_data = loaded
+                    self.log(f"   📂 从文件加载分镜数据: {len(self.shots_data)} 个")
+                else:
+                    self.log("❌ 没有分镜数据，请先生成分镜")
+                    self.update_task_progress("就绪")
+                    return
+            else:
+                self.log(f"   ✅ 使用内存中的分镜数据: {len(self.shots_data)} 个")
+            
+            # 步骤4: 检查音频文件
+            self.update_task_progress("正在检查音频文件...", 25)
+            self.log("\n📍 步骤 4/10: 检查音频文件")
+            if not self.audio_path:
+                self.log("❌ 没有音频文件，请先导入音频")
+                self.update_task_progress("就绪")
+                return
+            
+            if not os.path.exists(self.audio_path):
+                self.log(f"❌ 音频文件不存在: {self.audio_path}")
+                self.log("   请重新导入音频文件")
+                self.update_task_progress("就绪")
+                return
+            self.log(f"   ✅ 音频文件存在: {os.path.basename(self.audio_path)}")
+            
+            # 步骤5: 检查并补充图片
+            if skip_image_check:
+                self.update_task_progress("跳过图片检查", 30)
+                self.log("\n📍 步骤 5/10: 跳过图片检查（直接使用现有图片）")
+            else:
+                self.update_task_progress("正在检查图片...", 30)
+                self.log("\n📍 步骤 5/10: 检查并补充图片")
+                missing_count = sum(1 for shot in self.shots_data 
+                                   if not os.path.exists(os.path.join(self.images_dir, shot['image_file'])))
+                
+                if missing_count > 0:
+                    self.log(f"   ⚠️ 检测到 {missing_count} 张图片缺失，开始生成...")
+                    self.log("   🔄 正在调用图像生成模块...")
+                    
+                    # 记录开始时间
+                    img_start_time = time.time()
+                    
+                    self.generate_images()
+                    
+                    # 记录耗时
+                    img_elapsed = time.time() - img_start_time
+                    self.log(f"   ✅ 图像生成流程完成 (耗时: {img_elapsed:.1f}s)")
+                    
+                    # 再次检查
+                    missing_count = sum(1 for shot in self.shots_data 
+                                       if not os.path.exists(os.path.join(self.images_dir, shot['image_file'])))
+                    if missing_count > 0:
+                        missing_files = [shot['image_file'] for shot in self.shots_data 
+                                        if not os.path.exists(os.path.join(self.images_dir, shot['image_file']))]
+                        self.log(f"   ❌ 仍有 {missing_count} 张图片缺失，无法生成视频")
+                        self.log(f"      缺失的图片: {missing_files[:5]}")
+                        if len(missing_files) > 5:
+                            self.log(f"      ... 还有 {len(missing_files) - 5} 张")
+                        self.update_task_progress("就绪")
+                        return
+                    else:
+                        self.log("   ✅ 所有图片已补全")
+                else:
+                    self.log("   ✅ 所有图片已存在，跳过生成步骤")
+
+            if check_cancelled():
+                return
+            
+            # 步骤6: 加载音频
+            self.update_task_progress("正在加载音频...", 35)
+            self.log("\n📍 步骤 6/10: 加载音频文件")
+            
+            audio = AudioFileClip(self.audio_path)
+            audio_duration = audio.duration
+            self._active_audio = audio
+            self.log(f"   ✅ 音频加载成功，时长: {audio_duration:.2f}s")
+            
+            # 验证时间轴（只显示信息，不修改原始时间戳）
+            self.update_task_progress("正在验证时间轴...", 40)
+            self.log("\n📍 步骤 7/10: 验证时间轴")
+            total_shots_duration = 0
+            has_gaps = False
+            has_overlap = False
+            total_gaps = 0
+            total_overlap = 0
+            for i, shot in enumerate(self.shots_data):
+                expected_duration = shot['end'] - shot['start']
+                shot['duration'] = expected_duration
+                total_shots_duration += expected_duration
+                if i > 0:
+                    gap = shot['start'] - self.shots_data[i-1]['end']
+                    if gap > 0.05:
+                        has_gaps = True
+                        total_gaps += gap
+                    elif gap < 0:
+                        has_overlap = True
+                        total_overlap += abs(gap)
+            
+            self.log(f"   📊 音频时长: {audio_duration:.2f}s, 分镜总时长: {total_shots_duration:.2f}s")
+            
+            if total_gaps > 0:
+                self.log(f"      ⏱️ 时间间隔: {total_gaps:.2f}s")
+            if total_overlap > 0:
+                self.log(f"      ⚠️ 时间重叠: {total_overlap:.2f}s")
+            
+            if has_gaps:
+                self.log("      ⚠️ 检测到时间间隔，使用精确定位模式")
+            elif has_overlap:
+                self.log("      ⚠️ 检测到时间重叠，使用精确定位模式")
+            else:
+                self.log("      ✅ 时间戳连续，使用精确定位模式")
+            
+            self.log("      📍 保持原始语音时间戳，确保音画同步")
+            
+            if check_cancelled():
+                return
+            
+            # 步骤8: 准备视频片段
+            self.update_task_progress("正在准备视频片段...", 45)
+            self.log("\n📍 步骤 8/10: 准备视频片段")
+            
+            # 获取用户选择的动画效果
+            animation_type = self.animation_var.get() if hasattr(self, 'animation_var') else "无"
+            transition_type = self.transition_var.get() if hasattr(self, 'transition_var') else "硬切"
+            self.log(f"   🎬 动画效果: {animation_type}")
+            self.log(f"   🎬 过渡效果: {transition_type}")
+            
+            # 获取视频分辨率
+            width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
+            height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+            self.log(f"   📐 视频分辨率: {width}x{height}")
+            
+            self.log("      📍 保持原始语音时间戳，确保音画同步")
+            
+            if check_cancelled():
+                return
+            
+            # ========== 快速路径: 无动画+硬切 → FFmpeg直接渲染 ==========
+            if self.video_renderer is None:
+                try:
+                    self.video_renderer = HardwareAcceleratedRenderer()
+                except Exception:
+                    self.video_renderer = None
+            
+            use_ffmpeg_direct = (
+                animation_type == "无" and
+                transition_type == "硬切" and
+                not has_overlap and
+                self.video_renderer is not None
+            )
+            
+            if use_ffmpeg_direct:
+                self.log("")
+                self.log("⚡ 检测到简单场景（无动画/硬切），启用FFmpeg直接渲染模式")
+                self.log("   🚀 跳过moviepy，由FFmpeg原生处理，速度大幅提升")
+                
+                try:
+                    import tempfile
+                    from PIL import Image as PILImageForResize
+                    
+                    temp_render_dir = tempfile.mkdtemp(prefix="vg_render_")
+                    resized_images = []
+                    shot_durations = []
+                    
+                    prev_end = 0.0
+                    for shot in self.shots_data:
+                        image_path = os.path.join(self.images_dir, shot['image_file'])
+                        if not os.path.exists(image_path):
+                            self.log(f"   ⚠️ 图片缺失: {shot['image_file']}")
+                            continue
+                        
+                        shot_dur = shot['end'] - shot['start']
+                        gap = shot['start'] - prev_end
+                        if gap > 0.05 and prev_end > 0:
+                            shot_dur += gap
+                        
+                        resized_name = f"resized_{len(resized_images):04d}.png"
+                        resized_path = os.path.join(temp_render_dir, resized_name)
+                        
+                        with PILImageForResize.open(image_path) as orig_img:
+                            fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
+                            fitted.save(resized_path, 'PNG')
+                        
+                        resized_images.append(resized_path)
+                        shot_durations.append(shot_dur)
+                        prev_end = shot['end']
+                    
+                    if not resized_images:
+                        self.log("❌ 没有可用的图片文件")
+                        self.update_task_progress("就绪")
+                        shutil.rmtree(temp_render_dir, ignore_errors=True)
+                        return
+                    
+                    self.update_task_progress("正在渲染视频...", 60)
+                    self.log(f"\n🎥 开始FFmpeg直接渲染...")
+                    self.log(f"   📊 {len(resized_images)} 张图片, 总时长 {sum(shot_durations):.1f}s")
+                    
+                    output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+                    
+                    _ffmpeg_render_start = time.time()
+                    
+                    def _ffmpeg_progress(pct, info=None):
+                        progress = 60 + int(pct * 0.35)
+                        if info:
+                            time_str = f"{int(info.get('current_time', 0)//60):02d}:{int(info.get('current_time', 0)%60):02d}"
+                            total_str = f"{int(info.get('total_time', 0)//60):02d}:{int(info.get('total_time', 0)%60):02d}"
+                            desc = f"FFmpeg渲染 {pct:.0f}% ({time_str}/{total_str})"
+                            eta = info.get('eta')
+                            if eta and eta > 0:
+                                eta_min = int(eta // 60)
+                                eta_sec = int(eta % 60)
+                                desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                            speed = info.get('speed')
+                            if speed:
+                                desc += f" {speed:.1f}x"
+                            self.update_task_progress(desc, progress)
+                        else:
+                            self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
+                    
+                    def _ffmpeg_log(msg):
+                        self.log(f"   {msg}")
+                    
+                    success = self.video_renderer.render(
+                        resized_images, self.audio_path, output_path,
+                        fps=30, shot_durations=shot_durations,
+                        progress_callback=_ffmpeg_progress,
+                        log_callback=_ffmpeg_log
+                    )
+                    
+                    shutil.rmtree(temp_render_dir, ignore_errors=True)
+                    
+                    if success:
+                        _video_elapsed = time.time() - _video_start_time
+                        _video_min = int(_video_elapsed // 60)
+                        _video_sec = int(_video_elapsed % 60)
+                        self.update_task_progress("视频生成完成", 100)
+                        self.log("\n" + "=" * 60)
+                        self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
+                        self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
+                        self.log(f"   📁 保存位置: {output_path}")
+                        self.log("=" * 60)
+                        
+                        self.state_manager['video']['generated'] = True
+                        self.state_manager['video']['path'] = output_path
+                        
+                        self.log("\n📂 打开输出文件夹...")
+                        self._open_folder(os.path.dirname(output_path))
+                        return
+                    else:
+                        self.log("⚠️ FFmpeg直接渲染失败，回退到moviepy渲染...")
+                
+                except Exception as e:
+                    self.log(f"⚠️ FFmpeg直接渲染异常: {type(e).__name__} - {str(e)[:100]}")
+                    self.log("   🔄 回退到moviepy渲染...")
+                    if 'temp_render_dir' in locals():
+                        try:
+                            shutil.rmtree(temp_render_dir, ignore_errors=True)
+                        except Exception:
+                            pass
+            
+            # 步骤9: 创建视频片段（多线程批量加载图片）
+            self.update_task_progress("正在创建视频片段...", 50)
+            self.log("\n📍 步骤 9/10: 创建视频片段")
+            clips = []
+            total_shots = len(self.shots_data)
+            
+            self.log(f"   📊 共 {total_shots} 个分镜需要处理...")
+            
+            from PIL import Image as PILImage
+            
+            def _load_and_resize_single(shot_item):
+                shot, w, h = shot_item
+                image_path = os.path.join(self.images_dir, shot['image_file'])
+                if not os.path.exists(image_path):
+                    return (shot, None)
+                try:
+                    with PILImage.open(image_path) as orig_img:
+                        img = self._resize_image_to_fit(orig_img.copy(), w, h)
+                    return (shot, img)
+                except Exception:
+                    return (shot, None)
+            
+            load_batch_size = min(16, total_shots)
+            self.log(f"   ⚡ 多线程加载: {load_batch_size}线程并行预加载图片")
+            
+            shot_img_map = {}
+            load_start = time.time()
+            with ThreadPoolExecutor(max_workers=load_batch_size) as loader_pool:
+                load_tasks = [(shot, width, height) for shot in self.shots_data]
+                for shot, img in loader_pool.map(_load_and_resize_single, load_tasks):
+                    if img is not None:
+                        shot_img_map[shot['image_file']] = img
+                    else:
+                        self.log(f"      ⚠️ 图片缺失: {shot['image_file']}")
+            
+            load_elapsed = time.time() - load_start
+            self.log(f"   ✅ 图片预加载完成: {len(shot_img_map)}/{total_shots} 张 (耗时 {load_elapsed:.1f}s)")
+            
+            processed_shots = 0
+            intermediate_clips = []
+            clips = []
+            for shot in self.shots_data:
+                if check_cancelled():
+                    # 修复：同时清理 clips 和 intermediate_clips
+                    for img in shot_img_map.values():
+                        try: img.close()
+                        except: pass
+                    for ic in intermediate_clips:
+                        try: ic.close()
+                        except: pass
+                    for c in clips:
+                        try: c.close()
+                        except: pass
+                    return
+                
+                processed_shots += 1
+                progress = 50 + int((processed_shots / total_shots) * 10)
+                if processed_shots % 5 == 0 or processed_shots == total_shots:
+                    self.update_task_progress(f"正在创建视频片段 ({processed_shots}/{total_shots})...", progress)
+                
+                img = shot_img_map.get(shot['image_file'])
+                if img is None:
+                    continue
+                
+                shot_duration = shot['end'] - shot['start']
+                if shot_duration <= 0:
+                    self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
+                    try: img.close()
+                    except: pass
+                    continue
+                
+                clip = ImageClip(np.array(img)).with_duration(shot_duration)
+                
+                try:
+                    img.close()
+                except Exception:
+                    pass
+                
+                if animation_type != "无":
+                    old_clip = clip
+                    clip = self.apply_animation_effect_prerender(clip)
+                    if clip is not old_clip:
+                        intermediate_clips.append(old_clip)
+                
+                if transition_type == "交叉淡化" and shot_duration > 0.6:
+                    crossfade_dur = min(0.3, shot_duration * 0.15)
+                    old_clip = clip
+                    clip = clip.with_effects([vfx.FadeIn(crossfade_dur), vfx.FadeOut(crossfade_dur)])
+                    if clip is not old_clip:
+                        intermediate_clips.append(old_clip)
+                
+                clip = clip.with_start(shot['start'])
+                clips.append(clip)
+            
+            if not clips:
+                self.log("❌ 没有有效的图片文件")
+                self.update_task_progress("就绪")
+                return
+            
+            self.log(f"   ✅ 视频片段创建完成: {len(clips)} 个片段")
+            
+            # 检查是否被取消
+            if not self.task_running:
+                self.log("❌ 任务已被取消")
+                return
+            
+            # 步骤10: 合成视频片段
+            self.update_task_progress("正在合成视频...", 60)
+            self.log("\n📍 步骤 10/10: 合成视频片段")
+            
+            first_start = self.shots_data[0]['start'] if self.shots_data else 0
+            has_start_gap = first_start > 0.05
+            
+            if has_gaps or has_start_gap:
+                if has_start_gap:
+                    self.log(f"      ⚠️ 视频开头有 {first_start:.2f}s 间隔，用第一张图片填充")
+                if has_gaps:
+                    self.log("      ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
+                
+                fixed_clips = []
+                prev_clip = None
+                
+                for i, clip in enumerate(clips):
+                    if prev_clip is not None:
+                        # 计算前一个片段的实际结束时间
+                        prev_end = prev_clip.start + prev_clip.duration
+                        curr_start = clip.start
+                        gap = curr_start - prev_end
+                        
+                        if gap > 0.05:
+                            # 扩展前一个片段填补间隔
+                            new_duration = prev_clip.duration + gap
+                            prev_clip = prev_clip.with_duration(new_duration)
+                            # 更新列表中前一个元素
+                            fixed_clips[-1] = prev_clip
+                    
+                    fixed_clips.append(clip)
+                    prev_clip = clip
+                
+                clips = fixed_clips
+                self.log(f"      ✅ 已修复时间间隔: {len(clips)} 个片段")
+            
+            try:
+                background = ColorClip(size=(width, height), color=(0, 0, 0)).with_duration(audio_duration)
+                final_clip = CompositeVideoClip([background] + clips, size=(width, height))
+                self._active_background = background
+                self._active_final_clip = final_clip
+                self._active_clips = clips
+                self.log(f"   ✅ 视频片段合成完成: {len(clips)} 个片段")
+            except Exception as e:
+                self.log(f"   ❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
+                self.update_task_progress("就绪")
+                return
+
+            if check_cancelled():
+                return
+            
+            # 步骤11: 添加音频
+            self.update_task_progress("正在添加音频...", 65)
+            self.log("\n🔊 添加音频轨道...")
+            old_final_clip = final_clip
+            final_clip = final_clip.with_audio(audio)
+            if old_final_clip is not final_clip:
+                try:
+                    old_final_clip.close()
+                except Exception:
+                    pass
+            self.log("   ✅ 音频轨道添加成功")
+            
+            # 步骤12: 渲染视频
+            self.update_task_progress("正在渲染视频...", 70)
+            self.log("\n🎥 开始渲染视频...")
+            output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+            
+            if not hasattr(self, '_gpu_encoder_cache'):
+                self._gpu_encoder_cache = None
+            
+            use_gpu = False
+            gpu_encoder = 'h264_nvenc'
+            gpu_preset = "p4"
+            
+            if self._gpu_encoder_cache is not None:
+                use_gpu, gpu_encoder, gpu_preset = self._gpu_encoder_cache
+                if use_gpu:
+                    self.log(f"   ⚡ 使用缓存检测结果: GPU加速 ({gpu_encoder}, preset='{gpu_preset}')")
+                else:
+                    self.log(f"   🖥️ 使用缓存检测结果: CPU渲染 (libx264)")
+            else:
+                try:
+                    result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
+                    if 'h264_nvenc' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_nvenc'
+                        gpu_preset = "p4"
+                        self.log(f"   ⚡ 检测到NVIDIA GPU加速 (h264_nvenc)")
+                    elif 'h264_qsv' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_qsv'
+                        gpu_preset = "medium"
+                        self.log(f"   ⚡ 检测到Intel QuickSync加速 (h264_qsv)")
+                    elif 'h264_amf' in result.stdout:
+                        use_gpu = True
+                        gpu_encoder = 'h264_amf'
+                        gpu_preset = "quality"
+                        self.log(f"   ⚡ 检测到AMD AMF加速 (h264_amf)")
+                    else:
+                        self.log("      🖥️ 未检测到硬件编码器，将使用CPU渲染")
+                except FileNotFoundError:
+                    self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
+                except Exception as e:
+                    self.log(f"      ⚠️ ffmpeg检测失败: {type(e).__name__} - {str(e)[:100]}")
+                
+                self._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
+            
+            if not use_gpu:
+                self.log("      🖥️ 将使用CPU渲染 (libx264, preset='veryfast')")
+            
+            try:
+                from proglog import ProgressBarLogger
+                
+                _moviepy_render_start = time.time()
+                _moviepy_total_frames = int(audio_duration * 30)
+                _moviepy_last_log_time = 0.0
+                
+                class _MoviePyProgressLogger(ProgressBarLogger):
+                    def __init__(self, app_ref):
+                        super().__init__(min_time_interval=0.5)
+                        self.app = app_ref
+                        self._last_progress_pct = 0.0
+                        self._phase = "video"
+                    
+                    def bars_callback(self, bar, attr, value, old_value=None):
+                        try:
+                            bar_data = self.bars.get(bar, {})
+                            index = bar_data.get('index', 0)
+                            total = bar_data.get('total', 0)
+                            
+                            if total > 0 and attr == 'index':
+                                pct = (index / total) * 100
+                                progress_val = 70 + int((index / total) * 25)
+                                
+                                if self._phase == "audio":
+                                    phase_label = "音频编码"
+                                    progress_val = 70 + int((index / total) * 10)
+                                else:
+                                    phase_label = "视频编码"
+                                    progress_val = 80 + int((index / total) * 20)
+                                
+                                desc = f"{phase_label} {pct:.0f}%"
+                                
+                                elapsed = time.time() - _moviepy_render_start
+                                if pct > 5 and elapsed > 0:
+                                    remaining_pct = 100.0 - pct
+                                    eta = (remaining_pct / pct) * elapsed
+                                    if eta > 0:
+                                        eta_min = int(eta // 60)
+                                        eta_sec = int(eta % 60)
+                                        desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                                
+                                self.app.update_task_progress(desc, progress_val)
+                                
+                                now = time.time()
+                                nonlocal _moviepy_last_log_time
+                                if now - _moviepy_last_log_time >= 5.0 and pct > 1.0:
+                                    _moviepy_last_log_time = now
+                                    if self._phase == "audio":
+                                        self.app.log(f"   📊 音频编码: {pct:.0f}% ({index}/{total})")
+                                    else:
+                                        self.app.log(f"   📊 视频编码: {pct:.0f}% ({index}/{total}帧)")
+                                
+                                self._last_progress_pct = pct
+                        except Exception:
+                            pass
+                    
+                    def callback(self, **kw):
+                        pass
+                
+                _moviepy_logger = _MoviePyProgressLogger(self)
+                
+                encoder_desc = gpu_encoder if use_gpu else 'libx264'
+                total_frames_desc = _moviepy_total_frames
+                self.log(f"   🔄 正在渲染视频文件...")
+                self.log(f"      编码器: {encoder_desc}, 总帧数: {total_frames_desc}, 输出: {os.path.basename(output_path)}")
+                
+                if use_gpu:
+                    hw_params = ['-movflags', '+faststart', '-threads', '0']
+                    if gpu_encoder == 'h264_nvenc':
+                        hw_params.extend(['-cq', '23', '-rc', 'vbr'])
+                    final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=_moviepy_logger)
+                else:
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_moviepy_logger)
+            except Exception as e:
+                if use_gpu:
+                    self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
+                    self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
+                    self._gpu_encoder_cache = (False, 'libx264', 'veryfast')
+                    try:
+                        from proglog import ProgressBarLogger as _PBL2
+                        _fallback_logger = _MoviePyProgressLogger(self)
+                    except Exception:
+                        _fallback_logger = None
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_fallback_logger)
+                else:
+                    raise
+            
+            # 完成
+            _video_elapsed = time.time() - _video_start_time
+            _video_min = int(_video_elapsed // 60)
+            _video_sec = int(_video_elapsed % 60)
+            _render_elapsed = time.time() - _moviepy_render_start
+            file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            size_mb = file_size / (1024 * 1024)
+            self.update_task_progress("视频生成完成", 100)
+            self.log("\n" + "=" * 60)
+            self.log(f"✅ 视频生成完成！")
+            self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
+            self.log(f"   🎥 渲染耗时: {_render_elapsed:.1f}s, 文件{size_mb:.1f}MB")
+            self.log(f"   📁 保存位置: {output_path}")
+            self.log("=" * 60)
+            
+            self.state_manager['video']['generated'] = True
+            self.state_manager['video']['path'] = output_path
+            
+            self.log("\n🧹 释放资源...")
+            self.log("   ✅ 资源释放完成")
+            
+            self.log("\n📂 打开输出文件夹...")
+            self._open_folder(os.path.dirname(output_path))
+            
+        except Exception as e:
+            _video_elapsed = time.time() - _video_start_time
+            _video_min = int(_video_elapsed // 60)
+            _video_sec = int(_video_elapsed % 60)
+            self.log(f"\n❌ 视频生成失败: {e}")
+            self.log(f"   ⏱️ 已耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
+            traceback.print_exc()
+        finally:
+            for clip in clips:
+                try: clip.close()
+                except: pass
+            for ic in intermediate_clips:
+                try: ic.close()
+                except: pass
+            if background:
+                try: background.close()
+                except: pass
+            if final_clip:
+                try: final_clip.close()
+                except: pass
+            if audio:
+                try: audio.close()
+                except: pass
+            if 'shot_img_map' in locals():
+                for img in shot_img_map.values():
+                    try: img.close()
+                    except: pass
+            self._active_audio = None
+            self._active_clips = None
+            self._active_background = None
+            self._active_final_clip = None
+            try:
+                gc.collect()
+            except Exception:
+                pass
+    
+
+    def apply_animation_effect_prerender(self, clip):
+        """预渲染缩放动画效果 - 真正预计算缩放帧，渲染时仅做numpy切片
+        
+        优化策略：
+        1. 预先获取静态帧（ImageClip每帧相同）
+        2. 一次性渲染最大缩放帧（1.05x），后续每帧只需numpy裁剪
+        3. 避免每帧重复PIL转换+resize，渲染速度提升10倍以上
+        
+        注意：此函数返回新片段，会丢失原片段的 start 属性
+              调用方必须在调用此函数后重新设置 with_start()
+        """
+        try:
+            import numpy as np
+            from moviepy import VideoClip
+            from PIL import Image
+            
+            original_duration = clip.duration
+            
+            if not original_duration or original_duration <= 0:
+                self.log("⚠️ 动画片段时长无效，跳过动画效果")
+                return clip
+            
+            w, h = clip.size
+            
+            base_frame = clip.get_frame(0)
+            
+            max_scale = 1.05
+            max_w = int(w * max_scale)
+            max_h = int(h * max_scale)
+            base_img = Image.fromarray(base_frame)
+            max_zoomed_img = base_img.resize((max_w, max_h), Image.BILINEAR)
+            max_zoomed_array = np.array(max_zoomed_img)
+            base_img.close()
+            max_zoomed_img.close()
+            
+            def make_frame(t):
+                try:
+                    progress = min(t / original_duration, 1.0)
+                    scale = 1.0 + 0.05 * progress
+                    
+                    crop_w = int(w * max_scale / scale)
+                    crop_h = int(h * max_scale / scale)
+                    crop_w = min(crop_w, max_w)
+                    crop_h = min(crop_h, max_h)
+                    
+                    left = (max_w - crop_w) // 2
+                    top = (max_h - crop_h) // 2
+                    
+                    cropped = max_zoomed_array[top:top+crop_h, left:left+crop_w]
+                    
+                    if crop_w != w or crop_h != h:
+                        y_indices = np.linspace(0, crop_h - 1, h).astype(np.intp)
+                        x_indices = np.linspace(0, crop_w - 1, w).astype(np.intp)
+                        return cropped[np.ix_(y_indices, x_indices)]
+                    
+                    return cropped
+                except Exception:
+                    return base_frame
+            
+            animated_clip = VideoClip(make_frame, duration=original_duration)
+            
+            return animated_clip
+        except Exception as e:
+            self.log(f"⚠️ 预渲染动画效果失败: {e}")
+            return clip
+
+
+    def _resize_image_to_fit(self, img, target_width, target_height):
+        """将图片缩放到目标尺寸，保持比例，不足部分填充黑边"""
+        from PIL import Image
+        import numpy as np
+
+        orig_width, orig_height = img.size
+        scale_w = target_width / orig_width
+        scale_h = target_height / orig_height
+        scale = min(scale_w, scale_h)
+        new_width = int(orig_width * scale)
+        new_height = int(orig_height * scale)
+        resized = img.resize((new_width, new_height), Image.BILINEAR)
+        new_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
+        paste_x = (target_width - new_width) // 2
+        paste_y = (target_height - new_height) // 2
+        new_img.paste(resized, (paste_x, paste_y))
+        return new_img
+
+
+    def render_video_threaded(self):
+        """跑图生成视频（完整流程：生成分镜 + 生成图片 + 合成视频）
+        
+        工作流程（三种情况）：
+        1. 有分镜脚本 + 有图片（数量匹配）→ 直接使用，合成视频
+        2. 有分镜脚本 + 无图片/图片不匹配 → 使用分镜脚本，生成图片，合成视频
+        3. 无分镜脚本 → 从头生成分镜，生成图片，合成视频
+        
+        每次执行前会自动清除上一次任务的缓存
+        """
+        # ===== 任务互斥检查 =====
+        with self.task_lock:
+            if self.task_running:
+                self.log("⚠️ 已有任务正在运行，请稍后再试")
+                return
+
+        try:
+            self.log("🎞️ 开始跑图生成视频...")
+            self.log("🎬 开始执行生成视频任务")
+
+            # ===== 前置检查 =====
+            # 检查1: 必须导入音频文件
+            if not self.audio_path:
+                self.log("❌ 没有导入音频文件，无法执行任务")
+                messagebox.showwarning("缺少音频", "请先导入音频文件，再执行跑图生成视频任务！")
+                return
+            
+            if not os.path.exists(self.audio_path):
+                self.log(f"❌ 音频文件不存在: {self.audio_path}")
+                messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
+                return
+            
+            # 检查2: 检查是否存在分镜脚本文件
+            shots_file = os.path.join(self.output_dir, "shots_data.json")
+            has_shots_file = os.path.exists(shots_file)
+            
+            # 检查3: 图片文件夹内是否存在图片文件
+            has_images = False
+            image_count = 0
+            if os.path.exists(self.images_dir):
+                image_files = [f for f in os.listdir(self.images_dir) 
+                              if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp'))]
+                has_images = len(image_files) > 0
+                image_count = len(image_files)
+            
+            # 加载分镜数据以获取分镜数量（用于后续验证）
+            shots_count = 0
+            if has_shots_file:
+                try:
+                    with open(shots_file, 'r', encoding='utf-8') as f:
+                        temp_shots = json.load(f)
+                    shots_count = len(temp_shots)
+                except Exception as e:
+                    self.log(f"⚠️ 读取分镜脚本失败: {e}")
+                    has_shots_file = False
+            
+            # ========== 情况1: 有分镜脚本 + 有图片（数量匹配）→ 直接合成视频 ==========
+            if has_shots_file and has_images and image_count == shots_count:
+                self.log("")
+                self.log("=" * 60)
+                self.log("✅ 检测到完整的分镜脚本和图片文件")
+                self.log("=" * 60)
+                self.log(f"   📋 分镜数量: {shots_count} 个")
+                self.log(f"   🖼️ 图片数量: {image_count} 张")
+                self.log(f"   ✅ 数量匹配，可以直接合成视频")
+                self.log("")
+                self.log("💡 提示: 将直接使用现有文件，跳过生成分镜和生成图片步骤")
+                
+                # 修复：使用后台线程执行，避免冻结GUI
+                self._start_render_thread(mode="use_existing_shots_only")
+                return
+            
+            # ========== 情况2: 有分镜脚本 + 无图片/图片不匹配 → 使用分镜，生成图片 ==========
+            if has_shots_file and (not has_images or image_count != shots_count):
+                if not has_images:
+                    self.log("")
+                    self.log("=" * 60)
+                    self.log("✅ 检测到分镜脚本文件，但图片文件夹为空")
+                    self.log("=" * 60)
+                    self.log(f"   📋 分镜数量: {shots_count} 个")
+                    self.log(f"   🖼️ 图片数量: 0 张")
+                    self.log("")
+                    self.log("💡 提示: 将使用现有分镜脚本，自动生成图片")
+                else:
+                    self.log("")
+                    self.log("=" * 60)
+                    self.log("⚠️ 检测到分镜脚本文件，但图片数量不匹配")
+                    self.log("=" * 60)
+                    self.log(f"   📋 分镜数量: {shots_count} 个")
+                    self.log(f"   🖼️ 图片数量: {image_count} 张")
+                    self.log(f"   ❌ 数量不匹配（需要 {shots_count} 张）")
+                    self.log("")
+                    self.log("💡 提示: 将使用现有分镜脚本，重新生成所有图片")
+                
+                # 启动渲染线程
+                self._start_render_thread(mode="use_existing_shots")
+                return
+            
+            # ========== 情况3: 无分镜脚本 → 从头生成 ==========
+            if not has_shots_file:
+                self.log("")
+                self.log("=" * 60)
+                self.log("📝 未检测到分镜脚本文件")
+                self.log("=" * 60)
+                self.log("")
+                self.log("💡 提示: 将从头开始生成分镜脚本、图片和视频")
+                
+                # 启动渲染线程
+                self._start_render_thread(mode="full_generation")
+                return
+            
+        except Exception as e:
+            self.log(f"❌ 渲染视频线程启动失败: {e}")
+            traceback.print_exc()
+    
+
+    def _start_render_thread(self, mode="full_generation"):
+        """启动渲染线程
+        
+        Args:
+            mode: "full_generation" - 从头生成, "use_existing_shots" - 使用现有分镜和图片, "use_existing_shots_only" - 仅使用现有分镜和图片直接合成视频
+        """
+        def render_video_worker():
+            with self.task_lock:
+                self.task_running = True
+            self.pause_event.set()
+            try:
+                shots_file = os.path.join(self.output_dir, "shots_data.json")
+                
+                # ========== 阶段1: 准备分镜数据 ==========
+                self.log("")
+                self.log("=" * 60)
+                self.log("📋 阶段1/3: 准备分镜数据")
+                self.log("=" * 60)
+                
+                if mode == "use_existing_shots_only":
+                    # 情况1: 分镜和图片都已就绪，直接加载分镜数据，跳过生成分镜和生成图片
+                    self.log("✅ 分镜脚本和图片已就绪，直接加载分镜数据")
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            loaded = json.load(f)
+                        with self.resource_lock:
+                            self.shots_data = loaded
+                        self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        traceback.print_exc()
+                        return
+                elif mode == "use_existing_shots" and os.path.exists(shots_file):
+                    # 使用现有分镜脚本
+                    self.log("✅ 检测到已存在的分镜脚本文件")
+                    self.log("ℹ️ 将直接使用文件夹内分镜脚本生成图片")
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            loaded = json.load(f)
+                        with self.resource_lock:
+                            self.shots_data = loaded
+                        self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
+                    except Exception as e:
+                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self.log("🔄 将重新生成分镜脚本")
+                        self.generate_shots(auto_mode=True)
+                else:
+                    # 从头生成分镜
+                    self.log("📝 未检测到分镜脚本，开始从头生成...")
+                    self.log("🔄 正在清除上一次任务的缓存...")
+                    
+                    # 清除旧的分镜数据
+                    self.shots_data = []
+                    if hasattr(self, '_pregenerated_prompts'):
+                        delattr(self, '_pregenerated_prompts')
+                    if hasattr(self, '_shot_texts_for_context'):
+                        delattr(self, '_shot_texts_for_context')
+                    
+                    self._move_output_to_trash(reason="一键生成视频")
+                    
+                    # 清除音频分析缓存，强制重新转录
+                    self.cache_clear()
+                    try:
+                        prompt_cache.clear()
+                    except Exception:
+                        pass
+                    try:
+                        image_cache.clear()
+                    except Exception:
+                        pass
+                    
+                    # 重置状态管理器
+                    try:
+                        if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
+                            self.state_manager['shots'] = {
+                                'generated': False,
+                                'count': 0,
+                                'data': []
+                            }
+                    except Exception:
+                        pass
+                    
+                    self.log("✅ 旧数据已清除，开始生成分镜...")
+                    self.generate_shots(auto_mode=True)
+                    
+                    # 分镜生成完成后，立即记录日志确认
+                    self.log("🔍 检查分镜生成结果...")
+                
+                # 验证分镜是否生成成功
+                self.log(f"🔍 验证分镜数据: hasattr={hasattr(self, 'shots_data')}, data={'存在' if hasattr(self, 'shots_data') else '不存在'}, 长度={len(self.shots_data) if hasattr(self, 'shots_data') and self.shots_data else 0}")
+                
+                if not hasattr(self, 'shots_data') or not self.shots_data:
+                    self.log("⚠️ 内存中无分镜数据，尝试从文件加载...")
+                    # 尝试从文件加载
+                    if os.path.exists(shots_file):
+                        try:
+                            with open(shots_file, 'r', encoding='utf-8') as f:
+                                loaded = json.load(f)
+                            with self.resource_lock:
+                                self.shots_data = loaded
+                            self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                        except Exception as e:
+                            self.log(f"❌ 加载分镜数据失败: {e}")
+                            traceback.print_exc()
+                    
+                    if not self.shots_data:
+                        self.log("❌ 分镜生成失败，无法继续")
+                        self.update_task_progress("就绪")
+                        return
+                
+                self.log(f"✅ 阶段1完成: {len(self.shots_data)} 个分镜已就绪")
+                
+                # ========== 阶段2: 生成图像（仅当需要时） ==========
+                if mode != "use_existing_shots_only":
+                    self.log("🚀 即将进入阶段2: 生成图像...")
+                    self.log("")
+                    self.log("=" * 60)
+                    self.log("🖼️ 阶段2/3: 生成图像")
+                    self.log("=" * 60)
+                    
+                    self.generate_images()
+                    
+                    if not self.task_running:
+                        self.log("❌ 任务已被取消")
+                        return
+
+                    self.log("✅ 阶段2完成: 图像生成结束")
+                else:
+                    self.log("✅ 跳过阶段2: 使用现有图片")
+
+                # ========== 阶段3: 合成视频 ==========
+                self.log("")
+                self.log("=" * 60)
+                self.log("🎞️ 阶段3/3: 合成视频")
+                self.log("=" * 60)
+                
+                self.generate_video(skip_clear=True, skip_image_check=True)
+                
+                self.log("✅ 所有阶段完成")
+                
+            except Exception as e:
+                self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
+                traceback.print_exc()
+            finally:
+                with self.task_lock:
+                    self.task_running = False
+                if hasattr(self, '_pregenerated_prompts'):
+                    delattr(self, '_pregenerated_prompts')
+        
+        thread = threading.Thread(target=render_video_worker, daemon=True)
+        thread.start()
+        with self.task_lock:
+            self.current_task_thread = thread
+        self.log("✅ 渲染线程已启动")
+    
+

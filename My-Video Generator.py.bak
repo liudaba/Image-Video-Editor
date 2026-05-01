@@ -436,6 +436,10 @@ class DocuMakerLiteV7:
         self.MIN_SHOT_DURATION = DEFAULT_MIN_SHOT_DURATION
         self.whisper_model = None
         self._whisper_on_gpu = False
+        self._whisper_model_size = None
+        self._log_buffer = []
+        self._log_counter = 0
+        self.executor = None
         
         # API设置
         self.api_var = tk.StringVar(value="Stable Diffusion API")
@@ -2463,20 +2467,42 @@ class DocuMakerLiteV7:
     # 第五部分：提示词生成 (行 3809-4397)
     # 包含：ARV提示词、SD提示词、LLM提示词
     # =======================================================================
-    def _infer_visual_concept_from_dubbing(self, dubbing):
-        """使用大模型从配音内容智能推断画面构思"""
+    def _infer_from_dubbing_with_llm(self, dubbing, user_prompt_template, system_prompt):
+        """使用大模型从配音内容推断视觉信息（统一方法，消除重复代码）
+        
+        Args:
+            dubbing: 配音文本
+            user_prompt_template: 用户提示词模板，包含 {dubbing} 占位符
+            system_prompt: 系统提示词
+        """
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
-        
         if not is_ollama_available():
             return ""
-        
         try:
             model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
             if not model:
                 model = "gemma3:4b"
-            
-            prompt = f"""根据以下配音文本，构思一个适合的图像画面场景。
+            user_prompt = user_prompt_template.format(dubbing=dubbing)
+            result_text, _ = call_ollama_single(
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                log_callback=self.log,
+                num_predict=256,
+                num_ctx=2048
+            )
+            if result_text:
+                return result_text.strip()
+            return ""
+        except Exception:
+            return ""
+    
+    def _infer_visual_concept_from_dubbing(self, dubbing):
+        """使用大模型从配音内容智能推断画面构思"""
+        return self._infer_from_dubbing_with_llm(
+            dubbing,
+            user_prompt_template="""根据以下配音文本，构思一个适合的图像画面场景。
 要求：
 1. 描述一个具体的画面场景，包含主要视觉元素
 2. 用英文描述
@@ -2484,37 +2510,15 @@ class DocuMakerLiteV7:
 
 配音文本：{dubbing}
 
-返回格式：a detailed visual scene description"""
-            
-            result_text, _ = call_ollama_single(
-                model=model,
-                system_prompt="You are a visual scene designer. Describe a specific visual scene based on the given text.",
-                user_prompt=prompt,
-                log_callback=self.log,
-                num_predict=256,
-                num_ctx=2048
-            )
-            
-            if result_text:
-                return result_text.strip()
-            return ""
-        except Exception:
-            return ""
+返回格式：a detailed visual scene description""",
+            system_prompt="You are a visual scene designer. Describe a specific visual scene based on the given text."
+        )
     
     def _infer_visual_elements_from_dubbing(self, dubbing):
         """使用大模型从配音内容智能推断视觉元素"""
-        if not dubbing or len(dubbing.strip()) < 2:
-            return ""
-        
-        if not is_ollama_available():
-            return ""
-        
-        try:
-            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-            if not model:
-                model = "gemma3:4b"
-            
-            prompt = f"""从以下配音文本中提取所有能够用于图像生成的视觉元素关键词。
+        return self._infer_from_dubbing_with_llm(
+            dubbing,
+            user_prompt_template="""从以下配音文本中提取所有能够用于图像生成的视觉元素关键词。
 要求：
 1. 提取具体的人、物、场景、动作等视觉元素
 2. 用英文逗号分隔每个关键词
@@ -2522,22 +2526,9 @@ class DocuMakerLiteV7:
 
 配音文本：{dubbing}
 
-返回格式：keyword1, keyword2, keyword3"""
-            
-            result_text, _ = call_ollama_single(
-                model=model,
-                system_prompt="You are a visual element extractor. Extract visual keywords from text.",
-                user_prompt=prompt,
-                log_callback=self.log,
-                num_predict=256,
-                num_ctx=2048
-            )
-            
-            if result_text:
-                return result_text.strip()
-            return ""
-        except Exception:
-            return ""
+返回格式：keyword1, keyword2, keyword3""",
+            system_prompt="You are a visual element extractor. Extract visual keywords from text."
+        )
     
     def _generate_arv_prompt(self, description_parts, content_type, shot_id):
         """生成ARV绝对写实风格提示词 - 使用ARV优化模块，必要时切换大模型"""
@@ -4498,6 +4489,36 @@ Translation examples (Chinese meaning → English visual elements):
         """获取缓存统计信息"""
         return self.cache_stats
     
+    def _unload_ollama_models(self, log_prefix=""):
+        """卸载所有Ollama模型释放GPU显存（统一方法，替代4处重复代码）
+        
+        注意：此方法包含网络请求和短暂等待，不应在主线程中调用。
+        """
+        try:
+            if is_ollama_available():
+                status_resp = get_http_session().get(
+                    f"{Config.OLLAMA_BASE_URL}/api/ps",
+                    timeout=5
+                )
+                if status_resp.status_code == 200:
+                    loaded_models = status_resp.json().get('models', [])
+                    for m in loaded_models:
+                        model_name = m.get('name', '')
+                        if model_name:
+                            try:
+                                get_http_session().post(
+                                    f"{Config.OLLAMA_BASE_URL}/api/generate",
+                                    json={"model": model_name, "keep_alive": 0, "stream": False},
+                                    timeout=15
+                                )
+                            except Exception:
+                                pass
+                    if loaded_models:
+                        time.sleep(2)
+                        self.log(f"{log_prefix}🧹 Ollama 模型已卸载，GPU 显存已释放")
+        except Exception:
+            pass
+
     def init_thread_pool(self):
         """初始化线程池"""
         # 基于CPU核心数和系统内存动态调整线程池大小
@@ -4958,6 +4979,13 @@ Translation examples (Chinese meaning → English visual elements):
             pass
 
         try:
+            if self.executor is not None:
+                self.executor.shutdown(wait=False)
+                self.executor = None
+        except Exception:
+            pass
+
+        try:
             self.log("✅ 资源清理完成，正在退出...")
         except Exception:
             pass
@@ -4978,11 +5006,12 @@ Translation examples (Chinese meaning → English visual elements):
                     sys.stderr.close()
                 except Exception:
                     pass
-            ctypes.windll.kernel32.FreeConsole()
+            if sys.platform == "win32":
+                ctypes.windll.kernel32.FreeConsole()
         except Exception:
             pass
 
-        os._exit(0)
+        sys.exit(0)
     
     # =======================================================================
     # 第十部分：主任务执行 - 生成分镜/图片/视频 (行 7995-8940)
@@ -5145,33 +5174,7 @@ Translation examples (Chinese meaning → English visual elements):
                 self.update_task_progress("正在加载Whisper模型...", 20)
                 
                 # 检查Ollama是否有模型残留占用GPU显存，确保Whisper独占GPU
-                try:
-                    if is_ollama_available():
-                        try:
-                            status_resp = get_http_session().get(
-                                f"{Config.OLLAMA_BASE_URL}/api/ps",
-                                timeout=5
-                            )
-                            if status_resp.status_code == 200:
-                                loaded_models = status_resp.json().get('models', [])
-                                for m in loaded_models:
-                                    model_name = m.get('name', '')
-                                    if model_name:
-                                        try:
-                                            get_http_session().post(
-                                                f"{Config.OLLAMA_BASE_URL}/api/generate",
-                                                json={"model": model_name, "keep_alive": 0, "stream": False},
-                                                timeout=15
-                                            )
-                                        except Exception:
-                                            pass
-                                if loaded_models:
-                                    time.sleep(2)
-                                    self.log(f"🧹 已卸载 {len(loaded_models)} 个残留Ollama模型，为Whisper释放GPU显存")
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                self._unload_ollama_models(log_prefix="   ")
                 
                 warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                 
@@ -5990,36 +5993,13 @@ Translation examples (Chinese meaning → English visual elements):
                                     self.log(f"   ✅ 修正后的分镜数据已重新保存")
 
             # 主题一致性检查完成后，卸载Ollama释放GPU（后续步骤不再需要Ollama）
-            try:
-                if is_ollama_available():
-                    status_resp = get_http_session().get(
-                        f"{Config.OLLAMA_BASE_URL}/api/ps",
-                        timeout=5
-                    )
-                    if status_resp.status_code == 200:
-                        loaded_models = status_resp.json().get('models', [])
-                        for m in loaded_models:
-                            model_name = m.get('name', '')
-                            if model_name:
-                                try:
-                                    get_http_session().post(
-                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                                        json={"model": model_name, "keep_alive": 0, "stream": False},
-                                        timeout=15
-                                    )
-                                except Exception:
-                                    pass
-                        if loaded_models:
-                            time.sleep(2)
-                            self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
-            except Exception:
-                pass
+            self._unload_ollama_models()
 
             # 检查分镜是否为空
             if not shots:
                 self.log("❌ 未能生成分镜，请检查音频文件是否正确")
                 self.update_task_progress("就绪")
-                messagebox.showwarning("警告", "未能生成分镜，请检查音频文件是否正确")
+                self.root.after(0, lambda: messagebox.showwarning("警告", "未能生成分镜，请检查音频文件是否正确"))
                 return
             
             # 步骤4: 验证和完成
@@ -6093,30 +6073,7 @@ Translation examples (Chinese meaning → English visual elements):
             gc.collect()
             
             # 兜底卸载Ollama模型释放GPU显存
-            try:
-                if is_ollama_available():
-                    status_resp = get_http_session().get(
-                        f"{Config.OLLAMA_BASE_URL}/api/ps",
-                        timeout=5
-                    )
-                    if status_resp.status_code == 200:
-                        loaded_models = status_resp.json().get('models', [])
-                        for m in loaded_models:
-                            model_name = m.get('name', '')
-                            if model_name:
-                                try:
-                                    get_http_session().post(
-                                        f"{Config.OLLAMA_BASE_URL}/api/generate",
-                                        json={"model": model_name, "keep_alive": 0, "stream": False},
-                                        timeout=15
-                                    )
-                                except Exception:
-                                    pass
-                        if loaded_models:
-                            time.sleep(3)
-                            self.log("🧹 Ollama 模型已卸载，GPU 显存已释放")
-            except Exception:
-                pass
+            self._unload_ollama_models()
             
             set_ollama_available_global(False)
             
@@ -6360,27 +6317,7 @@ Translation examples (Chinese meaning → English visual elements):
                     self.log("   🧹 Whisper GPU 显存已释放")
                 
                 try:
-                    if is_ollama_available():
-                        status_resp = get_http_session().get(
-                            f"{Config.OLLAMA_BASE_URL}/api/ps",
-                            timeout=5
-                        )
-                        if status_resp.status_code == 200:
-                            loaded_models = status_resp.json().get('models', [])
-                            for m in loaded_models:
-                                model_name = m.get('name', '')
-                                if model_name:
-                                    try:
-                                        get_http_session().post(
-                                            f"{Config.OLLAMA_BASE_URL}/api/generate",
-                                            json={"model": model_name, "keep_alive": 0, "stream": False},
-                                            timeout=15
-                                        )
-                                    except Exception:
-                                        pass
-                            if loaded_models:
-                                time.sleep(3)
-                                self.log(f"   🧹 已卸载 {len(loaded_models)} 个Ollama模型，GPU显存释放给SD使用")
+                    self._unload_ollama_models(log_prefix="   ")
                 except Exception:
                     pass
                 self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
@@ -6444,7 +6381,7 @@ Translation examples (Chinese meaning → English visual elements):
                         cached = image_cache.get(ck)
                         if cached:
                             try:
-                                result_queue.put((idx, ck, cached, "cached", img_path), timeout=30)
+                                result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
                             except queue.Full:
                                 pass
                             continue
@@ -6560,7 +6497,7 @@ Translation examples (Chinese meaning → English visual elements):
 
                     if result_type == "cached":
                         cached_count += 1
-                        img_path = item[4]
+                        img_path = item[5]
                         save_queue.put((idx, img_path, item[2]), timeout=30)
                         self.log(f"   ✅ 缓存命中")
 
@@ -7345,12 +7282,6 @@ Translation examples (Chinese meaning → English visual elements):
             
             # 清除旧的分镜数据和缓存，防止新音频混入旧音频的转录内容
             self.log("🗑️ 清除旧分镜数据，防止混入旧音频内容...")
-            self.shots_data = []
-            self.total_audio_duration = 0
-            if hasattr(self, '_pregenerated_prompts'):
-                delattr(self, '_pregenerated_prompts')
-            if hasattr(self, '_shot_texts_for_context'):
-                delattr(self, '_shot_texts_for_context')
             
             # 释放Whisper GPU资源（如果上次任务异常退出未释放）
             self._safe_release_whisper_gpu()
@@ -7358,47 +7289,7 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("   🧹 Whisper GPU资源已释放")
             
             self._move_output_to_trash(reason="导入新音频")
-            
-            # 清除所有缓存（音频分析、提示词等），强制重新转录
-            self.cache_clear()
-            try:
-                prompt_cache.clear()
-            except Exception:
-                pass
-            try:
-                image_cache.clear()
-            except Exception:
-                pass
-            
-            # 重置状态管理器
-            try:
-                if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
-                    self.state_manager['shots'] = {
-                        'generated': False,
-                        'count': 0,
-                        'data': []
-                    }
-                    self.state_manager['audio']['duration'] = 0
-                    if 'images' in self.state_manager:
-                        self.state_manager['images']['generated'] = False
-                        self.state_manager['images']['count'] = 0
-                    if 'video' in self.state_manager:
-                        self.state_manager['video']['generated'] = False
-                        self.state_manager['video']['path'] = None
-            except Exception:
-                pass
-            
-            try:
-                if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
-                    self.data_bus.clear()
-            except Exception:
-                pass
-
-            try:
-                if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
-                    self.event_system.clear()
-            except Exception:
-                pass
+            self._reset_project_state(reset_audio_path=False)
             
             if hasattr(self, 'txt_script') and self.txt_script:
                 def clear_script():
@@ -7515,6 +7406,61 @@ Translation examples (Chinese meaning → English visual elements):
         new_img.paste(resized, (paste_x, paste_y))
         return new_img
 
+    def _reset_project_state(self, reset_audio_path=False):
+        """重置项目状态（公共方法，被 import_audio 和 clear_audio 共用）
+        
+        Args:
+            reset_audio_path: 是否同时重置音频路径（clear_audio=True, import_audio=False）
+        """
+        self.shots_data = []
+        if reset_audio_path:
+            self.total_audio_duration = 0
+        if hasattr(self, '_pregenerated_prompts'):
+            delattr(self, '_pregenerated_prompts')
+        if hasattr(self, '_shot_texts_for_context'):
+            delattr(self, '_shot_texts_for_context')
+        
+        self.cache_clear()
+        try:
+            prompt_cache.clear()
+        except Exception:
+            pass
+        try:
+            image_cache.clear()
+        except Exception:
+            pass
+        
+        try:
+            if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
+                self.state_manager['shots'] = {
+                    'generated': False, 'count': 0, 'data': []
+                }
+                if reset_audio_path:
+                    self.state_manager['audio'] = {
+                        'loaded': False, 'path': None, 'duration': 0
+                    }
+                else:
+                    self.state_manager['audio']['duration'] = 0
+                if 'images' in self.state_manager:
+                    self.state_manager['images']['generated'] = False
+                    self.state_manager['images']['count'] = 0
+                if 'video' in self.state_manager:
+                    self.state_manager['video']['generated'] = False
+                    self.state_manager['video']['path'] = None
+        except Exception:
+            pass
+        
+        try:
+            if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
+                self.data_bus.clear()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
+                self.event_system.clear()
+        except Exception:
+            pass
+
     def clear_audio(self):
         """清除音频"""
         self.log("🗑️ 清除音频")
@@ -7530,74 +7476,23 @@ Translation examples (Chinese meaning → English visual elements):
                 self.log("✅ Whisper模型内存已释放")
             
             self.audio_path = None
-            self.total_audio_duration = 0
-            self.shots_data = []
-
-            if hasattr(self, '_pregenerated_prompts'):
-                delattr(self, '_pregenerated_prompts')
-            if hasattr(self, '_shot_texts_for_context'):
-                delattr(self, '_shot_texts_for_context')
-            
+            self._reset_project_state(reset_audio_path=True)
             self._move_output_to_trash(reason="清除音频")
-            
-            self.cache_clear()
-
-            try:
-                prompt_cache.clear()
-            except Exception:
-                pass
-
-            try:
-                image_cache.clear()
-            except Exception:
-                pass
-            
-            self.state_manager['audio']['loaded'] = False
-            self.state_manager['audio']['path'] = None
-            self.state_manager['audio']['duration'] = 0
-            self.state_manager['shots']['generated'] = False
-            self.state_manager['shots']['count'] = 0
-            self.state_manager['shots']['data'] = []
-
-            try:
-                if 'images' in self.state_manager:
-                    self.state_manager['images']['generated'] = False
-                    self.state_manager['images']['count'] = 0
-                if 'video' in self.state_manager:
-                    self.state_manager['video']['generated'] = False
-                    self.state_manager['video']['path'] = None
-            except Exception:
-                pass
-
-            try:
-                if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
-                    self.data_bus.clear()
-            except Exception:
-                pass
-
-            try:
-                if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
-                    self.event_system.clear()
-            except Exception:
-                pass
             
             # 更新UI
             if hasattr(self, 'lbl_audio_status'):
                 def update_ui():
                     try:
                         self.lbl_audio_status.config(text="未加载音频")
-                        # 清空脚本区域（已移除脚本窗口）
                         if hasattr(self, 'txt_script') and self.txt_script:
                             self.txt_script.delete(1.0, tk.END)
                             self.txt_script.insert(tk.END, "# 分镜脚本将在此显示\n")
-                    except Exception as e:
+                    except Exception:
                         pass
                 if hasattr(self, 'root') and self.root:
                     self.root.after(0, update_ui)
             
-            # 清理内存
             gc.collect()
-            
             self.log("✅ 音频清除完成")
         except Exception as e:
             self.log(f"❌ 音频清除失败: {e}")

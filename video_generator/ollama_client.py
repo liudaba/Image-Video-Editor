@@ -311,7 +311,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
-                       llm_config=None):
+                       llm_config=None, extra_options=None):
     """调用单个 Ollama 模型（不自动切换）
 
     Args:
@@ -322,6 +322,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
         num_predict: 预测token数
         num_ctx: 上下文长度
         llm_config: LLMConfig 实例
+        extra_options: 额外的采样参数，会覆盖默认值（如 repeat_penalty, temperature）
 
     Returns:
         tuple: (result_text, model_name) 或 (None, None)
@@ -345,6 +346,10 @@ def call_ollama_single(model, system_prompt, user_prompt,
             "num_predict": num_predict,
             "num_ctx": num_ctx
         }
+
+    # 合并额外选项（覆盖默认值）
+    if extra_options:
+        options.update(extra_options)
 
     try:
         with _ollama_call_semaphore:

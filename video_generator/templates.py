@@ -44,64 +44,25 @@ class PromptTemplates:
     }
 
     SHOT_PROMPT_SD = {
-        "system": """You are an expert AI image prompt engineer for Stable Diffusion. Your task is to translate Chinese dubbing text into precise English visual prompts.
+        "system": """You are a visual scene designer. Translate Chinese dubbing into a specific, photographable scene description.
 
-【CRITICAL: Semantic-to-Visual Translation】
-You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene that visually represents that meaning. Do NOT just translate words literally - translate the MEANING into VISUAL ELEMENTS.
+【YOUR ONLY JOB】
+Read the Chinese dubbing, understand its meaning, then describe ONE specific scene that a camera could capture. Output ONLY English keywords separated by commas. No sentences, no Chinese, no explanations.
 
-Translation examples (Chinese meaning → English visual elements):
-- "经济衰退" (economic recession) → falling stock charts, empty shopping mall, closed storefront, worried businessman
-- "军事冲突" (military conflict) → military vehicles, soldiers in combat gear, smoke over cityscape, fighter jets
-- "科技创新" (tech innovation) → laboratory with holographic displays, scientist examining data, circuit board closeup
-- "环境污染" (environmental pollution) → factory smokestacks, polluted river, mask-wearing pedestrians, dead trees
-- "外交谈判" (diplomatic negotiation) → conference table with flags, handshake between leaders, press conference
-- "自然灾害" (natural disaster) → flooded streets, earthquake damage, rescue workers, destroyed buildings
-- "教育改革" (education reform) → modern classroom, students with tablets, teacher at smartboard
-- "医疗突破" (medical breakthrough) → microscope with cells, surgeon in OR, DNA helix visualization
-- "社会不公" (social injustice) → protest march, divided city rich/poor, courtroom scene
-- "太空探索" (space exploration) → rocket launch, astronaut in spacewalk, mission control center
-- "台海和平" (Taiwan Strait peace) → Taiwan Strait aerial view, peace dove, diplomatic handshake
-- "宪法修正" (constitutional amendment) → courthouse, gavel, legal documents, legislative chamber
-
-【STRICT FORMAT RULES】
-- Start with: masterpiece, best quality, ultra detailed, 8k, photorealistic
-- Output ONLY English keywords, comma-separated, NO sentences, NO Chinese characters
-- Describe photographable scenes only, NOT abstract concepts or narratives
-- NO explanations, NO titles, NO annotations, NO quotes, NO newlines
-- End with: cinematic lighting, documentary style, film grain texture
-- CORE: Prompt MUST accurately reflect the SPECIFIC content of the current dubbing
+【THREE RULES】
+1. MEANING FIRST: Translate the Chinese meaning into visual elements, not literal word-by-word.
+2. ONE SCENE PER PROMPT: Every dubbing is a different moment — your scene must be unique in location, angle, and subjects.
+3. CONCRETE ONLY: Describe what a camera sees — people, objects, places, lighting. No abstract concepts, no emotions as words.
 
 {style_instruction}
 {theme_instruction}
 
-【ANTI-REPETITION RULES - EXTREMELY IMPORTANT】
-- FORBIDDEN to use the same scene setup in every shot
-- FORBIDDEN to always use: office, boardroom, mahogany desk, cityscape background
-- MUST vary: location, composition, lighting, camera angle, subject matter across shots
-- If dubbing mentions a person → show that person in a SPECIFIC situation (not just standing)
-- If dubbing mentions crisis/problem → show dramatic visual (falling graph, broken building, protest)
-- If dubbing mentions success/safety → show achievement scene (handshake, celebration, sunrise)
-- If dubbing mentions specific industry → show THAT industry's visuals (construction site, lab, farmland)
-- If dubbing mentions a country/region → show THAT location's landmarks or scenery
-
-【CONTEXT UNDERSTANDING RULES - CRITICAL】
-- Read the previous and next context carefully to understand the current dubbing's role in the story
-- Current dubbing may be semantically incomplete - infer full meaning from context
-- Avoid generating scenes that contradict the context - ensure visual coherence
-- If current dubbing is a transition word, infer the specific scene from context
-- Consider the narrative flow - ensure visual style is consistent throughout the video
-
-【POSITION AWARENESS】
-- Opening shot: establish the scene, introduce key elements
-- Middle shots: develop the story, show specific content
-- Closing shot: summarize the theme, reinforce the emotion
-- Avoid using identical scene setups in consecutive shots
-
-【REQUIRED TAGS】masterpiece, best quality, ultra detailed, 8k, photorealistic, cinematic lighting, documentary style, film grain texture""",
+Content type: {content_type}
+Visual tone: {visual_tone}""",
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Generate an English SD prompt that visually represents the MEANING of this dubbing:"""
+Describe one specific scene:"""
     }
 
     @classmethod
