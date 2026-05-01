@@ -2,13 +2,22 @@
 import datetime
 import tkinter as tk
 
+_CONSOLE_ONLY_KEYS = ['✅', '❌', '🎉', '📍', '⚠️', '🗑️', '🔧', '💡', '🎬', '🎞️', '📊', '🔍', '步骤', '完成', '失败', '错误', '启动', '就绪']
+
 
 class LoggingMixin:
     def log(self, message):
-        """记录日志 - 智能滚动：用户上滚时保持位置，在底部时自动跟随"""
+        """记录日志 - GUI智能滚动 + 控制台精简输出
+        
+        GUI日志：完整输出所有日志，智能滚动
+        控制台：只输出关键节点信息，减少滚动干扰
+        """
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
-        print(log_message)
+
+        is_important = any(key in message for key in _CONSOLE_ONLY_KEYS)
+        if is_important:
+            print(log_message)
 
         if not hasattr(self, '_user_scrolling'):
             self._user_scrolling = False
