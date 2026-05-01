@@ -514,6 +514,144 @@ class ShotsMixin:
         return merged
 
 
+    def _check_and_deduplicate_prompts(self, pregenerated_prompts, final_tasks):
+        """检测并修正重复的提示词
+        
+        策略：
+        1. 计算相邻提示词的词汇重叠率
+        2. 重叠率超过70%的标记为重复
+        3. 对重复提示词追加差异化指令重新生成
+        
+        Returns:
+            修正的重复提示词数量
+        """
+        if not pregenerated_prompts or len(pregenerated_prompts) <= 1:
+            return 0
+        
+        def _token_overlap_ratio(p1, p2):
+            if not p1 or not p2:
+                return 0.0
+            tokens1 = set(p1.lower().split(','))
+            tokens1 = {t.strip() for t in tokens1 if len(t.strip()) > 2}
+            tokens2 = set(p2.lower().split(','))
+            tokens2 = {t.strip() for t in tokens2 if len(t.strip()) > 2}
+            if not tokens1 or not tokens2:
+                return 0.0
+            intersection = tokens1 & tokens2
+            union = tokens1 | tokens2
+            return len(intersection) / len(union) if union else 0.0
+        
+        duplicate_count = 0
+        indices = sorted(pregenerated_prompts.keys())
+        
+        for i in range(1, len(indices)):
+            curr_idx = indices[i]
+            prev_idx = indices[i - 1]
+            curr_prompt = pregenerated_prompts.get(curr_idx, "")
+            prev_prompt = pregenerated_prompts.get(prev_idx, "")
+            
+            if not curr_prompt or not prev_prompt:
+                continue
+            
+            overlap = _token_overlap_ratio(curr_prompt, prev_prompt)
+            if overlap > 0.7:
+                duplicate_count += 1
+                dubbing = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ""
+                if dubbing and is_ollama_available():
+                    try:
+                        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                        if not model:
+                            model = "gemma3:4b"
+                        diff_prompt = f"""The previous shot prompt was: {prev_prompt}
+
+This is TOO SIMILAR. Generate a COMPLETELY DIFFERENT scene for the same dubbing.
+Current dubbing: {dubbing}
+
+Requirements:
+- Use a DIFFERENT location, angle, and composition
+- Focus on a different aspect of the same topic
+- Must be visually distinct from the previous scene
+- Output ONLY the new prompt, nothing else"""
+
+                        result_text, _ = call_ollama_single(
+                            model=model,
+                            system_prompt="You are an AI image prompt engineer. Generate a visually distinct alternative prompt.",
+                            user_prompt=diff_prompt,
+                            log_callback=self.log,
+                            num_predict=512,
+                            num_ctx=2048
+                        )
+                        if result_text:
+                            cleaned = self._clean_prompt_output(result_text.strip())
+                            if cleaned and len(cleaned) > 20:
+                                pregenerated_prompts[curr_idx] = cleaned
+                                self._pregenerated_prompts_for_context[curr_idx] = cleaned
+                    except Exception:
+                        pass
+        
+        return duplicate_count
+
+
+    def _calculate_prompt_quality(self, prompt_en, dubbing_text):
+        """计算提示词质量评分（0.0-1.0）
+        
+        评分维度：
+        1. 长度适当性（0.25分）：30-200字符为最佳
+        2. 关键词丰富度（0.25分）：逗号分隔的关键词数量
+        3. 无中文污染（0.25分）：不含中文字符
+        4. 语义相关性（0.25分）：提示词与配音文本的实体重叠
+        """
+        if not prompt_en:
+            return 0.0
+        
+        score = 0.0
+        
+        prompt_len = len(prompt_en)
+        if 30 <= prompt_len <= 200:
+            score += 0.25
+        elif 15 <= prompt_len < 30 or 200 < prompt_len <= 300:
+            score += 0.15
+        elif prompt_len > 10:
+            score += 0.05
+        
+        keywords = [k.strip() for k in prompt_en.split(',') if k.strip()]
+        if 8 <= len(keywords) <= 25:
+            score += 0.25
+        elif 5 <= len(keywords) < 8 or 25 < len(keywords) <= 35:
+            score += 0.15
+        elif len(keywords) >= 3:
+            score += 0.05
+        
+        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', prompt_en))
+        if not has_chinese:
+            score += 0.25
+        elif has_chinese:
+            chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', prompt_en))
+            if chinese_chars <= 3:
+                score += 0.10
+        
+        if dubbing_text:
+            from video_generator.enhanced_content_recognition import COUNTRY_MAPPING, MILITARY_MAPPING if ENHANCED_RECOGNITION_AVAILABLE else {}, {}
+            entity_hits = 0
+            prompt_lower = prompt_en.lower()
+            for cn_name, en_value in {**COUNTRY_MAPPING, **MILITARY_MAPPING}.items() if ENHANCED_RECOGNITION_AVAILABLE else {}.items():
+                if cn_name in dubbing_text:
+                    for en_part in en_value.split(','):
+                        en_part = en_part.strip().lower()
+                        if en_part and en_part in prompt_lower:
+                            entity_hits += 1
+                            break
+            if entity_hits > 0:
+                score += min(0.25, 0.1 * entity_hits)
+            else:
+                dubbing_words = set(dubbing_text.lower().split())
+                prompt_words = set(prompt_lower.split())
+                overlap = dubbing_words & prompt_words
+                if overlap:
+                    score += min(0.25, 0.05 * len(overlap))
+        
+        return round(min(1.0, score), 2)
+
     def _extract_shot_theme_elements(self, shot_text, global_elements):
         """从分镜文案中提取相关的主题元素
         
@@ -607,9 +745,7 @@ class ShotsMixin:
             else:
                 prompt_en = self._generate_sd_prompt(description_parts, content_type, shot_id)
         
-        # 简化处理：直接使用生成的提示词，跳过额外的优化和质量评估
-        # 已由大模型生成
-        prompt_quality = 0.0
+        prompt_quality = self._calculate_prompt_quality(prompt_en, description_parts.get('dubbing', ''))
         optimized_prompt = prompt_en
         
         # 修复：使用Decimal进行高精度时间戳计算，确保duration = end - start
@@ -641,7 +777,10 @@ class ShotsMixin:
             "theme_elements": theme_elements if theme_elements else []
         }
 
-        shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'])
+        sd_model_name = ""
+        if hasattr(self, 'sd_model_var'):
+            sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+        shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'], sd_model_name)
         
         return shot_data
     
@@ -693,7 +832,7 @@ class ShotsMixin:
                 result['visual_elements'] = self._infer_visual_elements_from_dubbing(result['dubbing'])
         
         if not result['dubbing']:
-            result['dubbing'] = cleaned[:200]
+            result['dubbing'] = cleaned[:100] if len(cleaned) > 100 else cleaned
         
         return result
     
@@ -1062,85 +1201,56 @@ class ShotsMixin:
             "dubbing": dubbing
         }
         
-        if prompt_type == "SD提示词":
-            # 为SD提示词添加上下文信息
-            context_hint = ""
-            if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
-                shot_texts = self._shot_texts_for_context
-                try:
-                    idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
-                    if idx >= 0:
-                        # 添加全局内容摘要（帮助理解整体主题）
-                        if full_text and len(full_text) > 50:
-                            # 截取前200字符作为内容摘要
-                            content_summary = full_text[:200] + "..." if len(full_text) > 200 else full_text
-                            context_hint += f"整体内容摘要: {content_summary}\n"
-                        
-                        # 添加前文上下文（最近的2-3个片段）
-                        prev_texts = [shot_texts[j] for j in range(max(0, idx-3), idx)]
-                        if prev_texts:
-                            context_hint += f"前文上下文: {' | '.join(prev_texts)}\n"
-                        
-                        # 添加后文上下文（接下来的2-3个片段）
-                        next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+4))]
-                        if next_texts:
-                            context_hint += f"后文上下文: {' | '.join(next_texts)}\n"
-                        
-                        # 添加全局位置信息
-                        total_shots = len(shot_texts)
-                        position_info = f"这是第{idx+1}个分镜，共{total_shots}个分镜"
-                        if idx == 0:
-                            position_info += "（开头）"
-                        elif idx == total_shots - 1:
-                            position_info += "（结尾）"
-                        elif idx < total_shots // 3:
-                            position_info += "（前段）"
-                        elif idx > (total_shots * 2) // 3:
-                            position_info += "（后段）"
-                        else:
-                            position_info += "（中段）"
-                        context_hint += f"位置信息: {position_info}\n"
-                except Exception:
-                    pass
-            
-            # 更新模板参数，包含上下文
-            template_params["context_hint"] = context_hint
-            template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
-        elif prompt_type == "ARV写实提示词":
-            context_hint = ""
-            if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
-                shot_texts = self._shot_texts_for_context
-                try:
-                    idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
-                    if idx >= 0:
-                        prev_texts = [shot_texts[j] for j in range(max(0, idx-2), idx)]
-                        next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+3))]
-                        if prev_texts:
-                            context_hint += f"前文: {' | '.join(prev_texts)}\n"
-                        if next_texts:
-                            context_hint += f"后文: {' | '.join(next_texts)}\n"
-                except Exception:
-                    pass
-
-            template = {
-                "system": f"""You are a visual scene designer. Translate Chinese dubbing into a specific, photographable scene description.
-
-【YOUR ONLY JOB】
-Read the Chinese dubbing, understand its meaning, then describe ONE specific scene that a camera could capture. Output ONLY English keywords separated by commas. No sentences, no Chinese, no explanations.
-
-【THREE RULES】
-1. MEANING FIRST: Translate the Chinese meaning into visual elements, not literal word-by-word.
-2. ONE SCENE PER PROMPT: Every dubbing is a different moment — your scene must be unique in location, angle, and subjects.
-3. CONCRETE ONLY: Describe what a camera sees — people, objects, places, lighting. No abstract concepts, no emotions as words.
-
-Content type: {content_type or 'general'}
-Visual tone: {visual_tone or '根据内容确定'}""",
-                "user": f"""{context_hint}当前配音: {dubbing}
-
-描述一个具体的可拍摄场景:"""
-            }
+        context_hint = ""
+        if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
+            shot_texts = self._shot_texts_for_context
+            try:
+                idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
+                if idx >= 0:
+                    if full_text and len(full_text) > 50:
+                        content_summary = full_text[:200] + "..." if len(full_text) > 200 else full_text
+                        context_hint += f"整体内容摘要: {content_summary}\n"
+                    
+                    prev_texts = [shot_texts[j] for j in range(max(0, idx-3), idx)]
+                    if prev_texts:
+                        context_hint += f"前文上下文: {' | '.join(prev_texts)}\n"
+                    
+                    next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+4))]
+                    if next_texts:
+                        context_hint += f"后文上下文: {' | '.join(next_texts)}\n"
+                    
+                    if hasattr(self, '_pregenerated_prompts_for_context'):
+                        prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-3), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
+                        if prev_prompts:
+                            context_hint += f"已生成的前文提示词（必须避免重复这些场景）: {' | '.join(prev_prompts[-3:])}\n"
+                    
+                    total_shots = len(shot_texts)
+                    position_info = f"这是第{idx+1}个分镜，共{total_shots}个分镜"
+                    if idx == 0:
+                        position_info += "（开头）"
+                    elif idx == total_shots - 1:
+                        position_info += "（结尾）"
+                    elif idx < total_shots // 3:
+                        position_info += "（前段）"
+                    elif idx > (total_shots * 2) // 3:
+                        position_info += "（后段）"
+                    else:
+                        position_info += "（中段）"
+                    context_hint += f"位置信息: {position_info}\n"
+            except Exception:
+                pass
+        
+        template_params["context_hint"] = context_hint
+        
+        if prompt_type == "ARV写实提示词":
+            template_key = "shot_prompt_sd"
         else:
-            template = PromptTemplates.get_template("shot_prompt_sd", **template_params)
+            sd_model_name = ""
+            if hasattr(self, 'sd_model_var'):
+                sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+            template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
+        
+        template = PromptTemplates.get_template(template_key, **template_params)
         
         try:
             llm_config = getattr(self, 'current_llm_config', None)
@@ -1163,21 +1273,39 @@ Visual tone: {visual_tone or '根据内容确定'}""",
             
             raise Exception(f"大模型 {model} 返回为空 (配音: {dubbing[:30]}...)")
         except Exception as e:
-            self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑")
+            self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑生成基础提示词")
+            self.log(f"   💡 提示: 回退生成的提示词质量较低，建议检查Ollama服务状态")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                 return ARVPromptTemplates.generate_prompt(dubbing, content_type)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type)
     
 
-    def _get_custom_negative_prompt(self, content_type, dubbing):
-        """根据内容类型和配音内容生成定制化负面提示词 - 适配ARV写实模型"""
-        base_negative = [
-            "(worst quality:1.2)", "(low quality:1.2)", "cartoon", "anime", "painting",
-            "illustration", "3d render", "sketch", "(ugly:1.3)", "(deformed:1.3)",
-            "blurry", "disfigured", "(bad anatomy:1.2)", "extra limbs", "mutated hands",
-            "(bad hands:1.2)", "missing fingers", "extra digits", "cropped", "watermark",
-            "text", "signature", "username", "jpeg artifacts", "duplicate", "morbid"
-        ]
+    def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name=""):
+        """根据内容类型和配音内容生成定制化负面提示词 - 适配不同制图模型"""
+        sd_model_lower = (sd_model_name or "").lower()
+        is_flux = any(kw in sd_model_lower for kw in ['flux', 'flx'])
+        is_sd3 = any(kw in sd_model_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3'])
+        is_sdxl = any(kw in sd_model_lower for kw in ['sdxl', 'xl'])
+
+        if is_flux:
+            return ""
+
+        if is_sd3 or is_sdxl:
+            base_negative = [
+                "worst quality", "low quality", "cartoon", "anime", "painting",
+                "illustration", "3d render", "sketch", "ugly", "deformed",
+                "blurry", "disfigured", "bad anatomy", "extra limbs", "mutated hands",
+                "bad hands", "missing fingers", "extra digits", "cropped", "watermark",
+                "text", "signature", "username", "jpeg artifacts", "duplicate", "morbid"
+            ]
+        else:
+            base_negative = [
+                "(worst quality:1.2)", "(low quality:1.2)", "cartoon", "anime", "painting",
+                "illustration", "3d render", "sketch", "(ugly:1.3)", "(deformed:1.3)",
+                "blurry", "disfigured", "(bad anatomy:1.2)", "extra limbs", "mutated hands",
+                "(bad hands:1.2)", "missing fingers", "extra digits", "cropped", "watermark",
+                "text", "signature", "username", "jpeg artifacts", "duplicate", "morbid"
+            ]
 
         content_specific_negative = {
             "space": [
@@ -2066,7 +2194,7 @@ Visual tone: {visual_tone or '根据内容确定'}""",
             if not has_theme_element and core_theme.lower() in description:
                 has_theme_element = True
             
-            if not has_theme_element and i > 0:
+            if not has_theme_element:
                 deviation_count += 1
                 deviation_indices.append(i)
         
@@ -2129,7 +2257,7 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                 if not has_theme_element and core_theme.lower() in description:
                     has_theme_element = True
                 
-                if not has_theme_element and i > 0:
+                if not has_theme_element:
                     indices_to_fix.append(i)
 
         for i in indices_to_fix:
@@ -2149,11 +2277,35 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                         visual_tone=visual_tone,
                         theme_elements=theme_elements
                     )
-                    if corrected and len(corrected) > 30:
+                    if corrected and len(corrected) > 20:
                         shot['prompt_en'] = corrected
                         fixed_count += 1
                 except Exception:
                     pass
+
+        if consistency_issues and fixed_count > 0:
+            self.log(f"   🔍 修正后重新验证...")
+            still_deviant = 0
+            for i in indices_to_fix:
+                if i >= len(shots):
+                    continue
+                shot = shots[i]
+                prompt = shot.get('prompt_en', '').lower()
+                description = shot.get('description', '').lower()
+                combined = prompt + ' ' + description
+                has_theme = False
+                if theme_elements:
+                    theme_elements_en_check = self._translate_theme_elements_to_english(theme_elements) if theme_elements else []
+                    for elem in theme_elements_en_check:
+                        if elem.lower() in prompt:
+                            has_theme = True
+                            break
+                if not has_theme and core_theme.lower() in description:
+                    has_theme = True
+                if not has_theme:
+                    still_deviant += 1
+            if still_deviant > 0:
+                self.log(f"   ⚠️ 修正后仍有 {still_deviant} 个分镜偏离主题")
 
         if consistency_issues:
             msg = f"发现{len(consistency_issues)}个偏离主题的分镜"
@@ -2815,11 +2967,79 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                                 theme_info['visual_tone'] = user_custom_tone
                                 self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
             
-            # 步骤2.5: 使用原始语音片段（确保时间戳准确性，实现100%语音同步）
-            self.log("\n📍 步骤 2.5/4: 使用原始语音片段")
+            # 步骤2.3: 二次纠错（使用专用纠错模板，提高纠错准确率）
+            if is_ollama_available() and full_text and len(full_text) > 50:
+                existing_corrections = theme_info.get('correction_dict', {})
+                if len(existing_corrections) < 3:
+                    self.log("\n🔧 执行二次纠错（专用纠错模板）...")
+                    try:
+                        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                        if not model:
+                            model = "gemma3:4b"
+                        core_theme_for_correction = theme_info.get('core_theme', '') or user_custom_theme or ''
+                        correction_template = PromptTemplates.get_template("correction_only", text=full_text, theme=core_theme_for_correction)
+                        result_text, _ = call_ollama_single(
+                            model=model,
+                            system_prompt=correction_template["system"],
+                            user_prompt=correction_template["user"],
+                            log_callback=self.log,
+                            num_predict=2000,
+                            num_ctx=4096
+                        )
+                        if result_text:
+                            json_match = re.search(r'\{[\s\S]*\}', result_text.strip())
+                            if json_match:
+                                correction_data = json.loads(json_match.group())
+                                corrections_list = correction_data.get('corrections', [])
+                                new_corrections = {}
+                                for item in corrections_list:
+                                    orig = item.get('original', '')
+                                    corrected = item.get('corrected', '')
+                                    if orig and corrected and orig != corrected:
+                                        if orig not in existing_corrections:
+                                            new_corrections[orig] = corrected
+                                if new_corrections:
+                                    existing_corrections.update(new_corrections)
+                                    theme_info['correction_dict'] = existing_corrections
+                                    self.log(f"   ✅ 二次纠错新增 {len(new_corrections)} 项: {new_corrections}")
+                                else:
+                                    self.log(f"   ✅ 二次纠错完成，未发现新的错误")
+                    except Exception as e:
+                        self.log(f"   ⚠️ 二次纠错失败: {str(e)[:60]}")
             
-            final_tasks = original_shot_tasks
-            self.log(f"📝 使用原始语音片段: {len(final_tasks)} 个分镜")
+            # 步骤2.5: 语义合并分镜（将Whisper碎片片段合并为语义完整的分镜）
+            self.log("\n📍 步骤 2.5/4: 语义合并分镜")
+            
+            if is_ollama_available() and len(original_shot_tasks) > 1:
+                self.log("   🔄 使用大模型进行语义分镜合并...")
+                merged_segments = self._merge_semantic_segments(original_shot_tasks)
+                final_tasks = []
+                for seg in merged_segments:
+                    text = seg.get('text', '').strip()
+                    if text:
+                        seg_content_type = self.analyze_content_type(text)
+                        final_tasks.append({
+                            'text': text,
+                            'start': seg.get('start', 0),
+                            'end': seg.get('end', 0),
+                            'content_type': seg_content_type
+                        })
+                self.log(f"📝 语义合并完成: {len(original_shot_tasks)} → {len(final_tasks)} 个分镜")
+            else:
+                final_tasks = self._rule_based_merge(original_shot_tasks)
+                merged_for_display = []
+                for seg in final_tasks:
+                    text = seg.get('text', '').strip()
+                    if text:
+                        seg_content_type = self.analyze_content_type(text)
+                        merged_for_display.append({
+                            'text': text,
+                            'start': seg.get('start', 0),
+                            'end': seg.get('end', 0),
+                            'content_type': seg_content_type
+                        })
+                final_tasks = merged_for_display
+                self.log(f"📝 规则合并完成: {len(original_shot_tasks)} → {len(final_tasks)} 个分镜")
             
             # 预先为原始分镜生成提示词
             pregenerated_prompts = {}
@@ -2910,6 +3130,7 @@ Visual tone: {visual_tone or '根据内容确定'}""",
             self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
+            self._pregenerated_prompts_for_context = {}
 
             completed_count = 0
             with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
@@ -2924,6 +3145,7 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                             pregenerated_prompts[idx] = ""
                         else:
                             pregenerated_prompts[idx] = prompt
+                            self._pregenerated_prompts_for_context[idx] = prompt
                     except Exception as e:
                         idx = future_to_idx[future]
                         failed_count += 1
@@ -2936,6 +3158,10 @@ Visual tone: {visual_tone or '根据内容确定'}""",
             elapsed = time.time() - start_time
             speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
             self.log(f"   完成 {len(pregenerated_prompts)} 个 (速度: {speed:.2f}个/秒)")
+            
+            duplicate_count = self._check_and_deduplicate_prompts(pregenerated_prompts, final_tasks)
+            if duplicate_count > 0:
+                self.log(f"   🔄 已去重修正 {duplicate_count} 个重复提示词")
             
             if failed_count > 0:
                 self.log(f"⚠️ {failed_count} 个提示词生成失败，使用内置逻辑回退生成")
@@ -3066,7 +3292,18 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                                 progress = 50 + int(completed_count / len(shot_tasks) * 30) if len(shot_tasks) > 0 else 50
                                 self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
                     except Exception as e:
-                        self.log(f"   ⚠️ 创建分镜失败: {str(e)}")
+                        task_idx = futures[future]
+                        self.log(f"   ⚠️ 创建分镜{task_idx+1}失败: {str(e)[:80]}")
+                        try:
+                            task_data = shot_tasks[task_idx] if task_idx < len(shot_tasks) else None
+                            if task_data:
+                                idx, shot = create_shot_task(task_data)
+                                if shot:
+                                    with lock:
+                                        shots_dict[idx] = shot
+                                    self.log(f"   🔄 分镜{task_idx+1}重试成功")
+                        except Exception as retry_e:
+                            self.log(f"   ❌ 分镜{task_idx+1}重试也失败: {str(retry_e)[:60]}")
             
             elapsed_time = time.time() - create_start_time
             
@@ -3116,8 +3353,7 @@ Visual tone: {visual_tone or '根据内容确定'}""",
                         self.log(f"\n🔍 主题一致性预检查: 偏离率 {deviation_ratio:.1f}% ({deviation_count}/{total_checked})")
                         
                         # 根据偏离率决定是否执行深度修正
-                        if deviation_ratio < 15:
-                            # 偏离率较低，跳过深度修正以加速流程
+                        if deviation_ratio < 25:
                             self.log(f"ℹ️ 偏离率较低({deviation_ratio:.1f}%)，跳过深度修正以加速流程")
                         else:
                             # 偏离率较高，执行完整的主题一致性检查和自动修正
@@ -3151,9 +3387,51 @@ Visual tone: {visual_tone or '根据内容确定'}""",
             self.log("🔍 验证时间戳完整性...")
             total_shots_duration = sum(s['duration'] for s in shots)
             
+            # 检测并修复重叠
+            overlap_fixed = 0
+            for i in range(1, len(shots)):
+                prev_end = shots[i-1]['end']
+                curr_start = shots[i]['start']
+                if curr_start < prev_end:
+                    overlap = prev_end - curr_start
+                    mid_point = (curr_start + prev_end) / 2.0
+                    shots[i-1]['end'] = mid_point
+                    shots[i-1]['duration'] = mid_point - shots[i-1]['start']
+                    shots[i]['start'] = mid_point
+                    shots[i]['duration'] = shots[i]['end'] - mid_point
+                    overlap_fixed += 1
+            if overlap_fixed > 0:
+                self.log(f"   🔧 已修复 {overlap_fixed} 个时间戳重叠")
+            
+            # 填充间隔：将前一个分镜的end延伸到后一个分镜的start
+            gaps_filled = 0
+            for i in range(1, len(shots)):
+                prev_end = shots[i-1]['end']
+                curr_start = shots[i]['start']
+                gap = curr_start - prev_end
+                if gap > 0.1:
+                    shots[i-1]['end'] = curr_start
+                    shots[i-1]['duration'] = curr_start - shots[i-1]['start']
+                    gaps_filled += 1
+            if gaps_filled > 0:
+                self.log(f"   🔧 已填充 {gaps_filled} 个时间间隔（延伸前一分镜end）")
+            
+            # 确保首尾覆盖整个音频时长
+            if shots and audio_total_duration > 0:
+                if shots[0]['start'] > 0.1:
+                    shots[0]['start'] = 0.0
+                    shots[0]['duration'] = shots[0]['end'] - shots[0]['start']
+                    self.log(f"   🔧 首分镜起始时间已校准为0.0s")
+                if shots[-1]['end'] < audio_total_duration - 0.1:
+                    shots[-1]['end'] = audio_total_duration
+                    shots[-1]['duration'] = shots[-1]['end'] - shots[-1]['start']
+                    self.log(f"   🔧 尾分镜结束时间已校准为{audio_total_duration:.2f}s")
+            
+            # 重新计算总时长
+            total_shots_duration = sum(s['duration'] for s in shots)
+            
             if abs(total_shots_duration - audio_total_duration) > 0.1:
                 self.log(f"   ⚠️ 时长差异: 分镜{total_shots_duration:.2f}s vs 音频{audio_total_duration:.2f}s")
-                self.log(f"   ✅ 保持原始时间戳，确保音画同步")
             else:
                 self.log(f"   ✅ 时间戳验证通过")
             
