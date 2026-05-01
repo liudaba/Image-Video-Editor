@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """提示词系统 - 根据制图模型类型自适应选择模板
 
+核心改进：两阶段思考法（Chain-of-Thought）
+阶段1: 理解语义 — 这段配音在说什么？核心信息是什么？
+阶段2: 视觉翻译 — 如何用一张照片/画面来表现这个核心信息？
+
 支持模型：
 - SD 1.5:  权重标记 + 关键词堆砌
 - SDXL:    关键词为主，少量权重
@@ -10,13 +14,6 @@
 
 
 class PromptTemplates:
-    """提示词系统 - 根据制图模型类型选择不同的提示词格式
-
-    SD 1.5:  权重标记 + 关键词堆砌
-    SDXL:    关键词为主，少量权重
-    Flux:    自然语言句子描述
-    SD 3:    自然语言 + 少量关键词
-    """
 
     THEME_ANALYSIS = {
         "system": """你是视频内容分析师。分析语音文本并输出结构化结果。
@@ -73,8 +70,8 @@ class PromptTemplates:
 4. 人名、地名、机构名要特别仔细
 
 【输出格式】严格输出JSON：
-{"corrections": [{"original": "错字", "corrected": "正确字", "reason": "原因"}]}
-如果没有错误，输出：{"corrections": []}
+{{"corrections": [{{"original": "错字", "corrected": "正确字", "reason": "原因"}}]}}
+如果没有错误，输出：{{"corrections": []}}
 
 只输出JSON，不要有其他内容。""",
 
@@ -87,269 +84,191 @@ class PromptTemplates:
     }
 
     SHOT_PROMPT_SD = {
-        "system": """You are an expert AI image prompt engineer for Stable Diffusion 1.5. Your task is to translate Chinese dubbing text into precise English visual prompts.
+        "system": """You are a visual scene designer for Stable Diffusion 1.5. You convert Chinese audio narration into precise English image prompts.
 
-【CRITICAL: Semantic-to-Visual Translation】
-You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene that visually represents that meaning. Do NOT just translate words literally - translate the MEANING into VISUAL ELEMENTS.
+【TWO-STEP THINKING - MANDATORY】
+You MUST follow these two steps for EVERY prompt:
 
-Translation examples (Chinese meaning → English visual elements):
-- "经济衰退" → falling stock charts, empty shopping mall, closed storefront, worried businessman
-- "军事冲突" → military vehicles, soldiers in combat gear, smoke over cityscape, fighter jets
-- "科技创新" → laboratory with holographic displays, scientist examining data, circuit board closeup
-- "环境污染" → factory smokestacks, polluted river, mask-wearing pedestrians, dead trees
-- "外交谈判" → conference table with flags, handshake between leaders, press conference
-- "自然灾害" → flooded streets, earthquake damage, rescue workers, destroyed buildings
-- "教育改革" → modern classroom, students with tablets, teacher at smartboard
-- "医疗突破" → microscope with cells, surgeon in OR, DNA helix visualization
-- "社会不公" → protest march, divided city rich/poor, courtroom scene
-- "太空探索" → rocket launch, astronaut in spacewalk, mission control center
+Step 1 - UNDERSTAND: What is this audio saying? What is the CORE MESSAGE?
+Step 2 - VISUALIZE: What SPECIFIC photographable scene best represents this core message?
 
-【FORMAT RULES - SD 1.5 SPECIFIC】
-- DO NOT output quality tags like "masterpiece, best quality, RAW photo, photorealistic, ultra detailed, 8k" - these are added automatically
-- DO NOT output style suffixes like "cinematic lighting, documentary style, film grain" - these are added automatically
-- ONLY output the scene description keywords (subject, environment, lighting, composition, atmosphere)
-- Use weight syntax for emphasis: (subject:1.3) primary, (subject:1.2) secondary
-- Output ONLY English keywords, comma-separated, NO sentences, NO Chinese characters
-- Describe photographable scenes only, NOT abstract concepts
-- NO explanations, NO titles, NO quotes, NO newlines
+Output format: [understanding] | [prompt]
+- [understanding]: 1 sentence explaining the core meaning in English
+- [prompt]: SD 1.5 keywords only, comma-separated
+
+Example outputs:
+[The speaker introduces Tokyo University as Japan's top academic institution] | (Tokyo University:1.3), iconic Yasuda Auditorium, red brick gate, students walking, cherry blossoms, academic prestige, (golden hour:1.2), wide establishing shot
+[A student describes the brutal exam competition] | (exhausted student:1.3), head on desk, scattered textbooks, clock showing 3am, dim desk lamp, empty energy drink cans, stress, close-up
+[ChatGPT is disrupting the publishing industry] | (ChatGPT interface:1.3) on laptop screen, bookshelf behind, (publishing contract:1.2) being shredded, AI text generation, digital vs traditional, split composition
+[The speaker warns about cultural erosion] | (traditional bookstore:1.3), dusty shelves, elderly owner, closed sign, digital tablet glowing nearby, cultural heritage fading, melancholic atmosphere
+
+【FORMAT RULES - SD 1.5】
+- DO NOT output quality tags (masterpiece, best quality, RAW photo, etc.) - added automatically
+- DO NOT output style suffixes (cinematic lighting, film grain, etc.) - added automatically
+- ONLY output scene description keywords
+- Use weight syntax: (main subject:1.3) for primary, (secondary:1.2) for emphasis
+- NO sentences in the prompt part, NO Chinese, NO explanations beyond the [understanding]
+- Each prompt MUST describe a DIFFERENT, SPECIFIC scene
 
 {style_instruction}
 {theme_instruction}
 
-【ANTI-REPETITION RULES - EXTREMELY IMPORTANT】
-- FORBIDDEN to use the same scene setup in every shot
-- FORBIDDEN to always use: office, boardroom, mahogany desk, cityscape background
-- FORBIDDEN to add "rain" to every shot - only when dubbing implies rain, sadness, or storm
-- MUST vary: location, composition, lighting, camera angle, subject matter
-- If dubbing mentions a person → show that person in a SPECIFIC situation
-- If dubbing mentions crisis → show dramatic visual (falling graph, broken building)
-- If dubbing mentions specific industry → show THAT industry's visuals
-- If dubbing mentions a country/region → show THAT location's landmarks
-
-【NO FABRICATION RULES - STRICTLY ENFORCED】
-- FORBIDDEN to invent character names (e.g., "Shuji Nakamura")
-- FORBIDDEN to transliterate Chinese literally as fake names (e.g., "Shimu Lou")
-- Use real entity names in English, or describe WITHOUT naming
-- Use generic descriptions: "Japanese professor", "publisher executive", "young student"
-
-【CONTEXT UNDERSTANDING】
-- Read previous and next context to understand current dubbing's role
-- Infer full meaning from context when dubbing is semantically incomplete
-- Ensure visual coherence across shots
-
-【POSITION AWARENESS】
-- Opening: establish scene, introduce key elements
-- Middle: develop story, show specific content
-- Closing: summarize theme, reinforce emotion
+【CRITICAL RULES】
+- FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
+- FORBIDDEN: repeating the same scene across shots
+- FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- REQUIRED: each prompt must be visually DISTINCT from neighbors
+- REQUIRED: prompt must match the SPECIFIC content, not just the general topic
+- If dubbing mentions a country → show THAT country's landmarks/culture
+- If dubbing mentions an industry → show THAT industry's specific visuals
+- If dubbing mentions conflict → show dramatic visual metaphor
+- If dubbing mentions data/facts → show charts, screens, documents
 
 【内容类型】：{content_type}
-【全局主题（仅参考）】：{core_theme}
-【视觉基调】：{visual_tone}
-
-只输出英文提示词，不要解释。""",
+【全局主题】：{core_theme}
+【视觉基调】：{visual_tone}""",
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Generate an English SD prompt that visually represents the MEANING of this dubbing:"""
+Step 1: What is this saying? Step 2: What scene shows this?"""
     }
 
     SHOT_PROMPT_SDXL = {
-        "system": """You are an expert AI image prompt engineer for SDXL. Your task is to translate Chinese dubbing text into precise English visual prompts optimized for SDXL.
+        "system": """You are a visual scene designer for SDXL. You convert Chinese audio narration into precise English image prompts.
 
-【CRITICAL: Semantic-to-Visual Translation】
-You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene that visually represents that meaning. Do NOT just translate words literally - translate the MEANING into VISUAL ELEMENTS.
+【TWO-STEP THINKING - MANDATORY】
+You MUST follow these two steps for EVERY prompt:
 
-Translation examples (Chinese meaning → English visual elements):
-- "经济衰退" → falling stock charts, empty shopping mall, closed storefront, worried businessman
-- "军事冲突" → military vehicles, soldiers in combat gear, smoke over cityscape, fighter jets
-- "科技创新" → laboratory with holographic displays, scientist examining data, circuit board closeup
-- "环境污染" → factory smokestacks, polluted river, mask-wearing pedestrians, dead trees
-- "外交谈判" → conference table with flags, handshake between leaders, press conference
-- "自然灾害" → flooded streets, earthquake damage, rescue workers, destroyed buildings
-- "教育改革" → modern classroom, students with tablets, teacher at smartboard
-- "医疗突破" → microscope with cells, surgeon in OR, DNA helix visualization
+Step 1 - UNDERSTAND: What is this audio saying? What is the CORE MESSAGE?
+Step 2 - VISUALIZE: What SPECIFIC photographable scene best represents this core message?
 
-【FORMAT RULES - SDXL SPECIFIC】
-- DO NOT output quality tags like "RAW photo, photorealistic, ultra detailed, 8k" - these are added automatically
-- DO NOT output style suffixes like "cinematic lighting, high quality, professional photography" - these are added automatically
-- ONLY output the scene description keywords and short phrases
-- Use weight syntax SPARINGLY - only for the most important subject: (main subject:1.2)
-- SDXL understands natural language better than SD 1.5 - mix keywords with short phrases
-- Output English keywords and short descriptive phrases, comma-separated
-- NO long weight chains like (keyword:1.3)(keyword:1.2) - keep it clean
-- NO Chinese characters, NO explanations, NO quotes, NO newlines
+Output format: [understanding] | [prompt]
+- [understanding]: 1 sentence explaining the core meaning in English
+- [prompt]: SDXL keywords and short phrases, comma-separated
+
+Example outputs:
+[The speaker introduces Tokyo University as Japan's top academic institution] | Tokyo University campus, iconic Yasuda Auditorium, students walking through red brick gate, cherry blossoms in bloom, academic prestige, golden hour lighting, wide establishing shot
+[A student describes the brutal exam competition] | exhausted student with head on desk, scattered textbooks and notes, clock showing 3am, dim desk lamp, empty energy drink cans, stress and determination, close-up portrait
+[ChatGPT is disrupting the publishing industry] | ChatGPT interface on laptop screen, traditional bookshelf behind, publishing contract being pushed aside, AI text generation visualization, digital vs traditional media, split composition
+[The speaker warns about cultural erosion] | traditional bookstore interior, dusty shelves, elderly owner at counter, closed sign visible, digital tablet glowing on counter, cultural heritage fading, melancholic warm light
+
+【FORMAT RULES - SDXL】
+- DO NOT output quality tags (RAW photo, photorealistic, etc.) - added automatically
+- DO NOT output style suffixes (cinematic lighting, etc.) - added automatically
+- ONLY output scene description
+- Use weight syntax SPARINGLY: (main subject:1.2) only for primary emphasis
+- Mix keywords with short descriptive phrases - SDXL understands natural language
+- NO Chinese, NO long weight chains, NO explanations beyond [understanding]
 
 {style_instruction}
 {theme_instruction}
 
-【ANTI-REPETITION RULES - EXTREMELY IMPORTANT】
-- FORBIDDEN to use the same scene setup in every shot
-- FORBIDDEN to always use: office, boardroom, cityscape background
-- FORBIDDEN to add "rain" to every shot - only when dubbing implies rain or sadness
-- MUST vary: location, composition, lighting, camera angle, subject matter
-- If dubbing mentions a person → show that person in a SPECIFIC situation
-- If dubbing mentions crisis → show dramatic visual metaphor
-- If dubbing mentions specific industry → show THAT industry's visuals
-- If dubbing mentions a country/region → show THAT location's landmarks
-
-【NO FABRICATION RULES - STRICTLY ENFORCED】
-- FORBIDDEN to invent character names
-- FORBIDDEN to transliterate Chinese literally as fake names
-- Use real entity names in English, or describe WITHOUT naming
-- Use generic descriptions: "Japanese professor", "publisher executive"
-
-【CONTEXT UNDERSTANDING】
-- Read previous and next context to understand current dubbing's role
-- Infer full meaning from context when dubbing is semantically incomplete
-- Ensure visual coherence across shots
-
-【POSITION AWARENESS】
-- Opening: establish scene, introduce key elements
-- Middle: develop story, show specific content
-- Closing: summarize theme, reinforce emotion
+【CRITICAL RULES】
+- FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
+- FORBIDDEN: repeating the same scene across shots
+- FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- REQUIRED: each prompt must be visually DISTINCT from neighbors
+- REQUIRED: prompt must match the SPECIFIC content, not just the general topic
 
 【内容类型】：{content_type}
-【全局主题（仅参考）】：{core_theme}
-【视觉基调】：{visual_tone}
-
-只输出英文提示词，不要解释。""",
+【全局主题】：{core_theme}
+【视觉基调】：{visual_tone}""",
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Generate an English SDXL prompt that visually represents the MEANING of this dubbing:"""
+Step 1: What is this saying? Step 2: What scene shows this?"""
     }
 
     SHOT_PROMPT_FLUX = {
-        "system": """You are an expert visual scene designer for the Flux image generation model. Your task is to translate Chinese dubbing text into detailed English scene descriptions.
+        "system": """You are a visual scene designer for the Flux image generation model. You convert Chinese audio narration into detailed English scene descriptions.
 
-【CRITICAL: Semantic-to-Visual Translation】
-You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene in natural English sentences. Do NOT just translate words literally - describe the VISUAL SCENE that represents the meaning.
+【TWO-STEP THINKING - MANDATORY】
+You MUST follow these two steps for EVERY prompt:
 
-【OUTPUT FORMAT - FLUX SPECIFIC - EXTREMELY IMPORTANT】
-- Output NATURAL LANGUAGE sentences describing the scene, NOT comma-separated keywords
-- Describe as if directing a photographer: subject, action/pose, setting, lighting, mood, camera angle
+Step 1 - UNDERSTAND: What is this audio saying? What is the CORE MESSAGE?
+Step 2 - VISUALIZE: What SPECIFIC photographable scene best represents this core message?
+
+Output format: [understanding] | [description]
+- [understanding]: 1 sentence explaining the core meaning in English
+- [description]: 1-3 natural language sentences describing the visual scene
+
+Example outputs:
+[The speaker introduces Tokyo University as Japan's top academic institution] | A wide establishing shot of Tokyo University's iconic Yasuda Auditorium at golden hour, students walking through the historic red brick gate under cherry blossoms, conveying academic prestige and tradition
+[A student describes the brutal exam competition] | An exhausted student slumped over a desk covered in scattered textbooks and notes at 3am, a dim desk lamp casting harsh shadows, empty energy drink cans nearby, capturing the intensity of exam preparation
+[ChatGPT is disrupting the publishing industry] | A laptop screen showing ChatGPT interface glowing in a traditional study, with a bookshelf of leather-bound volumes behind it and a publishing contract being pushed aside on the desk, symbolizing the clash between AI and traditional publishing
+
+【FORMAT RULES - FLUX】
+- Output NATURAL LANGUAGE sentences, NOT comma-separated keywords
 - DO NOT use weight syntax like (keyword:1.3) - Flux does NOT support it
-- DO NOT include quality tags like "masterpiece, best quality" - Flux handles quality automatically
-- DO NOT include negative prompt instructions - Flux does not use negative prompts
-- DO NOT output style suffixes - these are added automatically
-- Each prompt should be 1-3 natural language sentences
-
-Translation examples:
-- "经济衰退" → "A wide shot of an empty shopping mall with closed storefronts and 'for rent' signs, a lone businessman walking through the deserted corridor, muted gray tones"
-- "军事冲突" → "Military vehicles parked in a dusty convoy, soldiers in combat gear consulting maps under harsh sunlight, smoke rising from a distant cityscape on the horizon"
-- "科技创新" → "A scientist in a white lab coat examining holographic data displays floating above a sleek workstation, blue LED lights reflecting off glass surfaces in a modern laboratory"
-- "环境污染" → "Factory smokestacks belching dark smoke against a gray sky, a polluted river with chemical discoloration flowing past an industrial complex, dead trees along the bank"
-- "外交谈判" → "A grand conference room with flags of multiple nations, two leaders shaking hands across a polished table, press photographers capturing the moment from behind a velvet rope"
-- "教育改革" → "Students engaged with tablets in a bright modern classroom with large windows, a teacher writing equations on a smartboard, natural daylight streaming in"
+- DO NOT include quality tags or style suffixes - added automatically
+- Each description should be 1-3 sentences
 
 {style_instruction}
 {theme_instruction}
 
-【ANTI-REPETITION RULES - EXTREMELY IMPORTANT】
-- FORBIDDEN to use the same scene setup in every shot
-- FORBIDDEN to always use rain, office, or boardroom settings
-- MUST vary: location, composition, lighting, camera angle, subject matter
-- Each shot must feel like a different moment in the story
-- If dubbing mentions a person → describe that person in a SPECIFIC situation with details
-- If dubbing mentions crisis → describe a dramatic visual scene
-- If dubbing mentions specific industry → describe THAT industry's environment
-
-【NO FABRICATION RULES - STRICTLY ENFORCED】
-- FORBIDDEN to invent character names (e.g., "Shuji Nakamura")
-- FORBIDDEN to transliterate Chinese literally as fake names (e.g., "Shimu Lou")
-- Use real entity names in English, or describe WITHOUT naming
-- Use generic descriptions: "a Japanese professor", "a publisher executive", "a young student"
-
-【CONTEXT UNDERSTANDING】
-- Read previous and next context to understand current dubbing's role
-- Infer full meaning from context when dubbing is semantically incomplete
-- Ensure visual coherence across shots
-
-【POSITION AWARENESS】
-- Opening: establish scene, introduce key elements
-- Middle: develop story, show specific content
-- Closing: summarize theme, reinforce emotion
+【CRITICAL RULES】
+- FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
+- FORBIDDEN: repeating the same scene across shots
+- FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- REQUIRED: each scene must be visually DISTINCT from neighbors
+- REQUIRED: scene must match the SPECIFIC content, not just the general topic
 
 【内容类型】：{content_type}
-【全局主题（仅参考）】：{core_theme}
-【视觉基调】：{visual_tone}
-
-只输出英文场景描述，不要解释。""",
+【全局主题】：{core_theme}
+【视觉基调】：{visual_tone}""",
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Describe a specific visual scene in natural English that represents the MEANING of this dubbing (must be different from previous scenes):"""
+Step 1: What is this saying? Step 2: What scene shows this?"""
     }
 
     SHOT_PROMPT_SD3 = {
-        "system": """You are an expert AI image prompt engineer for Stable Diffusion 3. Your task is to translate Chinese dubbing text into precise English visual prompts optimized for SD3.
+        "system": """You are a visual scene designer for Stable Diffusion 3. You convert Chinese audio narration into precise English image prompts.
 
-【CRITICAL: Semantic-to-Visual Translation】
-You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIFIC photographable scene that visually represents that meaning. Do NOT just translate words literally - translate the MEANING into VISUAL ELEMENTS.
+【TWO-STEP THINKING - MANDATORY】
+You MUST follow these two steps for EVERY prompt:
 
-【FORMAT RULES - SD3 SPECIFIC】
-- SD3 understands natural language well - use descriptive phrases and short sentences
-- You can mix natural language descriptions with keywords
-- DO NOT output quality tags like "masterpiece, best quality" - SD3 handles quality automatically
-- DO NOT output style suffixes like "cinematic lighting, high quality" - these are added automatically
-- ONLY output the scene description
-- DO NOT overuse weight syntax - use sparingly: (main subject:1.2) only for emphasis
-- Output English text, NO Chinese characters, NO explanations, NO quotes, NO newlines
+Step 1 - UNDERSTAND: What is this audio saying? What is the CORE MESSAGE?
+Step 2 - VISUALIZE: What SPECIFIC photographable scene best represents this core message?
 
-Translation examples:
-- "经济衰退" → A wide shot of an empty shopping mall with closed storefronts, a lone businessman walking through the deserted corridor, muted gray tones, cinematic lighting
-- "军事冲突" → Military vehicles in a dusty convoy, soldiers in combat gear consulting maps under harsh sunlight, smoke rising from a distant city, cinematic lighting
-- "科技创新" → A scientist examining holographic data displays in a modern laboratory, blue LED lights reflecting off glass surfaces, cinematic lighting
-- "环境污染" → Factory smokestacks belching dark smoke against a gray sky, a polluted river with chemical discoloration, dead trees along the bank, cinematic lighting
+Output format: [understanding] | [prompt]
+- [understanding]: 1 sentence explaining the core meaning in English
+- [prompt]: SD3 descriptive phrases and keywords, comma-separated
+
+Example outputs:
+[The speaker introduces Tokyo University as Japan's top academic institution] | Tokyo University campus, iconic Yasuda Auditorium, students walking through red brick gate, cherry blossoms, academic prestige, golden hour, wide shot
+[A student describes the brutal exam competition] | exhausted student at desk, scattered textbooks, clock showing 3am, dim desk lamp, energy drink cans, stress, close-up
+[ChatGPT is disrupting the publishing industry] | ChatGPT interface on laptop, traditional bookshelf behind, publishing contract pushed aside, AI text generation, digital vs traditional, split composition
+
+【FORMAT RULES - SD3】
+- DO NOT output quality tags (masterpiece, best quality, etc.) - SD3 handles quality automatically
+- DO NOT output style suffixes - added automatically
+- ONLY output scene description
+- Use weight syntax SPARINGLY: (main subject:1.2) only for emphasis
+- Mix natural language with keywords - SD3 understands both
+- NO Chinese, NO explanations beyond [understanding]
 
 {style_instruction}
 {theme_instruction}
 
-【ANTI-REPETITION RULES - EXTREMELY IMPORTANT】
-- FORBIDDEN to use the same scene setup in every shot
-- FORBIDDEN to always use: office, boardroom, cityscape background
-- FORBIDDEN to add "rain" to every shot - only when dubbing implies rain or sadness
-- MUST vary: location, composition, lighting, camera angle, subject matter
-- If dubbing mentions a person → show that person in a SPECIFIC situation
-- If dubbing mentions crisis → show dramatic visual metaphor
-- If dubbing mentions specific industry → show THAT industry's visuals
-- If dubbing mentions a country/region → show THAT location's landmarks
-
-【NO FABRICATION RULES - STRICTLY ENFORCED】
-- FORBIDDEN to invent character names
-- FORBIDDEN to transliterate Chinese literally as fake names
-- Use real entity names in English, or describe WITHOUT naming
-- Use generic descriptions: "Japanese professor", "publisher executive"
-
-【CONTEXT UNDERSTANDING】
-- Read previous and next context to understand current dubbing's role
-- Infer full meaning from context when dubbing is semantically incomplete
-- Ensure visual coherence across shots
-
-【POSITION AWARENESS】
-- Opening: establish scene, introduce key elements
-- Middle: develop story, show specific content
-- Closing: summarize theme, reinforce emotion
+【CRITICAL RULES】
+- FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
+- FORBIDDEN: repeating the same scene across shots
+- FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- REQUIRED: each prompt must be visually DISTINCT from neighbors
+- REQUIRED: prompt must match the SPECIFIC content, not just the general topic
 
 【内容类型】：{content_type}
-【全局主题（仅参考）】：{core_theme}
-【视觉基调】：{visual_tone}
-
-只输出英文提示词，不要解释。""",
+【全局主题】：{core_theme}
+【视觉基调】：{visual_tone}""",
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Generate an English SD3 prompt that visually represents the MEANING of this dubbing:"""
+Step 1: What is this saying? Step 2: What scene shows this?"""
     }
 
     @classmethod
     def get_template(cls, template_type, **kwargs):
-        """获取提示词模板
-
-        Args:
-            template_type: 模板类型 (shot_prompt_sd / shot_prompt_sdxl / shot_prompt_flux / shot_prompt_sd3 / theme_analysis / correction_only)
-            **kwargs: 模板参数 (visual_style, core_theme, visual_tone, content_type, dubbing, context_hint)
-        """
         templates = {
             "theme_analysis": cls.THEME_ANALYSIS,
             "theme_extraction": cls.THEME_ANALYSIS,
@@ -372,12 +291,9 @@ Generate an English SD3 prompt that visually represents the MEANING of this dubb
         if is_shot_prompt:
             visual_style = kwargs.get("visual_style", "")
             if visual_style and visual_style.strip():
-                style_instruction = f"""【IMPORTANT: Must use user-preset style】
-User-preset visual style: {visual_style}
-You MUST strictly follow this style, do NOT change or add other styles."""
+                style_instruction = f"【Style】Must use: {visual_style}"
             else:
-                style_instruction = """【Style Selection】
-Choose an appropriate visual style based on content (cinematic, news documentary, art photography, commercial photography, etc.)."""
+                style_instruction = "【Style】Choose appropriate style based on content."
 
             core_theme = kwargs.get("core_theme", "")
             visual_tone = kwargs.get("visual_tone", "")
@@ -392,38 +308,22 @@ Choose an appropriate visual style based on content (cinematic, news documentary
                 if visual_tone and visual_tone.strip():
                     theme_parts.append(f"Visual tone: {visual_tone}")
                 theme_text = ", ".join(theme_parts)
-                theme_instruction = f"""【IMPORTANT: Must incorporate these elements】
-{theme_text}
-Your prompt MUST reflect this theme and tone, translating them into concrete visual elements."""
+                theme_instruction = f"【Theme】{theme_text} - MUST reflect in visual elements."
             else:
                 theme_instruction = ""
 
-            if theme_instruction:
-                system_content = template["system"].format(
-                    style_instruction=style_instruction,
-                    theme_instruction="\n" + theme_instruction,
-                    content_type=content_type_display,
-                    core_theme=core_theme_display,
-                    visual_tone=visual_tone_display,
-                )
-            else:
-                system_content = template["system"].format(
-                    style_instruction=style_instruction,
-                    theme_instruction="",
-                    content_type=content_type_display,
-                    core_theme=core_theme_display,
-                    visual_tone=visual_tone_display,
-                )
+            system_content = template["system"].format(
+                style_instruction=style_instruction,
+                theme_instruction=theme_instruction,
+                content_type=content_type_display,
+                core_theme=core_theme_display,
+                visual_tone=visual_tone_display,
+            )
             system_content = system_content.replace("\n\n\n", "\n\n")
 
             dubbing = kwargs.get("dubbing", "")
             context_hint = kwargs.get("context_hint", "")
-            if context_hint:
-                context_section = f"""{context_hint}
-
-"""
-            else:
-                context_section = ""
+            context_section = f"{context_hint}\n\n" if context_hint else ""
 
             user_content = template["user_template"].format(
                 context_section=context_section,
@@ -440,14 +340,6 @@ Your prompt MUST reflect this theme and tone, translating them into concrete vis
 
     @classmethod
     def get_template_key_for_model(cls, sd_model_name):
-        """根据制图模型名称返回对应的模板key
-
-        Args:
-            sd_model_name: SD模型名称或路径
-
-        Returns:
-            模板key字符串，如 "shot_prompt_sd", "shot_prompt_sdxl" 等
-        """
         if not sd_model_name:
             return "shot_prompt_sd"
 

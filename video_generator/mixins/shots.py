@@ -606,6 +606,55 @@ Requirements:
         return duplicate_count
 
 
+    def _extract_entities_for_prompt(self, text):
+        """从配音文本中提取关键实体（国家、军事、组织等），返回英文提示"""
+        if not text:
+            return ""
+        
+        entities = []
+        
+        if ENHANCED_RECOGNITION_AVAILABLE:
+            try:
+                from video_generator.enhanced_content_recognition import (
+                    COUNTRY_MAPPING, CITY_MAPPING, ORGANIZATION_MAPPING, MILITARY_MAPPING
+                )
+                for cn, en in COUNTRY_MAPPING.items():
+                    if cn in text:
+                        entities.append(en)
+                for cn, en in CITY_MAPPING.items():
+                    if cn in text:
+                        entities.append(en)
+                for cn, en in ORGANIZATION_MAPPING.items():
+                    if cn in text:
+                        entities.append(en)
+                for cn, en in MILITARY_MAPPING.items():
+                    if cn in text:
+                        entities.append(en)
+            except ImportError:
+                pass
+        
+        tech_terms = {
+            'ChatGPT': 'ChatGPT', 'AI': 'AI', '人工智能': 'AI artificial intelligence',
+            '算法': 'algorithm', '数据': 'data', '互联网': 'internet',
+            '手机': 'smartphone', '电脑': 'computer', '软件': 'software',
+            '机器人': 'robot', '无人机': 'drone', '导弹': 'missile',
+            '核武器': 'nuclear weapon', '航母': 'aircraft carrier',
+            'GDP': 'GDP', '股市': 'stock market', '经济': 'economy',
+        }
+        for cn, en in tech_terms.items():
+            if cn in text:
+                entities.append(en)
+        
+        seen = set()
+        unique = []
+        for e in entities:
+            e_lower = e.lower()
+            if e_lower not in seen:
+                seen.add(e_lower)
+                unique.append(e)
+        
+        return ', '.join(unique[:8]) if unique else ""
+
     def _calculate_prompt_quality(self, prompt_en, dubbing_text):
         """计算提示词质量评分（0.0-1.0）
         
@@ -987,6 +1036,9 @@ Requirements:
     def _clean_prompt_output(self, raw_output):
         """清洗大模型输出的提示词，移除解释性文字和格式污染
         
+        支持两阶段输出格式: [understanding] | [prompt]
+        如果检测到此格式，只提取 [prompt] 部分
+        
         Args:
             raw_output: 大模型返回的原始输出
             
@@ -996,9 +1048,14 @@ Requirements:
         if not raw_output:
             return ""
         
-        
-        # 转为字符串
         text = str(raw_output).strip()
+        
+        # 解析两阶段输出格式: [understanding] | [prompt]
+        pipe_match = re.search(r'\]\s*\|\s*', text)
+        if pipe_match:
+            after_pipe = text[pipe_match.end():].strip()
+            if after_pipe and len(after_pipe) > 10:
+                text = after_pipe
         
         # 【关键】处理 DeepSeek-R1 等推理模型的思考标签
         # 必须在最前面处理，否则会影响后续清洗逻辑
@@ -1235,37 +1292,41 @@ Requirements:
                 idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
                 if idx >= 0:
                     if full_text and len(full_text) > 50:
-                        content_summary = full_text[:200] + "..." if len(full_text) > 200 else full_text
-                        context_hint += f"整体内容摘要: {content_summary}\n"
+                        content_summary = full_text[:300] + "..." if len(full_text) > 300 else full_text
+                        context_hint += f"Full content summary: {content_summary}\n"
                     
-                    prev_texts = [shot_texts[j] for j in range(max(0, idx-3), idx)]
+                    prev_texts = [shot_texts[j] for j in range(max(0, idx-5), idx)]
                     if prev_texts:
-                        context_hint += f"前文上下文: {' | '.join(prev_texts)}\n"
+                        context_hint += f"Previous dubbing: {' | '.join(prev_texts)}\n"
                     
-                    next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+4))]
+                    next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+6))]
                     if next_texts:
-                        context_hint += f"后文上下文: {' | '.join(next_texts)}\n"
+                        context_hint += f"Next dubbing: {' | '.join(next_texts)}\n"
                     
                     if hasattr(self, '_pregenerated_prompts_for_context'):
                         prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-3), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
                         if prev_prompts:
-                            context_hint += f"已生成的前文提示词（必须避免重复这些场景）: {' | '.join(prev_prompts[-3:])}\n"
+                            context_hint += f"Previous prompts (DO NOT repeat these scenes): {' | '.join(prev_prompts[-3:])}\n"
                     
                     total_shots = len(shot_texts)
-                    position_info = f"这是第{idx+1}个分镜，共{total_shots}个分镜"
+                    position_info = f"Shot {idx+1} of {total_shots}"
                     if idx == 0:
-                        position_info += "（开头）"
+                        position_info += " (OPENING - establish the scene)"
                     elif idx == total_shots - 1:
-                        position_info += "（结尾）"
+                        position_info += " (CLOSING - reinforce the theme)"
                     elif idx < total_shots // 3:
-                        position_info += "（前段）"
+                        position_info += " (early section)"
                     elif idx > (total_shots * 2) // 3:
-                        position_info += "（后段）"
+                        position_info += " (late section)"
                     else:
-                        position_info += "（中段）"
-                    context_hint += f"位置信息: {position_info}\n"
+                        position_info += " (middle section)"
+                    context_hint += f"Position: {position_info}\n"
             except Exception:
                 pass
+        
+        entity_hint = self._extract_entities_for_prompt(dubbing)
+        if entity_hint:
+            context_hint += f"Key entities in this dubbing: {entity_hint}\n"
         
         template_params["context_hint"] = context_hint
         
@@ -3051,39 +3112,21 @@ Requirements:
                     except Exception as e:
                         self.log(f"   ⚠️ 二次纠错失败: {str(e)[:60]}")
             
-            # 步骤2.5: 语义合并分镜（将Whisper碎片片段合并为语义完整的分镜）
-            self.log("\n📍 步骤 2.5/4: 语义合并分镜")
+            # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
+            self.log("\n📍 步骤 2.5/4: 准备分镜任务")
             
-            if is_ollama_available() and len(original_shot_tasks) > 1:
-                self.log("   🔄 使用大模型进行语义分镜合并...")
-                merged_segments = self._merge_semantic_segments(original_shot_tasks)
-                final_tasks = []
-                for seg in merged_segments:
-                    text = seg.get('text', '').strip()
-                    if text:
-                        seg_content_type = self.analyze_content_type(text)
-                        final_tasks.append({
-                            'text': text,
-                            'start': seg.get('start', 0),
-                            'end': seg.get('end', 0),
-                            'content_type': seg_content_type
-                        })
-                self.log(f"📝 语义合并完成: {len(original_shot_tasks)} → {len(final_tasks)} 个分镜")
-            else:
-                final_tasks = self._rule_based_merge(original_shot_tasks)
-                merged_for_display = []
-                for seg in final_tasks:
-                    text = seg.get('text', '').strip()
-                    if text:
-                        seg_content_type = self.analyze_content_type(text)
-                        merged_for_display.append({
-                            'text': text,
-                            'start': seg.get('start', 0),
-                            'end': seg.get('end', 0),
-                            'content_type': seg_content_type
-                        })
-                final_tasks = merged_for_display
-                self.log(f"📝 规则合并完成: {len(original_shot_tasks)} → {len(final_tasks)} 个分镜")
+            final_tasks = []
+            for seg in original_shot_tasks:
+                text = seg.get('text', '').strip()
+                if text:
+                    seg_content_type = self.analyze_content_type(text)
+                    final_tasks.append({
+                        'text': text,
+                        'start': seg.get('start', 0),
+                        'end': seg.get('end', 0),
+                        'content_type': seg_content_type
+                    })
+            self.log(f"📝 共 {len(final_tasks)} 个语音片段分镜")
             
             # 预先为原始分镜生成提示词
             pregenerated_prompts = {}
