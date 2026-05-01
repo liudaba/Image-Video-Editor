@@ -291,7 +291,15 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
         if is_shot_prompt:
             visual_style = kwargs.get("visual_style", "")
             if visual_style and visual_style.strip():
-                style_instruction = f"【Style】Must use: {visual_style}"
+                non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon', 
+                    'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
+                    'sketch', 'illustration', '3d animation', 'cel shading',
+                    '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺']
+                is_non_realistic = any(kw.lower() in visual_style.lower() for kw in non_realistic_keywords)
+                if is_non_realistic:
+                    style_instruction = f"【Style】Must use: {visual_style}\n【Style Override】This is a NON-REALISTIC style. Do NOT use photorealistic, RAW photo, or documentary keywords. Embrace the artistic/stylized aesthetic."
+                else:
+                    style_instruction = f"【Style】Must use: {visual_style}"
             else:
                 style_instruction = "【Style】Choose appropriate style based on content."
 

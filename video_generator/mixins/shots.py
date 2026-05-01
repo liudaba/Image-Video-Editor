@@ -1215,22 +1215,30 @@ Requirements:
         if len(text.strip()) < 10:
             return raw_output.strip()
         
-        # 拼接质量前缀和风格后缀（由代码保证，不依赖模型输出）
-        text = self._build_final_prompt(text)
+        sd_model_name = ""
+        if hasattr(self, 'sd_model_var'):
+            sd_model_name = self.sd_model_var.get() if hasattr(self.sd_model_var, 'get') else str(self.sd_model_var)
+        text = self._build_final_prompt(text, sd_model_name)
 
         return text.strip()
     
 
-    def _build_final_prompt(self, scene_description):
+    def _build_final_prompt(self, scene_description, sd_model_name=""):
         """拼接最终提示词：质量前缀 + 模型场景描述 + 风格后缀
 
-        质量标签和风格标签由代码拼接，不依赖模型输出，杜绝拼写错误。
-        模型只需专注于场景描述。
+        根据制图模型类型自动选择对应的质量前缀/后缀格式：
+        - SD 1.5: 带权重标记 (masterpiece, best quality:1.2)
+        - SDXL:   无权重标记 RAW photo, photorealistic
+        - Flux:   无前缀后缀（自然语言）
+        - SD3:    无前缀，轻量后缀
         """
-        prefix = "(masterpiece, best quality:1.2), RAW photo, (photorealistic:1.3), ultra detailed, 8k"
-        suffix = "cinematic lighting, documentary style, (film grain:1.1)"
+        from video_generator.model_profiles import get_model_profile, detect_model_type
 
-        # 清理模型输出中可能残留的质量标签（避免重复）
+        model_type = detect_model_type(sd_model_name)
+        profile = get_model_profile(model_type)
+        prefix = profile.get("quality_prefix", "")
+        suffix = profile.get("quality_suffix", "")
+
         redundant = [
             "masterpiece", "best quality", "ultra detailed", "8k",
             "photorealistic", "cinematic lighting", "documentary style",
@@ -1249,13 +1257,25 @@ Requirements:
 
         cleaned = re.sub(r',\s*,+', ',', cleaned).strip(', ')
 
-        if len(cleaned) > 250:
-            keywords = [k.strip() for k in cleaned.split(',') if k.strip()]
-            if len(keywords) > 20:
-                keywords = keywords[:20]
-                cleaned = ', '.join(keywords)
+        if model_type in ('flux', 'sd3'):
+            if len(cleaned) > 400:
+                cleaned = cleaned[:400]
+        else:
+            if len(cleaned) > 250:
+                keywords = [k.strip() for k in cleaned.split(',') if k.strip()]
+                if len(keywords) > 20:
+                    keywords = keywords[:20]
+                    cleaned = ', '.join(keywords)
 
-        return f"{prefix}, {cleaned}, {suffix}"
+        parts = []
+        if prefix:
+            parts.append(prefix)
+        if cleaned:
+            parts.append(cleaned)
+        if suffix:
+            parts.append(suffix)
+
+        return ', '.join(parts)
 
 
     def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text="", shot_index=-1):
@@ -1369,70 +1389,40 @@ Requirements:
     
 
     def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name=""):
-        """根据内容类型和配音内容生成定制化负面提示词 - 适配不同制图模型"""
-        sd_model_lower = (sd_model_name or "").lower()
-        is_flux = any(kw in sd_model_lower for kw in ['flux', 'flx'])
-        is_sd3 = any(kw in sd_model_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3'])
-        is_sdxl = any(kw in sd_model_lower for kw in ['sdxl', 'xl'])
+        """根据制图模型类型和内容生成定制化负面提示词
+        
+        使用 model_profiles 统一管理，不再手动判断模型类型
+        """
+        from video_generator.model_profiles import get_model_profile, detect_model_type
 
-        if is_flux:
+        model_type = detect_model_type(sd_model_name)
+        profile = get_model_profile(model_type)
+
+        if not profile.get("needs_negative", True):
             return ""
 
-        if is_sd3 or is_sdxl:
-            base_negative = [
-                "worst quality", "low quality", "cartoon", "anime", "painting",
-                "illustration", "3d render", "sketch", "ugly", "deformed",
-                "blurry", "disfigured", "bad anatomy", "extra limbs", "mutated hands",
-                "bad hands", "missing fingers", "extra digits", "cropped", "watermark",
-                "text", "signature", "username", "jpeg artifacts", "duplicate", "morbid"
-            ]
-        else:
-            base_negative = [
-                "(worst quality:1.2)", "(low quality:1.2)", "cartoon", "anime", "painting",
-                "illustration", "3d render", "sketch", "(ugly:1.3)", "(deformed:1.3)",
-                "blurry", "disfigured", "(bad anatomy:1.2)", "extra limbs", "mutated hands",
-                "(bad hands:1.2)", "missing fingers", "extra digits", "cropped", "watermark",
-                "text", "signature", "username", "jpeg artifacts", "duplicate", "morbid"
-            ]
+        base_negative = profile.get("default_negative", "").split(", ")
+        base_negative = [n.strip() for n in base_negative if n.strip()]
 
         content_specific_negative = {
-            "space": [
-                "human", "person", "face", "building", "tree",
-                "landscape", "daytime", "sun"
-            ],
-            "science": [
-                "cartoon character", "fictional creature", "fantasy", "magic"
-            ],
-            "nature": [
-                "urban", "building", "structure", "artificial", "concrete"
-            ],
-            "history": [
-                "modern", "contemporary", "anachronism", "smartphone", "computer"
-            ]
+            "space": ["human", "person", "face", "building", "tree", "landscape", "daytime", "sun"],
+            "science": ["cartoon character", "fictional creature", "fantasy", "magic"],
+            "nature": ["urban", "building", "structure", "artificial", "concrete"],
+            "history": ["modern", "contemporary", "anachronism", "smartphone", "computer"],
         }
 
         additional_negative = []
-
         if any(kw in dubbing for kw in ["黑洞", "宇宙", "银河", "恒星", "星云"]):
-            additional_negative.extend([
-                "star", "sun", "planet", "moon", "satellite",
-                "human", "person", "face", "building", "tree"
-            ])
-
+            additional_negative.extend(["star", "sun", "planet", "moon", "satellite", "human", "person", "face", "building", "tree"])
         if any(kw in dubbing for kw in ["政治", "历史", "古代", "战争"]):
-            additional_negative.extend([
-                "modern", "contemporary", "anachronism"
-            ])
+            additional_negative.extend(["modern", "contemporary", "anachronism"])
 
         all_negative = base_negative.copy()
-
         content_type_lower = content_type.lower() if content_type else ""
         for ct, negatives in content_specific_negative.items():
             if ct in content_type_lower:
                 all_negative.extend(negatives)
-
         all_negative.extend(additional_negative)
-
         all_negative = list(dict.fromkeys(all_negative))
 
         return ", ".join(all_negative)
