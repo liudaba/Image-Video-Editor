@@ -630,25 +630,22 @@ Requirements:
             if chinese_chars <= 3:
                 score += 0.10
         
-        if dubbing_text:
-            from video_generator.enhanced_content_recognition import COUNTRY_MAPPING, MILITARY_MAPPING if ENHANCED_RECOGNITION_AVAILABLE else {}, {}
-            entity_hits = 0
-            prompt_lower = prompt_en.lower()
-            for cn_name, en_value in {**COUNTRY_MAPPING, **MILITARY_MAPPING}.items() if ENHANCED_RECOGNITION_AVAILABLE else {}.items():
-                if cn_name in dubbing_text:
-                    for en_part in en_value.split(','):
-                        en_part = en_part.strip().lower()
-                        if en_part and en_part in prompt_lower:
-                            entity_hits += 1
-                            break
-            if entity_hits > 0:
-                score += min(0.25, 0.1 * entity_hits)
-            else:
-                dubbing_words = set(dubbing_text.lower().split())
-                prompt_words = set(prompt_lower.split())
-                overlap = dubbing_words & prompt_words
-                if overlap:
-                    score += min(0.25, 0.05 * len(overlap))
+        if dubbing_text and ENHANCED_RECOGNITION_AVAILABLE:
+            try:
+                from video_generator.enhanced_content_recognition import COUNTRY_MAPPING, MILITARY_MAPPING
+                entity_hits = 0
+                prompt_lower = prompt_en.lower()
+                for cn_name, en_value in {**COUNTRY_MAPPING, **MILITARY_MAPPING}.items():
+                    if cn_name in dubbing_text:
+                        for en_part in en_value.split(','):
+                            en_part = en_part.strip().lower()
+                            if en_part and en_part in prompt_lower:
+                                entity_hits += 1
+                                break
+                if entity_hits > 0:
+                    score += min(0.25, 0.1 * entity_hits)
+            except ImportError:
+                pass
         
         return round(min(1.0, score), 2)
 
