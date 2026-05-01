@@ -105,11 +105,12 @@ Translation examples (Chinese meaning → English visual elements):
 - "太空探索" → rocket launch, astronaut in spacewalk, mission control center
 
 【FORMAT RULES - SD 1.5 SPECIFIC】
-- Start with: (masterpiece, best quality:1.2), RAW photo, (photorealistic:1.3), ultra detailed, 8k
+- DO NOT output quality tags like "masterpiece, best quality, RAW photo, photorealistic, ultra detailed, 8k" - these are added automatically
+- DO NOT output style suffixes like "cinematic lighting, documentary style, film grain" - these are added automatically
+- ONLY output the scene description keywords (subject, environment, lighting, composition, atmosphere)
 - Use weight syntax for emphasis: (subject:1.3) primary, (subject:1.2) secondary
 - Output ONLY English keywords, comma-separated, NO sentences, NO Chinese characters
 - Describe photographable scenes only, NOT abstract concepts
-- End with: cinematic lighting, documentary style, (film grain:1.1), film grain texture
 - NO explanations, NO titles, NO quotes, NO newlines
 
 {style_instruction}
@@ -169,13 +170,14 @@ Translation examples (Chinese meaning → English visual elements):
 - "医疗突破" → microscope with cells, surgeon in OR, DNA helix visualization
 
 【FORMAT RULES - SDXL SPECIFIC】
-- Start with: RAW photo, photorealistic, ultra detailed, 8k
+- DO NOT output quality tags like "RAW photo, photorealistic, ultra detailed, 8k" - these are added automatically
+- DO NOT output style suffixes like "cinematic lighting, high quality, professional photography" - these are added automatically
+- ONLY output the scene description keywords and short phrases
 - Use weight syntax SPARINGLY - only for the most important subject: (main subject:1.2)
 - SDXL understands natural language better than SD 1.5 - mix keywords with short phrases
 - Output English keywords and short descriptive phrases, comma-separated
 - NO long weight chains like (keyword:1.3)(keyword:1.2) - keep it clean
 - NO Chinese characters, NO explanations, NO quotes, NO newlines
-- End with: cinematic lighting, high quality, professional photography
 
 {style_instruction}
 {theme_instruction}
@@ -226,10 +228,10 @@ You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIF
 【OUTPUT FORMAT - FLUX SPECIFIC - EXTREMELY IMPORTANT】
 - Output NATURAL LANGUAGE sentences describing the scene, NOT comma-separated keywords
 - Describe as if directing a photographer: subject, action/pose, setting, lighting, mood, camera angle
-- Example: "A middle-aged Japanese professor sitting alone in a dimly lit traditional study, surrounded by dusty books and scrolls, candlelight flickering on his worried face, rain visible through the paper screen door"
 - DO NOT use weight syntax like (keyword:1.3) - Flux does NOT support it
 - DO NOT include quality tags like "masterpiece, best quality" - Flux handles quality automatically
 - DO NOT include negative prompt instructions - Flux does not use negative prompts
+- DO NOT output style suffixes - these are added automatically
 - Each prompt should be 1-3 natural language sentences
 
 Translation examples:
@@ -288,11 +290,11 @@ You MUST first understand what the Chinese dubbing MEANS, then describe a SPECIF
 【FORMAT RULES - SD3 SPECIFIC】
 - SD3 understands natural language well - use descriptive phrases and short sentences
 - You can mix natural language descriptions with keywords
-- Example: "A worried Japanese professor sitting alone in a dimly lit traditional study, surrounded by dusty books and scrolls, candlelight flickering, cinematic lighting"
+- DO NOT output quality tags like "masterpiece, best quality" - SD3 handles quality automatically
+- DO NOT output style suffixes like "cinematic lighting, high quality" - these are added automatically
+- ONLY output the scene description
 - DO NOT overuse weight syntax - use sparingly: (main subject:1.2) only for emphasis
-- DO NOT include quality tags like "masterpiece, best quality" - SD3 handles quality automatically
 - Output English text, NO Chinese characters, NO explanations, NO quotes, NO newlines
-- End with: cinematic lighting, high quality
 
 Translation examples:
 - "经济衰退" → A wide shot of an empty shopping mall with closed storefronts, a lone businessman walking through the deserted corridor, muted gray tones, cinematic lighting

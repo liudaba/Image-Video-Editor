@@ -420,6 +420,20 @@ class ShotsMixin:
             
             merged.sort(key=lambda x: x['start'])
             
+            deduped = []
+            for item in merged:
+                if deduped:
+                    prev = deduped[-1]
+                    if item['start'] < prev['end']:
+                        if item['end'] > prev['end']:
+                            item['start'] = prev['end']
+                        else:
+                            continue
+                if item['end'] > item['start']:
+                    deduped.append(item)
+            
+            merged = deduped
+            
             self.log(f"   ✅ 大模型语义划分: {len(segments)} → {len(merged)} 个分镜")
             return merged
             
@@ -1135,7 +1149,12 @@ Requirements:
                             seen.add(w_lower)
                 text = ', '.join(unique_words)
         
-        # 如果结果太短（可能是清洗过度），返回原始输出
+        meaningless_words = ['texture', 'textures', 'textured', 'detailed texture', 'visual texture']
+        for w in meaningless_words:
+            text = re.sub(r',?\s*\(' + re.escape(w) + r'(?::[\d.]+)?\)\s*,?', ',', text, flags=re.IGNORECASE)
+            text = re.sub(r',?\s*\b' + re.escape(w) + r'\b\s*,?', ',', text, flags=re.IGNORECASE)
+        text = re.sub(r',\s*,+', ',', text).strip(', ')
+        
         if len(text.strip()) < 10:
             return raw_output.strip()
         
@@ -1159,14 +1178,25 @@ Requirements:
             "masterpiece", "best quality", "ultra detailed", "8k",
             "photorealistic", "cinematic lighting", "documentary style",
             "film grain", "high quality", "professional photography",
+            "RAW photo", "raw photo", "film grain texture",
         ]
         cleaned = scene_description
         for tag in redundant:
             cleaned = re.sub(r',?\s*\(' + re.escape(tag) + r'(?::[\d.]+)?\)\s*,?', ',', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r',?\s*' + re.escape(tag) + r'\s*,?', ',', cleaned, flags=re.IGNORECASE)
 
-        # 清理多余逗号
+        cleaned = re.sub(r'\(\s*,\s*:\s*[\d.]+\s*\)', '', cleaned)
+        cleaned = re.sub(r'\(\s*:\s*[\d.]+\s*\)', '', cleaned)
+        cleaned = re.sub(r'\(\s*,\s*\)', '', cleaned)
+        cleaned = re.sub(r'\(\s*\)', '', cleaned)
+
         cleaned = re.sub(r',\s*,+', ',', cleaned).strip(', ')
+
+        if len(cleaned) > 250:
+            keywords = [k.strip() for k in cleaned.split(',') if k.strip()]
+            if len(keywords) > 20:
+                keywords = keywords[:20]
+                cleaned = ', '.join(keywords)
 
         return f"{prefix}, {cleaned}, {suffix}"
 
@@ -2965,6 +2995,23 @@ Requirements:
                                 self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
             
             # 步骤2.3: 二次纠错（使用专用纠错模板，提高纠错准确率）
+            COMMON_ASR_ERRORS = {
+                '殘史': '蠶食', '殘蚀': '蠶食', '蚕食': '蠶食',
+                '李三': '理科三类', '理科三類': '理科三类',
+                '朱木樓馬峰': '珠穆朗瑪峰', '朱木樓': '珠穆朗瑪',
+                '吉英社': '集英社', '蔣談社': '講談社',
+                'Chad Gapty': 'ChatGPT', 'Chad GPT': 'ChatGPT',
+                '算法之民': '算法之侵', '步步緊逼': '步步紧逼',
+                '露入': '落入', '扣動扳機': '扣动扳机',
+            }
+            existing_corrections = theme_info.get('correction_dict', {})
+            for wrong, correct in COMMON_ASR_ERRORS.items():
+                if wrong in full_text and wrong not in existing_corrections:
+                    existing_corrections[wrong] = correct
+            if existing_corrections != theme_info.get('correction_dict', {}):
+                theme_info['correction_dict'] = existing_corrections
+                self.log(f"   📝 常见ASR错误映射补充 {len(COMMON_ASR_ERRORS)} 项")
+            
             if is_ollama_available() and full_text and len(full_text) > 50:
                 existing_corrections = theme_info.get('correction_dict', {})
                 if len(existing_corrections) < 3:
