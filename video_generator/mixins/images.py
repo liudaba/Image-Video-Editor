@@ -692,14 +692,13 @@ class ImagesMixin:
             except Exception:
                 pass
             self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
-            self.log(f"   模式: 并发生成（2个SD请求并行 + 图片保存流水线）")
+            self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
             self.log("")
 
             import queue
             import base64
             from PIL import Image
             from io import BytesIO
-            from concurrent.futures import ThreadPoolExecutor
 
             save_queue = queue.Queue(maxsize=8)
 
@@ -729,22 +728,10 @@ class ImagesMixin:
             saver_thread.start()
 
             result_queue = queue.Queue(maxsize=16)
-            task_queue = queue.Queue()
-            for idx, t in enumerate(tasks):
-                task_queue.put((idx, t))
-            _sd_producer_count = 2
-            _producers_done = [0]
 
             def sd_producer():
-                """并发请求线程: 从共享任务队列取任务并发送SD请求"""
-                while self.task_running:
-                    try:
-                        item = task_queue.get_nowait()
-                    except queue.Empty:
-                        break
-
-                    idx, (sid, prompt, img_file, img_path, desc, neg) = item
-
+                """独立请求线程: 连续发送SD生成请求，实现预取"""
+                for idx, (sid, prompt, img_file, img_path, desc, neg) in enumerate(tasks):
                     if not self.task_running:
                         try:
                             result_queue.put((idx, None, None, "cancelled"), timeout=5)
@@ -767,7 +754,6 @@ class ImagesMixin:
                             result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
                         except queue.Full:
                             pass
-                        task_queue.task_done()
                         continue
 
                     max_retries = 3
@@ -839,17 +825,13 @@ class ImagesMixin:
                             result_queue.put((idx, None, None, "failed"), timeout=5)
                         except queue.Full:
                             pass
-                    task_queue.task_done()
+                try:
+                    result_queue.put(None, timeout=5)
+                except queue.Full:
+                    pass
 
-                _producers_done[0] += 1
-                if _producers_done[0] >= _sd_producer_count:
-                    try:
-                        result_queue.put(None, timeout=5)
-                    except queue.Full:
-                        pass
-
-            for i in range(_sd_producer_count):
-                threading.Thread(target=sd_producer, daemon=True, name=f"SD-Producer-{i}").start()
+            producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
+            producer_thread.start()
 
             # --- 主线程（消费者）: 从队列取结果，更新UI ---
             generated_count = 0
