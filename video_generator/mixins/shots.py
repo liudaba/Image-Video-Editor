@@ -3082,64 +3082,6 @@ Requirements:
                                 theme_info['visual_tone'] = user_custom_tone
                                 self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
             
-            # 步骤2.3: 二次纠错（使用专用纠错模板，提高纠错准确率）
-            COMMON_ASR_ERRORS = {
-                '殘史': '蠶食', '殘蚀': '蠶食', '蚕食': '蠶食',
-                '李三': '理科三类', '理科三類': '理科三类',
-                '朱木樓馬峰': '珠穆朗瑪峰', '朱木樓': '珠穆朗瑪',
-                '吉英社': '集英社', '蔣談社': '講談社',
-                'Chad Gapty': 'ChatGPT', 'Chad GPT': 'ChatGPT',
-                '算法之民': '算法之侵', '步步緊逼': '步步紧逼',
-                '露入': '落入', '扣動扳機': '扣动扳机',
-            }
-            existing_corrections = theme_info.get('correction_dict', {})
-            for wrong, correct in COMMON_ASR_ERRORS.items():
-                if wrong in full_text and wrong not in existing_corrections:
-                    existing_corrections[wrong] = correct
-            if existing_corrections != theme_info.get('correction_dict', {}):
-                theme_info['correction_dict'] = existing_corrections
-                self.log(f"   📝 常见ASR错误映射补充 {len(COMMON_ASR_ERRORS)} 项")
-            
-            if is_llm_available() and full_text and len(full_text) > 50:
-                existing_corrections = theme_info.get('correction_dict', {})
-                if len(existing_corrections) < 3:
-                    self.log("\n🔧 执行二次纠错（专用纠错模板）...")
-                    try:
-                        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-                        if not model:
-                            model = "gemma3:4b"
-                        core_theme_for_correction = theme_info.get('core_theme', '') or user_custom_theme or ''
-                        correction_template = PromptTemplates.get_template("correction_only", text=full_text, theme=core_theme_for_correction)
-                        result_text, _ = call_ollama_single(
-                            model=model,
-                            system_prompt=correction_template["system"],
-                            user_prompt=correction_template["user"],
-                            log_callback=self.log,
-                            num_predict=2000,
-                            num_ctx=4096,
-                            timeout=Config.API_TIMEOUT_LLM_ANALYSIS
-                        )
-                        if result_text:
-                            json_match = re.search(r'\{[\s\S]*\}', result_text.strip())
-                            if json_match:
-                                correction_data = json.loads(json_match.group())
-                                corrections_list = correction_data.get('corrections', [])
-                                new_corrections = {}
-                                for item in corrections_list:
-                                    orig = item.get('original', '')
-                                    corrected = item.get('corrected', '')
-                                    if orig and corrected and orig != corrected:
-                                        if orig not in existing_corrections:
-                                            new_corrections[orig] = corrected
-                                if new_corrections:
-                                    existing_corrections.update(new_corrections)
-                                    theme_info['correction_dict'] = existing_corrections
-                                    self.log(f"   ✅ 二次纠错新增 {len(new_corrections)} 项: {new_corrections}")
-                                else:
-                                    self.log(f"   ✅ 二次纠错完成，未发现新的错误")
-                    except Exception as e:
-                        self._log_exception(f"   ⚠️ 二次纠错失败", e)
-            
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
             self.log("\n📍 步骤 2.5/4: 准备分镜任务")
             

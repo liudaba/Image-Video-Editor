@@ -54,36 +54,6 @@ class PromptTemplates:
 请先仔细阅读整段文本，理解主题和语境，然后逐一检查每个词是否存在语音识别错误（如同音字、专有名词错误），最后按格式输出："""
     }
 
-    CORRECTION_ONLY = {
-        "system": """你是中文文本纠错专家，专门修正语音识别（ASR）产生的错误。
-
-【任务】检查以下语音转录文本中的识别错误并纠正。
-
-【纠错策略】
-1. 先理解整段文本的主题和语境
-2. 逐句检查，重点关注：
-   - 同音字替换（最常见）：如人名被替换为同音常见词
-   - 专有名词错误：如英文品牌名被音译为中文
-   - 形近字错误：如字形相近导致的误识别
-   - 语境不通顺的地方
-3. 如果文本包含繁体字，先在脑中转换为简体再分析
-4. 人名、地名、机构名要特别仔细
-5. 只纠正文本中实际存在的错误，不要编造不存在的错误
-
-【输出格式】严格输出JSON：
-{{"corrections": [{{"original": "错字", "corrected": "正确字", "reason": "原因"}}]}}
-如果没有错误，输出：{{"corrections": []}}
-
-只输出JSON，不要有其他内容。""",
-
-        "user_template": """文本主题：{theme}
-
-语音转录文本：
-{text}
-
-请仔细检查并输出纠错结果（JSON格式）："""
-    }
-
     SHOT_PROMPT_SD = {
         "system": """You are a visual scene designer for Stable Diffusion 1.5. You convert Chinese audio narration into precise English image prompts.
 
@@ -273,7 +243,6 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
         templates = {
             "theme_analysis": cls.THEME_ANALYSIS,
             "theme_extraction": cls.THEME_ANALYSIS,
-            "correction_only": cls.CORRECTION_ONLY,
             "shot_prompt_sd": cls.SHOT_PROMPT_SD,
             "shot_prompt_sdxl": cls.SHOT_PROMPT_SDXL,
             "shot_prompt_flux": cls.SHOT_PROMPT_FLUX,
