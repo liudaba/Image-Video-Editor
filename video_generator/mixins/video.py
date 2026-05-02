@@ -416,7 +416,7 @@ class VideoMixin:
                 
                 if animation_type != "无":
                     old_clip = clip
-                    clip = self.apply_animation_effect_prerender(clip)
+                    clip = self.apply_animation_effect_prerender(clip, animation_type)
                     if clip is not old_clip:
                         intermediate_clips.append(old_clip)
                 
@@ -515,7 +515,7 @@ class VideoMixin:
             
             use_gpu = False
             gpu_encoder = 'h264_nvenc'
-            gpu_preset = "p4"
+            gpu_preset = "p6"
             
             if self._gpu_encoder_cache is not None:
                 use_gpu, gpu_encoder, gpu_preset = self._gpu_encoder_cache
@@ -529,7 +529,7 @@ class VideoMixin:
                     if 'h264_nvenc' in result.stdout:
                         use_gpu = True
                         gpu_encoder = 'h264_nvenc'
-                        gpu_preset = "p4"
+                        gpu_preset = "p6"
                         self.log(f"   ⚡ 检测到NVIDIA GPU加速 (h264_nvenc)")
                     elif 'h264_qsv' in result.stdout:
                         use_gpu = True
@@ -551,7 +551,7 @@ class VideoMixin:
                 self._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
             
             if not use_gpu:
-                self.log("      🖥️ 将使用CPU渲染 (libx264, preset='veryfast')")
+                self.log("      🖥️ 将使用CPU渲染 (libx264, preset='medium')")
             
             try:
                 from proglog import ProgressBarLogger
@@ -623,21 +623,21 @@ class VideoMixin:
                 if use_gpu:
                     hw_params = ['-movflags', '+faststart', '-threads', '0']
                     if gpu_encoder == 'h264_nvenc':
-                        hw_params.extend(['-cq', '23', '-rc', 'vbr'])
+                        hw_params.extend(['-cq', '20', '-rc', 'vbr'])
                     final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=_moviepy_logger)
                 else:
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_moviepy_logger)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='medium', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '20'], logger=_moviepy_logger)
             except Exception as e:
                 if use_gpu:
                     self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
-                    self.log("      🖥️ 切换为CPU渲染 (libx264, preset='veryfast')")
-                    self._gpu_encoder_cache = (False, 'libx264', 'veryfast')
+                    self.log("      🖥️ 切换为CPU渲染 (libx264, preset='medium')")
+                    self._gpu_encoder_cache = (False, 'libx264', 'medium')
                     try:
                         from proglog import ProgressBarLogger as _PBL2
                         _fallback_logger = _MoviePyProgressLogger(self)
                     except Exception:
                         _fallback_logger = None
-                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='veryfast', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '23'], logger=_fallback_logger)
+                    final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='medium', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '20'], logger=_fallback_logger)
                 else:
                     raise
             
@@ -702,14 +702,22 @@ class VideoMixin:
                 pass
     
 
-    def apply_animation_effect_prerender(self, clip):
-        """预渲染缩放动画效果 - 真正预计算缩放帧，渲染时仅做numpy切片
-        
-        优化策略：
-        1. 预先获取静态帧（ImageClip每帧相同）
-        2. 一次性渲染最大缩放帧（1.05x），后续每帧只需numpy裁剪
-        3. 避免每帧重复PIL转换+resize，渲染速度提升10倍以上
-        
+    def apply_animation_effect_prerender(self, clip, animation_type="缩放"):
+        """预渲染动画效果 - 使用PIL仿射变换实现亚像素级平滑插值
+
+        支持动画类型:
+        - "缩放": 缓慢放大 (Ken Burns效果, 1.0x→1.10x)
+        - "左移": 画面向左缓慢平移
+        - "右移": 画面向右缓慢平移
+        - "上移": 画面向上缓慢平移
+        - "下移": 画面向下缓慢平移
+
+        核心优化:
+        1. 预渲染放大/扩展帧，后续每帧仅做仿射变换
+        2. 使用PIL Image.transform()实现亚像素级插值，消除整数截断导致的抖动
+        3. 使用smoothstep缓动曲线，起止更自然
+        4. BICUBIC重采样保证画面清晰
+
         注意：此函数返回新片段，会丢失原片段的 start 属性
               调用方必须在调用此函数后重新设置 with_start()
         """
@@ -717,52 +725,118 @@ class VideoMixin:
             import numpy as np
             from moviepy import VideoClip
             from PIL import Image
-            
+
             original_duration = clip.duration
-            
+
             if not original_duration or original_duration <= 0:
                 self.log("⚠️ 动画片段时长无效，跳过动画效果")
                 return clip
-            
+
             w, h = clip.size
-            
             base_frame = clip.get_frame(0)
-            
-            max_scale = 1.05
-            max_w = int(w * max_scale)
-            max_h = int(h * max_scale)
             base_img = Image.fromarray(base_frame)
-            max_zoomed_img = base_img.resize((max_w, max_h), Image.BILINEAR)
-            max_zoomed_array = np.array(max_zoomed_img)
+
+            if animation_type == "缩放":
+                max_scale = 1.10
+                max_w = int(w * max_scale)
+                max_h = int(h * max_scale)
+                source_img = base_img.resize((max_w, max_h), Image.LANCZOS)
+
+                def make_frame(t):
+                    try:
+                        progress = min(t / original_duration, 1.0)
+                        progress = progress * progress * (3 - 2 * progress)
+                        scale = 1.0 + (max_scale - 1.0) * progress
+                        crop_w = w * max_scale / scale
+                        crop_h = h * max_scale / scale
+                        left = (max_w - crop_w) / 2.0
+                        top = (max_h - crop_h) / 2.0
+                        sx = crop_w / w
+                        sy = crop_h / h
+                        result = source_img.transform(
+                            (w, h), Image.AFFINE,
+                            (sx, 0, left, 0, sy, top),
+                            Image.BICUBIC
+                        )
+                        return np.array(result)
+                    except Exception:
+                        return base_frame
+
+            elif animation_type in ("左移", "右移"):
+                pan_ratio = 1.15
+                max_w = int(w * pan_ratio)
+                source_img = base_img.resize((max_w, h), Image.LANCZOS)
+                total_offset = float(max_w - w)
+
+                if animation_type == "左移":
+                    def make_frame(t):
+                        try:
+                            progress = min(t / original_duration, 1.0)
+                            progress = progress * progress * (3 - 2 * progress)
+                            offset = total_offset * progress
+                            result = source_img.transform(
+                                (w, h), Image.AFFINE,
+                                (1, 0, offset, 0, 1, 0),
+                                Image.BICUBIC
+                            )
+                            return np.array(result)
+                        except Exception:
+                            return base_frame
+                else:
+                    def make_frame(t):
+                        try:
+                            progress = min(t / original_duration, 1.0)
+                            progress = progress * progress * (3 - 2 * progress)
+                            offset = total_offset * (1 - progress)
+                            result = source_img.transform(
+                                (w, h), Image.AFFINE,
+                                (1, 0, offset, 0, 1, 0),
+                                Image.BICUBIC
+                            )
+                            return np.array(result)
+                        except Exception:
+                            return base_frame
+
+            elif animation_type in ("上移", "下移"):
+                pan_ratio = 1.15
+                max_h = int(h * pan_ratio)
+                source_img = base_img.resize((w, max_h), Image.LANCZOS)
+                total_offset = float(max_h - h)
+
+                if animation_type == "上移":
+                    def make_frame(t):
+                        try:
+                            progress = min(t / original_duration, 1.0)
+                            progress = progress * progress * (3 - 2 * progress)
+                            offset = total_offset * progress
+                            result = source_img.transform(
+                                (w, h), Image.AFFINE,
+                                (1, 0, 0, 0, 1, offset),
+                                Image.BICUBIC
+                            )
+                            return np.array(result)
+                        except Exception:
+                            return base_frame
+                else:
+                    def make_frame(t):
+                        try:
+                            progress = min(t / original_duration, 1.0)
+                            progress = progress * progress * (3 - 2 * progress)
+                            offset = total_offset * (1 - progress)
+                            result = source_img.transform(
+                                (w, h), Image.AFFINE,
+                                (1, 0, 0, 0, 1, offset),
+                                Image.BICUBIC
+                            )
+                            return np.array(result)
+                        except Exception:
+                            return base_frame
+            else:
+                base_img.close()
+                return clip
+
             base_img.close()
-            max_zoomed_img.close()
-            
-            def make_frame(t):
-                try:
-                    progress = min(t / original_duration, 1.0)
-                    scale = 1.0 + 0.05 * progress
-                    
-                    crop_w = int(w * max_scale / scale)
-                    crop_h = int(h * max_scale / scale)
-                    crop_w = min(crop_w, max_w)
-                    crop_h = min(crop_h, max_h)
-                    
-                    left = (max_w - crop_w) // 2
-                    top = (max_h - crop_h) // 2
-                    
-                    cropped = max_zoomed_array[top:top+crop_h, left:left+crop_w]
-                    
-                    if crop_w != w or crop_h != h:
-                        y_indices = np.linspace(0, crop_h - 1, h).astype(np.intp)
-                        x_indices = np.linspace(0, crop_w - 1, w).astype(np.intp)
-                        return cropped[np.ix_(y_indices, x_indices)]
-                    
-                    return cropped
-                except Exception:
-                    return base_frame
-            
             animated_clip = VideoClip(make_frame, duration=original_duration)
-            
             return animated_clip
         except Exception as e:
             self.log(f"⚠️ 预渲染动画效果失败: {e}")
@@ -771,8 +845,7 @@ class VideoMixin:
 
     def _resize_image_to_fit(self, img, target_width, target_height):
         """将图片缩放到目标尺寸，保持比例，不足部分填充黑边"""
-        from PIL import Image
-        import numpy as np
+        from PIL import Image, ImageFilter
 
         orig_width, orig_height = img.size
         scale_w = target_width / orig_width
@@ -780,7 +853,9 @@ class VideoMixin:
         scale = min(scale_w, scale_h)
         new_width = int(orig_width * scale)
         new_height = int(orig_height * scale)
-        resized = img.resize((new_width, new_height), Image.BILINEAR)
+        resized = img.resize((new_width, new_height), Image.LANCZOS)
+        if orig_width < target_width or orig_height < target_height:
+            resized = resized.filter(ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=3))
         new_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
         paste_x = (target_width - new_width) // 2
         paste_y = (target_height - new_height) // 2

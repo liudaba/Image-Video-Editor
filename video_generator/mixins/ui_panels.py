@@ -303,7 +303,7 @@ class UIPanelsMixin:
         if not hasattr(self, 'animation_var'):
             self.animation_var = tk.StringVar(value="无")
         
-        animation_options = ["无", "缩放"]
+        animation_options = ["无", "缩放", "左移", "右移", "上移", "下移"]
         animation_combo = ttk.Combobox(animation_frame, textvariable=self.animation_var, values=animation_options, state="readonly", font=('Microsoft YaHei', large_font_size))
         animation_combo.pack(fill=tk.X, padx=5, pady=2)
         

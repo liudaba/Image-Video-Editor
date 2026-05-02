@@ -80,28 +80,28 @@ class HardwareAcceleratedRenderer:
         if self.has_cuda:
             return {
                 'vcodec': 'h264_nvenc',
-                'preset': 'p4',
+                'preset': 'p6',
                 'rc': 'vbr',
-                'cq': 23
+                'cq': 20
             }
         elif self.has_quicksync:
             return {
                 'vcodec': 'h264_qsv',
                 'preset': 'medium',
-                'global_quality': 23
+                'global_quality': 20
             }
         elif self.has_amf:
             return {
                 'vcodec': 'h264_amf',
                 'preset': 'quality',
                 'rc': 'vbr',
-                'quality': 23
+                'quality': 20
             }
         else:
             return {
                 'vcodec': 'libx264',
-                'preset': 'veryfast',
-                'crf': 23
+                'preset': 'medium',
+                'crf': 20
             }
 
     def cancel_render(self):
