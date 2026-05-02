@@ -233,108 +233,102 @@ class VideoMixin:
                 self.log("   🚀 跳过moviepy，由FFmpeg原生处理，速度大幅提升")
                 
                 try:
-                    import tempfile
                     from PIL import Image as PILImageForResize
                     
                     temp_render_dir = tempfile.mkdtemp(prefix="vg_render_")
-                    resized_images = []
-                    shot_durations = []
-                    
-                    prev_end = 0.0
-                    for shot in self.shots_data:
-                        image_path = os.path.join(self.images_dir, shot['image_file'])
-                        if not os.path.exists(image_path):
-                            self.log(f"   ⚠️ 图片缺失: {shot['image_file']}")
-                            continue
+                    try:
+                        resized_images = []
+                        shot_durations = []
                         
-                        shot_dur = shot['end'] - shot['start']
-                        gap = shot['start'] - prev_end
-                        if gap > 0.05 and prev_end > 0:
-                            shot_dur += gap
+                        prev_end = 0.0
+                        for shot in self.shots_data:
+                            image_path = os.path.join(self.images_dir, shot['image_file'])
+                            if not os.path.exists(image_path):
+                                self.log(f"   ⚠️ 图片缺失: {shot['image_file']}")
+                                continue
+                            
+                            shot_dur = shot['end'] - shot['start']
+                            gap = shot['start'] - prev_end
+                            if gap > 0.05 and prev_end > 0:
+                                shot_dur += gap
+                            
+                            resized_name = f"resized_{len(resized_images):04d}.png"
+                            resized_path = os.path.join(temp_render_dir, resized_name)
+                            
+                            with PILImageForResize.open(image_path) as orig_img:
+                                fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
+                                fitted.save(resized_path, 'PNG')
+                            
+                            resized_images.append(resized_path)
+                            shot_durations.append(shot_dur)
+                            prev_end = shot['end']
                         
-                        resized_name = f"resized_{len(resized_images):04d}.png"
-                        resized_path = os.path.join(temp_render_dir, resized_name)
+                        if not resized_images:
+                            self.log("❌ 没有可用的图片文件")
+                            self.update_task_progress("就绪")
+                            return
                         
-                        with PILImageForResize.open(image_path) as orig_img:
-                            fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
-                            fitted.save(resized_path, 'PNG')
+                        self.update_task_progress("正在渲染视频...", 60)
+                        self.log(f"\n🎥 开始FFmpeg直接渲染...")
+                        self.log(f"   📊 {len(resized_images)} 张图片, 总时长 {sum(shot_durations):.1f}s")
                         
-                        resized_images.append(resized_path)
-                        shot_durations.append(shot_dur)
-                        prev_end = shot['end']
-                    
-                    if not resized_images:
-                        self.log("❌ 没有可用的图片文件")
-                        self.update_task_progress("就绪")
-                        shutil.rmtree(temp_render_dir, ignore_errors=True)
-                        return
-                    
-                    self.update_task_progress("正在渲染视频...", 60)
-                    self.log(f"\n🎥 开始FFmpeg直接渲染...")
-                    self.log(f"   📊 {len(resized_images)} 张图片, 总时长 {sum(shot_durations):.1f}s")
-                    
-                    output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
-                    
-                    _ffmpeg_render_start = time.time()
-                    
-                    def _ffmpeg_progress(pct, info=None):
-                        progress = 60 + int(pct * 0.35)
-                        if info:
-                            time_str = f"{int(info.get('current_time', 0)//60):02d}:{int(info.get('current_time', 0)%60):02d}"
-                            total_str = f"{int(info.get('total_time', 0)//60):02d}:{int(info.get('total_time', 0)%60):02d}"
-                            desc = f"FFmpeg渲染 {pct:.0f}% ({time_str}/{total_str})"
-                            eta = info.get('eta')
-                            if eta and eta > 0:
-                                eta_min = int(eta // 60)
-                                eta_sec = int(eta % 60)
-                                desc += f" 剩余{eta_min}:{eta_sec:02d}"
-                            speed = info.get('speed')
-                            if speed:
-                                desc += f" {speed:.1f}x"
-                            self.update_task_progress(desc, progress)
+                        output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+                        
+                        _ffmpeg_render_start = time.time()
+                        
+                        def _ffmpeg_progress(pct, info=None):
+                            progress = 60 + int(pct * 0.35)
+                            if info:
+                                time_str = f"{int(info.get('current_time', 0)//60):02d}:{int(info.get('current_time', 0)%60):02d}"
+                                total_str = f"{int(info.get('total_time', 0)//60):02d}:{int(info.get('total_time', 0)%60):02d}"
+                                desc = f"FFmpeg渲染 {pct:.0f}% ({time_str}/{total_str})"
+                                eta = info.get('eta')
+                                if eta and eta > 0:
+                                    eta_min = int(eta // 60)
+                                    eta_sec = int(eta % 60)
+                                    desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                                speed = info.get('speed')
+                                if speed:
+                                    desc += f" {speed:.1f}x"
+                                self.update_task_progress(desc, progress)
+                            else:
+                                self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
+                        
+                        def _ffmpeg_log(msg):
+                            self.log(f"   {msg}")
+                        
+                        success = self.video_renderer.render(
+                            resized_images, self.audio_path, output_path,
+                            fps=30, shot_durations=shot_durations,
+                            progress_callback=_ffmpeg_progress,
+                            log_callback=_ffmpeg_log
+                        )
+                        
+                        if success:
+                            _video_elapsed = time.time() - _video_start_time
+                            _video_min = int(_video_elapsed // 60)
+                            _video_sec = int(_video_elapsed % 60)
+                            self.update_task_progress("视频生成完成", 100)
+                            self.log("\n" + "=" * 60)
+                            self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
+                            self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
+                            self.log(f"   📁 保存位置: {output_path}")
+                            self.log("=" * 60)
+                            
+                            self.state_manager['video']['generated'] = True
+                            self.state_manager['video']['path'] = output_path
+                            
+                            self.log("\n📂 打开输出文件夹...")
+                            self._open_folder(os.path.dirname(output_path))
+                            return
                         else:
-                            self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
-                    
-                    def _ffmpeg_log(msg):
-                        self.log(f"   {msg}")
-                    
-                    success = self.video_renderer.render(
-                        resized_images, self.audio_path, output_path,
-                        fps=30, shot_durations=shot_durations,
-                        progress_callback=_ffmpeg_progress,
-                        log_callback=_ffmpeg_log
-                    )
-                    
-                    shutil.rmtree(temp_render_dir, ignore_errors=True)
-                    
-                    if success:
-                        _video_elapsed = time.time() - _video_start_time
-                        _video_min = int(_video_elapsed // 60)
-                        _video_sec = int(_video_elapsed % 60)
-                        self.update_task_progress("视频生成完成", 100)
-                        self.log("\n" + "=" * 60)
-                        self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
-                        self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
-                        self.log(f"   📁 保存位置: {output_path}")
-                        self.log("=" * 60)
-                        
-                        self.state_manager['video']['generated'] = True
-                        self.state_manager['video']['path'] = output_path
-                        
-                        self.log("\n📂 打开输出文件夹...")
-                        self._open_folder(os.path.dirname(output_path))
-                        return
-                    else:
-                        self.log("⚠️ FFmpeg直接渲染失败，回退到moviepy渲染...")
+                            self.log("⚠️ FFmpeg直接渲染失败，回退到moviepy渲染...")
+                    finally:
+                        shutil.rmtree(temp_render_dir, ignore_errors=True)
                 
                 except Exception as e:
-                    self.log(f"⚠️ FFmpeg直接渲染异常: {type(e).__name__} - {str(e)[:100]}")
+                    self._log_exception(f"⚠️ FFmpeg直接渲染异常: {type(e).__name__}", e)
                     self.log("   🔄 回退到moviepy渲染...")
-                    if 'temp_render_dir' in locals():
-                        try:
-                            shutil.rmtree(temp_render_dir, ignore_errors=True)
-                        except Exception:
-                            pass
             
             # 步骤9: 创建视频片段（多线程批量加载图片）
             self.update_task_progress("正在创建视频片段...", 50)
@@ -486,7 +480,7 @@ class VideoMixin:
                 self._active_clips = clips
                 self.log(f"   ✅ 视频片段合成完成: {len(clips)} 个片段")
             except Exception as e:
-                self.log(f"   ❌ 视频片段合成失败: {type(e).__name__} - {str(e)[:200]}")
+                self._log_exception(f"   ❌ 视频片段合成失败: {type(e).__name__}", e)
                 self.update_task_progress("就绪")
                 return
 
@@ -546,7 +540,7 @@ class VideoMixin:
                 except FileNotFoundError:
                     self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
                 except Exception as e:
-                    self.log(f"      ⚠️ ffmpeg检测失败: {type(e).__name__} - {str(e)[:100]}")
+                    self._log_exception(f"      ⚠️ ffmpeg检测失败: {type(e).__name__}", e)
                 
                 self._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
             
@@ -629,7 +623,7 @@ class VideoMixin:
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='medium', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '20'], logger=_moviepy_logger)
             except Exception as e:
                 if use_gpu:
-                    self.log(f"      ⚠️ GPU渲染失败，切换CPU: {str(e)[:50]}")
+                    self._log_exception(f"      ⚠️ GPU渲染失败，切换CPU", e)
                     self.log("      🖥️ 切换为CPU渲染 (libx264, preset='medium')")
                     self._gpu_encoder_cache = (False, 'libx264', 'medium')
                     try:
@@ -839,7 +833,7 @@ class VideoMixin:
             animated_clip = VideoClip(make_frame, duration=original_duration)
             return animated_clip
         except Exception as e:
-            self.log(f"⚠️ 预渲染动画效果失败: {e}")
+            self._log_exception("⚠️ 预渲染动画效果失败", e)
             return clip
 
 
@@ -916,7 +910,7 @@ class VideoMixin:
                         temp_shots = json.load(f)
                     shots_count = len(temp_shots)
                 except Exception as e:
-                    self.log(f"⚠️ 读取分镜脚本失败: {e}")
+                    self._log_exception("⚠️ 读取分镜脚本失败", e)
                     has_shots_file = False
             
             # ========== 情况1: 有分镜脚本 + 有图片（数量匹配）→ 直接合成视频 ==========
@@ -1008,7 +1002,7 @@ class VideoMixin:
                             self.shots_data = loaded
                         self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
-                        self.log(f"❌ 加载分镜数据失败: {e}")
+                        self._log_exception("❌ 加载分镜数据失败", e)
                         traceback.print_exc()
                         return
                 elif mode == "use_existing_shots" and os.path.exists(shots_file):

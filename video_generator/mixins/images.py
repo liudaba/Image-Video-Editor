@@ -69,7 +69,7 @@ class ImagesMixin:
                         self.root.after(0, update_ui)
                 return False
         except Exception as e:
-            self.log(f"❌ SD API 连接异常: {str(e)}")
+            self._log_exception("❌ SD API 连接异常", e)
             self._sd_api_connected = False
             
             # 更新状态变量
@@ -165,7 +165,7 @@ class ImagesMixin:
                         self.shots_data = loaded_shots
                     self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                 except Exception as e:
-                    self.log(f"❌ 加载分镜数据失败: {e}")
+                    self._log_exception("❌ 加载分镜数据失败", e)
                     self.update_task_progress("就绪")
                     return
             else:
@@ -263,7 +263,7 @@ class ImagesMixin:
                     with Image.open(BytesIO(img_bytes)) as image:
                         image.save(save_path)
                 except Exception as e:
-                    self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
+                    self._log_exception(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'}", e)
                 finally:
                     save_queue.task_done()
 
@@ -336,7 +336,7 @@ class ImagesMixin:
                                     pass
                     except Exception as e:
                         if retry < max_retries - 1:
-                            self.log(f"   ⚠️ 云端生图异常，{retry_delay}秒后重试: {str(e)[:80]}")
+                            self._log_exception(f"   ⚠️ 云端生图异常，{retry_delay}秒后重试", e)
                             time.sleep(retry_delay)
                         else:
                             try:
@@ -458,7 +458,7 @@ class ImagesMixin:
                             shot['description'] = self.clean_text(shot['description'])
                     self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                 except Exception as e:
-                    self.log(f"❌ 加载分镜数据失败: {e}")
+                    self._log_exception("❌ 加载分镜数据失败", e)
                     self.log("❌ 没有分镜数据，无法生成图像")
                     self.update_task_progress("就绪")
                     return
@@ -520,7 +520,7 @@ class ImagesMixin:
                 self.log(f"   可用模型: 无法获取")
                     
         except Exception as e:
-            self.log(f"❌ SD服务连接异常: {str(e)}")
+            self._log_exception("❌ SD服务连接异常", e)
             self.log("💡 请确认 Stable Diffusion Web UI 已启动且API地址正确")
             self.update_task_progress("就绪")
             return
@@ -670,7 +670,7 @@ class ImagesMixin:
                     self.log(f"   继续使用: {current_sd_model}")
                         
             except Exception as e:
-                self.log(f"   ❌ 切换异常: {e}")
+                self._log_exception("   ❌ 切换异常", e)
                 self.log(f"   继续使用: {current_sd_model}")
             
         # ========== 最终配置确认 ==========
@@ -721,7 +721,7 @@ class ImagesMixin:
                         with Image.open(BytesIO(img_bytes)) as image:
                             image.save(save_path)
                     except Exception as e:
-                        self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
+                        self._log_exception(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'}", e)
                     finally:
                         save_queue.task_done()
 

@@ -221,7 +221,7 @@ _ollama_call_semaphore = threading.Semaphore(3)
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
                       log_callback=None, num_predict=512, num_ctx=4096,
-                      llm_config=None):
+                      llm_config=None, timeout=120):
     """统一的大模型调用函数
 
     调度逻辑：
@@ -236,6 +236,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
         num_predict: 预测token数
         num_ctx: 上下文长度
         llm_config: LLMConfig 实例，如果提供则使用其参数
+        timeout: 请求超时时间（秒），默认120秒
 
     Returns:
         tuple: (result_text, model_name) 或 (None, None)
@@ -307,7 +308,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                         "keep_alive": 60,
                         "options": options
                     },
-                    timeout=120
+                    timeout=(10, timeout)
                 )
 
             if response.status_code != 200:
@@ -340,7 +341,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
-                       llm_config=None, extra_options=None):
+                       llm_config=None, extra_options=None, timeout=120):
     """调用单个大模型（不自动切换）
 
     调度逻辑：
@@ -356,6 +357,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
         num_ctx: 上下文长度
         llm_config: LLMConfig 实例
         extra_options: 额外的采样参数，会覆盖默认值（如 repeat_penalty, temperature）
+        timeout: 请求超时时间（秒），默认120秒
 
     Returns:
         tuple: (result_text, model_name) 或 (None, None)
@@ -416,7 +418,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
                     "keep_alive": 60,
                     "options": options
                 },
-                timeout=120
+                timeout=(10, timeout)
             )
 
         if response.status_code != 200:
@@ -476,7 +478,7 @@ def warmup_model(model, log_callback=None):
                         "temperature": 0.1
                     }
                 },
-                timeout=60
+                timeout=(10, 30)
             )
         return response.status_code == 200
     except Exception:

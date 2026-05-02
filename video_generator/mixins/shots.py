@@ -105,7 +105,8 @@ class ShotsMixin:
                 model=model,
                 system_prompt="You are an AI art style keyword generator. Output only English keywords separated by commas.",
                 user_prompt=user_message,
-                log_callback=self.log
+                log_callback=self.log,
+                timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             
             if result_text:
@@ -121,7 +122,7 @@ class ShotsMixin:
             
             return cleaned
         except Exception as e:
-            self.log(f"⚠️ 风格描述生成失败: {e}")
+            self._log_exception("⚠️ 风格描述生成失败", e)
             # 返回一个默认风格
             return "professional photography, high quality, detailed"
     
@@ -135,7 +136,7 @@ class ShotsMixin:
                 content_type, visual_style = recognizer.detect_content_type(sentence)
                 return content_type
             except Exception as e:
-                self.log(f"⚠️ 增强版识别失败，使用内置识别: {e}")
+                self._log_exception("⚠️ 增强版识别失败，使用内置识别", e)
         
         # 回退到内置识别逻辑
         # 内容类型关键词及其权重
@@ -358,7 +359,8 @@ class ShotsMixin:
                 user_prompt=user_prompt,
                 log_callback=self.log,
                 num_predict=4000,
-                num_ctx=8192
+                num_ctx=8192,
+                timeout=Config.API_TIMEOUT_LLM_ANALYSIS
             )
             
             if not result_text:
@@ -436,7 +438,7 @@ class ShotsMixin:
             return merged
             
         except Exception as e:
-            self.log(f"   ⚠️ 大模型语义划分失败({str(e)[:60]})，回退到规则合并")
+            self._log_exception(f"   ⚠️ 大模型语义划分失败，回退到规则合并", e)
             return self._rule_based_merge(segments)
     
 
@@ -591,7 +593,8 @@ Requirements:
                             user_prompt=diff_prompt,
                             log_callback=self.log,
                             num_predict=512,
-                            num_ctx=2048
+                            num_ctx=2048,
+                            timeout=Config.API_TIMEOUT_LLM_PROMPT
                         )
                         if result_text:
                             cleaned = self._clean_prompt_output(result_text.strip())
@@ -922,7 +925,8 @@ Requirements:
                 user_prompt=user_prompt,
                 log_callback=self.log,
                 num_predict=256,
-                num_ctx=2048
+                num_ctx=2048,
+                timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             if result_text:
                 return result_text.strip()
@@ -982,7 +986,7 @@ Requirements:
             return self._generate_arv_format_prompt(description_parts, content_type, shot_id)
 
         except Exception as e:
-            self.log(f"⚠️ ARV提示词生成失败: {e}，切换到SD提示词")
+            self._log_exception("⚠️ ARV提示词生成失败，切换到SD提示词", e)
             return self._generate_sd_prompt(description_parts, content_type, shot_id)
 
 
@@ -1003,7 +1007,7 @@ Requirements:
                 theme_elements=theme_elements
             )
         except Exception as e:
-            self.log(f"⚠️ ARV格式生成失败: {e}")
+            self._log_exception("⚠️ ARV格式生成失败", e)
             return self._generate_sd_prompt(description_parts, content_type, shot_id)
 
 
@@ -1389,7 +1393,8 @@ Requirements:
                 log_callback=self.log,
                 num_predict=768,
                 num_ctx=4096,
-                llm_config=llm_config
+                llm_config=llm_config,
+                timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             
             if result_text:
@@ -1401,7 +1406,7 @@ Requirements:
             
             raise Exception(f"大模型 {model} 返回为空 (配音: {dubbing[:30]}...)")
         except Exception as e:
-            self.log(f"⚠️ 大模型调用失败: {str(e)[:80]}，回退到内置逻辑生成基础提示词")
+            self._log_exception(f"⚠️ 大模型调用失败，回退到内置逻辑生成基础提示词", e)
             self.log(f"   💡 提示: 回退生成的提示词质量较低，建议检查Ollama服务状态")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                 return ARVPromptTemplates.generate_prompt(dubbing, content_type)
@@ -1516,7 +1521,7 @@ Requirements:
                     return ", ".join(entities)
                 
             except Exception as e:
-                self.log(f"⚠️ 增强版实体识别失败，使用内置识别: {e}")
+                self._log_exception("⚠️ 增强版实体识别失败，使用内置识别", e)
         
         # 回退到内置识别逻辑
         # 国家/地区实体 - 扩展版本，包含更多国家和常见误识别纠正
@@ -1956,7 +1961,7 @@ Requirements:
                             self._add_to_translation_cache(elem, translated_map[elem])
                             self.log(f"🌐 LLM翻译: '{elem}' → '{translated_map[elem]}' (已缓存)")
             except Exception as e:
-                self.log(f"⚠️ LLM翻译失败: {e}，使用原文")
+                self._log_exception("⚠️ LLM翻译失败，使用原文", e)
         
         return result
     
@@ -1998,7 +2003,8 @@ Requirements:
                 user_prompt=prompt,
                 log_callback=self.log,
                 num_predict=500,
-                num_ctx=2048
+                num_ctx=2048,
+                timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             
             if result_text:
@@ -2009,7 +2015,7 @@ Requirements:
             
             return {}
         except Exception as e:
-            self.log(f"⚠️ LLM批量翻译异常: {e}")
+            self._log_exception("⚠️ LLM批量翻译异常", e)
             return {}
 
     # =======================================================================
@@ -2240,7 +2246,7 @@ Requirements:
                 theme_info['correction_dict'] = {}
 
         except Exception as e:
-            self.log(f"⚠️ 提取主题信息时出错: {e}")
+            self._log_exception("⚠️ 提取主题信息时出错", e)
 
         return theme_info
 
@@ -2536,7 +2542,7 @@ Requirements:
                 audio_stat = os.stat(self.audio_path)
                 audio_key = f"audio_{hashlib.md5(self.audio_path.encode()).hexdigest()}_{audio_stat.st_mtime}_{audio_stat.st_size}"
             except Exception as e:
-                self.log(f"❌ 无法读取音频文件: {e}")
+                self._log_exception("❌ 无法读取音频文件", e)
                 self.update_task_progress("就绪")
                 return
             
@@ -2618,7 +2624,7 @@ Requirements:
                                 whisper_used_gpu = (device == "cuda")
                                 self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
                             except Exception as e:
-                                self.log(f"⚠️ Whisper加载失败: {e}")
+                                self._log_exception("⚠️ Whisper加载失败", e)
                         else:
                             try:
                                 import torch
@@ -2633,7 +2639,7 @@ Requirements:
                                 else:
                                     self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
                             except Exception as e:
-                                self.log(f"⚠️ Whisper移至GPU失败，使用CPU: {e}")
+                                self._log_exception("⚠️ Whisper移至GPU失败，使用CPU", e)
                     else:
                         self.log("📦 正在加载Whisper模型...")
                         try:
@@ -2662,14 +2668,14 @@ Requirements:
                             else:
                                 self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
                         except Exception as e:
-                            self.log(f"⚠️ GPU加载失败，回退到CPU: {e}")
+                            self._log_exception("⚠️ GPU加载失败，回退到CPU", e)
                             whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                             try:
                                 self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
                                 whisper_model_loaded = True
                                 self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
                             except Exception as e2:
-                                self.log(f"❌ 模型加载完全失败: {e2}")
+                                self._log_exception("❌ 模型加载完全失败", e2)
                                 self.update_task_progress("就绪")
                                 return
                     
@@ -2693,7 +2699,7 @@ Requirements:
                             avg_duration = sum(s.get('end', 0) - s.get('start', 0) for s in segments) / len(segments) if segments else 0
                             self.log(f"   ℹ️ 平均片段时长: {avg_duration:.1f}秒，如需要更细分镜可减小停顿检测阈值")
                     except Exception as e:
-                        self.log(f"❌ 语音识别失败: {e}")
+                        self._log_exception("❌ 语音识别失败", e)
                         self.update_task_progress("就绪")
                         return
                     
@@ -2911,7 +2917,8 @@ Requirements:
                                         log_callback=self.log,
                                         num_predict=2000,
                                         num_ctx=8192,
-                                        llm_config=getattr(self, 'current_llm_config', None)
+                                        llm_config=getattr(self, 'current_llm_config', None),
+                                        timeout=Config.API_TIMEOUT_LLM_ANALYSIS
                                     )
                                     
                                     if not result_content:
@@ -2971,7 +2978,7 @@ Requirements:
                                         time.sleep(1)  # 超时后等待稍长时间再重试
                                 except Exception as e:
                                     error_msg = str(e).lower()
-                                    self.log(f"⚠️ 模型 {current_model} 调用失败: {str(e)[:100]}")
+                                    self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
                                     
                                     # 如果是连接错误，直接退出
                                     if "connection" in error_msg or "refused" in error_msg:
@@ -3053,7 +3060,7 @@ Requirements:
                             _ollama_model_already_loaded = True
                         
                         except Exception as e:
-                            self.log(f"   ⚠️ 大模型分析过程出错: {str(e)[:100]}")
+                            self._log_exception(f"   ⚠️ 大模型分析过程出错", e)
                             self.log("   将使用原始语音片段创建分镜")
                             theme_info = {
                                 'content_type': '', 
@@ -3109,7 +3116,8 @@ Requirements:
                             user_prompt=correction_template["user"],
                             log_callback=self.log,
                             num_predict=2000,
-                            num_ctx=4096
+                            num_ctx=4096,
+                            timeout=Config.API_TIMEOUT_LLM_ANALYSIS
                         )
                         if result_text:
                             json_match = re.search(r'\{[\s\S]*\}', result_text.strip())
@@ -3130,7 +3138,7 @@ Requirements:
                                 else:
                                     self.log(f"   ✅ 二次纠错完成，未发现新的错误")
                     except Exception as e:
-                        self.log(f"   ⚠️ 二次纠错失败: {str(e)[:60]}")
+                        self._log_exception(f"   ⚠️ 二次纠错失败", e)
             
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
             self.log("\n📍 步骤 2.5/4: 准备分镜任务")
@@ -3175,7 +3183,7 @@ Requirements:
                     warmup_time = time.time() - warmup_start
                     self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
                 except Exception as e:
-                    self.log(f"⚠️ 模型预热失败: {str(e)[:50]}")
+                    self._log_exception(f"⚠️ 模型预热失败", e)
             
             # 获取用户预设的风格（高级设置面板）
             user_selected_styles = self.get_selected_styles()
@@ -3257,7 +3265,7 @@ Requirements:
                         idx = future_to_idx[future]
                         failed_count += 1
                         pregenerated_prompts[idx] = ""
-                        self.log(f"   ⚠️ 第{idx+1}个生成异常: {str(e)[:100]}")
+                        self._log_exception(f"   ⚠️ 第{idx+1}个生成异常", e)
                     completed_count += 1
                     progress_pct = 65 + int((completed_count / total_tasks) * 15)
                     self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
@@ -3384,6 +3392,7 @@ Requirements:
             
             with ThreadPoolExecutor(max_workers=thread_count) as executor:
                 futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
+                _last_progress_time = time.time()
                 
                 for future in as_completed(futures):
                     try:
@@ -3392,7 +3401,9 @@ Requirements:
                             if shot:
                                 shots_dict[idx] = shot
                             completed_count += 1
-                            if completed_count % 5 == 0 or completed_count == len(shot_tasks):
+                            now = time.time()
+                            if (now - _last_progress_time >= 0.5) or completed_count == len(shot_tasks):
+                                _last_progress_time = now
                                 elapsed = time.time() - create_start_time
                                 speed = completed_count / elapsed if elapsed > 0 else 0
                                 self.log(f"   📊 正在创建分镜: {completed_count}/{len(shot_tasks)} (速度: {speed:.1f}个/秒)")
@@ -3400,7 +3411,7 @@ Requirements:
                                 self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
                     except Exception as e:
                         task_idx = futures[future]
-                        self.log(f"   ⚠️ 创建分镜{task_idx+1}失败: {str(e)[:80]}")
+                        self._log_exception(f"   ⚠️ 创建分镜{task_idx+1}失败", e)
                         try:
                             task_data = shot_tasks[task_idx] if task_idx < len(shot_tasks) else None
                             if task_data:

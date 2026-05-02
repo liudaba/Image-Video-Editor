@@ -59,10 +59,10 @@ class HardwareAcceleratedRenderer:
     def _check_quicksync(self):
         try:
             result = subprocess.run(
-                ['ffmpeg', '-hwaccels'],
+                ['ffmpeg', '-encoders'],
                 capture_output=True, text=True, timeout=3
             )
-            return 'qsv' in result.stdout.lower()
+            return 'h264_qsv' in result.stdout
         except Exception:
             return False
 

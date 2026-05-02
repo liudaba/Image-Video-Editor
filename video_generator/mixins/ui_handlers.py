@@ -942,17 +942,26 @@ class UIHandlersMixin:
                         except:
                             gpu_memory_percent = 0
                     
-                    # 更新UI（捕获 tkinter 组件已销毁的异常）
                     try:
-                        if update_interval % 2 == 0:  # 每2次循环更新一次UI
-                            if hasattr(self, 'cpu_label') and self.cpu_label.winfo_exists():
-                                self.cpu_label.config(text=f"{cpu_usage:.1f}%")
-                            if hasattr(self, 'memory_label') and self.memory_label.winfo_exists():
-                                self.memory_label.config(text=f"{memory_usage:.1f}%")
-                            if hasattr(self, 'gpu_label') and self.gpu_label.winfo_exists():
-                                self.gpu_label.config(text=f"{gpu_memory_percent:.1f}%")
-                            if hasattr(self, 'memory_detail_label') and self.memory_detail_label.winfo_exists():
-                                self.memory_detail_label.config(text=f"{memory_used} MB / {memory_total} MB")
+                        if update_interval % 2 == 0:
+                            _cpu = cpu_usage
+                            _mem = memory_usage
+                            _gpu = gpu_memory_percent
+                            _mem_d = f"{memory_used} MB / {memory_total} MB"
+                            def _update_perf_ui():
+                                try:
+                                    if hasattr(self, 'cpu_label') and self.cpu_label.winfo_exists():
+                                        self.cpu_label.config(text=f"{_cpu:.1f}%")
+                                    if hasattr(self, 'memory_label') and self.memory_label.winfo_exists():
+                                        self.memory_label.config(text=f"{_mem:.1f}%")
+                                    if hasattr(self, 'gpu_label') and self.gpu_label.winfo_exists():
+                                        self.gpu_label.config(text=f"{_gpu:.1f}%")
+                                    if hasattr(self, 'memory_detail_label') and self.memory_detail_label.winfo_exists():
+                                        self.memory_detail_label.config(text=_mem_d)
+                                except tk.TclError:
+                                    pass
+                            if hasattr(self, 'root') and self.root:
+                                self.root.after(0, _update_perf_ui)
                     except tk.TclError:
                         break
                     

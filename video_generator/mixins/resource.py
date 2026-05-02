@@ -74,61 +74,52 @@ class ResourceMixin:
             'images': {},
             'audio': {}
         }
-        # 缓存配置
         self.cache_config = {
-            'max_size': 1000,  # 最大缓存项数
-            'expiry_time': 3600,  # 缓存过期时间（秒）
-            'cleanup_interval': 600  # 清理间隔（秒）
+            'max_size': 1000,
+            'expiry_time': 3600,
+            'cleanup_interval': 600
         }
-        # 缓存统计信息
         self.cache_stats = {
             'hits': 0,
             'misses': 0,
             'evictions': 0,
             'size': 0
         }
-        # 缓存清理线程控制标志
-        self.cache_cleanup_running = True
-        # 启动缓存清理线程
-        threading.Thread(target=self.cache_cleanup, daemon=True).start()
+        self._cache_cleanup_stop_event = threading.Event()
+        self._cache_cleanup_thread = threading.Thread(target=self._cache_cleanup_loop, daemon=True)
+        self._cache_cleanup_thread.start()
         self.log("✅ 缓存系统初始化完成")
-    
 
-    def cache_cleanup(self):
-        """定期清理过期缓存"""
-        while getattr(self, 'cache_cleanup_running', True):
+
+    def _cache_cleanup_loop(self):
+        """定期清理过期缓存（支持通过 Event 立即停止）"""
+        while not self._cache_cleanup_stop_event.is_set():
             try:
-                time.sleep(self.cache_config['cleanup_interval'])
-                
-                # 检查是否应该退出
-                if not getattr(self, 'cache_cleanup_running', True):
+                if self._cache_cleanup_stop_event.wait(timeout=self.cache_config['cleanup_interval']):
                     break
-                    
+
                 current_time = time.time()
                 evicted = 0
-                
+
                 for category in self.cache_system:
                     items_to_remove = []
                     for key, value in self.cache_system[category].items():
-                        # 检查是否有过期时间
                         if isinstance(value, dict) and 'timestamp' in value:
                             if current_time - value['timestamp'] > self.cache_config['expiry_time']:
                                 items_to_remove.append(key)
-                    
-                    # 移除过期项
+
                     for key in items_to_remove:
                         del self.cache_system[category][key]
                         evicted += 1
-                
+
                 if evicted > 0:
                     self.cache_stats['evictions'] += evicted
                     self.cache_stats['size'] = sum(len(items) for items in self.cache_system.values())
                     self.log(f"🔄 缓存清理完成，移除了 {evicted} 个过期项")
             except Exception as e:
-                # 检查是否因为关闭导致的异常
-                if not getattr(self, 'cache_cleanup_running', True):
+                if self._cache_cleanup_stop_event.is_set():
                     break
-                self.log(f"⚠️ 缓存清理失败: {e}")
+                self._log_exception("⚠️ 缓存清理失败", e)
     
 
     def cache_get(self, category, key):
@@ -354,7 +345,7 @@ class ResourceMixin:
                 task['status'] = 'failed'
                 task['error'] = str(e)
                 self.thread_pool_stats['failed_tasks'] += 1
-                self.log(f"❌ 任务失败: {task['type']} - {e}")
+                self._log_exception(f"❌ 任务失败: {task['type']}", e)
             finally:
                 self.thread_pool_stats['active_threads'] -= 1
                 with self.task_lock:
@@ -582,7 +573,7 @@ class ResourceMixin:
             return True
         except Exception as e:
             if hasattr(self, 'log'):
-                self.log(f"⚠️ 移动文件到垃圾桶失败: {os.path.basename(file_path)} - {e}")
+                self._log_exception(f"⚠️ 移动文件到垃圾桶失败: {os.path.basename(file_path)}", e)
             return False
 
 
@@ -628,7 +619,7 @@ class ResourceMixin:
             if moved_count > 0:
                 self.log(f"🗑️ 已将 {moved_count} 个文件移至垃圾桶: {trash_session_dir}")
         except Exception as e:
-            self.log(f"⚠️ 移动文件到垃圾桶失败: {e}")
+            self._log_exception("⚠️ 移动文件到垃圾桶失败", e)
         
         return moved_count
 
@@ -647,7 +638,10 @@ class ResourceMixin:
 
         try:
             self.perf_monitor_running = False
-            self.cache_cleanup_running = False
+            if hasattr(self, '_cache_cleanup_stop_event'):
+                self._cache_cleanup_stop_event.set()
+            if hasattr(self, '_cache_cleanup_thread') and self._cache_cleanup_thread.is_alive():
+                self._cache_cleanup_thread.join(timeout=3)
             self.task_running = False
             self._api_heartbeat_running = False
             self.sd_connected = False

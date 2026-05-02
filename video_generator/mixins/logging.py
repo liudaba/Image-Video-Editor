@@ -1,5 +1,6 @@
 """Logging mixin - smart auto-scroll with user scroll detection."""
 import datetime
+import traceback
 import tkinter as tk
 
 _CONSOLE_ONLY_KEYS = ['✅', '❌', '🎉', '📍', '⚠️', '🗑️', '🔧', '💡', '🎬', '🎞️', '📊', '🔍', '步骤', '完成', '失败', '错误', '启动', '就绪']
@@ -35,6 +36,23 @@ class LoggingMixin:
 
         if hasattr(self, 'root') and self.root:
             self.root.after(0, update_ui)
+
+    def _log_exception(self, prefix, exc=None):
+        """记录异常消息及完整堆栈（仅控制台输出堆栈，GUI只显示摘要）
+
+        Args:
+            prefix: 日志前缀，如 "⚠️ 模型调用失败"
+            exc: 异常对象，默认使用当前异常上下文
+        """
+        if exc is None:
+            exc_info = traceback.format_exc()
+            msg = prefix
+        else:
+            exc_info = traceback.format_exception(type(exc), exc, exc.__traceback__)
+            exc_info = ''.join(exc_info)
+            msg = f"{prefix}: {exc}"
+        self.log(msg)
+        print(exc_info)
 
     def _on_log_scroll(self, event):
         """监听滚动事件：用户上滚时暂停自动跟随，滚回底部时恢复"""
