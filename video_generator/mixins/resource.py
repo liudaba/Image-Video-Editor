@@ -587,7 +587,7 @@ class ResourceMixin:
         """
         moved_count = 0
         try:
-            trash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "垃圾桶")
+            trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
             

@@ -60,3 +60,6 @@ output_project/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 垃圾桶
+垃圾桶/
