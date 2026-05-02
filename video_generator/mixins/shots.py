@@ -2256,7 +2256,7 @@ Requirements:
         
         检查策略：
         1. 中文主题关键词在description中匹配
-        2. 英文主题关键词在prompt中匹配
+        2. 英文主题关键词在prompt中匹配（仅使用翻译字典，不调用LLM）
         3. 内容类型关键词匹配
         4. 只要命中任一即视为一致
         
@@ -2280,18 +2280,17 @@ Requirements:
         check_keywords_cn = list(set(check_keywords_cn))
         
         check_keywords_en = []
-        if theme_elements:
-            theme_elements_en = self._translate_theme_elements_to_english(theme_elements)
-            for elem in theme_elements_en:
-                for word in elem.lower().split():
+        for elem in theme_elements:
+            trans = self._get_translation_from_dict(elem)
+            if trans:
+                for word in trans.lower().split():
                     if len(word) > 3:
                         check_keywords_en.append(word)
-        if core_theme:
-            core_theme_en = self._translate_theme_elements_to_english([core_theme])
-            for elem in core_theme_en:
-                for word in elem.lower().split():
-                    if len(word) > 3:
-                        check_keywords_en.append(word)
+        trans = self._get_translation_from_dict(core_theme)
+        if trans:
+            for word in trans.lower().split():
+                if len(word) > 3:
+                    check_keywords_en.append(word)
         check_keywords_en = list(set(check_keywords_en))
         
         content_type_keywords = {
@@ -3413,8 +3412,23 @@ Requirements:
                         self.log(f"\n🔍 主题一致性预检查: 偏离率 {deviation_ratio:.1f}% ({deviation_count}/{total_checked})")
                         
                         # 根据偏离率决定是否执行深度修正
-                        if deviation_ratio < 25:
+                        if deviation_ratio < 15:
                             self.log(f"ℹ️ 偏离率较低({deviation_ratio:.1f}%)，跳过深度修正以加速流程")
+                        elif deviation_ratio < 25:
+                            self.log(f"⚠️ 偏离率中等({deviation_ratio:.1f}%)，对偏离分镜追加主题关键词...")
+                            for idx in deviation_indices:
+                                if idx < len(shots):
+                                    shot = shots[idx]
+                                    desc = shot.get('description', '')
+                                    prompt_en = shot.get('prompt_en', '')
+                                    if core_theme and core_theme not in desc:
+                                        shot['description'] = f"{desc} {core_theme}".strip()
+                                    if check_keywords_en and prompt_en:
+                                        extra_kw = ', '.join(check_keywords_en[:3])
+                                        shot['prompt_en'] = f"{prompt_en}, {extra_kw}"
+                            with open(shots_file, 'w', encoding='utf-8') as f:
+                                json.dump(shots, f, ensure_ascii=False, indent=2)
+                            self.log(f"   ✅ 已对 {len(deviation_indices)} 个偏离分镜追加主题关键词")
                         else:
                             # 偏离率较高，执行完整的主题一致性检查和自动修正
                             self.log(f"\n⚠️ 偏离率较高({deviation_ratio:.1f}%)，正在执行深度检查与自动修正...")
