@@ -20,6 +20,7 @@ from .ollama_client import (
     call_ollama_single,
     warmup_model,
     is_ollama_available,
+    is_llm_available,
     set_ollama_available,
     check_ollama_available,
     get_available_models,

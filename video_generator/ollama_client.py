@@ -24,6 +24,18 @@ def is_ollama_available():
         return _ollama_available
 
 
+def is_llm_available():
+    """检查大模型是否可用（云端或本地Ollama，任一可用即返回True）"""
+    try:
+        from video_generator.cloud_llm_client import is_cloud_llm_enabled
+        if is_cloud_llm_enabled():
+            return True
+    except ImportError:
+        pass
+    with _ollama_state_lock:
+        return _ollama_available
+
+
 def set_ollama_available(value):
     """线程安全地设置 Ollama 可用状态"""
     global _ollama_available
@@ -210,10 +222,11 @@ _ollama_call_semaphore = threading.Semaphore(3)
 def call_ollama_model(model_list, system_prompt, user_prompt,
                       log_callback=None, num_predict=512, num_ctx=4096,
                       llm_config=None):
-    """统一的 Ollama 模型调用函数
+    """统一的大模型调用函数
 
-    使用 HTTP API 直接调用，避免 ollama 库版本兼容性问题。
-    自动尝试多个模型，直到成功。
+    调度逻辑：
+    - 云端大模型已启用 → 全部由云端模型完成，不使用本地Ollama
+    - 云端大模型未启用 → 全部由本地Ollama完成
 
     Args:
         model_list: 模型名称列表，按优先级排列
@@ -227,6 +240,22 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
     Returns:
         tuple: (result_text, model_name) 或 (None, None)
     """
+    try:
+        from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
+        if is_cloud_llm_enabled():
+            temperature = None
+            if llm_config:
+                temperature = llm_config.config.get("temperature")
+            result, model = call_cloud_llm(
+                system_prompt, user_prompt,
+                log_callback=log_callback,
+                num_predict=num_predict,
+                temperature=temperature,
+            )
+            return result, model
+    except ImportError:
+        pass
+
     if not is_ollama_available():
         if not check_ollama_available():
             if log_callback:
@@ -312,7 +341,11 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
                        llm_config=None, extra_options=None):
-    """调用单个 Ollama 模型（不自动切换）
+    """调用单个大模型（不自动切换）
+
+    调度逻辑：
+    - 云端大模型已启用 → 全部由云端模型完成，不使用本地Ollama
+    - 云端大模型未启用 → 全部由本地Ollama完成
 
     Args:
         model: 模型名称
@@ -327,6 +360,24 @@ def call_ollama_single(model, system_prompt, user_prompt,
     Returns:
         tuple: (result_text, model_name) 或 (None, None)
     """
+    try:
+        from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
+        if is_cloud_llm_enabled():
+            temperature = None
+            if llm_config:
+                temperature = llm_config.config.get("temperature")
+            if extra_options and "temperature" in extra_options:
+                temperature = extra_options["temperature"]
+            result, used_model = call_cloud_llm(
+                system_prompt, user_prompt,
+                log_callback=log_callback,
+                num_predict=num_predict,
+                temperature=temperature,
+            )
+            return result, used_model
+    except ImportError:
+        pass
+
     if not is_ollama_available():
         if not check_ollama_available():
             if log_callback:
@@ -392,6 +443,8 @@ def call_ollama_single(model, system_prompt, user_prompt,
 def warmup_model(model, log_callback=None):
     """预热模型（发送简单请求让模型加载到内存）
 
+    云端模式下自动跳过，不需要预热本地模型。
+
     Args:
         model: 模型名称
         log_callback: 日志回调
@@ -399,6 +452,14 @@ def warmup_model(model, log_callback=None):
     Returns:
         bool: 是否成功
     """
+    try:
+        from video_generator.cloud_llm_client import is_cloud_llm_enabled
+        if is_cloud_llm_enabled():
+            if log_callback:
+                log_callback("☁️ 云端模式已启用，跳过本地模型预热")
+            return True
+    except ImportError:
+        pass
     try:
         with _ollama_call_semaphore:
             response = get_http_session().post(

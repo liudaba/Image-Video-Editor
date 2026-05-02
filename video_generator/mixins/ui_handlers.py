@@ -14,11 +14,12 @@ from video_generator.ollama_client import (
     is_ollama_available,
     set_ollama_available,
     check_ollama_available,
+    LLMConfig,
     get_available_models,
     try_start_ollama_service,
 )
+from video_generator.multi_model import llm_optimizer
 from video_generator.app_state import (
-    PERFORMANCE_MONITOR_AVAILABLE,
     psutil,
     GPUtil,
 )
@@ -27,29 +28,46 @@ class UIHandlersMixin:
     def _check_api_heartbeat(self):
         """周期性检测API连接状态，发现恢复时自动连接并提示"""
         try:
-            sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
-            sd_connected = getattr(self, '_sd_api_connected', False)
-            
-            if not sd_connected:
-                try:
-                    resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=5)
-                    if resp.status_code == 200:
-                        self._sd_api_connected = True
-                        if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
-                            self.root.after(0, lambda: self.sd_api_status_var.set("✅ 已连接"))
-                        if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
-                            self.root.after(0, lambda: self.sd_api_status_label.config(foreground="green"))
-                        self.log("✅ SD API 已自动连接")
-                        if hasattr(self, 'root') and self.root:
-                            self.root.after(0, self._update_model_dropdown)
-                except Exception:
-                    pass
-            
+            cloud_img = False
+            try:
+                from video_generator.cloud_image_client import is_cloud_image_enabled
+                cloud_img = is_cloud_image_enabled()
+            except ImportError:
+                pass
+
+            if not cloud_img:
+                sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+                sd_connected = getattr(self, '_sd_api_connected', False)
+
+                if not sd_connected:
+                    try:
+                        resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=5)
+                        if resp.status_code == 200:
+                            self._sd_api_connected = True
+                            if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
+                                self.root.after(0, lambda: self.sd_api_status_var.set("✅ 已连接"))
+                            if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
+                                self.root.after(0, lambda: self.sd_api_status_label.config(foreground="green"))
+                            self.log("✅ SD API 已自动连接")
+                            if hasattr(self, 'root') and self.root:
+                                self.root.after(0, self._update_model_dropdown)
+                    except Exception:
+                        pass
+
             ollama_connected = is_ollama_available()
             if not ollama_connected:
-                if check_ollama_available():
-                    set_ollama_available(True)
-                    self.log("✅ Ollama服务已自动连接")
+                try:
+                    from video_generator.cloud_llm_client import is_cloud_llm_enabled
+                    if is_cloud_llm_enabled():
+                        pass
+                    else:
+                        if check_ollama_available():
+                            set_ollama_available(True)
+                            self.log("✅ Ollama服务已自动连接")
+                except ImportError:
+                    if check_ollama_available():
+                        set_ollama_available(True)
+                        self.log("✅ Ollama服务已自动连接")
         except Exception:
             pass
     
@@ -245,21 +263,92 @@ class UIHandlersMixin:
             self.advanced_window.destroy()
             self.advanced_window = None
         else:
-            # 创建新的高级设置窗口
             self.advanced_window = tk.Toplevel(self.root)
             self.advanced_window.title("⚙️ 高级设置")
-            self.advanced_window.geometry("700x650")
+            self.advanced_window.geometry("960x680")
+            self.advanced_window.minsize(760, 520)
             self.advanced_window.resizable(True, True)
+            self.advanced_window.configure(bg="#2a2d35")
             
-            # 绑定窗口关闭按钮（X）事件，关闭前自动保存
             self.advanced_window.protocol("WM_DELETE_WINDOW", self._on_advanced_window_close)
             
-            # 创建高级设置面板
-            adv_frame = ttk.Frame(self.advanced_window, padding=15)
-            adv_frame.pack(fill=tk.BOTH, expand=True)
+            main_frame = ttk.Frame(self.advanced_window, padding=6, style="Adv.TFrame")
+            main_frame.pack(fill=tk.BOTH, expand=True)
             
-            # 调用设置内容的方法
-            self.setup_advanced_panel_content(adv_frame)
+            main_frame.columnconfigure(0, weight=1, minsize=10)
+            main_frame.columnconfigure(1, weight=1, minsize=10)
+            
+            main_frame.rowconfigure(0, weight=0, minsize=10)
+            main_frame.rowconfigure(1, weight=0, minsize=10)
+            main_frame.rowconfigure(2, weight=0, minsize=10)
+            main_frame.rowconfigure(3, weight=0, minsize=10)
+            main_frame.rowconfigure(4, weight=1, minsize=10)
+            main_frame.rowconfigure(5, weight=0, minsize=10)
+            
+            self._adv_panels = {}
+            
+            self._adv_panels["draw"] = ttk.Frame(main_frame)
+            self._adv_panels["draw"].grid(row=0, column=0, sticky="new", padx=3, pady=2)
+            
+            self._adv_panels["style"] = ttk.Frame(main_frame)
+            self._adv_panels["style"].grid(row=1, column=0, sticky="new", padx=3, pady=2)
+            
+            self._adv_panels["sd_api"] = ttk.Frame(main_frame)
+            self._adv_panels["sd_api"].grid(row=2, column=0, sticky="new", padx=3, pady=2)
+            
+            video_thread_frame = ttk.Frame(main_frame)
+            video_thread_frame.grid(row=3, column=0, sticky="new", padx=3, pady=2)
+            video_thread_frame.columnconfigure(0, weight=1)
+            
+            self._adv_panels["video"] = ttk.Frame(video_thread_frame)
+            self._adv_panels["video"].grid(row=0, column=0, sticky="ew", pady=1)
+            
+            self._adv_panels["thread"] = ttk.Frame(video_thread_frame)
+            self._adv_panels["thread"].grid(row=1, column=0, sticky="ew", pady=1)
+            
+            prompt_theme_frame = ttk.Frame(main_frame)
+            prompt_theme_frame.grid(row=4, column=0, sticky="nsew", padx=3, pady=2)
+            prompt_theme_frame.rowconfigure(0, weight=0, minsize=10)
+            prompt_theme_frame.rowconfigure(1, weight=1, minsize=10)
+            prompt_theme_frame.columnconfigure(0, weight=1)
+            
+            self._adv_panels["theme"] = ttk.Frame(prompt_theme_frame)
+            self._adv_panels["theme"].grid(row=0, column=0, sticky="new", pady=0)
+            
+            self._adv_panels["prompt"] = ttk.Frame(prompt_theme_frame)
+            self._adv_panels["prompt"].grid(row=1, column=0, sticky="nsew", pady=1)
+            
+            right_container = ttk.Frame(main_frame)
+            right_container.grid(row=0, column=1, rowspan=5, sticky="nsew", padx=3, pady=2)
+            right_container.rowconfigure(0, weight=2, minsize=10)
+            right_container.rowconfigure(1, weight=0, minsize=10)
+            right_container.rowconfigure(2, weight=1, minsize=10)
+            right_container.columnconfigure(0, weight=1)
+            
+            self._adv_panels["cloud_llm"] = ttk.Frame(right_container)
+            self._adv_panels["cloud_llm"].grid(row=0, column=0, sticky="nsew", pady=(2, 0))
+            
+            cloud_asr_img_frame = ttk.Frame(right_container)
+            cloud_asr_img_frame.grid(row=1, column=0, sticky="new", pady=0)
+            cloud_asr_img_frame.columnconfigure(0, weight=1)
+            
+            self._adv_panels["cloud_asr"] = ttk.Frame(cloud_asr_img_frame)
+            self._adv_panels["cloud_asr"].grid(row=0, column=0, sticky="new", pady=0)
+            
+            self._adv_panels["cloud_img"] = ttk.Frame(cloud_asr_img_frame)
+            self._adv_panels["cloud_img"].grid(row=1, column=0, sticky="new", pady=0)
+            
+            self._adv_panels["optimize"] = ttk.Frame(right_container)
+            self._adv_panels["optimize"].grid(row=2, column=0, sticky="nsew", pady=(0, 2))
+            
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=6)
+            style = ttk.Style()
+            style.configure("LargeGreen.TButton", font=('Microsoft YaHei', 14, 'bold'))
+            btn_apply = ttk.Button(btn_frame, text="✅ 应用设置", command=self.apply_advanced_settings, style="LargeGreen.TButton")
+            btn_apply.pack(fill=tk.X, padx=5)
+            
+            self.setup_advanced_panel_content(self._adv_panels)
     
 
     def _print_current_settings(self):
@@ -821,12 +910,7 @@ class UIHandlersMixin:
             return True
 
 
-    def check_and_update_dependencies(self):
-        """检查并更新依赖项（子线程执行，避免阻塞GUI）"""
-        def _worker():
-            self._check_and_update_dependencies_impl()
-        threading.Thread(target=_worker, daemon=True).start()
-    
+
 
     def monitor_performance(self):
         """监控系统性能 - 优化版（非阻塞）"""
@@ -932,64 +1016,425 @@ class UIHandlersMixin:
         except Exception as e:
             self.log(f"❌ 日志清除失败: {e}")
             traceback.print_exc()
-    
 
-    def show_performance_stats(self):
-        """显示性能优化统计信息"""
-        self.log("=" * 60)
-        self.log("📊 性能优化统计报告")
-        self.log("=" * 60)
+
+    # =======================================================================
+    # 云端大模型相关处理
+    # =======================================================================
+
+    def _on_cloud_provider_changed(self, event=None):
+        """云端大模型服务商切换时更新模型列表"""
+        from video_generator.cloud_llm_client import PROVIDER_CONFIG, get_provider_models
         
-        # 提示词缓存统计
-        prompt_stats = prompt_cache.get_stats()
-        self.log(f"\n💬 提示词缓存:")
-        self.log(f"   命中次数: {prompt_stats['hits']}")
-        self.log(f"   未命中次数: {prompt_stats['misses']}")
-        self.log(f"   命中率: {prompt_stats['hit_rate']}")
-        self.log(f"   缓存条目: {prompt_stats['size']}")
+        provider_name = self.cloud_llm_provider_var.get()
+        provider_id = None
+        for pid, pcfg in PROVIDER_CONFIG.items():
+            if pcfg["name"] == provider_name:
+                provider_id = pid
+                break
         
-        # 图像缓存统计
-        image_stats = image_cache.get_stats()
-        self.log(f"\n🖼️ 图像缓存:")
-        self.log(f"   命中次数: {image_stats['hits']}")
-        self.log(f"   未命中次数: {image_stats['misses']}")
-        self.log(f"   命中率: {image_stats['hit_rate']}")
-        self.log(f"   缓存条目: {image_stats['size']}")
+        if not provider_id:
+            return
         
-        # 硬件加速状态 - 延迟初始化
-        self.log(f"\n⚡ 硬件加速:")
-        if self.video_renderer is None:
-            self.log("   正在检测硬件...")
-            self.video_renderer = HardwareAcceleratedRenderer()
-        if self.video_renderer:
-            encoder = self.video_renderer.preferred_encoder
-            self.log(f"   视频编码器: {encoder.get('vcodec', '未知')}")
-            self.log(f"   CUDA可用: {'是' if self.video_renderer.has_cuda else '否'}")
-            self.log(f"   Quick Sync可用: {'是' if self.video_renderer.has_quicksync else '否'}")
+        models = get_provider_models(provider_id)
+        model_names = [f"{m['name']} - {m['desc']}" for m in models]
+        self._cloud_model_ids = [m['id'] for m in models]
         
-        # 线程配置
-        self.log(f"\n🔧 并发配置:")
-        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
-        self.log(f"   图像生成线程数: {thread_count}")
-        prompt_thread_count = self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS
-        self.log(f"   提示词生成线程数: {prompt_thread_count}")
+        if hasattr(self, '_cloud_model_combo'):
+            self._cloud_model_combo['values'] = model_names
         
-        # 计算节省时间估计
-        total_hits = prompt_stats['hits'] + image_stats['hits']
-        if total_hits > 0:
-            avg_time_saved_per_hit = 3.0  # 估计每次缓存命中节省3秒
-            estimated_time_saved = total_hits * avg_time_saved_per_hit
-            self.log(f"\n💰 优化收益估算:")
-            self.log(f"   预计节省时间: {estimated_time_saved:.0f} 秒 ({estimated_time_saved/60:.1f} 分钟)")
+        default_model = PROVIDER_CONFIG[provider_id]["default_model"]
+        self.cloud_llm_model_var.set(default_model)
+        self._cloud_selected_model_id = default_model
         
-        self.log("=" * 60)
+        self.log(f"☁️ 已切换云端服务商: {provider_name}")
+
+
+    def _on_cloud_model_changed(self, event=None):
+        """云端大模型选择变更"""
+        selected_display = self.cloud_llm_model_var.get()
+        if hasattr(self, '_cloud_model_combo') and hasattr(self, '_cloud_model_ids'):
+            values = self._cloud_model_combo['values']
+            for i, val in enumerate(values):
+                if val == selected_display and i < len(self._cloud_model_ids):
+                    actual_id = self._cloud_model_ids[i]
+                    self._cloud_selected_model_id = actual_id
+                    self.log(f"☁️ 已选择云端模型: {selected_display} ({actual_id})")
+                    return
+        self.log(f"☁️ 已选择云端模型: {selected_display}")
+
+
+    def _toggle_api_key_visibility(self):
+        """切换API Key显示/隐藏"""
+        if hasattr(self, 'cloud_llm_api_key_var'):
+            current = self.cloud_llm_api_key_var.get()
+            for widget in self.advanced_window.winfo_children() if self.advanced_window else []:
+                self._toggle_entry_show(widget, current)
     
+    def _toggle_entry_show(self, parent, current_value):
+        """递归查找并切换API Key输入框的显示模式"""
+        for child in parent.winfo_children():
+            if isinstance(child, ttk.Entry) and hasattr(child, 'cget'):
+                try:
+                    current_show = child.cget('show')
+                    if current_show == '*':
+                        child.config(show='')
+                    else:
+                        child.config(show='*')
+                except Exception:
+                    pass
+            self._toggle_entry_show(child, current_value)
+
+
+    def _test_cloud_llm_connection(self):
+        """测试云端大模型连接"""
+        from video_generator.cloud_llm_client import test_cloud_connection, PROVIDER_CONFIG
+        
+        provider_name = self.cloud_llm_provider_var.get()
+        provider_id = None
+        for pid, pcfg in PROVIDER_CONFIG.items():
+            if pcfg["name"] == provider_name:
+                provider_id = pid
+                break
+        
+        if not provider_id:
+            self.log("⚠️ 未选择云端服务商")
+            return
+        
+        api_key = self.cloud_llm_api_key_var.get().strip()
+        if not api_key:
+            self.log("⚠️ 请先输入API Key")
+            messagebox.showwarning("提示", "请先输入API Key再测试连接！")
+            return
+        
+        model = getattr(self, '_cloud_selected_model_id', '') or self.cloud_llm_model_var.get()
+        custom_url = self.cloud_llm_custom_url_var.get().strip()
+        
+        self.log(f"☁️ 正在测试云端模型连接: {provider_name} / {model}...")
+        self.cloud_llm_status_var.set("⏳ 测试中...")
+        if hasattr(self, 'cloud_llm_status_label'):
+            self.cloud_llm_status_label.config(foreground="orange")
+        
+        if hasattr(self, 'btn_test_cloud'):
+            self.btn_test_cloud.config(state='disabled')
+        
+        def _do_test():
+            success, message = test_cloud_connection(api_key, provider_id, model, custom_url)
+            
+            def _update_ui():
+                if success:
+                    self.cloud_llm_status_var.set(f"✅ {message}")
+                    if hasattr(self, 'cloud_llm_status_label'):
+                        self.cloud_llm_status_label.config(foreground="green")
+                    self.log("=" * 50)
+                    self.log(f"✅ 云端模型连接成功！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+                else:
+                    self.cloud_llm_status_var.set(f"❌ {message}")
+                    if hasattr(self, 'cloud_llm_status_label'):
+                        self.cloud_llm_status_label.config(foreground="red")
+                    self.log("=" * 50)
+                    self.log(f"❌ 云端模型连接失败！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+                
+                if hasattr(self, 'btn_test_cloud'):
+                    self.btn_test_cloud.config(state='normal')
+            
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, _update_ui)
+        
+        threading.Thread(target=_do_test, daemon=True).start()
+
+
+    def _on_cloud_image_provider_changed(self, event=None):
+        """云端生图服务商变更"""
+        try:
+            from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG, get_image_provider_models
+            provider_name = self.cloud_image_provider_var.get()
+            provider_id = None
+            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
+            if not provider_id:
+                return
+            models = get_image_provider_models(provider_id)
+            model_names = [f"{m['name']} - {m['desc']}" for m in models]
+            self._cloud_img_model_ids = [m['id'] for m in models]
+            if hasattr(self, '_cloud_img_model_combo'):
+                self._cloud_img_model_combo['values'] = model_names
+            default_model = IMAGE_PROVIDER_CONFIG[provider_id].get("default_model", "")
+            self.cloud_image_model_var.set(default_model)
+            self._cloud_selected_image_model_id = default_model
+        except ImportError:
+            pass
+
+
+    def _on_cloud_image_model_changed(self, event=None):
+        """云端生图模型变更"""
+        idx = getattr(self, '_cloud_img_model_combo', None)
+        if idx is not None:
+            current = self._cloud_img_model_combo.current()
+            if 0 <= current < len(self._cloud_img_model_ids):
+                self._cloud_selected_image_model_id = self._cloud_img_model_ids[current]
+            else:
+                self._cloud_selected_image_model_id = self.cloud_image_model_var.get()
+
+
+    def _toggle_entry_visibility(self, entry_widget):
+        """切换输入框的密码显示/隐藏"""
+        if entry_widget.cget('show') == '*':
+            entry_widget.config(show='')
+        else:
+            entry_widget.config(show='*')
+
+
+    def _test_cloud_image_connection(self):
+        """测试云端生图连接"""
+        try:
+            from video_generator.cloud_image_client import test_cloud_image_connection, IMAGE_PROVIDER_CONFIG
+        except ImportError:
+            self.log("⚠️ 云端生图模块未安装")
+            return
+
+        provider_name = self.cloud_image_provider_var.get()
+        provider_id = None
+        for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+            if pcfg["name"] == provider_name:
+                provider_id = pid
+                break
+
+        if not provider_id:
+            self.log("⚠️ 未选择云端生图服务商")
+            return
+
+        api_key = self.cloud_image_api_key_var.get().strip()
+        if not api_key:
+            self.log("⚠️ 请先输入云端生图API Key")
+            messagebox.showwarning("提示", "请先输入API Key再测试连接！")
+            return
+
+        model = getattr(self, '_cloud_selected_image_model_id', '') or self.cloud_image_model_var.get()
+        custom_url = self.cloud_image_custom_url_var.get().strip()
+
+        self.log(f"☁️ 正在测试云端生图连接: {provider_name} / {model}...")
+        self.cloud_image_status_var.set("⏳ 测试中...")
+        if hasattr(self, 'cloud_image_status_label'):
+            self.cloud_image_status_label.config(foreground="orange")
+
+        if hasattr(self, 'btn_test_cloud_image'):
+            self.btn_test_cloud_image.config(state='disabled')
+
+        def _do_test():
+            success, message = test_cloud_image_connection(api_key, provider_id, model, custom_url)
+
+            def _update_ui():
+                if success:
+                    self.cloud_image_status_var.set(f"✅ {message}")
+                    if hasattr(self, 'cloud_image_status_label'):
+                        self.cloud_image_status_label.config(foreground="green")
+                    self.log("=" * 50)
+                    self.log(f"✅ 云端生图连接成功！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+                else:
+                    self.cloud_image_status_var.set(f"❌ {message}")
+                    if hasattr(self, 'cloud_image_status_label'):
+                        self.cloud_image_status_label.config(foreground="red")
+                    self.log("=" * 50)
+                    self.log(f"❌ 云端生图连接失败！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+
+                if hasattr(self, 'btn_test_cloud_image'):
+                    self.btn_test_cloud_image.config(state='normal')
+
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, _update_ui)
+
+        threading.Thread(target=_do_test, daemon=True).start()
+
+
+    def _apply_cloud_llm_config(self):
+        """应用云端大模型配置到全局状态"""
+        from video_generator.cloud_llm_client import set_cloud_llm_config, PROVIDER_CONFIG
+        
+        provider_name = self.cloud_llm_provider_var.get()
+        provider_id = None
+        for pid, pcfg in PROVIDER_CONFIG.items():
+            if pcfg["name"] == provider_name:
+                provider_id = pid
+                break
+        
+        if not provider_id:
+            provider_id = "deepseek"
+        
+        enabled = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
+        api_key = self.cloud_llm_api_key_var.get().strip() if hasattr(self, 'cloud_llm_api_key_var') else ""
+        model = getattr(self, '_cloud_selected_model_id', '') or (self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else "")
+        custom_url = self.cloud_llm_custom_url_var.get().strip() if hasattr(self, 'cloud_llm_custom_url_var') else ""
+        
+        if enabled and not api_key:
+            self.log("⚠️ 启用云端模型需要提供API Key")
+            enabled = False
+            if hasattr(self, 'cloud_llm_enabled_var'):
+                self.cloud_llm_enabled_var.set(False)
+        
+        set_cloud_llm_config({
+            "enabled": enabled,
+            "provider": provider_id,
+            "api_key": api_key,
+            "model": model,
+            "custom_base_url": custom_url,
+        })
+        
+        try:
+            from video_generator.cloud_llm_client import set_cloud_asr_config
+            asr_enabled = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
+            asr_api_key = self.cloud_asr_api_key_var.get().strip() if hasattr(self, 'cloud_asr_api_key_var') else ""
+            set_cloud_asr_config({
+                "enabled": asr_enabled,
+                "provider": "openai",
+                "api_key": asr_api_key,
+            })
+        except ImportError:
+            pass
+
+        try:
+            from video_generator.cloud_image_client import set_cloud_image_config, IMAGE_PROVIDER_CONFIG
+            img_enabled = self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False
+            img_api_key = self.cloud_image_api_key_var.get().strip() if hasattr(self, 'cloud_image_api_key_var') else ""
+            img_provider_name = self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else ""
+            img_provider_id = None
+            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                if pcfg["name"] == img_provider_name:
+                    img_provider_id = pid
+                    break
+            if not img_provider_id:
+                img_provider_id = "siliconflow"
+            img_model = getattr(self, '_cloud_selected_image_model_id', '') or (self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else "")
+            img_custom_url = self.cloud_image_custom_url_var.get().strip() if hasattr(self, 'cloud_image_custom_url_var') else ""
+
+            if img_enabled and not img_api_key:
+                self.log("⚠️ 启用云端生图需要提供API Key")
+                img_enabled = False
+                if hasattr(self, 'cloud_image_enabled_var'):
+                    self.cloud_image_enabled_var.set(False)
+
+            set_cloud_image_config({
+                "enabled": img_enabled,
+                "provider": img_provider_id,
+                "api_key": img_api_key,
+                "model": img_model,
+                "custom_base_url": img_custom_url,
+            })
+
+            if img_enabled:
+                img_provider_display = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get("name", img_provider_id)
+                self.log("=" * 50)
+                self.log(f"🎨 云端生图已启用！")
+                self.log(f"   服务商: {img_provider_display}")
+                self.log(f"   模型:   {img_model}")
+                self.log(f"   所有图片将由云端生成，无需本地SD")
+                self.log("=" * 50)
+            else:
+                self.log("🖥️ 云端生图已禁用，使用本地SD生成图片")
+        except ImportError:
+            pass
+        
+        provider_display = PROVIDER_CONFIG.get(provider_id, {}).get("name", provider_id)
+        if enabled:
+            if is_ollama_available():
+                try:
+                    self._unload_ollama_models(log_prefix="☁️ ")
+                    set_ollama_available(False)
+                    self.log("☁️ 已释放本地Ollama GPU资源（云端模式不需要本地模型）")
+                except Exception as e:
+                    self.log(f"⚠️ 释放本地Ollama资源时出错: {e}")
+            self.log("=" * 50)
+            self.log(f"☁️ 云端大模型已启用！")
+            self.log(f"   服务商: {provider_display}")
+            self.log(f"   模型:   {model}")
+            self.log(f"   所有AI思考任务将由云端完成")
+            self.log(f"   SD制图仍使用本地模型，不受影响")
+            self.log("=" * 50)
+        else:
+            self.log("=" * 50)
+            self.log(f"🖥️ 云端大模型已禁用")
+            self.log(f"   所有AI思考任务将由本地Ollama完成")
+            self.log("=" * 50)
+
+
+    def _on_cloud_llm_toggle_ui(self, *args):
+        """云端LLM启用状态变化时，更新本地模型面板的可用性"""
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, self._update_local_model_panel_state)
+
+    def _on_cloud_asr_toggle_ui(self, *args):
+        """云端ASR启用状态变化时，更新Whisper模型选择器的可用性"""
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, self._update_local_model_panel_state)
+
+    def _update_local_model_panel_state(self):
+        """根据云端模式状态，启用/禁用本地模型预选面板中的各项"""
+        cloud_llm = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
+        cloud_asr = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
+        cloud_img = self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False
+
+        if hasattr(self, '_ollama_button'):
+            state = 'disabled' if cloud_llm else 'normal'
+            self._ollama_button.config(state=state)
+
+        if hasattr(self, '_ollama_label'):
+            self._ollama_label.config(foreground="#888888" if cloud_llm else "")
+
+        if hasattr(self, '_whisper_combo'):
+            state = 'disabled' if cloud_asr else 'readonly'
+            self._whisper_combo.config(state=state)
+
+        if hasattr(self, '_whisper_label'):
+            self._whisper_label.config(foreground="#888888" if cloud_asr else "")
+
+        if hasattr(self, '_sd_model_combo'):
+            state = 'disabled' if cloud_img else 'readonly'
+            self._sd_model_combo.config(state=state)
+        if hasattr(self, '_sd_model_label'):
+            self._sd_model_label.config(foreground="#888888" if cloud_img else "")
+
+        if hasattr(self, '_width_entry'):
+            state = 'disabled' if cloud_img else 'normal'
+            self._width_entry.config(state=state)
+        if hasattr(self, '_height_entry'):
+            state = 'disabled' if cloud_img else 'normal'
+            self._height_entry.config(state=state)
+
+        if hasattr(self, '_btn_connect_api'):
+            state = 'disabled' if cloud_img else 'normal'
+            self._btn_connect_api.config(state=state)
+        if hasattr(self, '_btn_disconnect_api'):
+            state = 'disabled' if cloud_img else 'normal'
+            self._btn_disconnect_api.config(state=state)
+        if hasattr(self, '_sd_api_url_entry'):
+            state = 'disabled' if cloud_img else 'normal'
+            self._sd_api_url_entry.config(state=state)
+
+        if hasattr(self, '_cloud_mode_note'):
+            notes = []
+            if cloud_llm:
+                notes.append("☁️ Ollama模型已禁用（云端LLM替代）")
+                notes.append("   配置模式仅temperature生效")
+            if cloud_asr:
+                notes.append("☁️ 语音模型已禁用（云端ASR替代）")
+            if cloud_img:
+                notes.append("🎨 本地SD设置已禁用（云端生图替代）")
+            self._cloud_mode_note.config(text="\n".join(notes))
 
     def clear_script(self):
         """清除脚本"""
         self.log("🗑️ 清除脚本")
         try:
-            # 清空脚本文本框
             if hasattr(self, 'txt_script') and self.txt_script:
                 def update_ui():
                     try:
@@ -1083,6 +1528,36 @@ class UIHandlersMixin:
                 if 'whisper_model' in config and hasattr(self, 'whisper_model_var'):
                     self.whisper_model_var.set(config['whisper_model'])
                 
+                if 'cloud_llm_enabled' in config and hasattr(self, 'cloud_llm_enabled_var'):
+                    self.cloud_llm_enabled_var.set(config['cloud_llm_enabled'])
+                if 'cloud_llm_provider' in config and hasattr(self, 'cloud_llm_provider_var'):
+                    self.cloud_llm_provider_var.set(config['cloud_llm_provider'])
+                if 'cloud_llm_api_key' in config and hasattr(self, 'cloud_llm_api_key_var'):
+                    self.cloud_llm_api_key_var.set(config['cloud_llm_api_key'])
+                if 'cloud_llm_model' in config and hasattr(self, 'cloud_llm_model_var'):
+                    self.cloud_llm_model_var.set(config['cloud_llm_model'])
+                    self._cloud_selected_model_id = config['cloud_llm_model']
+                if 'cloud_llm_custom_url' in config and hasattr(self, 'cloud_llm_custom_url_var'):
+                    self.cloud_llm_custom_url_var.set(config['cloud_llm_custom_url'])
+                if 'cloud_asr_enabled' in config and hasattr(self, 'cloud_asr_enabled_var'):
+                    self.cloud_asr_enabled_var.set(config['cloud_asr_enabled'])
+                if 'cloud_asr_api_key' in config and hasattr(self, 'cloud_asr_api_key_var'):
+                    self.cloud_asr_api_key_var.set(config['cloud_asr_api_key'])
+
+                if 'cloud_image_enabled' in config and hasattr(self, 'cloud_image_enabled_var'):
+                    self.cloud_image_enabled_var.set(config['cloud_image_enabled'])
+                if 'cloud_image_provider' in config and hasattr(self, 'cloud_image_provider_var'):
+                    self.cloud_image_provider_var.set(config['cloud_image_provider'])
+                if 'cloud_image_api_key' in config and hasattr(self, 'cloud_image_api_key_var'):
+                    self.cloud_image_api_key_var.set(config['cloud_image_api_key'])
+                if 'cloud_image_model' in config and hasattr(self, 'cloud_image_model_var'):
+                    self.cloud_image_model_var.set(config['cloud_image_model'])
+                if 'cloud_image_custom_url' in config and hasattr(self, 'cloud_image_custom_url_var'):
+                    self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
+                
+                if hasattr(self, '_apply_cloud_llm_config'):
+                    self._apply_cloud_llm_config()
+                
                 # 集中显示已加载的配置
                 ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'
                 whisper_model = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'
@@ -1107,7 +1582,9 @@ class UIHandlersMixin:
     def save_config(self):
         """保存配置"""
         try:
-            # 获取用户选择的风格预设
+            if hasattr(self, '_apply_cloud_llm_config'):
+                self._apply_cloud_llm_config()
+            
             selected_styles = self.get_selected_styles()
             
             config = {
@@ -1126,7 +1603,19 @@ class UIHandlersMixin:
                 'prompt_type': self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词',
                 'animation': self.animation_var.get() if hasattr(self, 'animation_var') else '无',
                 'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16,
-                'prompt_thread_count': self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS
+                'prompt_thread_count': self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS,
+                'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
+                'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'deepseek',
+                'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',
+                'cloud_llm_model': self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else 'deepseek-chat',
+                'cloud_llm_custom_url': self.cloud_llm_custom_url_var.get() if hasattr(self, 'cloud_llm_custom_url_var') else '',
+                'cloud_asr_enabled': self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False,
+                'cloud_asr_api_key': self.cloud_asr_api_key_var.get() if hasattr(self, 'cloud_asr_api_key_var') else '',
+                'cloud_image_enabled': self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False,
+                'cloud_image_provider': self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else 'siliconflow',
+                'cloud_image_api_key': self.cloud_image_api_key_var.get() if hasattr(self, 'cloud_image_api_key_var') else '',
+                'cloud_image_model': self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else '',
+                'cloud_image_custom_url': self.cloud_image_custom_url_var.get() if hasattr(self, 'cloud_image_custom_url_var') else '',
             }
             
             with open(self.config_file, 'w', encoding='utf-8') as f:

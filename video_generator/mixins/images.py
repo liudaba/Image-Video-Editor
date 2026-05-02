@@ -11,12 +11,22 @@ import tkinter as tk
 
 from video_generator.config import Config, get_http_session
 from video_generator.cache import image_cache
-from video_generator.ollama_client import is_ollama_available
 from video_generator.model_profiles import get_model_profile
 
 class ImagesMixin:
     def _check_sd_api_impl(self, silent=False):
         """实际执行SD API连接检查（内部方法）"""
+        cloud_img = False
+        try:
+            from video_generator.cloud_image_client import is_cloud_image_enabled
+            cloud_img = is_cloud_image_enabled()
+        except ImportError:
+            pass
+        if cloud_img:
+            if not silent:
+                self.log("☁️ 云端生图已启用，无需连接本地SD API")
+            return True
+
         api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
 
         try:
@@ -114,476 +124,808 @@ class ImagesMixin:
         try:
             from PIL import Image
             from io import BytesIO
-            
-            # 检查是否有分镜数据，如果没有则尝试从文件加载
-            if not self.shots_data:
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
+
+            cloud_image_enabled = False
+            try:
+                from video_generator.cloud_image_client import is_cloud_image_enabled
+                cloud_image_enabled = is_cloud_image_enabled()
+            except ImportError:
+                pass
+
+            if cloud_image_enabled:
+                self._generate_images_cloud()
+            else:
+                self._generate_images_local()
+        except Exception as e:
+            self.log(f"❌ 图像生成失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _generate_images_cloud(self):
+        """云端生图流程"""
+        from video_generator.cloud_image_client import call_cloud_image, get_cloud_image_config
+        from PIL import Image
+        from io import BytesIO
+
+        self._safe_release_whisper_gpu()
+        if not self._whisper_on_gpu:
+            self.log("   🧹 Whisper GPU 显存已释放（云端生图模式）")
+        try:
+            self._unload_ollama_models(log_prefix="   ☁️ ")
+        except Exception:
+            pass
+
+        if not self.shots_data:
+            shots_file = os.path.join(self.output_dir, "shots_data.json")
+            if os.path.exists(shots_file):
+                try:
+                    with open(shots_file, 'r', encoding='utf-8') as f:
+                        loaded_shots = json.load(f)
+                    with self.resource_lock:
+                        self.shots_data = loaded_shots
+                    self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                except Exception as e:
+                    self.log(f"❌ 加载分镜数据失败: {e}")
+                    self.update_task_progress("就绪")
+                    return
+            else:
+                self.log("❌ 没有分镜数据，无法生成图像")
+                self.update_task_progress("就绪")
+                return
+
+        self.update_task_progress("正在准备云端生图...", 10)
+
+        cloud_config = get_cloud_image_config()
+        from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG
+        provider_name = IMAGE_PROVIDER_CONFIG.get(cloud_config.get("provider", ""), {}).get("name", "未知")
+        cloud_model = cloud_config.get("model", "未知")
+
+        width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
+        height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+        selected_styles = self.get_selected_styles()
+
+        self.log("")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log("☁️ 云端生图任务开始")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log(f"   服务商: {provider_name}")
+        self.log(f"   模型:   {cloud_model}")
+        self.log(f"   尺寸:   {width} × {height}")
+        if selected_styles:
+            self.log(f"   风格预设: {', '.join(selected_styles)}")
+        self.log(f"   所有图片将由云端生成，无需本地SD")
+        self.log("")
+
+        if not os.path.exists(self.images_dir):
+            os.makedirs(self.images_dir)
+
+        style_descriptions = []
+        for style in selected_styles:
+            style_desc = self.generate_style_description(style)
+            if style_desc:
+                style_descriptions.append(style_desc)
+
+        sorted_shots = sorted(self.shots_data, key=lambda x: x['id'])
+
+        tasks = []
+        skipped_count = 0
+        for shot in sorted_shots:
+            shot_id = shot['id']
+            prompt = shot['prompt_en']
+            image_file = shot['image_file']
+            image_path = os.path.join(self.images_dir, image_file)
+            negative_prompt = shot.get('negative_prompt', '')
+
+            if os.path.exists(image_path):
+                skipped_count += 1
+                continue
+
+            enhanced_prompt = prompt
+            if style_descriptions:
+                style_text = ", ".join(style_descriptions)
+                enhanced_prompt = f"{style_text}, {prompt}"
+
+            tasks.append((shot_id, enhanced_prompt, image_file, image_path, negative_prompt))
+
+        self.log(f"📊 任务统计:")
+        self.log(f"   总分镜数: {len(self.shots_data)} 个")
+        if skipped_count > 0:
+            self.log(f"   已存在跳过: {skipped_count} 个")
+        self.log(f"   需要生成: {len(tasks)} 个")
+
+        if not tasks:
+            self.log("✅ 所有图片已存在，无需生成")
+            self.state_manager['images']['generated'] = True
+            self.state_manager['images']['count'] = len(self.shots_data)
+            return
+
+        self.log(f"🚀 开始云端生成 {len(tasks)} 张图像...")
+        self.log("")
+
+        import queue
+
+        save_queue = queue.Queue(maxsize=8)
+
+        def image_saver():
+            while True:
+                try:
+                    item = save_queue.get(timeout=30)
+                except queue.Empty:
+                    if not self.task_running:
+                        break
+                    continue
+                if item is None:
+                    save_queue.task_done()
+                    break
+                try:
+                    _, save_path, b64_data = item
+                    img_bytes = base64.b64decode(b64_data)
+                    with Image.open(BytesIO(img_bytes)) as image:
+                        image.save(save_path)
+                except Exception as e:
+                    self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
+                finally:
+                    save_queue.task_done()
+
+        saver_thread = threading.Thread(target=image_saver, daemon=True)
+        saver_thread.start()
+
+        result_queue = queue.Queue(maxsize=16)
+
+        def cloud_producer():
+            for idx, (sid, prompt, img_file, img_path, neg) in enumerate(tasks):
+                if not self.task_running:
                     try:
-                        with open(shots_file, 'r', encoding='utf-8') as f:
-                            loaded_shots = json.load(f)
-                        with self.resource_lock:
-                            self.shots_data = loaded_shots
-                        for shot in self.shots_data:
-                            if 'description' in shot and shot['description']:
-                                shot['description'] = self.clean_text(shot['description'])
-                        self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                        result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                    except queue.Full:
+                        pass
+                    break
+                if not self.pause_event.is_set():
+                    self.pause_event.wait(timeout=5)
+                    if not self.pause_event.is_set() and not self.task_running:
+                        try:
+                            result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                        except queue.Full:
+                            pass
+                        break
+
+                ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                cached = image_cache.get(ck)
+                if cached:
+                    try:
+                        result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
+                    except queue.Full:
+                        pass
+                    continue
+
+                max_retries = 3
+                retry_delay = 8
+                for retry in range(max_retries):
+                    if not self.task_running:
+                        try:
+                            result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                        except queue.Full:
+                            pass
+                        break
+                    try:
+                        req_start = time.time()
+                        img_b64, used_model = call_cloud_image(
+                            prompt=prompt,
+                            negative_prompt=neg or "",
+                            width=width,
+                            height=height,
+                            log_callback=lambda msg: self.log(f"   {msg}") if msg else None,
+                        )
+                        req_time = time.time() - req_start
+
+                        if img_b64:
+                            image_cache.set(ck, img_b64)
+                            try:
+                                result_queue.put((idx, ck, img_b64, "generated", req_time, img_path), timeout=30)
+                            except queue.Full:
+                                pass
+                            break
+                        else:
+                            if retry < max_retries - 1:
+                                self.log(f"   ⚠️ 第{retry+1}次生成失败，{retry_delay}秒后重试...")
+                                time.sleep(retry_delay)
+                            else:
+                                try:
+                                    result_queue.put((idx, None, None, "failed"), timeout=5)
+                                except queue.Full:
+                                    pass
                     except Exception as e:
-                        self.log(f"❌ 加载分镜数据失败: {e}")
-                        self.log("❌ 没有分镜数据，无法生成图像")
-                        self.update_task_progress("就绪")
-                        return
-                else:
+                        if retry < max_retries - 1:
+                            self.log(f"   ⚠️ 云端生图异常，{retry_delay}秒后重试: {str(e)[:80]}")
+                            time.sleep(retry_delay)
+                        else:
+                            try:
+                                result_queue.put((idx, None, None, "failed"), timeout=5)
+                            except queue.Full:
+                                pass
+
+            try:
+                result_queue.put(None, timeout=5)
+            except queue.Full:
+                pass
+
+        producer_thread = threading.Thread(target=cloud_producer, daemon=True, name="Cloud-Image-Producer")
+        producer_thread.start()
+
+        generated_count = 0
+        failed_count = 0
+        cached_count = 0
+        batch_start_time = time.time()
+        total_tasks = len(tasks)
+        received = 0
+        task_cancelled = False
+
+        while received < total_tasks:
+            try:
+                item = result_queue.get(timeout=30)
+            except queue.Empty:
+                if not self.task_running:
+                    task_cancelled = True
+                    self.log("❌ 任务已被取消")
+                    break
+                continue
+            if item is None:
+                break
+
+            result_type = item[3] if len(item) > 3 else "unknown"
+
+            if result_type == "cancelled":
+                task_cancelled = True
+                self.log("❌ 任务已被取消")
+                break
+
+            idx = item[0]
+            progress = 40 + (received / total_tasks) * 50
+            self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
+
+            if received % 5 == 0 or received == total_tasks - 1:
+                elapsed = time.time() - batch_start_time
+                avg_time = elapsed / (received + 1)
+                remaining = (total_tasks - received - 1) * avg_time
+                self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
+
+            if result_type == "cached":
+                cached_count += 1
+                img_path = item[5]
+                save_queue.put((idx, img_path, item[2]), timeout=30)
+                self.log(f"   ✅ 缓存命中")
+
+            elif result_type == "generated":
+                generated_count += 1
+                req_time = item[4]
+                img_path = item[5]
+                save_queue.put((idx, img_path, item[2]), timeout=30)
+                self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
+
+            else:
+                failed_count += 1
+                self.log(f"   ❌ 生成失败")
+
+            received += 1
+            result_queue.task_done()
+
+        while not result_queue.empty():
+            try:
+                result_queue.get_nowait()
+                result_queue.task_done()
+            except queue.Empty:
+                break
+
+        if generated_count + cached_count > 0 and not task_cancelled:
+            self.state_manager['images']['generated'] = True
+        self.state_manager['images']['count'] = generated_count + cached_count
+
+        try:
+            save_queue.put(None, timeout=5)
+        except Exception:
+            pass
+        try:
+            saver_thread.join(timeout=10)
+        except Exception:
+            pass
+        try:
+            producer_thread.join(timeout=5)
+        except Exception:
+            pass
+
+    def _generate_images_local(self):
+        """本地SD生图流程（原有逻辑）"""
+        try:
+            from video_generator.cloud_image_client import is_cloud_image_enabled
+            if is_cloud_image_enabled():
+                self.log("⚠️ 云端生图已启用，切换到云端流程")
+                self._generate_images_cloud()
+                return
+        except ImportError:
+            pass
+
+        # 检查是否有分镜数据，如果没有则尝试从文件加载
+        if not self.shots_data:
+            shots_file = os.path.join(self.output_dir, "shots_data.json")
+            if os.path.exists(shots_file):
+                try:
+                    with open(shots_file, 'r', encoding='utf-8') as f:
+                        loaded_shots = json.load(f)
+                    with self.resource_lock:
+                        self.shots_data = loaded_shots
+                    for shot in self.shots_data:
+                        if 'description' in shot and shot['description']:
+                            shot['description'] = self.clean_text(shot['description'])
+                    self.log(f"📂 已从文件加载分镜数据: {len(self.shots_data)} 个分镜")
+                except Exception as e:
+                    self.log(f"❌ 加载分镜数据失败: {e}")
                     self.log("❌ 没有分镜数据，无法生成图像")
                     self.update_task_progress("就绪")
                     return
-            
-            # 更新进度
-            self.update_task_progress("正在连接SD服务...", 10)
-            
-            # 检查SD API连接状态
-            api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
-            current_sd_model = "未知"  # 当前实际使用的SD模型
-            
-            # 获取用户设置的像素尺寸
-            width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
-            height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
-            
-            # 调试：显示原始设置值
-            raw_width = self.width_var.get() if hasattr(self, 'width_var') else "未设置"
-            raw_height = self.height_var.get() if hasattr(self, 'height_var') else "未设置"
-            self.log(f"   原始设置: 宽={raw_width}, 高={raw_height}")
-            
-            # 获取用户选择的模型
-            selected_model = self.model_var.get() if hasattr(self, 'model_var') else "使用当前模型"
-            
-            # 获取用户选择的风格预设
-            selected_styles = self.get_selected_styles()
-            
-            # ========== 步骤1: 连接SD服务 ==========
-            self.log("")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            self.log("🖼️ 图像生成任务开始")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            
-            try:
-                # 获取当前SD配置
-                options_response = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=Config.API_TIMEOUT_MEDIUM)
-                if options_response.status_code != 200:
-                    self.log(f"❌ SD服务连接失败 (状态码: {options_response.status_code})")
-                    self.log("💡 请确认 Stable Diffusion Web UI 已启动")
-                    self.update_task_progress("就绪")
-                    return
-                
-                options = options_response.json()
-                current_sd_model = options.get('sd_model_checkpoint', '未知')
-                self.log(f"✅ SD服务连接成功")
-                self.log(f"   服务地址: {api_url}")
-                self.log(f"   当前模型: {current_sd_model}")
-                
-                # 获取可用模型列表
-                models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
-                if models_response.status_code == 200:
-                    available_models = models_response.json()
-                    self.log(f"   可用模型: {len(available_models)} 个")
-                else:
-                    available_models = []
-                    self.log(f"   可用模型: 无法获取")
-                    
-            except Exception as e:
-                self.log(f"❌ SD服务连接异常: {str(e)}")
-                self.log("💡 请确认 Stable Diffusion Web UI 已启动且API地址正确")
+            else:
+                self.log("❌ 没有分镜数据，无法生成图像")
                 self.update_task_progress("就绪")
                 return
             
-            # ========== 步骤2: 准备生成参数 ==========
-            self.update_task_progress("正在准备生成参数...", 20)
-            self.log("")
-            self.log("📋 生成参数配置:")
-            self.log(f"   图像尺寸: {width} × {height} 像素")
-            self.log(f"   用户选择模型: {selected_model}")
-
-            # 根据制图模型获取最优参数配置
-            model_profile = get_model_profile(selected_model)
-            gen_params = model_profile["params"]
-            needs_negative = model_profile["needs_negative"]
-            use_vae = model_profile.get("use_vae_override", False)
-            vae_name = model_profile.get("vae_name", "")
-
-            self.log(f"   模型类型: {model_profile['name']}")
-            self.log(f"   提示词格式: {model_profile['prompt_format']}")
-            self.log(f"   采样参数: steps={gen_params['steps']}, cfg_scale={gen_params['cfg_scale']}, sampler={gen_params['sampler_name']} {gen_params['scheduler']}")
-            self.log(f"   负面提示词: {'需要' if needs_negative else '不需要'}")
-            if use_vae and vae_name:
-                self.log(f"   VAE覆盖: {vae_name}")
-
-            if selected_styles:
-                self.log(f"   风格预设: {', '.join(selected_styles)}")
+        # 更新进度
+        self.update_task_progress("正在连接SD服务...", 10)
             
-            # 确保图像目录存在
-            if not os.path.exists(self.images_dir):
-                os.makedirs(self.images_dir)
+        # 检查SD API连接状态
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+        current_sd_model = "未知"  # 当前实际使用的SD模型
             
-            # 准备风格描述
-            style_descriptions = []
-            for style in selected_styles:
-                style_desc = self.generate_style_description(style)
-                if style_desc:
-                    style_descriptions.append(style_desc)
+        # 获取用户设置的像素尺寸
+        width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
+        height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
             
-            # 按分镜ID排序
-            sorted_shots = sorted(self.shots_data, key=lambda x: x['id'])
+        # 调试：显示原始设置值
+        raw_width = self.width_var.get() if hasattr(self, 'width_var') else "未设置"
+        raw_height = self.height_var.get() if hasattr(self, 'height_var') else "未设置"
+        self.log(f"   原始设置: 宽={raw_width}, 高={raw_height}")
             
-            # 统计需要生成的图像
-            tasks = []
-            skipped_count = 0
-            for shot in sorted_shots:
-                shot_id = shot['id']
-                prompt = shot['prompt_en']
-                image_file = shot['image_file']
-                image_path = os.path.join(self.images_dir, image_file)
-                description = shot.get('description', 'No content')
-                negative_prompt = shot.get('negative_prompt', '')
-
-                if os.path.exists(image_path):
-                    skipped_count += 1
-                    continue
-
-                # 根据模型类型处理负面提示词
-                if not needs_negative:
-                    negative_prompt = ""
-
-                enhanced_prompt = prompt
-                if style_descriptions:
-                    style_text = ", ".join(style_descriptions)
-                    enhanced_prompt = f"{prompt}, {style_text}"
-
-                tasks.append((shot_id, enhanced_prompt, image_file, image_path, description, negative_prompt))
+        # 获取用户选择的模型
+        selected_model = self.model_var.get() if hasattr(self, 'model_var') else "使用当前模型"
             
-            self.log("")
-            self.log(f"📊 任务统计:")
-            self.log(f"   总分镜数: {len(self.shots_data)} 个")
-            if skipped_count > 0:
-                self.log(f"   已存在跳过: {skipped_count} 个")
-            self.log(f"   需要生成: {len(tasks)} 个")
+        # 获取用户选择的风格预设
+        selected_styles = self.get_selected_styles()
             
-            # ========== 步骤3: 模型切换（如需要）==========
-            if selected_model and selected_model != "使用当前模型":
-                self.log("")
-                self.log("🔄 模型切换:")
-                self.log(f"   目标模型: {selected_model}")
-                self.log(f"   当前模型: {current_sd_model}")
+        # ========== 步骤1: 连接SD服务 ==========
+        self.log("")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log("🖼️ 图像生成任务开始")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            
+        try:
+            # 获取当前SD配置
+            options_response = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=Config.API_TIMEOUT_MEDIUM)
+            if options_response.status_code != 200:
+                self.log(f"❌ SD服务连接失败 (状态码: {options_response.status_code})")
+                self.log("💡 请确认 Stable Diffusion Web UI 已启动")
+                self.update_task_progress("就绪")
+                return
                 
-                try:
-                    sd_model_name = selected_model
+            options = options_response.json()
+            current_sd_model = options.get('sd_model_checkpoint', '未知')
+            self.log(f"✅ SD服务连接成功")
+            self.log(f"   服务地址: {api_url}")
+            self.log(f"   当前模型: {current_sd_model}")
+                
+            # 获取可用模型列表
+            models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
+            if models_response.status_code == 200:
+                available_models = models_response.json()
+                self.log(f"   可用模型: {len(available_models)} 个")
+            else:
+                available_models = []
+                self.log(f"   可用模型: 无法获取")
                     
-                    import re as _re
-                    sd_model_name = _re.sub(r'^\[SD1\.5\]\s*|\[SDXL\]\s*|\[Flux\]\s*|\[SD3\]\s*', '', sd_model_name).strip()
+        except Exception as e:
+            self.log(f"❌ SD服务连接异常: {str(e)}")
+            self.log("💡 请确认 Stable Diffusion Web UI 已启动且API地址正确")
+            self.update_task_progress("就绪")
+            return
+            
+        # ========== 步骤2: 准备生成参数 ==========
+        self.update_task_progress("正在准备生成参数...", 20)
+        self.log("")
+        self.log("📋 生成参数配置:")
+        self.log(f"   图像尺寸: {width} × {height} 像素")
+        self.log(f"   用户选择模型: {selected_model}")
+
+        # 根据制图模型获取最优参数配置
+        model_profile = get_model_profile(selected_model)
+        gen_params = model_profile["params"]
+        needs_negative = model_profile["needs_negative"]
+        use_vae = model_profile.get("use_vae_override", False)
+        vae_name = model_profile.get("vae_name", "")
+
+        self.log(f"   模型类型: {model_profile['name']}")
+        self.log(f"   提示词格式: {model_profile['prompt_format']}")
+        self.log(f"   采样参数: steps={gen_params['steps']}, cfg_scale={gen_params['cfg_scale']}, sampler={gen_params['sampler_name']} {gen_params['scheduler']}")
+        self.log(f"   负面提示词: {'需要' if needs_negative else '不需要'}")
+        if use_vae and vae_name:
+            self.log(f"   VAE覆盖: {vae_name}")
+
+        if selected_styles:
+            self.log(f"   风格预设: {', '.join(selected_styles)}")
+            
+        # 确保图像目录存在
+        if not os.path.exists(self.images_dir):
+            os.makedirs(self.images_dir)
+            
+        # 准备风格描述
+        style_descriptions = []
+        for style in selected_styles:
+            style_desc = self.generate_style_description(style)
+            if style_desc:
+                style_descriptions.append(style_desc)
+            
+        # 按分镜ID排序
+        sorted_shots = sorted(self.shots_data, key=lambda x: x['id'])
+            
+        # 统计需要生成的图像
+        tasks = []
+        skipped_count = 0
+        for shot in sorted_shots:
+            shot_id = shot['id']
+            prompt = shot['prompt_en']
+            image_file = shot['image_file']
+            image_path = os.path.join(self.images_dir, image_file)
+            description = shot.get('description', 'No content')
+            negative_prompt = shot.get('negative_prompt', '')
+
+            if os.path.exists(image_path):
+                skipped_count += 1
+                continue
+
+            # 根据模型类型处理负面提示词
+            if not needs_negative:
+                negative_prompt = ""
+
+            enhanced_prompt = prompt
+            if style_descriptions:
+                style_text = ", ".join(style_descriptions)
+                enhanced_prompt = f"{style_text}, {prompt}"
+
+            tasks.append((shot_id, enhanced_prompt, image_file, image_path, description, negative_prompt))
+            
+        self.log("")
+        self.log(f"📊 任务统计:")
+        self.log(f"   总分镜数: {len(self.shots_data)} 个")
+        if skipped_count > 0:
+            self.log(f"   已存在跳过: {skipped_count} 个")
+        self.log(f"   需要生成: {len(tasks)} 个")
+            
+        # ========== 步骤3: 模型切换（如需要）==========
+        if selected_model and selected_model != "使用当前模型":
+            self.log("")
+            self.log("🔄 模型切换:")
+            self.log(f"   目标模型: {selected_model}")
+            self.log(f"   当前模型: {current_sd_model}")
+                
+            try:
+                sd_model_name = selected_model
                     
-                    if len(available_models) == 0:
-                        models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_LONG)
-                        if models_response.status_code == 200:
-                            available_models = models_response.json()
+                import re as _re
+                sd_model_name = _re.sub(r'^\[SD1\.5\]\s*|\[SDXL\]\s*|\[Flux\]\s*|\[SD3\]\s*', '', sd_model_name).strip()
                     
-                    target_model = None
-                    for model_info in available_models:
-                        # 精确匹配或部分匹配
-                        model_title = model_info.get('title', '')
-                        model_name = model_info.get('model_name', '')
+                if len(available_models) == 0:
+                    models_response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_LONG)
+                    if models_response.status_code == 200:
+                        available_models = models_response.json()
+                    
+                target_model = None
+                for model_info in available_models:
+                    # 精确匹配或部分匹配
+                    model_title = model_info.get('title', '')
+                    model_name = model_info.get('model_name', '')
                         
-                        # 去掉扩展名后比较
-                        clean_title = model_title.replace('.safetensors', '').replace('.ckpt', '')
+                    # 去掉扩展名后比较
+                    clean_title = model_title.replace('.safetensors', '').replace('.ckpt', '')
                         
-                        if sd_model_name == clean_title or sd_model_name == model_title or sd_model_name == model_name:
-                            target_model = model_title  # 使用完整的 title 来切换
-                            break
-                        # 也支持部分匹配
-                        elif sd_model_name.lower() in model_title.lower() or sd_model_name.lower() in model_name.lower():
-                            target_model = model_title
-                            break
+                    if sd_model_name == clean_title or sd_model_name == model_title or sd_model_name == model_name:
+                        target_model = model_title  # 使用完整的 title 来切换
+                        break
+                    # 也支持部分匹配
+                    elif sd_model_name.lower() in model_title.lower() or sd_model_name.lower() in model_name.lower():
+                        target_model = model_title
+                        break
                     
-                    if target_model:
-                        switch_response = get_http_session().post(
-                            f"{api_url}/sdapi/v1/options",
-                            json={"sd_model_checkpoint": target_model},
-                            timeout=30
-                        )
-                        if switch_response.status_code == 200:
-                            # 确认切换成功
-                            confirm_response = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=Config.API_TIMEOUT_MEDIUM)
-                            if confirm_response.status_code == 200:
-                                new_options = confirm_response.json()
-                                current_sd_model = new_options.get('sd_model_checkpoint', '未知')
-                                self.log(f"   ✅ 切换成功")
-                                self.log(f"   实际使用: {current_sd_model}")
-                            else:
-                                self.log(f"   ⚠️ 切换命令已发送，但无法确认结果")
-                        else:
-                            self.log(f"   ❌ 切换失败 (HTTP {switch_response.status_code})")
-                            self.log(f"   继续使用: {current_sd_model}")
+                if target_model:
+                    switch_response = get_http_session().post(
+                        f"{api_url}/sdapi/v1/options",
+                        json={"sd_model_checkpoint": target_model},
+                        timeout=30
+                    )
+                    if switch_response.status_code == 200:
+                        self.log(f"   ⏳ 模型切换中，等待加载...")
+                        model_loaded = False
+                        for wait_i in range(30):
+                            time.sleep(2)
+                            try:
+                                check_resp = get_http_session().get(f"{api_url}/sdapi/v1/options", timeout=5)
+                                if check_resp.status_code == 200:
+                                    check_opts = check_resp.json()
+                                    if check_opts.get('sd_model_checkpoint', '') == target_model:
+                                        model_loaded = True
+                                        current_sd_model = target_model
+                                        self.log(f"   ✅ 模型加载完成: {target_model}")
+                                        break
+                                    elif check_opts.get('sd_model_checkpoint', '') != current_sd_model:
+                                        current_sd_model = check_opts.get('sd_model_checkpoint', '')
+                                        self.log(f"   ✅ 切换成功: {current_sd_model}")
+                                        model_loaded = True
+                                        break
+                            except Exception:
+                                pass
+                            if wait_i % 5 == 4:
+                                self.log(f"   ⏳ 仍在加载模型... ({(wait_i+1)*2}秒)")
+                        if not model_loaded:
+                            self.log(f"   ⚠️ 模型加载超时，继续使用当前模型")
                     else:
-                        self.log(f"   ❌ 未找到目标模型")
+                        self.log(f"   ❌ 切换失败 (HTTP {switch_response.status_code})")
                         self.log(f"   继续使用: {current_sd_model}")
-                        
-                except Exception as e:
-                    self.log(f"   ❌ 切换异常: {e}")
+                else:
+                    self.log(f"   ❌ 未找到目标模型")
                     self.log(f"   继续使用: {current_sd_model}")
+                        
+            except Exception as e:
+                self.log(f"   ❌ 切换异常: {e}")
+                self.log(f"   继续使用: {current_sd_model}")
             
-            # ========== 最终配置确认 ==========
-            self.log("")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            self.log(f"🎯 实际使用模型: {current_sd_model}")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            self.log("")
+        # ========== 最终配置确认 ==========
+        self.log("")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log(f"🎯 实际使用模型: {current_sd_model}")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log("")
             
-            # ========== 步骤4: 预取流水线生成图像 ==========
-            if tasks:
-                self.log("")
-                self._safe_release_whisper_gpu()
-                if not self._whisper_on_gpu:
-                    self.log("   🧹 Whisper GPU 显存已释放")
+        # ========== 步骤4: 预取流水线生成图像 ==========
+        if tasks:
+            self.log("")
+            self._safe_release_whisper_gpu()
+            if not self._whisper_on_gpu:
+                self.log("   🧹 Whisper GPU 显存已释放")
                 
-                try:
-                    self._unload_ollama_models(log_prefix="   ")
-                except Exception:
-                    pass
-                self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
-                self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
-                self.log("")
+            try:
+                self._unload_ollama_models(log_prefix="   ")
+            except Exception:
+                pass
+            self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
+            self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
+            self.log("")
 
-                import queue
-                import base64
-                from PIL import Image
-                from io import BytesIO
+            import queue
+            import base64
+            from PIL import Image
+            from io import BytesIO
 
-                # --- 图片保存队列: 解码+保存在独立线程中执行 ---
-                save_queue = queue.Queue(maxsize=8)
+            # --- 图片保存队列: 解码+保存在独立线程中执行 ---
+            save_queue = queue.Queue(maxsize=8)
 
-                def image_saver():
-                    """独立IO线程: 解码base64并保存图片到磁盘"""
-                    while True:
-                        try:
-                            item = save_queue.get(timeout=30)
-                        except queue.Empty:
-                            if not self.task_running:
-                                break
-                            continue
-                        if item is None:
-                            save_queue.task_done()
+            def image_saver():
+                """独立IO线程: 解码base64并保存图片到磁盘"""
+                while True:
+                    try:
+                        item = save_queue.get(timeout=30)
+                    except queue.Empty:
+                        if not self.task_running:
                             break
+                        continue
+                    if item is None:
+                        save_queue.task_done()
+                        break
+                    try:
+                        _, save_path, b64_data = item
+                        img_bytes = base64.b64decode(b64_data)
+                        with Image.open(BytesIO(img_bytes)) as image:
+                            image.save(save_path)
+                    except Exception as e:
+                        self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
+                    finally:
+                        save_queue.task_done()
+
+            saver_thread = threading.Thread(target=image_saver, daemon=True)
+            saver_thread.start()
+
+            result_queue = queue.Queue(maxsize=16)
+
+            def sd_producer():
+                """独立请求线程: 连续发送SD生成请求，实现预取"""
+                for idx, (sid, prompt, img_file, img_path, desc, neg) in enumerate(tasks):
+                    if not self.task_running:
                         try:
-                            _, save_path, b64_data = item
-                            img_bytes = base64.b64decode(b64_data)
-                            with Image.open(BytesIO(img_bytes)) as image:
-                                image.save(save_path)
-                        except Exception as e:
-                            self.log(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'} - {e}")
-                        finally:
-                            save_queue.task_done()
+                            result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                        except queue.Full:
+                            pass
+                        break
+                    if not self.pause_event.is_set():
+                        self.pause_event.wait(timeout=5)
+                        if not self.pause_event.is_set() and not self.task_running:
+                            try:
+                                result_queue.put((idx, None, None, "cancelled"), timeout=5)
+                            except queue.Full:
+                                pass
+                            break
 
-                saver_thread = threading.Thread(target=image_saver, daemon=True)
-                saver_thread.start()
+                    ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                    cached = image_cache.get(ck)
+                    if cached:
+                        try:
+                            result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
+                        except queue.Full:
+                            pass
+                        continue
 
-                result_queue = queue.Queue(maxsize=16)
-
-                def sd_producer():
-                    """独立请求线程: 连续发送SD生成请求，实现预取"""
-                    for idx, (sid, prompt, img_file, img_path, desc, neg) in enumerate(tasks):
+                    max_retries = 3
+                    retry_delay = 5
+                    for retry in range(max_retries):
                         if not self.task_running:
                             try:
                                 result_queue.put((idx, None, None, "cancelled"), timeout=5)
                             except queue.Full:
                                 pass
                             break
-                        if not self.pause_event.is_set():
-                            self.pause_event.wait(timeout=5)
-                            if not self.pause_event.is_set() and not self.task_running:
-                                try:
-                                    result_queue.put((idx, None, None, "cancelled"), timeout=5)
-                                except queue.Full:
-                                    pass
-                                break
+                        try:
+                            req_start = time.time()
+                            # 构建请求参数（根据模型配置动态调整）
+                            request_payload = {
+                                "prompt": prompt,
+                                "negative_prompt": neg or "",
+                                "width": width, "height": height,
+                                "steps": gen_params["steps"],
+                                "cfg_scale": gen_params["cfg_scale"],
+                                "sampler_name": gen_params["sampler_name"],
+                                "scheduler": gen_params["scheduler"],
+                                "seed": -1, "batch_size": 1,
+                            }
+                            override_settings = {}
+                            if use_vae and vae_name:
+                                override_settings["sd_vae"] = vae_name
+                            if current_sd_model:
+                                override_settings["sd_model_checkpoint"] = current_sd_model
+                            if override_settings:
+                                request_payload["override_settings"] = override_settings
 
-                        ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
-                        cached = image_cache.get(ck)
-                        if cached:
-                            try:
-                                result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
-                            except queue.Full:
-                                pass
-                            continue
+                            resp = get_http_session().post(
+                                f"{api_url}/sdapi/v1/txt2img",
+                                json=request_payload,
+                                timeout=Config.API_TIMEOUT_LONG
+                            )
+                            req_time = time.time() - req_start
 
-                        max_retries = 3
-                        retry_delay = 5
-                        for retry in range(max_retries):
-                            if not self.task_running:
-                                try:
-                                    result_queue.put((idx, None, None, "cancelled"), timeout=5)
-                                except queue.Full:
-                                    pass
-                                break
-                            try:
-                                req_start = time.time()
-                                # 构建请求参数（根据模型配置动态调整）
-                                request_payload = {
-                                    "prompt": prompt,
-                                    "negative_prompt": neg or "",
-                                    "width": width, "height": height,
-                                    "steps": gen_params["steps"],
-                                    "cfg_scale": gen_params["cfg_scale"],
-                                    "sampler_name": gen_params["sampler_name"],
-                                    "scheduler": gen_params["scheduler"],
-                                    "seed": -1, "batch_size": 1,
-                                }
-                                # VAE 覆盖（仅 SD 1.5 需要）
-                                if use_vae and vae_name:
-                                    request_payload["override_settings"] = {
-                                        "sd_vae": vae_name
-                                    }
-
-                                resp = get_http_session().post(
-                                    f"{api_url}/sdapi/v1/txt2img",
-                                    json=request_payload,
-                                    timeout=Config.API_TIMEOUT_LONG
-                                )
-                                req_time = time.time() - req_start
-
-                                if resp.status_code == 200:
-                                    rj = resp.json()
-                                    if "images" in rj and rj["images"]:
-                                        img_data = rj["images"][0]
-                                        image_cache.set(ck, img_data)
-                                        try:
-                                            result_queue.put((idx, ck, img_data, "generated", req_time, img_path), timeout=30)
-                                        except queue.Full:
-                                            pass
-                                        break
-                                    else:
-                                        if retry < max_retries - 1:
-                                            time.sleep(retry_delay)
+                            if resp.status_code == 200:
+                                rj = resp.json()
+                                if "images" in rj and rj["images"]:
+                                    img_data = rj["images"][0]
+                                    image_cache.set(ck, img_data)
+                                    try:
+                                        result_queue.put((idx, ck, img_data, "generated", req_time, img_path), timeout=30)
+                                    except queue.Full:
+                                        pass
+                                    break
                                 else:
                                     if retry < max_retries - 1:
                                         time.sleep(retry_delay)
-                            except requests.exceptions.ConnectionError:
-                                try:
-                                    result_queue.put((idx, None, None, "connection_error"), timeout=5)
-                                except queue.Full:
-                                    pass
-                                break
-                            except requests.exceptions.Timeout:
+                            else:
                                 if retry < max_retries - 1:
                                     time.sleep(retry_delay)
-                            except Exception as e:
-                                if retry < max_retries - 1:
-                                    time.sleep(retry_delay)
-                        else:
+                        except requests.exceptions.ConnectionError:
                             try:
-                                result_queue.put((idx, None, None, "failed"), timeout=5)
+                                result_queue.put((idx, None, None, "connection_error"), timeout=5)
                             except queue.Full:
                                 pass
-                    try:
-                        result_queue.put(None, timeout=5)
-                    except queue.Full:
-                        pass
-
-                producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
-                producer_thread.start()
-
-                # --- 主线程（消费者）: 从队列取结果，更新UI ---
-                generated_count = 0
-                failed_count = 0
-                cached_count = 0
-                batch_start_time = time.time()
-                total_tasks = len(tasks)
-                received = 0
-                task_cancelled = False
-
-                while received < total_tasks:
-                    try:
-                        item = result_queue.get(timeout=10)
-                    except queue.Empty:
-                        if not self.task_running:
-                            task_cancelled = True
-                            self.log("❌ 任务已被取消")
                             break
-                        continue
-                    if item is None:
-                        break
+                        except requests.exceptions.Timeout:
+                            if retry < max_retries - 1:
+                                time.sleep(retry_delay)
+                        except Exception as e:
+                            if retry < max_retries - 1:
+                                time.sleep(retry_delay)
+                    else:
+                        try:
+                            result_queue.put((idx, None, None, "failed"), timeout=5)
+                        except queue.Full:
+                            pass
+                try:
+                    result_queue.put(None, timeout=5)
+                except queue.Full:
+                    pass
 
-                    result_type = item[3] if len(item) > 3 else "unknown"
+            producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
+            producer_thread.start()
 
-                    if result_type == "cancelled":
+            # --- 主线程（消费者）: 从队列取结果，更新UI ---
+            generated_count = 0
+            failed_count = 0
+            cached_count = 0
+            batch_start_time = time.time()
+            total_tasks = len(tasks)
+            received = 0
+            task_cancelled = False
+
+            while received < total_tasks:
+                try:
+                    item = result_queue.get(timeout=10)
+                except queue.Empty:
+                    if not self.task_running:
                         task_cancelled = True
                         self.log("❌ 任务已被取消")
                         break
+                    continue
+                if item is None:
+                    break
 
-                    idx = item[0]
+                result_type = item[3] if len(item) > 3 else "unknown"
 
-                    progress = 40 + (received / total_tasks) * 50
-                    self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
+                if result_type == "cancelled":
+                    task_cancelled = True
+                    self.log("❌ 任务已被取消")
+                    break
 
-                    if received % 5 == 0 or received == total_tasks - 1:
-                        elapsed = time.time() - batch_start_time
-                        avg_time = elapsed / (received + 1)
-                        remaining = (total_tasks - received - 1) * avg_time
-                        self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
+                idx = item[0]
 
-                    if result_type == "cached":
-                        cached_count += 1
-                        img_path = item[5]
-                        save_queue.put((idx, img_path, item[2]), timeout=30)
-                        self.log(f"   ✅ 缓存命中")
+                progress = 40 + (received / total_tasks) * 50
+                self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
 
-                    elif result_type == "generated":
-                        generated_count += 1
-                        req_time = item[4]
-                        img_path = item[5]
-                        save_queue.put((idx, img_path, item[2]), timeout=30)
-                        self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
+                if received % 5 == 0 or received == total_tasks - 1:
+                    elapsed = time.time() - batch_start_time
+                    avg_time = elapsed / (received + 1)
+                    remaining = (total_tasks - received - 1) * avg_time
+                    self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
 
-                    elif result_type == "connection_error":
-                        failed_count += 1
-                        self.log(f"   ❌ 连接失败: SD服务未响应")
-                        self.log(f"   💡 请检查 SD WebUI 是否正常运行")
-                        break
+                if result_type == "cached":
+                    cached_count += 1
+                    img_path = item[5]
+                    save_queue.put((idx, img_path, item[2]), timeout=30)
+                    self.log(f"   ✅ 缓存命中")
 
-                    else:
-                        failed_count += 1
-                        self.log(f"   ❌ 生成失败")
+                elif result_type == "generated":
+                    generated_count += 1
+                    req_time = item[4]
+                    img_path = item[5]
+                    save_queue.put((idx, img_path, item[2]), timeout=30)
+                    self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
 
-                    received += 1
+                elif result_type == "connection_error":
+                    failed_count += 1
+                    self.log(f"   ❌ 连接失败: SD服务未响应")
+                    self.log(f"   💡 请检查 SD WebUI 是否正常运行")
+                    break
+
+                else:
+                    failed_count += 1
+                    self.log(f"   ❌ 生成失败")
+
+                received += 1
+                result_queue.task_done()
+
+            while not result_queue.empty():
+                try:
+                    result_queue.get_nowait()
                     result_queue.task_done()
+                except queue.Empty:
+                    break
 
-                while not result_queue.empty():
-                    try:
-                        result_queue.get_nowait()
-                        result_queue.task_done()
-                    except queue.Empty:
-                        break
+        if generated_count + cached_count > 0 and not task_cancelled:
+            self.state_manager['images']['generated'] = True
+        self.state_manager['images']['count'] = generated_count + cached_count
 
-            if generated_count + cached_count > 0 and not task_cancelled:
-                self.state_manager['images']['generated'] = True
-            self.state_manager['images']['count'] = generated_count + cached_count
-            
-        except Exception as e:
-            self.log(f"❌ 图像生成失败: {e}")
-            traceback.print_exc()
-        finally:
-            if 'save_queue' in locals():
-                try:
-                    save_queue.put(None, timeout=5)
-                except Exception:
-                    pass
-            if 'saver_thread' in locals():
-                try:
-                    saver_thread.join(timeout=10)
-                except Exception:
-                    pass
-            if 'producer_thread' in locals():
-                try:
-                    producer_thread.join(timeout=5)
-                except Exception:
-                    pass
+        if 'save_queue' in locals():
+            try:
+                save_queue.put(None, timeout=5)
+            except Exception:
+                pass
+        if 'saver_thread' in locals():
+            try:
+                saver_thread.join(timeout=10)
+            except Exception:
+                pass
+        if 'producer_thread' in locals():
+            try:
+                producer_thread.join(timeout=5)
+            except Exception:
+                pass
     
     # =======================================================================
     # 第十一部分：音视频导入与渲染 (行 9398-10278)

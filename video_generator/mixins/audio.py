@@ -199,6 +199,27 @@ class AudioMixin:
         except Exception:
             pass
 
+        try:
+            if hasattr(self, 'arv_prompter') and self.arv_prompter is not None:
+                del self.arv_prompter
+                self.arv_prompter = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'cache_stats'):
+                self.cache_stats = {'hits': 0, 'misses': 0, 'evictions': 0, 'size': 0}
+        except Exception:
+            pass
+
+        try:
+            from video_generator.enhanced_content_recognition import get_enhanced_recognizer
+            recognizer = get_enhanced_recognizer()
+            if recognizer and hasattr(recognizer, 'reset_context'):
+                recognizer.reset_context()
+        except Exception:
+            pass
+
 
     def clear_audio(self):
         """清除音频"""

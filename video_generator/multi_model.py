@@ -6,7 +6,7 @@ import time
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .ollama_client import (
-    LLMConfig, is_ollama_available, get_available_models,
+    LLMConfig, is_ollama_available, is_llm_available, get_available_models,
     call_ollama_single
 )
 
@@ -111,7 +111,7 @@ class MultiModelFusion:
         return 0.75
 
     def parallel_generate(self, prompt_template, models=None, timeout=60):
-        if not is_ollama_available():
+        if not is_llm_available():
             return None
         if models is None:
             models = self.available_models[:3]

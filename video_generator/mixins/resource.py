@@ -562,7 +562,7 @@ class ResourceMixin:
             if not os.path.exists(file_path):
                 return False
             
-            trash_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "垃圾桶")
+            trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
             
@@ -580,7 +580,9 @@ class ResourceMixin:
             
             shutil.move(file_path, dest)
             return True
-        except Exception:
+        except Exception as e:
+            if hasattr(self, 'log'):
+                self.log(f"⚠️ 移动文件到垃圾桶失败: {os.path.basename(file_path)} - {e}")
             return False
 
 
@@ -632,8 +634,8 @@ class ResourceMixin:
 
 
     def _cleanup_residual_files(self):
-        """启动时清理上次可能残留的磁盘文件，移动到垃圾桶而非直接删除"""
-        self._move_output_to_trash(reason="启动清理")
+        """清理残留的磁盘文件，移动到垃圾桶而非直接删除"""
+        self._move_output_to_trash(reason="自动清理")
 
 
     def on_close(self):

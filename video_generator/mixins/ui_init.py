@@ -10,17 +10,6 @@ from video_generator.config import Config
 from video_generator.cache import prompt_cache, image_cache
 from video_generator.ollama_client import (
     LLMConfig,
-    is_ollama_available,
-    set_ollama_available,
-    check_ollama_available,
-    get_available_models,
-    try_start_ollama_service,
-)
-from video_generator.optimization import (
-    ProgressManager,
-    ResourceManager,
-    BatchImageLoader,
-    VideoRendererOptimizer,
 )
 from video_generator.app_state import lazy_import, DEFAULT_MIN_SHOT_DURATION
 
@@ -29,14 +18,6 @@ try:
     ARV_OPTIMIZATION_AVAILABLE = True
 except ImportError:
     ARV_OPTIMIZATION_AVAILABLE = False
-
-# Re-export for backward compatibility
-from video_generator.app_state import (
-    OLLAMA_AVAILABLE,
-    get_ollama_available,
-    set_ollama_available_global,
-    PERFORMANCE_MONITOR_AVAILABLE,
-)
 
 DEFAULT_MIN_SHOT_DURATION = Config.DEFAULT_MIN_SHOT_DURATION
 
@@ -146,6 +127,36 @@ class UIInitMixin:
             # 复选框样式
             self.style.configure("TCheckbutton", background=self.bg_color, foreground=self.text_fg, 
                                font=("Microsoft YaHei", self.font_size))
+            
+            # LabelFrame 样式 - 板块标题字体加大加粗
+            self.style.configure("TLabelframe", background=self.panel_bg, foreground="#e0e0e0",
+                               font=("Microsoft YaHei", self.font_size + 4, "bold"),
+                               relief="groove", borderwidth=2)
+            self.style.configure("TLabelframe.Label", background=self.panel_bg, foreground="#90caf9",
+                               font=("Microsoft YaHei", self.font_size + 4, "bold"))
+            
+            # 高级设置面板专用 LabelFrame 样式
+            self.style.configure("Adv.TLabelframe", background="#2a2d35", foreground="#e0e0e0",
+                               font=("Microsoft YaHei", self.font_size + 5, "bold"),
+                               relief="groove", borderwidth=2)
+            self.style.configure("Adv.TLabelframe.Label", background="#2a2d35", foreground="#90caf9",
+                               font=("Microsoft YaHei", self.font_size + 5, "bold"))
+            
+            # 高级设置面板内部控件样式
+            self.style.configure("Adv.TFrame", background="#2a2d35")
+            self.style.configure("Adv.TLabel", background="#2a2d35", foreground="#cccccc",
+                               font=("Microsoft YaHei", self.font_size + 2))
+            self.style.configure("Adv.TCheckbutton", background="#2a2d35", foreground="#cccccc",
+                               font=("Microsoft YaHei", self.font_size + 2))
+            self.style.configure("Adv.TButton", background="#3c4f6e", foreground="#ffffff",
+                               font=("Microsoft YaHei", self.font_size + 3), padding=(8, 6), relief="flat")
+            self.style.map("Adv.TButton", background=[('active', '#4a6a9a')])
+            self.style.configure("Adv.TCombobox",
+                               font=("Microsoft YaHei", self.font_size + 2),
+                               padding=(6, 4))
+            self.style.configure("Adv.TEntry",
+                               font=("Microsoft YaHei", self.font_size + 2),
+                               padding=(4, 4))
             
             # 进度条样式 - 使用亮绿色进度条，与深色背景形成鲜明对比
             self.style.configure("TProgressbar", 
@@ -307,6 +318,17 @@ class UIInitMixin:
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")
         
+        # 云端大模型设置 - 初始默认值，由load_config覆盖
+        self.cloud_llm_enabled_var = tk.BooleanVar(value=False)
+        self.cloud_llm_provider_var = tk.StringVar(value="DeepSeek 深度求索")
+        self.cloud_llm_api_key_var = tk.StringVar(value="")
+        self.cloud_llm_model_var = tk.StringVar(value="deepseek-chat")
+        self.cloud_llm_custom_url_var = tk.StringVar(value="")
+        self.cloud_llm_status_var = tk.StringVar(value="❌ 未连接")
+        self._cloud_selected_model_id = "deepseek-chat"
+        self.cloud_asr_enabled_var = tk.BooleanVar(value=False)
+        self.cloud_asr_api_key_var = tk.StringVar(value="")
+        
         # 风格预设 - 预创建变量，确保load_config能恢复风格设置
         style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
         self.dlr_vars = [(opt, tk.BooleanVar()) for opt in style_options]
@@ -420,10 +442,21 @@ class UIInitMixin:
             # 等待延迟导入完成
             time.sleep(1)  # 等待Ollama模块加载完成
             
+            try:
+                self._cleanup_residual_files()
+            except Exception:
+                pass
+            
             self.system_check()
-            # 系统检查完成后，尝试连接SD API（静默模式，不弹窗）
             time.sleep(1)
-            self.check_sd_api_connection(silent=True)
+            cloud_img = False
+            try:
+                from video_generator.cloud_image_client import is_cloud_image_enabled
+                cloud_img = is_cloud_image_enabled()
+            except ImportError:
+                pass
+            if not cloud_img:
+                self.check_sd_api_connection(silent=True)
             
             # 【修改】启动时自动检测并连接Ollama服务
             self.auto_connect_ollama()

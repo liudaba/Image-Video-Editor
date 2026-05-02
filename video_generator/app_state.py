@@ -5,6 +5,7 @@ by multiple mixin modules, avoiding circular imports.
 """
 from video_generator.ollama_client import (
     is_ollama_available,
+    is_llm_available,
     set_ollama_available,
     check_ollama_available,
 )
@@ -20,6 +21,11 @@ OLLAMA_AVAILABLE = False
 def get_ollama_available():
     """Get Ollama availability (thread-safe)."""
     return is_ollama_available()
+
+
+def get_llm_available():
+    """Get LLM availability (cloud or local, thread-safe)."""
+    return is_llm_available()
 
 
 def set_ollama_available_global(value):

@@ -29,6 +29,13 @@ MODEL_PROFILES = {
             "(bad hands:1.2), missing fingers, extra digits, cropped, watermark, "
             "text, signature, username, jpeg artifacts, duplicate, morbid"
         ),
+        "non_realistic_negative": (
+            "(worst quality:1.2), (low quality:1.2), (ugly:1.3), (deformed:1.3), "
+            "blurry, disfigured, (bad anatomy:1.2), extra limbs, mutated hands, "
+            "(bad hands:1.2), missing fingers, extra digits, cropped, watermark, "
+            "text, signature, username, jpeg artifacts, duplicate, morbid, "
+            "photorealistic, RAW photo, real person"
+        ),
         # SD WebUI 生成参数
         "params": {
             "steps": 28,
@@ -53,6 +60,11 @@ MODEL_PROFILES = {
             "(worst quality:1.2), (low quality:1.2), cartoon, anime, "
             "painting, illustration, 3d render, sketch, blurry, "
             "watermark, text, signature, deformed, ugly"
+        ),
+        "non_realistic_negative": (
+            "(worst quality:1.2), (low quality:1.2), blurry, "
+            "watermark, text, signature, deformed, ugly, "
+            "photorealistic, RAW photo, real person"
         ),
         "params": {
             "steps": 30,

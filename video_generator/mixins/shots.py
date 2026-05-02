@@ -15,20 +15,18 @@ from tkinter import messagebox
 from video_generator.config import Config, get_http_session
 from video_generator.cache import prompt_cache, image_cache
 from video_generator.ollama_client import (
-    LLMConfig,
     call_ollama_model,
     call_ollama_single,
     get_available_models,
     warmup_model,
-    is_ollama_available,
-    set_ollama_available,
+    is_llm_available,
     check_ollama_available,
     try_start_ollama_service,
 )
-from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer, MultiModelFusion
+from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer
 from video_generator.templates import PromptTemplates
 from video_generator.parallel import ParallelPromptGenerator
-from video_generator.app_state import get_ollama_available, set_ollama_available_global
+from video_generator.app_state import set_ollama_available_global
 
 try:
     from video_generator.enhanced_content_recognition import (
@@ -316,7 +314,7 @@ class ShotsMixin:
             return segments
         
         try:
-            if not is_ollama_available():
+            if not is_llm_available():
                 return segments
             model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
             
@@ -571,7 +569,7 @@ class ShotsMixin:
             if overlap > 0.7:
                 duplicate_count += 1
                 dubbing = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ""
-                if dubbing and is_ollama_available():
+                if dubbing and is_llm_available():
                     try:
                         model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
                         if not model:
@@ -911,7 +909,7 @@ Requirements:
         """
         if not dubbing or len(dubbing.strip()) < 2:
             return ""
-        if not is_ollama_available():
+        if not is_llm_available():
             return ""
         try:
             model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
@@ -1231,6 +1229,8 @@ Requirements:
         - SDXL:   无权重标记 RAW photo, photorealistic
         - Flux:   无前缀后缀（自然语言）
         - SD3:    无前缀，轻量后缀
+
+        非写实风格（皮克斯、吉卜力、动漫等）自动移除写实关键词。
         """
         from video_generator.model_profiles import get_model_profile, detect_model_type
 
@@ -1238,6 +1238,26 @@ Requirements:
         profile = get_model_profile(model_type)
         prefix = profile.get("quality_prefix", "")
         suffix = profile.get("quality_suffix", "")
+
+        user_selected_styles = self.get_selected_styles()
+        is_non_realistic = False
+        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
+                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
+                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        if user_selected_styles:
+            style_text_lower = " ".join(user_selected_styles).lower()
+            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+
+        if is_non_realistic:
+            prefix = re.sub(r',?\s*\(?\s*RAW photo\s*\)?\s*,?', ',', prefix, flags=re.IGNORECASE)
+            prefix = re.sub(r',?\s*\(?\s*raw photo\s*\)?\s*,?', ',', prefix, flags=re.IGNORECASE)
+            prefix = re.sub(r',?\s*\(?\s*photorealistic(?::[\d.]+)?\)?\s*,?', ',', prefix, flags=re.IGNORECASE)
+            prefix = re.sub(r',?\s*\(?\s*documentary style\s*\)?\s*,?', ',', prefix, flags=re.IGNORECASE)
+            suffix = re.sub(r',?\s*\(?\s*film grain(?::[\d.]+)?\)?\s*,?', ',', suffix, flags=re.IGNORECASE)
+            suffix = re.sub(r',?\s*\(?\s*film grain texture\s*\)?\s*,?', ',', suffix, flags=re.IGNORECASE)
+            suffix = re.sub(r',?\s*\(?\s*documentary style\s*\)?\s*,?', ',', suffix, flags=re.IGNORECASE)
+            prefix = re.sub(r',\s*,+', ',', prefix).strip(', ')
+            suffix = re.sub(r',\s*,+', ',', suffix).strip(', ')
 
         redundant = [
             "masterpiece", "best quality", "ultra detailed", "8k",
@@ -1283,8 +1303,8 @@ Requirements:
         if theme_elements is None:
             theme_elements = []
         
-        if not is_ollama_available():
-            self.log("⚠️ Ollama不可用，使用内置逻辑生成提示词")
+        if not is_llm_available():
+            self.log("⚠️ 大模型不可用，使用内置逻辑生成提示词")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                 return self._generate_arv_format_prompt(dubbing, content_type, 0)
             elif prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
@@ -1401,7 +1421,19 @@ Requirements:
         if not profile.get("needs_negative", True):
             return ""
 
-        base_negative = profile.get("default_negative", "").split(", ")
+        user_selected_styles = self.get_selected_styles()
+        is_non_realistic = False
+        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
+                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
+                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        if user_selected_styles:
+            style_text_lower = " ".join(user_selected_styles).lower()
+            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+
+        if is_non_realistic and profile.get("non_realistic_negative"):
+            base_negative = profile.get("non_realistic_negative", "").split(", ")
+        else:
+            base_negative = profile.get("default_negative", "").split(", ")
         base_negative = [n.strip() for n in base_negative if n.strip()]
 
         content_specific_negative = {
@@ -1912,7 +1944,7 @@ Requirements:
                 result.append(elem)  # 暂时保留中文
         
         # === 第二层：LLM批量翻译未命中的词汇 ===
-        if untranslated and is_ollama_available():
+        if untranslated and is_llm_available():
             try:
                 translated_map = self._batch_translate_with_llm(untranslated)
                 if translated_map:
@@ -2341,7 +2373,7 @@ Requirements:
             shot = shots[i]
             consistency_issues.append(f"分镜{i+1}")
             
-            if is_ollama_available() and shot.get('description'):
+            if is_llm_available() and shot.get('description'):
                 try:
                     dubbing = shot['description']
                     content_type = shot.get('content_type', 'general')
@@ -2396,29 +2428,34 @@ Requirements:
                 self.update_task_progress("就绪")
                 return
             
-            # 检查Ollama服务是否可用
-            if not is_ollama_available():
-                self.log("🔄 正在检测Ollama服务...")
+            # 检查大模型服务是否可用（云端或本地Ollama）
+            llm_ready = is_llm_available()
+            
+            if not llm_ready:
                 if check_ollama_available():
                     set_ollama_available_global(True)
+                    llm_ready = True
                     self.log("✅ Ollama服务已连接")
                 else:
                     self.log("⚠️ Ollama服务未运行，尝试自动启动...")
                     if try_start_ollama_service():
                         set_ollama_available_global(True)
+                        llm_ready = True
                         self.log("✅ Ollama服务已自动启动并连接")
                     else:
                         set_ollama_available_global(False)
-                        self.log("❌ Ollama服务不可用")
+                        self.log("❌ 大模型服务不可用")
                         if not auto_mode:
                             self.root.after(0, lambda: messagebox.showwarning(
-                                "Ollama服务不可用",
-                                "Ollama大模型服务未运行，无法生成分镜！\n\n"
-                                "分镜生成需要Ollama进行：\n"
+                                "大模型服务不可用",
+                                "本地Ollama未运行，且未启用云端大模型！\n\n"
+                                "分镜生成需要大模型进行：\n"
                                 "• 语音文本纠错和标点添加\n"
                                 "• 主题分析和内容分类\n"
                                 "• 提示词生成\n\n"
-                                "请先启动Ollama服务后重试。"
+                                "请选择以下方式之一：\n"
+                                "方案A：启动本地Ollama服务后重试\n"
+                                "方案B：在高级设置中启用云端大模型"
                             ))
                         self.update_task_progress("就绪")
                         return
@@ -2517,150 +2554,161 @@ Requirements:
                         self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
                 whisper_used_gpu = False
             else:
-                # 加载Whisper模型进行语音识别
-                self.update_task_progress("正在加载Whisper模型...", 20)
+                # 检查是否启用云端语音识别
+                cloud_asr_enabled = False
+                try:
+                    from video_generator.cloud_llm_client import is_cloud_asr_enabled, call_cloud_asr
+                    cloud_asr_enabled = is_cloud_asr_enabled()
+                except ImportError:
+                    pass
                 
-                # 检查Ollama是否有模型残留占用GPU显存，确保Whisper独占GPU
-                self._unload_ollama_models(log_prefix="   ")
+                if cloud_asr_enabled:
+                    self.update_task_progress("正在使用云端Whisper识别...", 20)
+                    self.log("☁️ 使用云端Whisper API进行语音识别（无需本地GPU）")
+                    
+                    cloud_segments, cloud_text = call_cloud_asr(
+                        self.audio_path, language="zh", log_callback=self.log
+                    )
+                    
+                    if cloud_segments is not None:
+                        segments = cloud_segments
+                        full_text = cloud_text
+                        whisper_used_gpu = False
+                        
+                        self.log(f"✅ 云端语音识别完成，共 {len(segments)} 个片段")
+                        
+                        cache_data = {'segments': segments, 'full_text': full_text}
+                        self.cache_set('audio_analysis', audio_key, cache_data)
+                        self.log("✅ 音频分析结果已缓存")
+                    else:
+                        self.log("⚠️ 云端ASR失败，回退到本地Whisper")
+                        cloud_asr_enabled = False
                 
-                warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
+                if not cloud_asr_enabled:
+                    # 加载Whisper模型进行语音识别（本地模式或云端ASR失败时回退）
+                    self.update_task_progress("正在加载Whisper模型...", 20)
                 
-                if self.whisper_model:
-                    whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                    current_model_size = getattr(self, '_whisper_model_size', None)
-                    if current_model_size and current_model_size != whisper_model_size:
-                        self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
-                        self._safe_release_whisper_gpu()
-                        del self.whisper_model
-                        self.whisper_model = None
-                        gc.collect()
-                    if self.whisper_model is None:
+                # 本地Whisper语音识别（云端ASR成功时跳过）
+                if not cloud_asr_enabled:
+                    self.update_task_progress("正在加载Whisper模型...", 20)
+                    self._unload_ollama_models(log_prefix="   ")
+                    warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
+                    
+                    if self.whisper_model:
+                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
+                        current_model_size = getattr(self, '_whisper_model_size', None)
+                        if current_model_size and current_model_size != whisper_model_size:
+                            self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
+                            self._safe_release_whisper_gpu()
+                            del self.whisper_model
+                            self.whisper_model = None
+                            gc.collect()
+                        if self.whisper_model is None:
+                            try:
+                                import torch
+                                import whisper
+                                device = "cuda" if torch.cuda.is_available() else "cpu"
+                                if device == "cuda":
+                                    gpu_name = torch.cuda.get_device_name(0)
+                                    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                    self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                                self.whisper_model = whisper.load_model(whisper_model_size, device=device)
+                                self._whisper_model_size = whisper_model_size
+                                self._whisper_on_gpu = (device == "cuda")
+                                whisper_used_gpu = (device == "cuda")
+                                self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
+                            except Exception as e:
+                                self.log(f"⚠️ Whisper加载失败: {e}")
+                        else:
+                            try:
+                                import torch
+                                if torch.cuda.is_available():
+                                    gpu_name = torch.cuda.get_device_name(0)
+                                    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                    self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                                    self.whisper_model = self.whisper_model.to("cuda")
+                                    self._whisper_on_gpu = True
+                                    whisper_used_gpu = True
+                                    self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
+                                else:
+                                    self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
+                            except Exception as e:
+                                self.log(f"⚠️ Whisper移至GPU失败，使用CPU: {e}")
+                    else:
+                        self.log("📦 正在加载Whisper模型...")
                         try:
                             import torch
                             import whisper
-                            device = "cuda" if torch.cuda.is_available() else "cpu"
-                            if device == "cuda":
-                                gpu_name = torch.cuda.get_device_name(0)
-                                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-                            self.whisper_model = whisper.load_model(whisper_model_size, device=device)
-                            self._whisper_model_size = whisper_model_size
-                            self._whisper_on_gpu = (device == "cuda")
-                            whisper_used_gpu = (device == "cuda")
-                            self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
-                        except Exception as e:
-                            self.log(f"⚠️ Whisper加载失败: {e}")
-                    else:
-                        try:
-                            import torch
+                            whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                             if torch.cuda.is_available():
+                                device = "cuda"
                                 gpu_name = torch.cuda.get_device_name(0)
                                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-                                self.whisper_model = self.whisper_model.to("cuda")
-                                self._whisper_on_gpu = True
-                                whisper_used_gpu = True
-                                self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
+                                cuda_version = torch.version.cuda
+                                self.log(f"🖥️ 使用GPU加速: {gpu_name}")
+                                self.log(f"   CUDA版本: {cuda_version}")
+                                self.log(f"   GPU显存: {gpu_memory:.1f} GB")
+                                self.log(f"   使用模型: Whisper {whisper_model_size}")
                             else:
+                                device = "cpu"
                                 self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                        except Exception as e:
-                            self.log(f"⚠️ Whisper移至GPU失败，使用CPU: {e}")
-                else:
-                    # 模型未预加载，全新加载
-                    self.log("📦 正在加载Whisper模型...")
-                    try:
-                        import torch
-                        import whisper
-                        
-                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                        
-                        if torch.cuda.is_available():
-                            device = "cuda"
-                            gpu_name = torch.cuda.get_device_name(0)
-                            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                            cuda_version = torch.version.cuda
-                            self.log(f"🖥️ 使用GPU加速: {gpu_name}")
-                            self.log(f"   CUDA版本: {cuda_version}")
-                            self.log(f"   GPU显存: {gpu_memory:.1f} GB")
-                            self.log(f"   使用模型: Whisper {whisper_model_size}")
-                        else:
-                            device = "cpu"
-                            self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                            self.log(f"   使用模型: Whisper {whisper_model_size}")
-                        
-                        self.whisper_model = whisper.load_model(whisper_model_size, device=device)
-                        whisper_model_loaded = True
-                        self._whisper_on_gpu = (device == "cuda")
-                        
-                        if torch.cuda.is_available():
-                            whisper_used_gpu = True
-                            self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (GPU加速)")
-                        else:
-                            self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
-                    except Exception as e:
-                        self.log(f"⚠️ GPU加载失败，回退到CPU: {e}")
-                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                        try:
-                            self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
+                                self.log(f"   使用模型: Whisper {whisper_model_size}")
+                            self.whisper_model = whisper.load_model(whisper_model_size, device=device)
                             whisper_model_loaded = True
-                            self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
-                        except Exception as e2:
-                            self.log(f"❌ 模型加载完全失败: {e2}")
-                            self.update_task_progress("就绪")
-                            return
-                
-                # 语音识别，启用标点符号（添加超时机制）
-                self.update_task_progress("正在进行语音识别...", 30)
-                try:
-                    # 使用线程池添加超时控制
+                            self._whisper_on_gpu = (device == "cuda")
+                            if torch.cuda.is_available():
+                                whisper_used_gpu = True
+                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (GPU加速)")
+                            else:
+                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
+                        except Exception as e:
+                            self.log(f"⚠️ GPU加载失败，回退到CPU: {e}")
+                            whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
+                            try:
+                                self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
+                                whisper_model_loaded = True
+                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
+                            except Exception as e2:
+                                self.log(f"❌ 模型加载完全失败: {e2}")
+                                self.update_task_progress("就绪")
+                                return
                     
-                    if not self.task_running:
-                        self.log("❌ 任务已被取消")
+                    self.update_task_progress("正在进行语音识别...", 30)
+                    try:
+                        if not self.task_running:
+                            self.log("❌ 任务已被取消")
+                            return
+                        result = self.whisper_model.transcribe(
+                            self.audio_path,
+                            language="zh",
+                            word_timestamps=True,
+                            fp16=False,
+                            verbose=False,
+                            condition_on_previous_text=False,
+                            no_speech_threshold=0.3
+                        )
+                        segments = result.get("segments", [])
+                        self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段")
+                        if len(segments) < 50:
+                            avg_duration = sum(s.get('end', 0) - s.get('start', 0) for s in segments) / len(segments) if segments else 0
+                            self.log(f"   ℹ️ 平均片段时长: {avg_duration:.1f}秒，如需要更细分镜可减小停顿检测阈值")
+                    except Exception as e:
+                        self.log(f"❌ 语音识别失败: {e}")
+                        self.update_task_progress("就绪")
                         return
                     
-                    # 语音识别（优化参数，更敏感检测停顿）
-                    result = self.whisper_model.transcribe(
-                        self.audio_path,
-                        language="zh",
-                        word_timestamps=True,
-                        fp16=False,
-                        verbose=False,
-                        condition_on_previous_text=False,  # 减少对前文依赖，提高切分精度
-                        no_speech_threshold=0.3            # 降低无语音阈值，更敏感检测停顿
-                    )
+                    if not segments:
+                        self.log("❌ 音频识别失败，无法生成分镜")
+                        self.update_task_progress("就绪")
+                        return
                     
-                    segments = result.get("segments", [])
-                    self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段")
-                    
-                    # 提示：如果片段过少，说明语音停顿不明显
-                    if len(segments) < 50:
-                        avg_duration = sum(s.get('end', 0) - s.get('start', 0) for s in segments) / len(segments) if segments else 0
-                        self.log(f"   ℹ️ 平均片段时长: {avg_duration:.1f}秒，如需要更细分镜可减小停顿检测阈值")
-                except Exception as e:
-                    self.log(f"❌ 语音识别失败: {e}")
-                    self.update_task_progress("就绪")
-                    return
-                
-                if not segments:
-                    self.log("❌ 音频识别失败，无法生成分镜")
-                    self.update_task_progress("就绪")
-                    return
-                
-                # 收集完整文本用于大模型分析
-                full_text = "".join([segment.get("text", "").strip() for segment in segments])
-                
-                # 缓存分析结果
-                cache_data = {
-                    'segments': segments,
-                    'full_text': full_text
-                }
-                self.cache_set('audio_analysis', audio_key, cache_data)
-                self.log("✅ 音频分析结果已缓存")
-
-                # Whisper 转录完成，主动释放 GPU 资源（关键优化）
-                self._safe_release_whisper_gpu()
-                if not self._whisper_on_gpu:
-                    self.log("   ✅ Whisper 模型 GPU 资源已释放")
+                    full_text = "".join([segment.get("text", "").strip() for segment in segments])
+                    cache_data = {'segments': segments, 'full_text': full_text}
+                    self.cache_set('audio_analysis', audio_key, cache_data)
+                    self.log("✅ 音频分析结果已缓存")
+                    self._safe_release_whisper_gpu()
+                    if not self._whisper_on_gpu:
+                        self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
@@ -2756,25 +2804,30 @@ Requirements:
                     self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
-                _ollama_model_already_loaded = is_ollama_available()
+                _ollama_model_already_loaded = is_llm_available()
             else:
                 if len(full_text) > 100:
+                    llm_ready = is_llm_available()
                     ollama_connected = False
-                    if check_ollama_available():
-                        set_ollama_available_global(True)
-                        ollama_connected = True
-                        self.log("✅ 已连接到Ollama服务")
-                    else:
-                        self.log("⚠️ Ollama服务未响应")
-                        self.log("   尝试自动启动Ollama服务...")
-                        if try_start_ollama_service():
+                    
+                    if not llm_ready:
+                        if check_ollama_available():
                             set_ollama_available_global(True)
                             ollama_connected = True
-                            self.log("✅ Ollama服务已启动并连接成功")
+                            llm_ready = True
+                            self.log("✅ 已连接到Ollama服务")
                         else:
-                            self.log("❌ 无法启动Ollama服务")
+                            self.log("⚠️ Ollama服务未响应")
+                            self.log("   尝试自动启动Ollama服务...")
+                            if try_start_ollama_service():
+                                set_ollama_available_global(True)
+                                ollama_connected = True
+                                llm_ready = True
+                                self.log("✅ Ollama服务已启动并连接成功")
+                            else:
+                                self.log("❌ 本地Ollama不可用")
                     
-                    if ollama_connected and is_ollama_available():
+                    if llm_ready:
                         try:
                             self.update_task_progress("正在使用大模型分析文章内容...", 50)
                             
@@ -3040,7 +3093,7 @@ Requirements:
                 theme_info['correction_dict'] = existing_corrections
                 self.log(f"   📝 常见ASR错误映射补充 {len(COMMON_ASR_ERRORS)} 项")
             
-            if is_ollama_available() and full_text and len(full_text) > 50:
+            if is_llm_available() and full_text and len(full_text) > 50:
                 existing_corrections = theme_info.get('correction_dict', {})
                 if len(existing_corrections) < 3:
                     self.log("\n🔧 执行二次纠错（专用纠错模板）...")
@@ -3424,6 +3477,18 @@ Requirements:
 
             # 主题一致性检查完成后，卸载Ollama释放GPU（后续步骤不再需要Ollama）
             self._unload_ollama_models()
+
+            # 云端生图启用时，额外释放Whisper GPU（后续图像生成不需要本地GPU）
+            cloud_img = False
+            try:
+                from video_generator.cloud_image_client import is_cloud_image_enabled
+                cloud_img = is_cloud_image_enabled()
+            except ImportError:
+                pass
+            if cloud_img:
+                self._safe_release_whisper_gpu()
+                if not self._whisper_on_gpu:
+                    self.log("   🧹 Whisper GPU 显存已释放（云端生图模式）")
 
             # 检查分镜是否为空
             if not shots:

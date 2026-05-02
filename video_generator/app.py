@@ -13,60 +13,12 @@ import ctypes
 from ctypes import wintypes
 
 # ============ Sub-module imports ============
-from video_generator.config import Config, get_http_session
-from video_generator.cache import SmartCache, prompt_cache, image_cache
-from video_generator.ollama_client import (
-    LLMConfig, call_ollama_model, call_ollama_single, warmup_model,
-    is_ollama_available, set_ollama_available, check_ollama_available,
-    get_available_models, try_start_ollama_service,
-)
-from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer, MultiModelFusion
-from video_generator.templates import PromptTemplates
-from video_generator.parallel import ParallelPromptGenerator
-from video_generator.sd_generator import BatchSDGenerator
-from video_generator.hardware import HardwareAcceleratedRenderer
-from video_generator.optimization import (
-    ProgressManager, ResourceManager, BatchImageLoader, VideoRendererOptimizer,
-)
 
 print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-try:
-    from video_generator.enhanced_content_recognition import (
-        get_enhanced_recognizer, EnhancedContentRecognizer,
-        COUNTRY_MAPPING, REGION_MAPPING, CITY_MAPPING,
-        ORGANIZATION_MAPPING, MILITARY_MAPPING, CONTENT_TYPE_KEYWORDS,
-    )
-    ENHANCED_RECOGNITION_AVAILABLE = True
-except ImportError:
-    ENHANCED_RECOGNITION_AVAILABLE = False
-    print("⚠️ 增强版内容识别模块未找到，使用内置识别")
-
-try:
-    from video_generator.prompts_arv import ARVPromptTemplates, quick_generate_arv_prompt
-    ARV_PROMPTS_AVAILABLE = True
-except ImportError:
-    ARV_PROMPTS_AVAILABLE = False
-    print("⚠️ ARV提示词模板模块未找到，使用大模型生成所有提示词")
-
-try:
-    from video_generator.arv_optimization import AbsoluteRealisticPrompts, get_arv_prompter
-    ARV_OPTIMIZATION_AVAILABLE = True
-except ImportError:
-    ARV_OPTIMIZATION_AVAILABLE = False
-    print("⚠️ ARV优化模块未找到")
-
 # ============ Mixin imports ============
-from video_generator.app_state import (
-    OLLAMA_AVAILABLE,
-    get_ollama_available,
-    set_ollama_available_global,
-    lazy_import,
-    PERFORMANCE_MONITOR_AVAILABLE,
-    DEFAULT_MIN_SHOT_DURATION,
-)
 from video_generator.mixins.ui_init import UIInitMixin
 from video_generator.mixins.ui_panels import UIPanelsMixin
 from video_generator.mixins.ui_handlers import UIHandlersMixin
