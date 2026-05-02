@@ -257,7 +257,7 @@ class UIInitMixin:
     def _initialize_variables(self):
         """初始化变量"""
         # 基本路径
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.output_dir = os.path.join(self.base_dir, "output_project")
         self.images_dir = os.path.join(self.output_dir, "images")
         self.config_file = os.path.join(self.base_dir, "config.json")
