@@ -107,31 +107,28 @@ class UIHandlersMixin:
     def update_model_list(self):
         """更新模型列表，自动检测本地已安装的Ollama模型"""
         
-        # 模型信息字典：名称 -> (大小, 用途)
-        model_info = {
-            "qwen3:8b": ("5.2GB", "阿里通用模型，推荐首选"),
-            "qwen2.5:7b": ("4.7GB", "阿里通用模型，性能优秀"),
-            "gemma3:4b": ("3.3GB", "Google通用模型，推荐"),
-            "qwen3:4b": ("2.5GB", "阿里通用模型"),
-            "llama3.2:3b": ("2.0GB", "Meta轻量级模型"),
-            "deepseek-r1:8b": ("5.2GB", "推理模型，不推荐提示词"),
-            "gemma3:1b": ("815MB", "轻量级模型，速度快"),
+        model_sizes = {
+            "qwen3.5:4b": "2.5GB",
+            "qwen3:8b": "5.2GB",
+            "qwen3:4b": "2.5GB",
+            "qwen2.5:7b": "4.7GB",
+            "qwen2.5:3b": "2.0GB",
+            "gemma3:4b": "3.3GB",
+            "deepseek-r1:8b": "5.2GB",
+            "llama3.2:3b": "2.0GB",
+            "mistral": "4.1GB",
+            "llama3": "4.7GB",
         }
         
         def get_model_label(model_name):
-            """获取模型显示标签（名称+大小+用途）"""
-            for key, (size, desc) in model_info.items():
+            for key, size in model_sizes.items():
                 if key in model_name:
-                    return f"{model_name} | {size} | {desc}"
-            return f"{model_name}"
+                    return f"{model_name}  {size}"
+            return model_name
         
-        # 清空现有模型按钮
         for widget in self.model_dropdown_inner_frame.winfo_children():
             widget.destroy()
         
-        # 已移除"本地大模型"选项，因为该功能已不再使用
-        
-        # 自动检测并启动Ollama服务
         ollama_connected = False
         if check_ollama_available():
             set_ollama_available(True)
@@ -141,115 +138,36 @@ class UIHandlersMixin:
                 set_ollama_available(True)
                 ollama_connected = True
         
-        # 尝试获取本地已安装的Ollama模型
         try:
             if is_ollama_available() or ollama_connected:
                 available_models = get_available_models()
                 model_names = available_models
                     
                 if model_names:
-                    recommended_models = []
                     for model in model_names:
-                        if any(keyword in model.lower() for keyword in ["qwen", "gemma", "deepseek", "llama", "mistral"]):
-                            recommended_models.append((model, True))
-                        else:
-                            recommended_models.append((model, False))
-                    
-                    for model, is_recommended in recommended_models:
-                        model_label = model
-                        if "qwen2.5:7b" in model:
-                            model_label = f"{model} (通用任务，推荐)"
-                        elif "qwen2.5:3b" in model:
-                            model_label = f"{model} (轻量级任务，速度优先)"
-                        elif "qwen3:8b" in model:
-                            model_label = f"{model} (通用任务，内容分析)"
-                        elif "qwen3:4b" in model:
-                            model_label = f"{model} (轻量级通用任务)"
-                        elif "deepseek-r1:8b" in model:
-                            model_label = f"{model} (推理任务，逻辑分析)"
-                        elif "gemma3:4b" in model:
-                            model_label = f"{model} (通用任务，提示词优化)"
-                        elif "gemma3:1b" in model:
-                            model_label = f"{model} (超轻量任务，极速响应)"
-                        elif "mistral" in model:
-                            model_label = f"{model} (通用任务，创意生成)"
-                        elif "llama3" in model:
-                            model_label = f"{model} (通用任务，长文本分析)"
-                        
-                        if is_recommended:
-                            btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                        else:
-                            btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                        model_label = get_model_label(model)
+                        btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                         btn.pack(fill=tk.X, pady=1, padx=5)
                 else:
-                    default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
+                    default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
                     for model in default_models:
-                        model_label = model
-                        if "qwen2.5:7b" in model:
-                            model_label = f"{model} (通用任务，推荐)"
-                        elif "qwen2.5:3b" in model:
-                            model_label = f"{model} (轻量级任务，速度优先)"
-                        elif "gemma3:4b" in model:
-                            model_label = f"{model} (通用任务，提示词优化)"
-                        elif "gemma3:1b" in model:
-                            model_label = f"{model} (超轻量任务，极速响应)"
-                        elif "deepseek-r1:8b" in model:
-                            model_label = f"{model} (推理任务，逻辑分析)"
-                        elif "mistral" in model:
-                            model_label = f"{model} (通用任务，创意生成)"
-                        elif "llama3" in model:
-                            model_label = f"{model} (通用任务，长文本分析)"
-                        
-                        btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                        model_label = get_model_label(model)
+                        btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                         btn.pack(fill=tk.X, pady=1, padx=5)
             else:
-                # 如果Ollama不可用，显示默认模型
-                default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
+                default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
                 for model in default_models:
-                    # 添加模型任务标注
-                    model_label = model
-                    if "qwen2.5:7b" in model:
-                        model_label = f"{model} (通用任务，推荐)"
-                    elif "qwen2.5:3b" in model:
-                        model_label = f"{model} (轻量级任务，速度优先)"
-                    elif "gemma3:4b" in model:
-                        model_label = f"{model} (通用任务，提示词优化)"
-                    elif "gemma3:1b" in model:
-                        model_label = f"{model} (超轻量任务，极速响应)"
-                    elif "deepseek-r1:8b" in model:
-                        model_label = f"{model} (推理任务，逻辑分析)"
-                    elif "mistral" in model:
-                        model_label = f"{model} (通用任务，创意生成)"
-                    elif "llama3" in model:
-                        model_label = f"{model} (通用任务，长文本分析)"
-                    
-                    btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                    model_label = get_model_label(model)
+                    btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                     btn.pack(fill=tk.X, pady=1, padx=5)
         except Exception as e:
             error_msg = str(e)
             status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
             self.log(f"获取Ollama模型列表失败: {error_msg} (status code: {status_code})")
-            # 出错时显示默认模型
-            default_models = ["qwen2.5:7b", "gemma3:4b", "deepseek-r1:8b", "qwen2.5:3b", "gemma3:1b", "mistral", "llama3"]
+            default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
             for model in default_models:
-                # 添加模型任务标注
-                model_label = model
-                if "qwen2.5:7b" in model:
-                    model_label = f"{model} (通用任务，推荐)"
-                elif "qwen2.5:3b" in model:
-                    model_label = f"{model} (轻量级任务，速度优先)"
-                elif "gemma3:4b" in model:
-                    model_label = f"{model} (通用任务，提示词优化)"
-                elif "gemma3:1b" in model:
-                    model_label = f"{model} (超轻量任务，极速响应)"
-                elif "deepseek-r1:8b" in model:
-                    model_label = f"{model} (推理任务，逻辑分析)"
-                elif "mistral" in model:
-                    model_label = f"{model} (通用任务，创意生成)"
-                elif "llama3" in model:
-                    model_label = f"{model} (通用任务，长文本分析)"
-                
-                btn = ttk.Button(self.model_dropdown_inner_frame, text=f"{model_label} (推荐)", command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
+                model_label = get_model_label(model)
+                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
                 btn.pack(fill=tk.X, pady=1, padx=5)
 
 
@@ -421,25 +339,15 @@ class UIHandlersMixin:
             self.model_dropdown_frame.pack_forget()
             self.model_dropdown_visible = False
         else:
-            # 每次打开下拉菜单前，先更新模型列表
             self.update_model_list()
-            # 重新创建Canvas内的窗口
-            self.model_dropdown_canvas.create_window((0, 0), window=self.model_dropdown_inner_frame, anchor="nw")
-            # 设置Canvas窗口宽度与Canvas一致
-            self.model_dropdown_inner_frame.update_idletasks()
-            self.model_dropdown_canvas.itemconfig(self.model_dropdown_canvas.find_withtag("all")[0] if self.model_dropdown_canvas.find_withtag("all") else None, width=self.model_dropdown_canvas.winfo_width())
-            # 显示下拉框和滚动条
+            self.model_dropdown_inner_frame.pack(fill=tk.X)
             self.model_dropdown_frame.pack(fill=tk.X, pady=2)
-            self.model_dropdown_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            self.model_dropdown_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             self.model_dropdown_visible = True
-    
+
 
     def select_ollama_model(self, model):
         """选择Ollama模型"""
         self.ollama_model_var.set(model)
-        self.model_dropdown_canvas.pack_forget()
-        self.model_dropdown_scrollbar.pack_forget()
         self.model_dropdown_frame.pack_forget()
         self.model_dropdown_visible = False
         self.log(f"✅ 已选择Ollama模型: {model}")

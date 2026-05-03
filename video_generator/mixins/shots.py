@@ -2825,7 +2825,7 @@ Requirements:
                     self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
-                _ollama_model_already_loaded = is_llm_available()
+                _ollama_model_already_loaded = False
             else:
                 if len(full_text) > 100:
                     llm_ready = is_llm_available()
@@ -3130,15 +3130,27 @@ Requirements:
             if _ollama_model_already_loaded:
                 self.log("✅ 模型已在GPU中（主题分析阶段已加载），跳过预热")
             else:
+                try:
+                    from video_generator.cloud_llm_client import is_cloud_llm_enabled
+                    _need_restart = not is_cloud_llm_enabled()
+                except ImportError:
+                    _need_restart = True
+                
+                if _need_restart:
+                    from video_generator.ollama_client import restart_ollama_service
+                    restart_ollama_service(log_callback=self.log)
+                
                 self.log("🔥 预热模型中...")
                 try:
                     model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
                     if not model:
                         model = "gemma3:4b"
                     warmup_start = time.time()
-                    warmup_model(model)
+                    warmup_model(model, log_callback=self.log)
                     warmup_time = time.time() - warmup_start
                     self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
+                    time.sleep(2)
+                    self.log("   ⏳ 等待模型就绪...")
                 except Exception as e:
                     self._log_exception(f"⚠️ 模型预热失败", e)
             
@@ -3197,6 +3209,15 @@ Requirements:
                 prompt_max_workers = self.prompt_thread_count_var.get()
             else:
                 prompt_max_workers = 4
+            
+            try:
+                from video_generator.cloud_llm_client import is_cloud_llm_enabled
+                _cloud_llm = is_cloud_llm_enabled()
+            except ImportError:
+                _cloud_llm = False
+            
+            if not _cloud_llm and prompt_max_workers > 3:
+                self.log(f"   💡 本地Ollama串行处理请求，{prompt_max_workers}线程排队执行")
             
             total_tasks = len(final_tasks)
             self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")

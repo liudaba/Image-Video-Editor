@@ -521,8 +521,7 @@ class ImagesMixin:
                 self.log(f"   可用模型: 无法获取")
                     
         except Exception as e:
-            self._log_exception("❌ SD服务连接异常", e)
-            self.log("💡 请确认 Stable Diffusion Web UI 已启动且API地址正确")
+            self.log("❌ SD服务连接异常，💡 请确认 Stable Diffusion Web UI 已启动且API地址正确")
             self.update_task_progress("就绪")
             return
             

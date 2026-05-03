@@ -5,9 +5,19 @@
 使用 HTTP API 直接调用，避免 ollama 库版本兼容性问题
 """
 
+import re
+import subprocess
 import threading
 import time
 from .config import Config, get_http_session
+
+
+def _strip_think_tags(text):
+    if not text:
+        return text
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'</?think>', '', text)
+    return text.strip()
 
 
 # ============ Ollama 全局状态（线程安全管理） ============
@@ -97,13 +107,57 @@ def get_available_models(force_refresh=False):
     return _ollama_models_cache or []
 
 
+def restart_ollama_service(log_callback=None):
+    """重启Ollama服务，强制重新检测GPU
+
+    当Ollama在模型卸载/重载后GPU检测缓存失效时使用。
+    先关闭现有Ollama进程，再重新启动。
+
+    Args:
+        log_callback: 日志回调
+
+    Returns:
+        bool: 是否成功重启
+    """
+    import os
+
+    if log_callback:
+        log_callback("🔄 重启Ollama服务（强制重新检测GPU）...")
+
+    try:
+        if os.name == 'nt':
+            subprocess.run(
+                ["taskkill", "/f", "/im", "ollama.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            time.sleep(2)
+        else:
+            subprocess.run(["pkill", "-f", "ollama"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+    except Exception:
+        pass
+
+    set_ollama_available(False)
+    time.sleep(1)
+
+    if try_start_ollama_service():
+        if log_callback:
+            log_callback("✅ Ollama服务已重启")
+        return True
+    else:
+        if log_callback:
+            log_callback("⚠️ Ollama服务重启失败")
+        return False
+
+
 def try_start_ollama_service():
     """尝试自动启动 Ollama 服务
 
     Returns:
         bool: 是否成功启动
     """
-    import subprocess
     import os
 
     ollama_path = None
@@ -216,7 +270,7 @@ class LLMConfig:
 
 
 # ============ 统一 Ollama 调用函数 ============
-_ollama_call_semaphore = threading.Semaphore(3)
+_ollama_call_semaphore = threading.Semaphore(2)
 
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
@@ -290,6 +344,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             "num_ctx": num_ctx
         }
 
+    options["num_gpu"] = -1
+
     for model in candidate_models:
         try:
             if log_callback:
@@ -317,7 +373,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 continue
 
             result_data = response.json()
-            result = result_data.get("message", {}).get("content", "").strip()
+            result = _strip_think_tags(result_data.get("message", {}).get("content", ""))
 
             if not result:
                 if log_callback:
@@ -404,6 +460,8 @@ def call_ollama_single(model, system_prompt, user_prompt,
     if extra_options:
         options.update(extra_options)
 
+    options["num_gpu"] = -1
+
     try:
         with _ollama_call_semaphore:
             response = get_http_session().post(
@@ -427,7 +485,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
             return None, None
 
         result_data = response.json()
-        result = result_data.get("message", {}).get("content", "").strip()
+        result = _strip_think_tags(result_data.get("message", {}).get("content", ""))
 
         if not result:
             if log_callback:
@@ -475,11 +533,32 @@ def warmup_model(model, log_callback=None):
                     "keep_alive": 60,
                     "options": {
                         "num_predict": 1,
-                        "temperature": 0.1
+                        "temperature": 0.1,
+                        "num_gpu": -1
                     }
                 },
-                timeout=(10, 30)
+                timeout=(10, 60)
             )
+        if response.status_code == 200:
+            try:
+                ps_resp = get_http_session().get(
+                    f"{Config.OLLAMA_BASE_URL}/api/ps",
+                    timeout=5
+                )
+                if ps_resp.status_code == 200:
+                    models = ps_resp.json().get('models', [])
+                    for m in models:
+                        if model in m.get('name', ''):
+                            size_vram = m.get('size_vram', 0)
+                            size_total = m.get('size', 0)
+                            if log_callback:
+                                if size_vram > 0:
+                                    log_callback(f"   🖥️ 模型已加载到GPU (VRAM: {size_vram/1024**3:.1f}GB)")
+                                elif size_total > 0:
+                                    log_callback(f"   ⚠️ 模型运行在CPU上 (内存: {size_total/1024**3:.1f}GB，GPU未使用)")
+                            break
+            except Exception:
+                pass
         return response.status_code == 200
     except Exception:
         return False

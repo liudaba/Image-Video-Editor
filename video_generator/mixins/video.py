@@ -250,7 +250,7 @@ class VideoMixin:
                             
                             shot_dur = shot['end'] - shot['start']
                             gap = shot['start'] - prev_end
-                            if gap > 0.05 and prev_end > 0:
+                            if gap > 0.05:
                                 shot_dur += gap
                             
                             resized_name = f"resized_{len(resized_images):04d}.jpg"
@@ -450,21 +450,23 @@ class VideoMixin:
                 if has_gaps:
                     self.log("      ⚠️ 检测到片段间时间间隔，使用延续图片方式填充")
                 
+                if has_start_gap and clips:
+                    first_clip = clips[0]
+                    new_duration = first_clip.duration + first_clip.start
+                    clips[0] = first_clip.with_duration(new_duration).with_start(0)
+                
                 fixed_clips = []
                 prev_clip = None
                 
                 for i, clip in enumerate(clips):
                     if prev_clip is not None:
-                        # 计算前一个片段的实际结束时间
                         prev_end = prev_clip.start + prev_clip.duration
                         curr_start = clip.start
                         gap = curr_start - prev_end
                         
                         if gap > 0.05:
-                            # 扩展前一个片段填补间隔
                             new_duration = prev_clip.duration + gap
                             prev_clip = prev_clip.with_duration(new_duration)
-                            # 更新列表中前一个元素
                             fixed_clips[-1] = prev_clip
                     
                     fixed_clips.append(clip)

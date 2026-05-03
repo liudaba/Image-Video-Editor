@@ -19,7 +19,7 @@ class UIPanelsMixin:
         frame.columnconfigure(0, weight=1)
         
         # 为每个功能组设置权重，实现均匀分布
-        for i in range(8):
+        for i in range(9):  # 增加一行用于更新按钮
             frame.rowconfigure(i, weight=1)
         
         # 顶部标题和文件夹按钮
@@ -35,9 +35,22 @@ class UIPanelsMixin:
         btn_open_folder = ttk.Button(title_frame, text="📁 打开文件夹", command=self.open_output_folder, style="Medium.TButton")
         btn_open_folder.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
+        # ========== 新增: 版本更新按钮 ==========
+        update_frame = ttk.Frame(frame)
+        update_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
+        update_frame.columnconfigure(0, weight=1)
+        update_frame.rowconfigure(0, weight=1)
+        
+        btn_check_update = ttk.Button(update_frame, text="🔄 检查更新", command=self.check_for_updates, style="Medium.TButton")
+        btn_check_update.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # 分隔线
+        sep_update = ttk.Separator(frame, orient='horizontal')
+        sep_update.grid(row=2, column=0, sticky="ew", pady=5)
+
         # 第一组：音频导入
         section1 = ttk.Frame(frame)
-        section1.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
+        section1.grid(row=3, column=0, sticky="nsew", pady=(0, 5))
         section1.columnconfigure(0, weight=1)
         section1.rowconfigure(0, weight=1)
         section1.rowconfigure(1, weight=1)
@@ -58,11 +71,11 @@ class UIPanelsMixin:
 
         # 分隔线
         sep1 = ttk.Separator(frame, orient='horizontal')
-        sep1.grid(row=2, column=0, sticky="ew", pady=5)
+        sep1.grid(row=4, column=0, sticky="ew", pady=5)
 
         # 第二组：生成分镜
         section2 = ttk.Frame(frame)
-        section2.grid(row=3, column=0, sticky="nsew", pady=(0, 5))
+        section2.grid(row=5, column=0, sticky="nsew", pady=(0, 5))
         section2.columnconfigure(0, weight=1)
         section2.rowconfigure(0, weight=1)
         
@@ -71,11 +84,11 @@ class UIPanelsMixin:
 
         # 分隔线
         sep2 = ttk.Separator(frame, orient='horizontal')
-        sep2.grid(row=4, column=0, sticky="ew", pady=5)
+        sep2.grid(row=6, column=0, sticky="ew", pady=5)
 
         # 第三组：视频生成
         section5 = ttk.Frame(frame)
-        section5.grid(row=5, column=0, sticky="nsew", pady=(0, 5))
+        section5.grid(row=7, column=0, sticky="nsew", pady=(0, 5))
         section5.columnconfigure(0, weight=1)
         section5.rowconfigure(0, weight=1)
         section5.rowconfigure(1, weight=1)
@@ -87,11 +100,11 @@ class UIPanelsMixin:
 
         # 分隔线
         sep3 = ttk.Separator(frame, orient='horizontal')
-        sep3.grid(row=6, column=0, sticky="ew", pady=5)
+        sep3.grid(row=8, column=0, sticky="ew", pady=5)
 
         # 第四组：进度条和依赖检查
         status_frame = ttk.Frame(frame)
-        status_frame.grid(row=7, column=0, sticky="nsew", pady=(0, 5))
+        status_frame.grid(row=9, column=0, sticky="nsew", pady=(0, 5))
         status_frame.columnconfigure(0, weight=1)
         
         # 进度条
@@ -562,12 +575,7 @@ class UIPanelsMixin:
         self._ollama_button.pack(fill=tk.X, padx=5, pady=2)
         
         self.model_dropdown_frame = ttk.Frame(ollama_frame_right)
-        self.model_dropdown_canvas = tk.Canvas(self.model_dropdown_frame, height=200, highlightthickness=0, bg=self.panel_bg)
-        self.model_dropdown_scrollbar = ttk.Scrollbar(self.model_dropdown_frame, orient="vertical", command=self.model_dropdown_canvas.yview)
-        self.model_dropdown_inner_frame = ttk.Frame(self.model_dropdown_canvas)
-        
-        self.model_dropdown_canvas.configure(yscrollcommand=self.model_dropdown_scrollbar.set)
-        self.model_dropdown_inner_frame.bind("<Configure>", lambda e: self.model_dropdown_canvas.configure(scrollregion=self.model_dropdown_canvas.bbox("all")))
+        self.model_dropdown_inner_frame = ttk.Frame(self.model_dropdown_frame)
         
         config_frame = ttk.Frame(model_section)
         config_frame.pack(fill=tk.X, pady=3)
@@ -684,5 +692,90 @@ class UIPanelsMixin:
             self._setup_smart_scroll()
         
         self.log("📋 日志区域初始化完成")
-    
 
+    def check_for_updates(self):
+        """检查更新"""
+        try:
+            from video_generator.auto_updater import check_and_notify_update
+            check_and_notify_update(self.root, auto_check=False)
+        except ImportError as e:
+            self.log(f"⚠️ 更新模块未找到: {e}")
+            messagebox.showwarning("提示", "自动更新功能尚未启用")
+        except Exception as e:
+            self.log(f"❌ 检查更新失败: {e}")
+            messagebox.showerror("错误", f"检查更新失败:\n{str(e)}")
+    
+    def start_periodic_update_check(self, interval_hours=24):
+        """启动定时更新检查
+        
+        Args:
+            interval_hours: 检查间隔(小时),默认24小时
+        """
+        import threading
+        import time
+        
+        def periodic_check():
+            """后台定期检查更新"""
+            while True:
+                time.sleep(interval_hours * 3600)  # 转换为秒
+                try:
+                    self.log("🔄 正在后台检查更新...")
+                    from video_generator.auto_updater import check_and_notify_update
+                    # 静默检查,不打扰用户
+                    check_and_notify_update(self.root, auto_check=True, silent=True)
+                except Exception as e:
+                    # 静默失败,不影响主程序
+                    pass
+        
+        # 启动后台线程
+        check_thread = threading.Thread(target=periodic_check, daemon=True)
+        check_thread.start()
+        self.log(f"✅ 已启动定时更新检查(每{interval_hours}小时)")
+    
+    def show_windows_notification(self, title, message, icon="info"):
+        """显示Windows桌面通知
+        
+        Args:
+            title: 通知标题
+            message: 通知内容
+            icon: 图标类型 (info/warning/error/success)
+        """
+        try:
+            # 尝试使用Windows原生通知
+            from winrt.windows.ui.notifications import ToastNotificationManager, ToastNotification
+            from winrt.windows.data.xml.dom import XmlDocument
+            
+            # 获取模板
+            notifier = ToastNotificationManager.create_toast_notifier()
+            template_type = 0  # ToastText02
+            
+            if icon == "warning":
+                template_type = 1  # ToastWarning
+            elif icon == "error":
+                template_type = 2  # ToastError
+            
+            xml = ToastNotificationManager.get_template_content(template_type)
+            
+            # 设置文本
+            text_elements = xml.get_elements_by_tag_name("text")
+            text_elements[0].append_child(xml.create_text_node(title))
+            text_elements[1].append_child(xml.create_text_node(message))
+            
+            # 创建并显示通知
+            toast = ToastNotification(xml)
+            notifier.show(toast)
+            
+        except ImportError:
+            # 如果winrt不可用,使用简单的tkinter弹窗
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            if icon == "warning":
+                messagebox.showwarning(title, message)
+            elif icon == "error":
+                messagebox.showerror(title, message)
+            else:
+                messagebox.showinfo(title, message)
+        except Exception as e:
+            # 降级到日志提示
+            self.log(f"🔔 {title}: {message}")
