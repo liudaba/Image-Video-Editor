@@ -33,16 +33,27 @@ models/*.safetensors
 output/
 outputs/
 output_project/
+
+# ⚠️ 注意: docs/ 目录下的演示素材需要提交到Git
+# 以下规则不忽略 docs/ 目录
+
+# 视频文件 (除了docs/demo/目录下的)
 *.mp4
 *.avi
 *.mov
 *.mkv
+
+# 音频文件
 *.wav
 *.mp3
+
+# 图片文件 (除了docs/screenshots/目录下的)
 *.jpg
 *.jpeg
 *.png
 *.gif
+
+# JSON配置文件 (除了config.json模板)
 *.json
 
 # 临时文件
@@ -63,3 +74,6 @@ Thumbs.db
 
 # 垃圾桶
 垃圾桶/
+
+# 备份文件
+*.bak
