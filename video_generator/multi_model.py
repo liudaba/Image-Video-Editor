@@ -123,18 +123,12 @@ class MultiModelFusion:
         def call_single_model(model_name):
             try:
                 start_time = time.time()
-                if "1b" in model_name or "tiny" in model_name:
-                    config = LLMConfig("极速模式")
-                elif "8b" in model_name or "14b" in model_name:
-                    config = LLMConfig("质量优先")
-                else:
-                    config = LLMConfig("平衡模式")
 
                 result_text, used_model = call_ollama_single(
                     model_name,
                     prompt_template["system"],
                     prompt_template["user"],
-                    llm_config=config
+                    llm_config=LLMConfig()
                 )
                 duration = time.time() - start_time
 

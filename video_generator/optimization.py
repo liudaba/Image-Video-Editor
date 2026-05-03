@@ -113,7 +113,6 @@ class ResourceManager:
 
     def __init__(self):
         self.gpu_memory_threshold = 0.85
-        self.ollama_keep_alive_minutes = 5
         self.whisper_unload_after_use = True
         self._cleanup_lock = threading.Lock()
         self._registered_pools: List[Any] = []

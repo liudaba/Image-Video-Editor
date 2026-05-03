@@ -715,6 +715,11 @@ class ResourceMixin:
             pass
 
         try:
+            self._unload_ollama_models(log_prefix="🔄 退出清理: ")
+        except Exception:
+            pass
+
+        try:
             session = get_http_session()
             if session is not None:
                 session.close()

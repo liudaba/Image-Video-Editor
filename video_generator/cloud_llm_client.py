@@ -149,7 +149,7 @@ def get_effective_base_url():
 
 
 def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
-                   num_predict=512, temperature=None):
+                   num_predict=512, temperature=None, llm_config=None):
     """统一的云端大模型调用函数
 
     所有云端API均兼容 OpenAI Chat Completions 格式。
@@ -192,7 +192,18 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
         "messages": messages,
         "max_tokens": num_predict,
     }
-    if temperature is not None:
+
+    if llm_config:
+        sampling = llm_config.get_options()
+        if "temperature" in sampling:
+            request_body["temperature"] = sampling["temperature"]
+        if "top_p" in sampling:
+            request_body["top_p"] = sampling["top_p"]
+        if "frequency_penalty" in sampling:
+            request_body["frequency_penalty"] = sampling["frequency_penalty"]
+        if "presence_penalty" in sampling:
+            request_body["presence_penalty"] = sampling["presence_penalty"]
+    elif temperature is not None:
         request_body["temperature"] = temperature
     else:
         request_body["temperature"] = 0.3

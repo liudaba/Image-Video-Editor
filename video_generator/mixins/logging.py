@@ -94,8 +94,15 @@ class LoggingMixin:
             except Exception:
                 pass
 
+    def _toggle_auto_scroll(self):
+        if hasattr(self, '_auto_scroll_var'):
+            auto = self._auto_scroll_var.get()
+            self._user_scrolling = not auto
+            if auto:
+                if hasattr(self, 'txt_log') and self.txt_log:
+                    self.txt_log.see(tk.END)
+
     def _on_log_scroll(self, event):
-        """监听滚动事件：用户上滚时暂停自动跟随，滚回底部时恢复"""
         if not hasattr(self, 'txt_log') or not self.txt_log:
             return
 
@@ -104,26 +111,26 @@ class LoggingMixin:
             at_bottom = yview[1] >= 0.998
 
             if event.delta:
-                if event.delta < 0:
-                    pass
-                else:
-                    if at_bottom:
-                        self._user_scrolling = False
-                    else:
+                if event.delta > 0:
+                    if not at_bottom:
                         self._user_scrolling = True
+                        if hasattr(self, '_auto_scroll_var'):
+                            self._auto_scroll_var.set(False)
             elif event.num == 4:
                 self._user_scrolling = True
+                if hasattr(self, '_auto_scroll_var'):
+                    self._auto_scroll_var.set(False)
             elif event.num == 5:
-                if at_bottom:
-                    self._user_scrolling = False
+                pass
 
             if at_bottom:
                 self._user_scrolling = False
+                if hasattr(self, '_auto_scroll_var'):
+                    self._auto_scroll_var.set(True)
         except Exception:
             pass
 
     def _on_log_scrollbar(self, *args):
-        """监听滚动条拖动：用户拖动滚动条时判断是否在底部"""
         if not hasattr(self, 'txt_log') or not self.txt_log:
             return
 
@@ -132,8 +139,12 @@ class LoggingMixin:
             at_bottom = yview[1] >= 0.998
             if at_bottom:
                 self._user_scrolling = False
+                if hasattr(self, '_auto_scroll_var'):
+                    self._auto_scroll_var.set(True)
             elif len(args) >= 2 and args[0] == 'moveto':
                 self._user_scrolling = True
+                if hasattr(self, '_auto_scroll_var'):
+                    self._auto_scroll_var.set(False)
         except Exception:
             pass
 

@@ -57,12 +57,12 @@ except ImportError:
     ARV_PROMPTS_AVAILABLE = False
 
 class ShotsMixin:
+    def _get_current_model(self):
+        return (self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else None) or "gemma3:4b"
+
     def generate_style_description(self, style):
         """使用Ollama模型生成详细的风格描述"""
-        # 检查Ollama模型设置
-        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
-        if not model:
-            model = "gemma3:4b"
+        model = self._get_current_model()
         cache_key = f"style_{style}_{model}"
         cached_description = self.cache_get('prompts', cache_key)
         if cached_description:
@@ -107,6 +107,7 @@ class ShotsMixin:
                 system_prompt="You are an AI art style keyword generator. Output only English keywords separated by commas.",
                 user_prompt=user_message,
                 log_callback=self.log,
+                llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             
@@ -318,7 +319,7 @@ class ShotsMixin:
         try:
             if not is_llm_available():
                 return segments
-            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            model = self._get_current_model()
             
             indexed_lines = []
             for i, seg in enumerate(segments):
@@ -361,6 +362,7 @@ class ShotsMixin:
                 log_callback=self.log,
                 num_predict=4000,
                 num_ctx=8192,
+                llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_ANALYSIS
             )
             
@@ -574,7 +576,7 @@ class ShotsMixin:
                 dubbing = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ""
                 if dubbing and is_llm_available():
                     try:
-                        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                        model = self._get_current_model()
                         if not model:
                             model = "gemma3:4b"
                         diff_prompt = f"""The previous shot prompt was: {prev_prompt}
@@ -595,6 +597,7 @@ Requirements:
                             log_callback=self.log,
                             num_predict=512,
                             num_ctx=2048,
+                            llm_config=getattr(self, 'current_llm_config', None),
                             timeout=Config.API_TIMEOUT_LLM_PROMPT
                         )
                         if result_text:
@@ -921,7 +924,7 @@ Requirements:
         if not is_llm_available():
             return ""
         try:
-            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            model = self._get_current_model()
             if not model:
                 model = "gemma3:4b"
             user_prompt = user_prompt_template.format(dubbing=dubbing)
@@ -932,6 +935,7 @@ Requirements:
                 log_callback=self.log,
                 num_predict=256,
                 num_ctx=2048,
+                llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             if result_text:
@@ -1330,7 +1334,7 @@ Requirements:
             else:
                 return self._analyze_and_generate_sd_prompt(dubbing, content_type)
             
-        model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+        model = self._get_current_model()
         if not model:
             model = "gemma3:4b"
         
@@ -2008,7 +2012,7 @@ Requirements:
 
 返回："""
             
-            model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+            model = self._get_current_model()
             if not model:
                 model = "gemma3:4b"
             model_list = [model, "gemma3:4b", "qwen3:8b", "mistral"]
@@ -2020,6 +2024,7 @@ Requirements:
                 log_callback=self.log,
                 num_predict=500,
                 num_ctx=2048,
+                llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
             
@@ -2745,7 +2750,7 @@ Requirements:
             
             # 显示当前使用的提示词类型
             self.log(f"💬 提示词类型: {prompt_type}")
-            self.log(f"🤖 大模型: {self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else '未选择'}")
+            self.log(f"🤖 大模型: {self._get_current_model()}")
             
             audio_file_hash = hashlib.md5(self.audio_path.encode()).hexdigest()[:8]
             cache_key_string = f"{audio_file_hash}_{full_text}_{content_type}_{prompt_type}"
@@ -2827,7 +2832,7 @@ Requirements:
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
                 _ollama_model_already_loaded = False
             else:
-                if len(full_text) > 100:
+                if len(full_text) > 20:
                     llm_ready = is_llm_available()
                     ollama_connected = False
                     
@@ -2853,7 +2858,7 @@ Requirements:
                             self.update_task_progress("正在使用大模型分析文章内容...", 50)
                             
                             # 获取用户指定的模型
-                            user_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                            user_model = self._get_current_model()
                             
                             # 定义模型优先级列表（包含本地所有已安装的Ollama模型）
                             # 按能力和稳定性排序，推理模型(deepseek-r1)不适合提示词生成
@@ -2983,7 +2988,7 @@ Requirements:
                                             current_model_index += 1
                                             
                                 except TimeoutError:
-                                    self.log(f"⚠️ 模型 {current_model} 响应超时（超过120秒）")
+                                    self.log(f"⚠️ 模型 {current_model} 响应超时（超过180秒）")
                                     self.log(f"   可能原因: 模型计算量大或GPU资源不足")
                                     current_model_index += 1
                                     
@@ -3096,6 +3101,9 @@ Requirements:
                             if user_custom_tone:
                                 theme_info['visual_tone'] = user_custom_tone
                                 self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
+                else:
+                    self.log(f"⚠️ 文本内容过短({len(full_text)}字符)，跳过大模型主题分析")
+                    self.log(f"   💡 提示: 主题分析需要至少20字符的文本内容")
             
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
             self.log("\n📍 步骤 2.5/4: 准备分镜任务")
@@ -3142,7 +3150,7 @@ Requirements:
                 
                 self.log("🔥 预热模型中...")
                 try:
-                    model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else "gemma3:4b"
+                    model = self._get_current_model()
                     if not model:
                         model = "gemma3:4b"
                     warmup_start = time.time()

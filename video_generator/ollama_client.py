@@ -20,7 +20,6 @@ def _strip_think_tags(text):
     return text.strip()
 
 
-# ============ Ollama 全局状态（线程安全管理） ============
 _ollama_state_lock = threading.Lock()
 _ollama_available = False
 _ollama_models_cache = None
@@ -29,13 +28,11 @@ _OLLAMA_MODELS_CACHE_TTL = 30
 
 
 def is_ollama_available():
-    """线程安全地获取 Ollama 可用状态"""
     with _ollama_state_lock:
         return _ollama_available
 
 
 def is_llm_available():
-    """检查大模型是否可用（云端或本地Ollama，任一可用即返回True）"""
     try:
         from video_generator.cloud_llm_client import is_cloud_llm_enabled
         if is_cloud_llm_enabled():
@@ -47,14 +44,12 @@ def is_llm_available():
 
 
 def set_ollama_available(value):
-    """线程安全地设置 Ollama 可用状态"""
     global _ollama_available
     with _ollama_state_lock:
         _ollama_available = value
 
 
 def check_ollama_available():
-    """检测 Ollama 服务是否可用，更新全局状态并返回"""
     try:
         response = get_http_session().get(
             f"{Config.OLLAMA_BASE_URL}/api/tags",
@@ -69,14 +64,6 @@ def check_ollama_available():
 
 
 def get_available_models(force_refresh=False):
-    """获取可用模型列表（带缓存）
-
-    Args:
-        force_refresh: 强制刷新缓存
-
-    Returns:
-        list: 模型名称列表，失败返回空列表
-    """
     global _ollama_models_cache, _ollama_models_cache_time
 
     now = time.time()
@@ -108,17 +95,6 @@ def get_available_models(force_refresh=False):
 
 
 def restart_ollama_service(log_callback=None):
-    """重启Ollama服务，强制重新检测GPU
-
-    当Ollama在模型卸载/重载后GPU检测缓存失效时使用。
-    先关闭现有Ollama进程，再重新启动。
-
-    Args:
-        log_callback: 日志回调
-
-    Returns:
-        bool: 是否成功重启
-    """
     import os
 
     if log_callback:
@@ -153,11 +129,6 @@ def restart_ollama_service(log_callback=None):
 
 
 def try_start_ollama_service():
-    """尝试自动启动 Ollama 服务
-
-    Returns:
-        bool: 是否成功启动
-    """
     import os
 
     ollama_path = None
@@ -189,63 +160,7 @@ def try_start_ollama_service():
     return False
 
 
-# ============ 思考模型专属参数（基于官方推荐） ============
-_THINKING_MODEL_PROFILES = {
-    "qwen3.5": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 20,
-        "presence_penalty": 1.5,
-        "repeat_penalty": 1.0,
-    },
-    "qwen3": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 20,
-        "presence_penalty": 1.5,
-        "repeat_penalty": 1.0,
-    },
-    "deepseek-r1": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "min_p": 0.01,
-        "repeat_penalty": 1.0,
-    },
-    "deepscaler": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "min_p": 0.01,
-        "repeat_penalty": 1.0,
-    },
-    "kimi": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 20,
-        "repeat_penalty": 1.0,
-    },
-    "glm-5": {
-        "temperature": 0.6,
-        "top_p": 0.95,
-        "top_k": 20,
-        "repeat_penalty": 1.0,
-    },
-}
-
-_THINKING_MODEL_PREFIXES = tuple(_THINKING_MODEL_PROFILES.keys())
-
-
-def _get_thinking_model_profile(model_name):
-    model_lower = model_name.lower()
-    for prefix, profile in _THINKING_MODEL_PROFILES.items():
-        if model_lower.startswith(prefix):
-            return profile
-    return None
-
-
-# ============ LLMConfig ============
 class LLMConfig:
-    """大模型高级配置类"""
-
     PRESETS = {
         "创意模式": {
             "temperature": 0.9,
@@ -306,7 +221,6 @@ class LLMConfig:
         self.custom_params = {}
 
     def get_options(self, **overrides):
-        """获取Ollama调用参数"""
         options = self.config.copy()
         options.update(self.custom_params)
         options.update(overrides)
@@ -325,43 +239,20 @@ class LLMConfig:
         return False
 
 
-# ============ 统一 Ollama 调用函数 ============
 _ollama_call_semaphore = threading.Semaphore(2)
 
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
                       log_callback=None, num_predict=512, num_ctx=4096,
                       llm_config=None, timeout=120):
-    """统一的大模型调用函数
-
-    调度逻辑：
-    - 云端大模型已启用 → 全部由云端模型完成，不使用本地Ollama
-    - 云端大模型未启用 → 全部由本地Ollama完成
-
-    Args:
-        model_list: 模型名称列表，按优先级排列
-        system_prompt: 系统提示词
-        user_prompt: 用户提示词
-        log_callback: 日志回调函数
-        num_predict: 预测token数
-        num_ctx: 上下文长度
-        llm_config: LLMConfig 实例，如果提供则使用其参数
-        timeout: 请求超时时间（秒），默认120秒
-
-    Returns:
-        tuple: (result_text, model_name) 或 (None, None)
-    """
     try:
         from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
         if is_cloud_llm_enabled():
-            temperature = None
-            if llm_config:
-                temperature = llm_config.config.get("temperature")
             result, model = call_cloud_llm(
                 system_prompt, user_prompt,
                 log_callback=log_callback,
                 num_predict=num_predict,
-                temperature=temperature,
+                llm_config=llm_config,
             )
             return result, model
     except ImportError:
@@ -393,12 +284,10 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             num_ctx=num_ctx
         )
     else:
-        options = {
-            "temperature": 0.3,
-            "top_p": 0.9,
-            "num_predict": num_predict,
-            "num_ctx": num_ctx
-        }
+        options = LLMConfig().get_options(
+            num_predict=num_predict,
+            num_ctx=num_ctx
+        )
 
     options["num_gpu"] = -1
 
@@ -408,18 +297,6 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 log_callback(f"   尝试模型: {model}")
 
             model_options = dict(options)
-            thinking_profile = _get_thinking_model_profile(model)
-            is_thinking = thinking_profile is not None
-            if is_thinking and model_options.get("num_predict", 0) < 8192:
-                model_options["num_predict"] = max(model_options.get("num_predict", 512) * 3, 8192)
-                if model_options.get("num_ctx", 0) < model_options["num_predict"] + 2048:
-                    model_options["num_ctx"] = model_options["num_predict"] + 2048
-
-            if thinking_profile:
-                for key in LLMConfig._SAMPLING_KEYS:
-                    if key in thinking_profile:
-                        model_options.pop(key, None)
-                        model_options[key] = thinking_profile[key]
 
             with _ollama_call_semaphore:
                 response = get_http_session().post(
@@ -432,7 +309,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                         ],
                         "stream": False,
                         "keep_alive": 60,
-                        "options": model_options
+                        "options": model_options,
+                        "think": False
                     },
                     timeout=(10, timeout)
                 )
@@ -444,19 +322,11 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
             result_data = response.json()
             message = result_data.get("message", {})
-            content = _strip_think_tags(message.get("content", ""))
-            thinking = _strip_think_tags(message.get("thinking", ""))
+            raw_content = message.get("content", "")
 
-            if content and thinking:
-                result = thinking + "\n" + content
-            elif content:
-                result = content
-            elif thinking:
-                result = thinking
-            else:
-                result = ""
+            content = _strip_think_tags(raw_content)
 
-            if not result:
+            if not content:
                 if log_callback:
                     log_callback(f"   ⚠️ 模型 {model} 返回空结果")
                 continue
@@ -464,7 +334,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             if log_callback:
                 log_callback(f"   ✅ 使用模型: {model}")
 
-            return result, model
+            return content, model
 
         except Exception as e:
             if log_callback:
@@ -479,39 +349,14 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
                        llm_config=None, extra_options=None, timeout=120):
-    """调用单个大模型（不自动切换）
-
-    调度逻辑：
-    - 云端大模型已启用 → 全部由云端模型完成，不使用本地Ollama
-    - 云端大模型未启用 → 全部由本地Ollama完成
-
-    Args:
-        model: 模型名称
-        system_prompt: 系统提示词
-        user_prompt: 用户提示词
-        log_callback: 日志回调
-        num_predict: 预测token数
-        num_ctx: 上下文长度
-        llm_config: LLMConfig 实例
-        extra_options: 额外的采样参数，会覆盖默认值（如 repeat_penalty, temperature）
-        timeout: 请求超时时间（秒），默认120秒
-
-    Returns:
-        tuple: (result_text, model_name) 或 (None, None)
-    """
     try:
         from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
         if is_cloud_llm_enabled():
-            temperature = None
-            if llm_config:
-                temperature = llm_config.config.get("temperature")
-            if extra_options and "temperature" in extra_options:
-                temperature = extra_options["temperature"]
             result, used_model = call_cloud_llm(
                 system_prompt, user_prompt,
                 log_callback=log_callback,
                 num_predict=num_predict,
-                temperature=temperature,
+                llm_config=llm_config,
             )
             return result, used_model
     except ImportError:
@@ -523,14 +368,6 @@ def call_ollama_single(model, system_prompt, user_prompt,
                 log_callback("⚠️ Ollama 服务不可用")
             return None, None
 
-    thinking_profile = _get_thinking_model_profile(model)
-    is_thinking_model = thinking_profile is not None
-
-    if is_thinking_model and num_predict < 8192:
-        num_predict = max(num_predict * 3, 8192)
-        if num_ctx < num_predict + 2048:
-            num_ctx = num_predict + 2048
-
     options = {}
     if llm_config:
         options = llm_config.get_options(
@@ -538,18 +375,10 @@ def call_ollama_single(model, system_prompt, user_prompt,
             num_ctx=num_ctx
         )
     else:
-        options = {
-            "temperature": 0.3,
-            "top_p": 0.9,
-            "num_predict": num_predict,
-            "num_ctx": num_ctx
-        }
-
-    if thinking_profile:
-        for key in LLMConfig._SAMPLING_KEYS:
-            if key in thinking_profile:
-                options.pop(key, None)
-                options[key] = thinking_profile[key]
+        options = LLMConfig().get_options(
+            num_predict=num_predict,
+            num_ctx=num_ctx
+        )
 
     if extra_options:
         options.update(extra_options)
@@ -566,7 +395,8 @@ def call_ollama_single(model, system_prompt, user_prompt,
                 ],
                 "stream": False,
                 "keep_alive": 60,
-                "options": options
+                "options": options,
+                "think": False
             }
             response = get_http_session().post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
@@ -581,26 +411,16 @@ def call_ollama_single(model, system_prompt, user_prompt,
 
         result_data = response.json()
         message = result_data.get("message", {})
-        content = _strip_think_tags(message.get("content", ""))
-        thinking = _strip_think_tags(message.get("thinking", ""))
+        raw_content = message.get("content", "")
 
-        if content and thinking:
-            result = thinking + "\n" + content
-        elif content:
-            result = content
-        elif thinking:
-            result = thinking
-            if log_callback:
-                log_callback(f"💡 模型 {model} content为空，已回退使用thinking字段")
-        else:
-            result = ""
+        content = _strip_think_tags(raw_content)
 
-        if not result:
+        if not content:
             if log_callback:
                 log_callback(f"⚠️ 模型 {model} 返回空结果")
             return None, None
 
-        return result, model
+        return content, model
 
     except Exception as e:
         if log_callback:
@@ -609,17 +429,6 @@ def call_ollama_single(model, system_prompt, user_prompt,
 
 
 def warmup_model(model, log_callback=None):
-    """预热模型（发送简单请求让模型加载到内存）
-
-    云端模式下自动跳过，不需要预热本地模型。
-
-    Args:
-        model: 模型名称
-        log_callback: 日志回调
-
-    Returns:
-        bool: 是否成功
-    """
     try:
         from video_generator.cloud_llm_client import is_cloud_llm_enabled
         if is_cloud_llm_enabled():
@@ -671,4 +480,3 @@ def warmup_model(model, log_callback=None):
         return response.status_code == 200
     except Exception:
         return False
-

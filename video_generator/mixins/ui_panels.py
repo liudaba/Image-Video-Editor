@@ -667,19 +667,24 @@ class UIPanelsMixin:
 
     def setup_log_area(self):
         """设置日志区域 - 独占右侧面板"""
-        # 创建日志区域
         log_frame = ttk.LabelFrame(self.log_frame_container, text="运行日志", padding=15)
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # 创建日志控制栏
         log_control_frame = ttk.Frame(log_frame)
         log_control_frame.pack(fill=tk.X, pady=(0, 5))
         
-        # 添加清除日志按钮
+        self._auto_scroll_var = tk.BooleanVar(value=True)
+        btn_toggle_scroll = ttk.Checkbutton(
+            log_control_frame, text="📌 自动跟随",
+            variable=self._auto_scroll_var,
+            command=self._toggle_auto_scroll,
+            style="Small.TCheckbutton"
+        )
+        btn_toggle_scroll.pack(side=tk.LEFT, padx=5)
+        
         btn_clear_log = ttk.Button(log_control_frame, text="🗑️ 清除日志", command=self.clear_log, style="Small.TButton")
         btn_clear_log.pack(side=tk.RIGHT, padx=5)
         
-        # 创建日志文本框
         self.txt_log = tk.Text(log_frame, wrap=tk.WORD, bg="#1e1e1e", fg="#d4d4d4", font=('Microsoft YaHei', self.font_size + 4))
         self.txt_log.pack(fill=tk.BOTH, expand=True)
         
