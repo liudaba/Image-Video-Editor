@@ -1423,8 +1423,10 @@ Requirements:
             self._log_exception(f"⚠️ 大模型调用失败，回退到内置逻辑生成基础提示词", e)
             self.log(f"   💡 提示: 回退生成的提示词质量较低，建议检查Ollama服务状态")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type)
-            return self._analyze_and_generate_sd_prompt(dubbing, content_type)
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type,
+                    core_theme=core_theme, visual_tone=visual_tone)
+            return self._analyze_and_generate_sd_prompt(dubbing, content_type,
+                custom_theme=core_theme, custom_visual_tone=visual_tone)
     
 
     def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name=""):

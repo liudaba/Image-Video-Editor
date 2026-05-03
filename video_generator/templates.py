@@ -378,6 +378,10 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
             else:
                 theme_instruction = ""
 
+            theme_elements = kwargs.get("theme_elements", "")
+            if theme_elements and theme_elements != "根据配音内容确定":
+                theme_instruction += f"\n【Key Visual Elements】MUST include these elements in the scene: {theme_elements}"
+
             system_content = template["system"].format(
                 style_instruction=style_instruction,
                 theme_instruction=theme_instruction,

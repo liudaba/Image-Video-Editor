@@ -43,6 +43,9 @@ class ARVPromptTemplates:
         parts.append(cls.STYLE_TAGS.get(style, ""))
         parts.append(cls.COMPOSITION_TAGS.get(composition, ""))
         parts.append(cls.LIGHTING_TAGS.get(lighting, ""))
+
+        if core_theme:
+            parts.append(core_theme)
         
         return ", ".join(p for p in parts if p)
 
