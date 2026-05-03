@@ -189,6 +189,59 @@ def try_start_ollama_service():
     return False
 
 
+# ============ 思考模型专属参数（基于官方推荐） ============
+_THINKING_MODEL_PROFILES = {
+    "qwen3.5": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "presence_penalty": 1.5,
+        "repeat_penalty": 1.0,
+    },
+    "qwen3": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "presence_penalty": 1.5,
+        "repeat_penalty": 1.0,
+    },
+    "deepseek-r1": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+    },
+    "deepscaler": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+    },
+    "kimi": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "repeat_penalty": 1.0,
+    },
+    "glm-5": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "repeat_penalty": 1.0,
+    },
+}
+
+_THINKING_MODEL_PREFIXES = tuple(_THINKING_MODEL_PROFILES.keys())
+
+
+def _get_thinking_model_profile(model_name):
+    model_lower = model_name.lower()
+    for prefix, profile in _THINKING_MODEL_PROFILES.items():
+        if model_lower.startswith(prefix):
+            return profile
+    return None
+
+
 # ============ LLMConfig ============
 class LLMConfig:
     """大模型高级配置类"""
@@ -243,6 +296,9 @@ class LLMConfig:
             "description": "最高输出质量，适合复杂任务"
         }
     }
+
+    _SAMPLING_KEYS = {"temperature", "top_p", "top_k", "min_p", "repeat_penalty",
+                      "frequency_penalty", "presence_penalty"}
 
     def __init__(self, preset="质量优先"):
         self.preset = preset
@@ -351,6 +407,20 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             if log_callback:
                 log_callback(f"   尝试模型: {model}")
 
+            model_options = dict(options)
+            thinking_profile = _get_thinking_model_profile(model)
+            is_thinking = thinking_profile is not None
+            if is_thinking and model_options.get("num_predict", 0) < 8192:
+                model_options["num_predict"] = max(model_options.get("num_predict", 512) * 3, 8192)
+                if model_options.get("num_ctx", 0) < model_options["num_predict"] + 2048:
+                    model_options["num_ctx"] = model_options["num_predict"] + 2048
+
+            if thinking_profile:
+                for key in LLMConfig._SAMPLING_KEYS:
+                    if key in thinking_profile:
+                        model_options.pop(key, None)
+                        model_options[key] = thinking_profile[key]
+
             with _ollama_call_semaphore:
                 response = get_http_session().post(
                     f"{Config.OLLAMA_BASE_URL}/api/chat",
@@ -362,7 +432,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                         ],
                         "stream": False,
                         "keep_alive": 60,
-                        "options": options
+                        "options": model_options
                     },
                     timeout=(10, timeout)
                 )
@@ -373,7 +443,18 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 continue
 
             result_data = response.json()
-            result = _strip_think_tags(result_data.get("message", {}).get("content", ""))
+            message = result_data.get("message", {})
+            content = _strip_think_tags(message.get("content", ""))
+            thinking = _strip_think_tags(message.get("thinking", ""))
+
+            if content and thinking:
+                result = thinking + "\n" + content
+            elif content:
+                result = content
+            elif thinking:
+                result = thinking
+            else:
+                result = ""
 
             if not result:
                 if log_callback:
@@ -442,6 +523,14 @@ def call_ollama_single(model, system_prompt, user_prompt,
                 log_callback("⚠️ Ollama 服务不可用")
             return None, None
 
+    thinking_profile = _get_thinking_model_profile(model)
+    is_thinking_model = thinking_profile is not None
+
+    if is_thinking_model and num_predict < 8192:
+        num_predict = max(num_predict * 3, 8192)
+        if num_ctx < num_predict + 2048:
+            num_ctx = num_predict + 2048
+
     options = {}
     if llm_config:
         options = llm_config.get_options(
@@ -456,7 +545,12 @@ def call_ollama_single(model, system_prompt, user_prompt,
             "num_ctx": num_ctx
         }
 
-    # 合并额外选项（覆盖默认值）
+    if thinking_profile:
+        for key in LLMConfig._SAMPLING_KEYS:
+            if key in thinking_profile:
+                options.pop(key, None)
+                options[key] = thinking_profile[key]
+
     if extra_options:
         options.update(extra_options)
 
@@ -464,18 +558,19 @@ def call_ollama_single(model, system_prompt, user_prompt,
 
     try:
         with _ollama_call_semaphore:
+            request_body = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "stream": False,
+                "keep_alive": 60,
+                "options": options
+            }
             response = get_http_session().post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "stream": False,
-                    "keep_alive": 60,
-                    "options": options
-                },
+                json=request_body,
                 timeout=(10, timeout)
             )
 
@@ -485,7 +580,20 @@ def call_ollama_single(model, system_prompt, user_prompt,
             return None, None
 
         result_data = response.json()
-        result = _strip_think_tags(result_data.get("message", {}).get("content", ""))
+        message = result_data.get("message", {})
+        content = _strip_think_tags(message.get("content", ""))
+        thinking = _strip_think_tags(message.get("thinking", ""))
+
+        if content and thinking:
+            result = thinking + "\n" + content
+        elif content:
+            result = content
+        elif thinking:
+            result = thinking
+            if log_callback:
+                log_callback(f"💡 模型 {model} content为空，已回退使用thinking字段")
+        else:
+            result = ""
 
         if not result:
             if log_callback:
@@ -535,7 +643,8 @@ def warmup_model(model, log_callback=None):
                         "num_predict": 1,
                         "temperature": 0.1,
                         "num_gpu": -1
-                    }
+                    },
+                    "think": False
                 },
                 timeout=(10, 60)
             )
