@@ -556,11 +556,13 @@ class VideoMixin:
                 _moviepy_last_log_time = 0.0
                 
                 class _MoviePyProgressLogger(ProgressBarLogger):
-                    def __init__(self, app_ref):
+                    def __init__(self, app_ref, expected_total_frames):
                         super().__init__(min_time_interval=0.5)
                         self.app = app_ref
                         self._last_progress_pct = 0.0
                         self._phase = "video"
+                        self._expected_total = expected_total_frames
+                        self._valid_bar_name = None
                     
                     def bars_callback(self, bar, attr, value, old_value=None):
                         try:
@@ -568,47 +570,63 @@ class VideoMixin:
                             index = bar_data.get('index', 0)
                             total = bar_data.get('total', 0)
                             
-                            if total > 0 and attr == 'index':
-                                pct = (index / total) * 100
-                                progress_val = 70 + int((index / total) * 25)
-                                
+                            if total <= 0 or attr != 'index':
+                                return
+                            
+                            if self._valid_bar_name is None:
+                                if total == self._expected_total or abs(total - self._expected_total) <= max(1, self._expected_total * 0.05):
+                                    self._valid_bar_name = bar
+                                elif total < self._expected_total * 0.5:
+                                    return
+                            
+                            if self._valid_bar_name is not None and bar != self._valid_bar_name:
+                                if total < self._expected_total * 0.8:
+                                    return
+                            
+                            if bar != self._valid_bar_name and self._valid_bar_name is not None:
+                                self._phase = "audio"
+                            else:
+                                self._phase = "video"
+                            
+                            pct = (index / total) * 100
+                            
+                            if self._phase == "audio":
+                                phase_label = "音频编码"
+                                progress_val = 70 + int((index / total) * 10)
+                            else:
+                                phase_label = "视频编码"
+                                progress_val = 80 + int((index / total) * 20)
+                            
+                            desc = f"{phase_label} {pct:.0f}%"
+                            
+                            elapsed = time.time() - _moviepy_render_start
+                            if pct > 5 and elapsed > 0:
+                                remaining_pct = 100.0 - pct
+                                eta = (remaining_pct / pct) * elapsed
+                                if eta > 0:
+                                    eta_min = int(eta // 60)
+                                    eta_sec = int(eta % 60)
+                                    desc += f" 剩余{eta_min}:{eta_sec:02d}"
+                            
+                            self.app.update_task_progress(desc, progress_val)
+                            
+                            now = time.time()
+                            nonlocal _moviepy_last_log_time
+                            if now - _moviepy_last_log_time >= 5.0 and pct > 1.0:
+                                _moviepy_last_log_time = now
                                 if self._phase == "audio":
-                                    phase_label = "音频编码"
-                                    progress_val = 70 + int((index / total) * 10)
+                                    self.app.log(f"   📊 音频编码: {pct:.0f}% ({index}/{total})")
                                 else:
-                                    phase_label = "视频编码"
-                                    progress_val = 80 + int((index / total) * 20)
-                                
-                                desc = f"{phase_label} {pct:.0f}%"
-                                
-                                elapsed = time.time() - _moviepy_render_start
-                                if pct > 5 and elapsed > 0:
-                                    remaining_pct = 100.0 - pct
-                                    eta = (remaining_pct / pct) * elapsed
-                                    if eta > 0:
-                                        eta_min = int(eta // 60)
-                                        eta_sec = int(eta % 60)
-                                        desc += f" 剩余{eta_min}:{eta_sec:02d}"
-                                
-                                self.app.update_task_progress(desc, progress_val)
-                                
-                                now = time.time()
-                                nonlocal _moviepy_last_log_time
-                                if now - _moviepy_last_log_time >= 5.0 and pct > 1.0:
-                                    _moviepy_last_log_time = now
-                                    if self._phase == "audio":
-                                        self.app.log(f"   📊 音频编码: {pct:.0f}% ({index}/{total})")
-                                    else:
-                                        self.app.log(f"   📊 视频编码: {pct:.0f}% ({index}/{total}帧)")
-                                
-                                self._last_progress_pct = pct
+                                    self.app.log(f"   📊 视频编码: {pct:.0f}% ({index}/{total}帧)")
+                            
+                            self._last_progress_pct = pct
                         except Exception:
                             pass
                     
                     def callback(self, **kw):
                         pass
                 
-                _moviepy_logger = _MoviePyProgressLogger(self)
+                _moviepy_logger = _MoviePyProgressLogger(self, _moviepy_total_frames)
                 
                 encoder_desc = gpu_encoder if use_gpu else 'libx264'
                 total_frames_desc = _moviepy_total_frames
@@ -637,7 +655,7 @@ class VideoMixin:
                     self._gpu_encoder_cache = (False, 'libx264', 'medium')
                     try:
                         from proglog import ProgressBarLogger as _PBL2
-                        _fallback_logger = _MoviePyProgressLogger(self)
+                        _fallback_logger = _MoviePyProgressLogger(self, _moviepy_total_frames)
                     except Exception:
                         _fallback_logger = None
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='medium', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '20'], logger=_fallback_logger)
