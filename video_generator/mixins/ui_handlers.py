@@ -7,6 +7,7 @@ import time
 import threading
 import subprocess
 import tkinter as tk
+from video_generator.mixins.logging import safe_print_exc
 from tkinter import ttk, messagebox
 
 from video_generator.config import Config, get_http_session
@@ -1024,7 +1025,7 @@ class UIHandlersMixin:
             self.log("✅ 日志清除完成")
         except Exception as e:
             self.log(f"❌ 日志清除失败: {e}")
-            traceback.print_exc()
+            safe_print_exc()
 
 
     # =======================================================================
@@ -1457,7 +1458,7 @@ class UIHandlersMixin:
             self.log("✅ 脚本清除完成")
         except Exception as e:
             self.log(f"❌ 脚本清除失败: {e}")
-            traceback.print_exc()
+            safe_print_exc()
     
 
     def load_config(self):

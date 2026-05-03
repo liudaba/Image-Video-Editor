@@ -8,6 +8,7 @@ import re
 import gc
 import traceback
 import warnings
+from video_generator.mixins.logging import safe_print_exc
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import messagebox
@@ -719,10 +720,10 @@ Requirements:
         策略：
         1. 精确匹配：元素直接出现在分镜文案中
         2. 关键词关联匹配：通过语义关联词映射
-        3. 兜底：如果无匹配，返回全局元素（作为LLM参考）
+        3. 兜底：如果无匹配，返回空列表（不注入无关元素）
         """
         if not global_elements or not shot_text:
-            return global_elements[:6] if global_elements else []
+            return []
 
         semantic_map = {
             '地产': ['房', '楼', '万达', '恒大', 'SOHO', '建筑', '楼盘', '物业', '土地'],
@@ -735,6 +736,14 @@ Requirements:
             '转型': ['转', '升级', '布局', '多元化', '调整', '改革'],
             '商业': ['商', '市场', '竞争', '资本', '投资', '并购'],
             '权力': ['权', '控制', '掌控', '帝国', '教父', '大佬'],
+            '病毒': ['病毒', '感染', '传染', '疫情', '新冠', '德尔塔', '变异'],
+            '疫苗': ['疫苗', '接种', '免疫', '抗体', '防感染'],
+            '变异': ['变异', '突变', '变异株', '德尔塔', '毒株'],
+            '致死率': ['致死', '死亡', '重症', '死亡率', '病死'],
+            'ICU': ['ICU', '重症', '呼吸机', '监护', '急救'],
+            '基因编辑': ['基因', '编辑', 'DNA', 'CRISPR', '遗传', '基因组'],
+            '城市': ['城市', '建筑', '街道', '巷弄', '社区', '胡同', '弄堂'],
+            '生命': ['生命', '生存', '活着', '呼吸', '生活'],
         }
 
         matched_elements = []
@@ -746,10 +755,7 @@ Requirements:
             if any(kw in shot_text for kw in keywords):
                 matched_elements.append(elem)
 
-        if not matched_elements:
-            return global_elements[:6]
-
-        return matched_elements[:6]
+        return matched_elements[:3]
 
 
     def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, core_theme='', visual_tone='', theme_elements=None):
@@ -1213,6 +1219,12 @@ Requirements:
             text = re.sub(r',?\s*\(' + re.escape(w) + r'(?::[\d.]+)?\)\s*,?', ',', text, flags=re.IGNORECASE)
             text = re.sub(r',?\s*\b' + re.escape(w) + r'\b\s*,?', ',', text, flags=re.IGNORECASE)
         text = re.sub(r',\s*,+', ',', text).strip(', ')
+
+        # Fix SD syntax: [text:weight] → (text:weight) - square brackets are NOT weight syntax in SD
+        text = re.sub(r'\[([^,\]]+?):([\d.]+)\]', r'(\1:\2)', text)
+
+        # Fix SD syntax: [text | text] alternating syntax → just use first text
+        text = re.sub(r'\[([^|\]]+?)\s*\|\s*([^\]]+?)\]', r'\1', text)
         
         if len(text.strip()) < 10:
             return raw_output.strip()
@@ -1268,6 +1280,8 @@ Requirements:
             "photorealistic", "cinematic lighting", "documentary style",
             "film grain", "high quality", "professional photography",
             "RAW photo", "raw photo", "film grain texture",
+            "documentary photography", "photojournalism",
+            "raw and authentic", "unposed", "candid shot",
         ]
         cleaned = scene_description
         for tag in redundant:
@@ -3590,7 +3604,7 @@ Requirements:
             _shots_sec = int(_shots_elapsed % 60)
             self.log(f"❌ 生成分镜失败: {e}")
             self.log(f"   ⏱️ 已耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
-            traceback.print_exc()
+            safe_print_exc()
             self.update_task_progress("生成失败", 0)
             return []
         finally:
@@ -3649,7 +3663,7 @@ Requirements:
                     self.generate_shots()
                 except Exception as e:
                     self.log(f"❌ 生成分镜过程中出错: {e}")
-                    traceback.print_exc()
+                    safe_print_exc()
                 finally:
                     with self.task_lock:
                         self.task_running = False
@@ -3666,7 +3680,7 @@ Requirements:
                 
         except Exception as e:
             self.log(f"❌ 生成分镜线程启动失败: {e}")
-            traceback.print_exc()
+            safe_print_exc()
             with self.task_lock:
                 self.task_running = False
 

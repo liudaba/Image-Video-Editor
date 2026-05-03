@@ -88,12 +88,34 @@ Example outputs:
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
 - FORBIDDEN: repeating the same scene across shots
 - FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- FORBIDDEN: using square brackets [text:weight] for emphasis - use parentheses (text:weight) only
+- FORBIDDEN: defaulting to hospital/ICU/medical scenes unless the dubbing EXPLICITLY mentions medical treatment
 - REQUIRED: each prompt must be visually DISTINCT from neighbors
 - REQUIRED: prompt must match the SPECIFIC content, not just the general topic
 - If dubbing mentions a country → show THAT country's landmarks/culture
 - If dubbing mentions an industry → show THAT industry's specific visuals
 - If dubbing mentions conflict → show dramatic visual metaphor
 - If dubbing mentions data/facts → show charts, screens, documents
+
+【VISUAL METAPHOR RULES - CRITICAL】
+When the dubbing contains ABSTRACT concepts, you MUST translate them into CONCRETE visual metaphors:
+- "compromise/coexistence" → handshake, yin-yang, balance scale, two forces merging
+- "unintended consequences" → domino effect, ripple in water, butterfly effect
+- "restraint/wisdom" → empty space in painting, paused hands, quiet garden
+- "blindness/unknown" → fog, darkness with a single light, blindfolded figure
+- "precision/delicate" → watchmaker, surgical instrument, fine needlework
+- "chaos vs order" → wild garden vs manicured lawn, organic vs geometric
+- "power/control" → puppet strings, chess pieces, hand on lever
+- "loss of diversity" → identical rows, monochrome crowd, clone-like figures
+- "ethical dilemma" → crossroads, split path, figure at a fork
+- "fragility of life" → glass sculpture, soap bubble, delicate flower
+- "progress/evolution" → ascending stairs, growing tree, dawn light
+- "regression/machine-like" → gears replacing organs, mechanical heart, robot hands
+- "opening Pandora's box" → cracked container, light escaping from seams
+- "hidden danger" → crack in dam, iceberg below surface, shadow behind smile
+
+DO NOT use hospital/ICU/ventilator/medical scenes as default fallback!
+Only use medical scenes when the dubbing EXPLICITLY discusses medical treatment, hospitals, or patient care.
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -138,8 +160,30 @@ Example outputs:
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
 - FORBIDDEN: repeating the same scene across shots
 - FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- FORBIDDEN: using square brackets [text:weight] for emphasis - use parentheses (text:weight) only
+- FORBIDDEN: defaulting to hospital/ICU/medical scenes unless the dubbing EXPLICITLY mentions medical treatment
 - REQUIRED: each prompt must be visually DISTINCT from neighbors
 - REQUIRED: prompt must match the SPECIFIC content, not just the general topic
+
+【VISUAL METAPHOR RULES - CRITICAL】
+When the dubbing contains ABSTRACT concepts, you MUST translate them into CONCRETE visual metaphors:
+- "compromise/coexistence" → handshake, yin-yang, balance scale, two forces merging
+- "unintended consequences" → domino effect, ripple in water, butterfly effect
+- "restraint/wisdom" → empty space in painting, paused hands, quiet garden
+- "blindness/unknown" → fog, darkness with a single light, blindfolded figure
+- "precision/delicate" → watchmaker, surgical instrument, fine needlework
+- "chaos vs order" → wild garden vs manicured lawn, organic vs geometric
+- "power/control" → puppet strings, chess pieces, hand on lever
+- "loss of diversity" → identical rows, monochrome crowd, clone-like figures
+- "ethical dilemma" → crossroads, split path, figure at a fork
+- "fragility of life" → glass sculpture, soap bubble, delicate flower
+- "progress/evolution" → ascending stairs, growing tree, dawn light
+- "regression/machine-like" → gears replacing organs, mechanical heart, robot hands
+- "opening Pandora's box" → cracked container, light escaping from seams
+- "hidden danger" → crack in dam, iceberg below surface, shadow behind smile
+
+DO NOT use hospital/ICU/ventilator/medical scenes as default fallback!
+Only use medical scenes when the dubbing EXPLICITLY discusses medical treatment, hospitals, or patient care.
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -181,8 +225,30 @@ Example outputs:
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
 - FORBIDDEN: repeating the same scene across shots
 - FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- FORBIDDEN: using square brackets [text:weight] for emphasis - use parentheses (text:weight) only
+- FORBIDDEN: defaulting to hospital/ICU/medical scenes unless the dubbing EXPLICITLY mentions medical treatment
 - REQUIRED: each scene must be visually DISTINCT from neighbors
 - REQUIRED: scene must match the SPECIFIC content, not just the general topic
+
+【VISUAL METAPHOR RULES - CRITICAL】
+When the dubbing contains ABSTRACT concepts, you MUST translate them into CONCRETE visual metaphors:
+- "compromise/coexistence" → handshake, yin-yang, balance scale, two forces merging
+- "unintended consequences" → domino effect, ripple in water, butterfly effect
+- "restraint/wisdom" → empty space in painting, paused hands, quiet garden
+- "blindness/unknown" → fog, darkness with a single light, blindfolded figure
+- "precision/delicate" → watchmaker, surgical instrument, fine needlework
+- "chaos vs order" → wild garden vs manicured lawn, organic vs geometric
+- "power/control" → puppet strings, chess pieces, hand on lever
+- "loss of diversity" → identical rows, monochrome crowd, clone-like figures
+- "ethical dilemma" → crossroads, split path, figure at a fork
+- "fragility of life" → glass sculpture, soap bubble, delicate flower
+- "progress/evolution" → ascending stairs, growing tree, dawn light
+- "regression/machine-like" → gears replacing organs, mechanical heart, robot hands
+- "opening Pandora's box" → cracked container, light escaping from seams
+- "hidden danger" → crack in dam, iceberg below surface, shadow behind smile
+
+DO NOT use hospital/ICU/ventilator/medical scenes as default fallback!
+Only use medical scenes when the dubbing EXPLICITLY discusses medical treatment, hospitals, or patient care.
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -226,8 +292,30 @@ Example outputs:
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
 - FORBIDDEN: repeating the same scene across shots
 - FORBIDDEN: inventing names - use "a professor", "a student", "an executive"
+- FORBIDDEN: using square brackets [text:weight] for emphasis - use parentheses (text:weight) only
+- FORBIDDEN: defaulting to hospital/ICU/medical scenes unless the dubbing EXPLICITLY mentions medical treatment
 - REQUIRED: each prompt must be visually DISTINCT from neighbors
 - REQUIRED: prompt must match the SPECIFIC content, not just the general topic
+
+【VISUAL METAPHOR RULES - CRITICAL】
+When the dubbing contains ABSTRACT concepts, you MUST translate them into CONCRETE visual metaphors:
+- "compromise/coexistence" → handshake, yin-yang, balance scale, two forces merging
+- "unintended consequences" → domino effect, ripple in water, butterfly effect
+- "restraint/wisdom" → empty space in painting, paused hands, quiet garden
+- "blindness/unknown" → fog, darkness with a single light, blindfolded figure
+- "precision/delicate" → watchmaker, surgical instrument, fine needlework
+- "chaos vs order" → wild garden vs manicured lawn, organic vs geometric
+- "power/control" → puppet strings, chess pieces, hand on lever
+- "loss of diversity" → identical rows, monochrome crowd, clone-like figures
+- "ethical dilemma" → crossroads, split path, figure at a fork
+- "fragility of life" → glass sculpture, soap bubble, delicate flower
+- "progress/evolution" → ascending stairs, growing tree, dawn light
+- "regression/machine-like" → gears replacing organs, mechanical heart, robot hands
+- "opening Pandora's box" → cracked container, light escaping from seams
+- "hidden danger" → crack in dam, iceberg below surface, shadow behind smile
+
+DO NOT use hospital/ICU/ventilator/medical scenes as default fallback!
+Only use medical scenes when the dubbing EXPLICITLY discusses medical treatment, hospitals, or patient care.
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}

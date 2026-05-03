@@ -7,6 +7,7 @@ import gc
 import datetime
 import traceback
 import threading
+from video_generator.mixins.logging import safe_print_exc
 import subprocess
 import tempfile
 import shutil
@@ -252,12 +253,12 @@ class VideoMixin:
                             if gap > 0.05 and prev_end > 0:
                                 shot_dur += gap
                             
-                            resized_name = f"resized_{len(resized_images):04d}.png"
+                            resized_name = f"resized_{len(resized_images):04d}.jpg"
                             resized_path = os.path.join(temp_render_dir, resized_name)
                             
                             with PILImageForResize.open(image_path) as orig_img:
                                 fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
-                                fitted.save(resized_path, 'PNG')
+                                fitted.save(resized_path, 'JPEG', quality=95)
                             
                             resized_images.append(resized_path)
                             shot_durations.append(shot_dur)
@@ -509,7 +510,7 @@ class VideoMixin:
             
             use_gpu = False
             gpu_encoder = 'h264_nvenc'
-            gpu_preset = "p6"
+            gpu_preset = "p4"
             
             if self._gpu_encoder_cache is not None:
                 use_gpu, gpu_encoder, gpu_preset = self._gpu_encoder_cache
@@ -523,7 +524,7 @@ class VideoMixin:
                     if 'h264_nvenc' in result.stdout:
                         use_gpu = True
                         gpu_encoder = 'h264_nvenc'
-                        gpu_preset = "p6"
+                        gpu_preset = "p4"
                         self.log(f"   ⚡ 检测到NVIDIA GPU加速 (h264_nvenc)")
                     elif 'h264_qsv' in result.stdout:
                         use_gpu = True
@@ -618,6 +619,14 @@ class VideoMixin:
                     hw_params = ['-movflags', '+faststart', '-threads', '0']
                     if gpu_encoder == 'h264_nvenc':
                         hw_params.extend(['-cq', '20', '-rc', 'vbr'])
+                        try:
+                            if self.video_renderer is None:
+                                from video_generator.hardware import HardwareAcceleratedRenderer
+                                self.video_renderer = HardwareAcceleratedRenderer()
+                            nvenc_extra = self.video_renderer._build_nvenc_extra_params()
+                            hw_params.extend(nvenc_extra)
+                        except Exception:
+                            pass
                     final_clip.write_videofile(output_path, fps=30, codec=gpu_encoder, audio_codec='aac', preset=gpu_preset, ffmpeg_params=hw_params, logger=_moviepy_logger)
                 else:
                     final_clip.write_videofile(output_path, fps=30, codec='libx264', audio_codec='aac', preset='medium', ffmpeg_params=['-movflags', '+faststart', '-threads', '0', '-crf', '20'], logger=_moviepy_logger)
@@ -665,7 +674,7 @@ class VideoMixin:
             _video_sec = int(_video_elapsed % 60)
             self.log(f"\n❌ 视频生成失败: {e}")
             self.log(f"   ⏱️ 已耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
-            traceback.print_exc()
+            safe_print_exc()
         finally:
             for clip in clips:
                 try: clip.close()
@@ -970,7 +979,7 @@ class VideoMixin:
             
         except Exception as e:
             self.log(f"❌ 渲染视频线程启动失败: {e}")
-            traceback.print_exc()
+            safe_print_exc()
     
 
     def _start_render_thread(self, mode="full_generation"):
@@ -1003,7 +1012,7 @@ class VideoMixin:
                         self.log(f"📂 已加载分镜数据: {len(self.shots_data)} 个分镜")
                     except Exception as e:
                         self._log_exception("❌ 加载分镜数据失败", e)
-                        traceback.print_exc()
+                        safe_print_exc()
                         return
                 elif mode == "use_existing_shots" and os.path.exists(shots_file):
                     # 使用现有分镜脚本
@@ -1076,7 +1085,7 @@ class VideoMixin:
                             self.log(f"📂 从文件加载分镜数据: {len(self.shots_data)} 个分镜")
                         except Exception as e:
                             self.log(f"❌ 加载分镜数据失败: {e}")
-                            traceback.print_exc()
+                            safe_print_exc()
                     
                     if not self.shots_data:
                         self.log("❌ 分镜生成失败，无法继续")
@@ -1115,7 +1124,7 @@ class VideoMixin:
                 
             except Exception as e:
                 self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
-                traceback.print_exc()
+                safe_print_exc()
             finally:
                 with self.task_lock:
                     self.task_running = False

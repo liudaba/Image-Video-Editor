@@ -3,6 +3,7 @@ import os
 import gc
 import traceback
 import tkinter as tk
+from video_generator.mixins.logging import safe_print_exc
 from tkinter import ttk, filedialog, messagebox
 
 from video_generator.cache import prompt_cache, image_cache
@@ -141,7 +142,7 @@ class AudioMixin:
         except Exception as e:
             self.log(f"❌ 音频导入失败: {e}")
             messagebox.showerror("错误", f"音频导入失败: {str(e)}")
-            traceback.print_exc()
+            safe_print_exc()
     
 
     def _reset_project_state(self, reset_audio_path=False):
@@ -256,6 +257,6 @@ class AudioMixin:
             self.log("✅ 音频清除完成")
         except Exception as e:
             self.log(f"❌ 音频清除失败: {e}")
-            traceback.print_exc()
+            safe_print_exc()
     
 

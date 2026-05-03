@@ -13,13 +13,9 @@ MODEL_TYPE_SD3 = "sd3"
 MODEL_PROFILES = {
     MODEL_TYPE_SD15: {
         "name": "Stable Diffusion 1.5",
-        # 提示词格式：权重标记 + 关键词
         "prompt_format": "weighted_keywords",
-        # 质量前缀（Ollama 生成提示词时拼在前面）
         "quality_prefix": "(masterpiece, best quality:1.2), RAW photo, (photorealistic:1.3), ultra detailed, 8k",
-        # 质量后缀（Ollama 生成提示词时拼在后面）
-        "quality_suffix": "cinematic lighting, documentary style, (film grain:1.1), film grain texture",
-        # 是否需要负面提示词
+        "quality_suffix": "cinematic lighting, (film grain:1.1)",
         "needs_negative": True,
         # 默认负面提示词
         "default_negative": (

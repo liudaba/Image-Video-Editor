@@ -9,6 +9,8 @@ import base64
 import requests
 import tkinter as tk
 
+from video_generator.mixins.logging import safe_print_exc
+
 from video_generator.config import Config, get_http_session
 from video_generator.cache import image_cache
 from video_generator.model_profiles import get_model_profile
@@ -138,8 +140,7 @@ class ImagesMixin:
                 self._generate_images_local()
         except Exception as e:
             self.log(f"❌ 图像生成失败: {e}")
-            import traceback
-            traceback.print_exc()
+            safe_print_exc()
 
     def _generate_images_cloud(self):
         """云端生图流程"""
