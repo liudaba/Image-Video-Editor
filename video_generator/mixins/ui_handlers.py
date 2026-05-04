@@ -788,34 +788,44 @@ class UIHandlersMixin:
         """检查系统依赖项（优化版）"""
         self.log("正在检查系统依赖项...")
         
-        # 检查所有必要的依赖项
         core_dependencies = [
             ("requests", "pip install requests", None),
             ("PIL", "pip install Pillow", None),
             ("numpy", "pip install numpy", None),
             ("moviepy", "pip install moviepy", None),
-            ("whisper", "pip install openai-whisper", "load_model"),  # 特殊检查：需要验证load_model函数
+        ]
+
+        optional_dependencies = [
+            ("whisper", "pip install openai-whisper", "load_model"),
         ]
         
-        missing_deps = []
+        missing_core = []
         for dep, install_cmd, required_attr in core_dependencies:
             try:
                 module = __import__(dep)
-                # 如果指定了必需属性，检查该属性是否存在
                 if required_attr and not hasattr(module, required_attr):
                     self.log(f"⚠️ {dep} 已安装但功能不完整 (缺少 {required_attr})")
-                    missing_deps.append((dep, install_cmd))
+                    missing_core.append((dep, install_cmd))
                 else:
                     self.log(f"✅ {dep} 已安装")
             except (ImportError, TypeError, OSError) as e:
-                # TypeError/OSError: Python 3.14+ 与 whisper 包不兼容 (ctypes.CDLL(None) 失败)
                 self.log(f"⚠️ {dep} 加载失败: {type(e).__name__}: {str(e)[:60]}")
-                missing_deps.append((dep, install_cmd))
+                missing_core.append((dep, install_cmd))
         
-        if missing_deps:
+        for dep, install_cmd, required_attr in optional_dependencies:
+            try:
+                module = __import__(dep)
+                if required_attr and not hasattr(module, required_attr):
+                    self.log(f"⚠️ {dep} 已安装但功能不完整，可使用云端语音识别替代")
+                else:
+                    self.log(f"✅ {dep} 已安装")
+            except (ImportError, TypeError, OSError) as e:
+                self.log(f"⚠️ {dep} 未安装 ({type(e).__name__})，可使用云端语音识别替代")
+        
+        if missing_core:
             self.log("❌ 缺少核心依赖项")
             msg = "缺少以下核心依赖项:\n"
-            for dep, install_cmd in missing_deps:
+            for dep, install_cmd in missing_core:
                 msg += f"- {dep}: {install_cmd}\n"
             messagebox.showwarning("警告", msg)
             return False
