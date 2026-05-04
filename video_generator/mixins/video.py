@@ -8,6 +8,7 @@ import datetime
 import traceback
 import threading
 from video_generator.mixins.logging import safe_print_exc
+from video_generator.config import validate_image_size
 import subprocess
 import tempfile
 import shutil
@@ -205,8 +206,11 @@ class VideoMixin:
             self.log(f"   🎬 过渡效果: {transition_type}")
             
             # 获取视频分辨率
-            width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
-            height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+            width, height = validate_image_size(
+                self.width_var.get() if hasattr(self, 'width_var') else '1920',
+                self.height_var.get() if hasattr(self, 'height_var') else '1080',
+                default_w=1920, default_h=1080
+            )
             self.log(f"   📐 视频分辨率: {width}x{height}")
             
             self.log("      📍 保持原始语音时间戳，确保音画同步")
@@ -764,6 +768,9 @@ class VideoMixin:
                 max_w = int(w * max_scale)
                 max_h = int(h * max_scale)
                 source_img = base_img.resize((max_w, max_h), Image.LANCZOS)
+                source_arr = np.array(source_img)
+                source_img.close()
+                base_img.close()
 
                 def make_frame(t):
                     try:
@@ -776,12 +783,16 @@ class VideoMixin:
                         top = (max_h - crop_h) / 2.0
                         sx = crop_w / w
                         sy = crop_h / h
-                        result = source_img.transform(
+                        src = Image.fromarray(source_arr)
+                        result = src.transform(
                             (w, h), Image.AFFINE,
                             (sx, 0, left, 0, sy, top),
                             Image.BICUBIC
                         )
-                        return np.array(result)
+                        arr = np.array(result)
+                        result.close()
+                        src.close()
+                        return arr
                     except Exception:
                         return base_frame
 
@@ -789,6 +800,9 @@ class VideoMixin:
                 pan_ratio = 1.15
                 max_w = int(w * pan_ratio)
                 source_img = base_img.resize((max_w, h), Image.LANCZOS)
+                source_arr = np.array(source_img)
+                source_img.close()
+                base_img.close()
                 total_offset = float(max_w - w)
 
                 if animation_type == "左移":
@@ -797,12 +811,16 @@ class VideoMixin:
                             progress = min(t / original_duration, 1.0)
                             progress = progress * progress * (3 - 2 * progress)
                             offset = total_offset * progress
-                            result = source_img.transform(
+                            src = Image.fromarray(source_arr)
+                            result = src.transform(
                                 (w, h), Image.AFFINE,
                                 (1, 0, offset, 0, 1, 0),
                                 Image.BICUBIC
                             )
-                            return np.array(result)
+                            arr = np.array(result)
+                            result.close()
+                            src.close()
+                            return arr
                         except Exception:
                             return base_frame
                 else:
@@ -811,12 +829,16 @@ class VideoMixin:
                             progress = min(t / original_duration, 1.0)
                             progress = progress * progress * (3 - 2 * progress)
                             offset = total_offset * (1 - progress)
-                            result = source_img.transform(
+                            src = Image.fromarray(source_arr)
+                            result = src.transform(
                                 (w, h), Image.AFFINE,
                                 (1, 0, offset, 0, 1, 0),
                                 Image.BICUBIC
                             )
-                            return np.array(result)
+                            arr = np.array(result)
+                            result.close()
+                            src.close()
+                            return arr
                         except Exception:
                             return base_frame
 
@@ -824,6 +846,9 @@ class VideoMixin:
                 pan_ratio = 1.15
                 max_h = int(h * pan_ratio)
                 source_img = base_img.resize((w, max_h), Image.LANCZOS)
+                source_arr = np.array(source_img)
+                source_img.close()
+                base_img.close()
                 total_offset = float(max_h - h)
 
                 if animation_type == "上移":
@@ -832,12 +857,16 @@ class VideoMixin:
                             progress = min(t / original_duration, 1.0)
                             progress = progress * progress * (3 - 2 * progress)
                             offset = total_offset * progress
-                            result = source_img.transform(
+                            src = Image.fromarray(source_arr)
+                            result = src.transform(
                                 (w, h), Image.AFFINE,
                                 (1, 0, 0, 0, 1, offset),
                                 Image.BICUBIC
                             )
-                            return np.array(result)
+                            arr = np.array(result)
+                            result.close()
+                            src.close()
+                            return arr
                         except Exception:
                             return base_frame
                 else:
@@ -846,19 +875,22 @@ class VideoMixin:
                             progress = min(t / original_duration, 1.0)
                             progress = progress * progress * (3 - 2 * progress)
                             offset = total_offset * (1 - progress)
-                            result = source_img.transform(
+                            src = Image.fromarray(source_arr)
+                            result = src.transform(
                                 (w, h), Image.AFFINE,
                                 (1, 0, 0, 0, 1, offset),
                                 Image.BICUBIC
                             )
-                            return np.array(result)
+                            arr = np.array(result)
+                            result.close()
+                            src.close()
+                            return arr
                         except Exception:
                             return base_frame
             else:
                 base_img.close()
                 return clip
 
-            base_img.close()
             animated_clip = VideoClip(make_frame, duration=original_duration)
             return animated_clip
         except Exception as e:
@@ -901,6 +933,7 @@ class VideoMixin:
             if self.task_running:
                 self.log("⚠️ 已有任务正在运行，请稍后再试")
                 return
+            self.task_running = True
 
         try:
             self.log("🎞️ 开始跑图生成视频...")
@@ -1009,8 +1042,6 @@ class VideoMixin:
             mode: "full_generation" - 从头生成, "use_existing_shots" - 使用现有分镜和图片, "use_existing_shots_only" - 仅使用现有分镜和图片直接合成视频
         """
         def render_video_worker():
-            with self.task_lock:
-                self.task_running = True
             self.pause_event.set()
             try:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")

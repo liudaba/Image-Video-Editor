@@ -25,3 +25,4 @@ pydub>=0.25.0
 # 其他工具
 tqdm>=4.65.0
 python-dotenv>=1.0.0
+cryptography>=41.0.0

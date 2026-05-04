@@ -12,13 +12,15 @@ from .config import Config
 class SmartCache:
     """智能缓存系统 - 带TTL和LRU的混合缓存（优化版）"""
 
-    __slots__ = ('max_size', 'default_ttl', '_cache', '_lock', '_hits', '_misses', '_expire_times')
+    __slots__ = ('max_size', 'default_ttl', '_cache', '_lock', '_hits', '_misses',
+                 '_expire_times', '_access_times')
 
     def __init__(self, max_size=1000, default_ttl=3600):
         self.max_size = max_size
         self.default_ttl = default_ttl
         self._cache = {}
         self._expire_times = {}
+        self._access_times = {}
         self._lock = threading.RLock()
         self._hits = 0
         self._misses = 0
@@ -33,36 +35,42 @@ class SmartCache:
             if expire_time is not None:
                 if expire_time > time.time():
                     self._hits += 1
+                    self._access_times[key] = time.time()
                     return self._cache.get(key)
                 else:
                     self._cache.pop(key, None)
                     self._expire_times.pop(key, None)
+                    self._access_times.pop(key, None)
             self._misses += 1
             return None
 
     def set(self, key, value, ttl=None):
         with self._lock:
             if len(self._cache) >= self.max_size:
-                self._evict_expired()
+                self._evict()
 
             ttl = ttl or self.default_ttl
+            now = time.time()
             self._cache[key] = value
-            self._expire_times[key] = time.time() + ttl
+            self._expire_times[key] = now + ttl
+            self._access_times[key] = now
 
-    def _evict_expired(self):
-        """淘汰过期项，如果过期项不足则淘汰最旧的项"""
+    def _evict(self):
+        """先淘汰过期项，再按LRU淘汰最久未访问的项"""
         current_time = time.time()
         expired_keys = [k for k, v in self._expire_times.items() if v <= current_time]
         for k in expired_keys:
             self._cache.pop(k, None)
             self._expire_times.pop(k, None)
+            self._access_times.pop(k, None)
 
-        if len(self._cache) >= self.max_size and self._expire_times:
-            min_expire = min(self._expire_times.values())
-            oldest_keys = [k for k, v in self._expire_times.items() if v <= min_expire]
-            for k in oldest_keys[:max(1, len(oldest_keys) // 4)]:
+        if len(self._cache) >= self.max_size and self._access_times:
+            sorted_keys = sorted(self._access_times.items(), key=lambda x: x[1])
+            evict_count = max(1, len(sorted_keys) // 4)
+            for k, _ in sorted_keys[:evict_count]:
                 self._cache.pop(k, None)
                 self._expire_times.pop(k, None)
+                self._access_times.pop(k, None)
 
     def cleanup_expired(self):
         with self._lock:
@@ -71,6 +79,7 @@ class SmartCache:
             for k in expired_keys:
                 self._cache.pop(k, None)
                 self._expire_times.pop(k, None)
+                self._access_times.pop(k, None)
             return len(expired_keys)
 
     def get_stats(self):
@@ -88,12 +97,14 @@ class SmartCache:
         with self._lock:
             self._cache.clear()
             self._expire_times.clear()
+            self._access_times.clear()
 
     def clear_and_gc(self):
         """清空缓存并触发垃圾回收，释放内存"""
         with self._lock:
             self._cache.clear()
             self._expire_times.clear()
+            self._access_times.clear()
         gc.collect()
 
 

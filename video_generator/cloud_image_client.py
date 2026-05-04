@@ -187,6 +187,9 @@ def _call_openai_image_format(prompt, negative_prompt, width, height,
     if adj_h % 8 != 0:
         adj_h = (adj_h // 8) * 8
 
+    if (adj_w != width or adj_h != height) and log_callback:
+        log_callback(f"⚠️ 云端模型最大尺寸{max_size}px，已将 {width}x{height} 调整为 {adj_w}x{adj_h}")
+
     request_body = {
         "model": model,
         "prompt": prompt,
@@ -292,6 +295,9 @@ def _call_stability_v2(prompt, negative_prompt, width, height,
     max_size = 1024
     adj_w = min(width, max_size)
     adj_h = min(height, max_size)
+
+    if (adj_w != width or adj_h != height) and log_callback:
+        log_callback(f"⚠️ 云端模型最大尺寸{max_size}px，已将 {width}x{height} 调整为 {adj_w}x{adj_h}")
 
     form_data = {
         "prompt": prompt,

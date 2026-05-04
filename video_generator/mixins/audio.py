@@ -103,6 +103,10 @@ class AudioMixin:
             self.state_manager['audio']['path'] = file_path
             
             # 清除旧的分镜数据和缓存，防止新音频混入旧音频的转录内容
+            if self.state_manager.get('audio', {}).get('loaded', False):
+                if not messagebox.askyesno("确认", "导入新音频将清除当前所有分镜数据和图片，是否继续？"):
+                    self.log("ℹ️ 已取消导入新音频")
+                    return
             self.log("🗑️ 清除旧分镜数据，防止混入旧音频内容...")
             
             # 释放Whisper GPU资源（如果上次任务异常退出未释放）
@@ -151,79 +155,20 @@ class AudioMixin:
         Args:
             reset_audio_path: 是否同时重置音频路径（clear_audio=True, import_audio=False）
         """
-        self.shots_data = []
-        if reset_audio_path:
-            self.total_audio_duration = 0
-        if hasattr(self, '_pregenerated_prompts'):
-            delattr(self, '_pregenerated_prompts')
-        if hasattr(self, '_shot_texts_for_context'):
-            delattr(self, '_shot_texts_for_context')
-        
-        self.cache_clear()
-        try:
-            prompt_cache.clear()
-        except Exception:
-            pass
-        try:
-            image_cache.clear()
-        except Exception:
-            pass
-        
-        try:
-            if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
-                self.state_manager['shots'] = {
-                    'generated': False, 'count': 0, 'data': []
-                }
-                if reset_audio_path:
-                    self.state_manager['audio'] = {
-                        'loaded': False, 'path': None, 'duration': 0
-                    }
-                else:
-                    self.state_manager['audio']['duration'] = 0
-                if 'images' in self.state_manager:
-                    self.state_manager['images']['generated'] = False
-                    self.state_manager['images']['count'] = 0
-                if 'video' in self.state_manager:
-                    self.state_manager['video']['generated'] = False
-                    self.state_manager['video']['path'] = None
-        except Exception:
-            pass
-        
-        try:
-            if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
-                self.data_bus.clear()
-        except Exception:
-            pass
-        try:
-            if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
-                self.event_system.clear()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'arv_prompter') and self.arv_prompter is not None:
-                del self.arv_prompter
-                self.arv_prompter = None
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'cache_stats'):
-                self.cache_stats = {'hits': 0, 'misses': 0, 'evictions': 0, 'size': 0}
-        except Exception:
-            pass
-
-        try:
-            from video_generator.enhanced_content_recognition import get_enhanced_recognizer
-            recognizer = get_enhanced_recognizer()
-            if recognizer and hasattr(recognizer, 'reset_context'):
-                recognizer.reset_context()
-        except Exception:
-            pass
+        self._clear_internal_state(reset_audio=reset_audio_path, reset_cache_stats=True)
+        if not reset_audio_path:
+            try:
+                if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
+                    if 'audio' in self.state_manager:
+                        self.state_manager['audio']['duration'] = 0
+            except Exception:
+                pass
 
 
     def clear_audio(self):
         """清除音频"""
+        if not messagebox.askyesno("确认清除", "清除音频将删除所有分镜数据和已生成的图片，此操作不可恢复！\n\n确定要清除吗？"):
+            return
         self.log("🗑️ 清除音频")
         try:
             if self.whisper_model is not None:

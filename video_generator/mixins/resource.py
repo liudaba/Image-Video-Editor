@@ -9,7 +9,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 
 from video_generator.config import Config, get_http_session
-from video_generator.cache import prompt_cache, image_cache
+from video_generator.cache import prompt_cache, image_cache, SmartCache
 from video_generator.ollama_client import is_ollama_available
 
 class ResourceMixin:
@@ -67,154 +67,52 @@ class ResourceMixin:
     # =======================================================================
 
     def init_cache_system(self):
-        """初始化缓存系统"""
-        self.cache_system = {
-            'models': {},
-            'prompts': {},
-            'images': {},
-            'audio': {}
-        }
-        self.cache_config = {
-            'max_size': 1000,
-            'expiry_time': 3600,
-            'cleanup_interval': 600
-        }
-        self.cache_stats = {
-            'hits': 0,
-            'misses': 0,
-            'evictions': 0,
-            'size': 0
-        }
-        self._cache_cleanup_stop_event = threading.Event()
-        self._cache_cleanup_thread = threading.Thread(target=self._cache_cleanup_loop, daemon=True)
-        self._cache_cleanup_thread.start()
+        """初始化缓存系统 - 统一使用 SmartCache"""
+        self._general_cache = SmartCache(max_size=1000, default_ttl=3600)
         self.log("✅ 缓存系统初始化完成")
-
-
-    def _cache_cleanup_loop(self):
-        """定期清理过期缓存（支持通过 Event 立即停止）"""
-        while not self._cache_cleanup_stop_event.is_set():
-            try:
-                if self._cache_cleanup_stop_event.wait(timeout=self.cache_config['cleanup_interval']):
-                    break
-
-                current_time = time.time()
-                evicted = 0
-
-                for category in self.cache_system:
-                    items_to_remove = []
-                    for key, value in self.cache_system[category].items():
-                        if isinstance(value, dict) and 'timestamp' in value:
-                            if current_time - value['timestamp'] > self.cache_config['expiry_time']:
-                                items_to_remove.append(key)
-
-                    for key in items_to_remove:
-                        del self.cache_system[category][key]
-                        evicted += 1
-
-                if evicted > 0:
-                    self.cache_stats['evictions'] += evicted
-                    self.cache_stats['size'] = sum(len(items) for items in self.cache_system.values())
-                    self.log(f"🔄 缓存清理完成，移除了 {evicted} 个过期项")
-            except Exception as e:
-                if self._cache_cleanup_stop_event.is_set():
-                    break
-                self._log_exception("⚠️ 缓存清理失败", e)
-    
 
     def cache_get(self, category, key):
         """获取缓存"""
-        if category not in self.cache_system:
-            self.cache_stats['misses'] += 1
-            return None
-        
-        item = self.cache_system[category].get(key)
-        if item is None:
-            self.cache_stats['misses'] += 1
-            return None
-        
-        # 检查是否过期
-        if isinstance(item, dict) and 'timestamp' in item and 'value' in item:
-            if time.time() - item['timestamp'] > self.cache_config['expiry_time']:
-                del self.cache_system[category][key]
-                self.cache_stats['misses'] += 1
-                self.cache_stats['evictions'] += 1
-                return None
-            self.cache_stats['hits'] += 1
-            return item['value']
-        
-        self.cache_stats['hits'] += 1
-        return item
-    
+        composite_key = f"{category}:{key}"
+        return self._general_cache.get(composite_key)
 
     def cache_set(self, category, key, value):
         """设置缓存"""
-        if category not in self.cache_system:
-            self.cache_system[category] = {}
-        
-        # 检查缓存大小
-        current_size = sum(len(items) for items in self.cache_system.values())
-        if current_size >= self.cache_config['max_size']:
-            # 清理最旧的缓存项
-            self._cleanup_oldest_cache()
-        
-        # 添加时间戳
-        self.cache_system[category][key] = {
-            'value': value,
-            'timestamp': time.time()
-        }
-        
-        self.cache_stats['size'] = sum(len(items) for items in self.cache_system.values())
-    
-
-    def _cleanup_oldest_cache(self):
-        """清理最旧的缓存项"""
-        oldest_item = None
-        oldest_category = None
-        oldest_key = None
-        oldest_time = float('inf')
-        
-        for category in self.cache_system:
-            for key, item in self.cache_system[category].items():
-                if isinstance(item, dict) and 'timestamp' in item:
-                    if item['timestamp'] < oldest_time:
-                        oldest_time = item['timestamp']
-                        oldest_item = item
-                        oldest_category = category
-                        oldest_key = key
-        
-        if oldest_key:
-            del self.cache_system[oldest_category][oldest_key]
-            self.cache_stats['evictions'] += 1
-    
+        composite_key = f"{category}:{key}"
+        self._general_cache.set(composite_key, value)
 
     def cache_clear(self, category=None):
         """清除缓存"""
         if category:
-            if category in self.cache_system:
-                self.cache_stats['evictions'] += len(self.cache_system[category])
-                self.cache_system[category].clear()
+            with self._general_cache._lock:
+                prefix = f"{category}:"
+                keys_to_remove = [k for k in self._general_cache._cache if k.startswith(prefix)]
+                for k in keys_to_remove:
+                    self._general_cache._cache.pop(k, None)
+                    self._general_cache._expire_times.pop(k, None)
         else:
-            for cat in self.cache_system:
-                self.cache_stats['evictions'] += len(self.cache_system[cat])
-                self.cache_system[cat].clear()
-        self.cache_stats['size'] = 0
-    
+            self._general_cache.clear()
 
     def get_cache_stats(self):
         """获取缓存统计信息"""
-        return self.cache_stats
+        return self._general_cache.get_stats()
     
 
-    def _unload_ollama_models(self, log_prefix=""):
+    def _unload_ollama_models(self, log_prefix="", exit_mode=False):
         """卸载所有Ollama模型释放GPU显存（统一方法，替代4处重复代码）
 
         注意：此方法包含网络请求和等待，不应在主线程中调用。
         修复：轮询等待GPU显存真正释放，而非固定sleep。
+        
+        Args:
+            exit_mode: 退出模式，使用极短超时避免阻塞UI关闭
         """
+        api_timeout = 1 if exit_mode else 5
+        unload_timeout = 2 if exit_mode else 15
+        poll_max = 2 if exit_mode else 15
+
         try:
             if is_ollama_available():
-                # 记录卸载前的GPU显存占用
                 vram_before = 0
                 try:
                     import torch
@@ -225,7 +123,7 @@ class ResourceMixin:
 
                 status_resp = get_http_session().get(
                     f"{Config.OLLAMA_BASE_URL}/api/ps",
-                    timeout=5
+                    timeout=api_timeout
                 )
                 if status_resp.status_code == 200:
                     loaded_models = status_resp.json().get('models', [])
@@ -236,14 +134,13 @@ class ResourceMixin:
                                 get_http_session().post(
                                     f"{Config.OLLAMA_BASE_URL}/api/generate",
                                     json={"model": model_name, "keep_alive": 0, "stream": False},
-                                    timeout=15
+                                    timeout=unload_timeout
                                 )
                             except Exception:
                                 pass
                     if loaded_models:
-                        # 轮询等待GPU显存真正释放（最多等15秒）
                         released = False
-                        for attempt in range(15):
+                        for attempt in range(poll_max):
                             time.sleep(1)
                             try:
                                 import torch
@@ -266,22 +163,22 @@ class ResourceMixin:
 
     def init_thread_pool(self):
         """初始化线程池"""
-        # 基于CPU核心数和系统内存动态调整线程池大小
+        if hasattr(self, 'executor') and self.executor is not None:
+            try:
+                self.executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                self.executor.shutdown(wait=False)
+            except Exception:
+                pass
+
         try:
             import psutil
-            # 获取CPU核心数
             cpu_count = os.cpu_count() or 4
-            # 获取可用内存（GB）
             available_memory = psutil.virtual_memory().available / (1024 ** 3)
-            
-            # 根据系统资源动态调整线程数
-            # RTX 4000 + 8GB显存，优先使用GPU，线程数可以更多
-            self.max_workers = min(cpu_count, int(available_memory / 2), 8)  # 最多8个线程
+            self.max_workers = min(cpu_count, int(available_memory / 2), 8)
         except ImportError:
-            # 如果psutil不可用，使用默认值
             self.max_workers = min(os.cpu_count() or 4, 4)
         
-        # 初始化线程池
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
         self.thread_pool = {
             'executor': self.executor,
@@ -358,10 +255,8 @@ class ResourceMixin:
         threading.Thread(target=run_task, daemon=True, name=f"Task-{task_id}").start()
     
 
-    def _thorough_cleanup(self):
-        """彻底清理所有分镜脚本数据和缓存 - 确保无残留（含磁盘文件+内存数据）"""
-        self._move_output_to_trash(reason="彻底清理")
-
+    def _clear_internal_state(self, reset_audio=False, reset_cache_stats=False):
+        """公共内部状态清理方法，被 _thorough_cleanup / _release_memory_resources / _reset_project_state 共用"""
         try:
             self.shots_data = []
         except Exception:
@@ -387,53 +282,36 @@ class ResourceMixin:
                         'count': 0,
                         'data': []
                     }
-                if 'audio' in self.state_manager:
+                if reset_audio and 'audio' in self.state_manager:
                     self.state_manager['audio'] = {
                         'loaded': False,
                         'path': None,
                         'duration': 0
                     }
                 if 'images' in self.state_manager:
-                    self.state_manager['images'] = {
-                        'generated': False,
-                        'count': 0,
-                        'path': self.images_dir if hasattr(self, 'images_dir') else ''
-                    }
+                    self.state_manager['images']['generated'] = False
+                    self.state_manager['images']['count'] = 0
                 if 'video' in self.state_manager:
-                    self.state_manager['video'] = {
-                        'generated': False,
-                        'path': None
-                    }
+                    self.state_manager['video']['generated'] = False
+                    self.state_manager['video']['path'] = None
         except Exception:
             pass
 
-        try:
-            if hasattr(self, 'total_audio_duration'):
-                self.total_audio_duration = 0
-        except Exception:
-            pass
+        if reset_audio:
+            try:
+                if hasattr(self, 'total_audio_duration'):
+                    self.total_audio_duration = 0
+            except Exception:
+                pass
+            try:
+                if hasattr(self, 'audio_path'):
+                    self.audio_path = None
+            except Exception:
+                pass
 
         try:
-            if hasattr(self, 'audio_path'):
-                self.audio_path = None
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'cache_system') and isinstance(self.cache_system, dict):
-                for cat in list(self.cache_system.keys()):
-                    self.cache_system[cat] = {}
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'cache_stats') and isinstance(self.cache_stats, dict):
-                self.cache_stats = {
-                    'hits': 0,
-                    'misses': 0,
-                    'evictions': 0,
-                    'size': 0
-                }
+            if hasattr(self, '_general_cache'):
+                self._general_cache.clear()
         except Exception:
             pass
 
@@ -466,78 +344,22 @@ class ResourceMixin:
         except Exception:
             pass
 
+        try:
+            from video_generator.enhanced_content_recognition import get_enhanced_recognizer
+            recognizer = get_enhanced_recognizer()
+            if recognizer and hasattr(recognizer, 'reset_context'):
+                recognizer.reset_context()
+        except Exception:
+            pass
+
+    def _thorough_cleanup(self):
+        """彻底清理所有分镜脚本数据和缓存 - 确保无残留（含磁盘文件+内存数据）"""
+        self._move_output_to_trash(reason="彻底清理")
+        self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
     def _release_memory_resources(self):
         """只释放内存资源，不删除磁盘文件（用于程序退出时）"""
-        try:
-            self.shots_data = []
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, '_pregenerated_prompts'):
-                delattr(self, '_pregenerated_prompts')
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, '_shot_texts_for_context'):
-                delattr(self, '_shot_texts_for_context')
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
-                for key in self.state_manager:
-                    if isinstance(self.state_manager[key], dict):
-                        if 'data' in self.state_manager[key]:
-                            self.state_manager[key]['data'] = []
-                        if 'path' in self.state_manager[key]:
-                            self.state_manager[key]['path'] = None
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'audio_path'):
-                self.audio_path = None
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'cache_system') and isinstance(self.cache_system, dict):
-                for cat in list(self.cache_system.keys()):
-                    self.cache_system[cat] = {}
-        except Exception:
-            pass
-
-        try:
-            prompt_cache.clear()
-        except Exception:
-            pass
-
-        try:
-            image_cache.clear()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'arv_prompter') and self.arv_prompter is not None:
-                del self.arv_prompter
-                self.arv_prompter = None
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'data_bus') and isinstance(self.data_bus, dict):
-                self.data_bus.clear()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'event_system') and isinstance(self.event_system, dict):
-                self.event_system.clear()
-        except Exception:
-            pass
+        self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
 
     def _move_to_trash(self, file_path, trash_session_dir=None):
@@ -638,10 +460,6 @@ class ResourceMixin:
 
         try:
             self.perf_monitor_running = False
-            if hasattr(self, '_cache_cleanup_stop_event'):
-                self._cache_cleanup_stop_event.set()
-            if hasattr(self, '_cache_cleanup_thread') and self._cache_cleanup_thread.is_alive():
-                self._cache_cleanup_thread.join(timeout=3)
             self.task_running = False
             self._api_heartbeat_running = False
             self.sd_connected = False
@@ -670,11 +488,12 @@ class ResourceMixin:
             pass
 
         try:
-            if hasattr(self, 'executor'):
+            if hasattr(self, 'executor') and self.executor is not None:
                 try:
                     self.executor.shutdown(wait=False, cancel_futures=True)
                 except TypeError:
                     self.executor.shutdown(wait=False)
+                self.executor = None
         except Exception:
             pass
 
@@ -715,7 +534,7 @@ class ResourceMixin:
             pass
 
         try:
-            self._unload_ollama_models(log_prefix="🔄 退出清理: ")
+            self._unload_ollama_models(log_prefix="🔄 退出清理: ", exit_mode=True)
         except Exception:
             pass
 
@@ -738,13 +557,6 @@ class ResourceMixin:
 
         try:
             gc.collect()
-        except Exception:
-            pass
-
-        try:
-            if self.executor is not None:
-                self.executor.shutdown(wait=False)
-                self.executor = None
         except Exception:
             pass
 

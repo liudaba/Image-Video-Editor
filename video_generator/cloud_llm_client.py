@@ -217,77 +217,107 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
         provider_name = PROVIDER_CONFIG.get(provider_id, {}).get("name", provider_id)
         log_callback(f"☁️ 正在调用云端模型: {provider_name} / {model}")
 
-    try:
-        session = get_http_session()
-        response = session.post(
-            url,
-            headers=headers,
-            json=request_body,
-            timeout=120,
-        )
+    _MAX_RETRIES = 3
+    _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
-        if response.status_code == 401:
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            session = get_http_session()
+            response = session.post(
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=120,
+            )
+
+            if response.status_code == 401:
+                if log_callback:
+                    log_callback("=" * 50)
+                    log_callback("❌ 云端模型调用失败！API Key无效或已过期")
+                    log_callback("   请在高级设置中检查API Key配置")
+                    log_callback("=" * 50)
+                return None, None
+
+            if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                wait = min(2 ** attempt, 30)
+                if log_callback:
+                    reason = "频率限制" if response.status_code == 429 else f"服务器错误({response.status_code})"
+                    log_callback(f"⚠️ 云端模型{reason}，第{attempt}次重试（等待{wait}秒）...")
+                time.sleep(wait)
+                continue
+
+            if response.status_code == 429:
+                if log_callback:
+                    log_callback("=" * 50)
+                    log_callback("⚠️ 云端模型请求频率超限！")
+                    log_callback("   请稍后重试，或切换到其他服务商")
+                    log_callback("=" * 50)
+                return None, None
+
+            if response.status_code != 200:
+                error_detail = ""
+                try:
+                    err_json = response.json()
+                    error_detail = err_json.get("error", {}).get("message", "")
+                    if not error_detail:
+                        error_detail = str(err_json)[:200]
+                except Exception:
+                    error_detail = response.text[:200]
+                if log_callback:
+                    log_callback("=" * 50)
+                    log_callback(f"❌ 云端模型调用失败！HTTP {response.status_code}")
+                    log_callback(f"   错误详情: {error_detail[:150]}")
+                    log_callback("=" * 50)
+                return None, None
+
+            result_data = response.json()
+
+            choices = result_data.get("choices", [])
+            if not choices:
+                if log_callback:
+                    log_callback("⚠️ 云端模型返回空结果")
+                return None, None
+
+            content = choices[0].get("message", {}).get("content", "").strip()
+            if not content:
+                if log_callback:
+                    log_callback("⚠️ 云端模型返回空内容")
+                return None, None
+
+            usage = result_data.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+
+            if log_callback:
+                log_callback(f"✅ 云端模型调用成功: {model} (tokens: {prompt_tokens}+{completion_tokens})")
+
+            return content, model
+
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if attempt < _MAX_RETRIES:
+                wait = min(2 ** attempt, 30)
+                if log_callback:
+                    log_callback(f"⚠️ 云端模型网络异常({type(e).__name__})，第{attempt}次重试（等待{wait}秒）...")
+                time.sleep(wait)
+                continue
             if log_callback:
                 log_callback("=" * 50)
-                log_callback("❌ 云端模型调用失败！API Key无效或已过期")
-                log_callback("   请在高级设置中检查API Key配置")
+                log_callback(f"❌ 云端模型调用异常！重试{_MAX_RETRIES}次后仍失败")
+                log_callback(f"   {type(e).__name__}: {str(e)[:150]}")
                 log_callback("=" * 50)
             return None, None
 
-        if response.status_code == 429:
+        except Exception as e:
             if log_callback:
                 log_callback("=" * 50)
-                log_callback("⚠️ 云端模型请求频率超限！")
-                log_callback("   请稍后重试，或切换到其他服务商")
-                log_callback("=" * 50)
-            return None, None
-
-        if response.status_code != 200:
-            error_detail = ""
-            try:
-                err_json = response.json()
-                error_detail = err_json.get("error", {}).get("message", "")
-                if not error_detail:
-                    error_detail = str(err_json)[:200]
-            except Exception:
-                error_detail = response.text[:200]
-            if log_callback:
-                log_callback("=" * 50)
-                log_callback(f"❌ 云端模型调用失败！HTTP {response.status_code}")
-                log_callback(f"   错误详情: {error_detail[:150]}")
+                log_callback(f"❌ 云端模型调用异常！")
+                log_callback(f"   {type(e).__name__}: {str(e)[:150]}")
                 log_callback("=" * 50)
             return None, None
 
-        result_data = response.json()
-
-        choices = result_data.get("choices", [])
-        if not choices:
-            if log_callback:
-                log_callback("⚠️ 云端模型返回空结果")
-            return None, None
-
-        content = choices[0].get("message", {}).get("content", "").strip()
-        if not content:
-            if log_callback:
-                log_callback("⚠️ 云端模型返回空内容")
-            return None, None
-
-        usage = result_data.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-
-        if log_callback:
-            log_callback(f"✅ 云端模型调用成功: {model} (tokens: {prompt_tokens}+{completion_tokens})")
-
-        return content, model
-
-    except Exception as e:
-        if log_callback:
-            log_callback("=" * 50)
-            log_callback(f"❌ 云端模型调用异常！")
-            log_callback(f"   {type(e).__name__}: {str(e)[:150]}")
-            log_callback("=" * 50)
-        return None, None
+    if log_callback:
+        log_callback(f"❌ 云端模型调用失败：已达最大重试次数({_MAX_RETRIES})")
+    return None, None
 
 
 def test_cloud_connection(api_key, provider_id, model=None, custom_base_url=""):

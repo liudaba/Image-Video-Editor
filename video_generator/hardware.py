@@ -25,23 +25,43 @@ class HardwareAcceleratedRenderer:
         self._has_cuda_filters = None
         self._nvenc_sessions = None
         self._nvenc_options = None
+        self._encoders_detected = False
+
+    def _detect_encoders(self):
+        """一次性检测所有编码器，避免重复调用 ffmpeg -encoders"""
+        if self._encoders_detected:
+            return
+        self._encoders_detected = True
+        try:
+            result = subprocess.run(
+                ['ffmpeg', '-encoders'],
+                capture_output=True, text=True, timeout=3
+            )
+            stdout = result.stdout
+            self._has_cuda = 'h264_nvenc' in stdout
+            self._has_quicksync = 'h264_qsv' in stdout
+            self._has_amf = 'h264_amf' in stdout
+        except Exception:
+            self._has_cuda = False
+            self._has_quicksync = False
+            self._has_amf = False
 
     @property
     def has_cuda(self):
         if self._has_cuda is None:
-            self._has_cuda = self._check_cuda()
+            self._detect_encoders()
         return self._has_cuda
 
     @property
     def has_quicksync(self):
         if self._has_quicksync is None:
-            self._has_quicksync = self._check_quicksync()
+            self._detect_encoders()
         return self._has_quicksync
 
     @property
     def has_amf(self):
         if self._has_amf is None:
-            self._has_amf = self._check_amf()
+            self._detect_encoders()
         return self._has_amf
 
     @property
@@ -67,36 +87,6 @@ class HardwareAcceleratedRenderer:
         if self._nvenc_options is None:
             self._nvenc_options = self._detect_nvenc_options()
         return self._nvenc_options
-
-    def _check_cuda(self):
-        try:
-            result = subprocess.run(
-                ['ffmpeg', '-encoders'],
-                capture_output=True, text=True, timeout=3
-            )
-            return 'h264_nvenc' in result.stdout
-        except Exception:
-            return False
-
-    def _check_quicksync(self):
-        try:
-            result = subprocess.run(
-                ['ffmpeg', '-encoders'],
-                capture_output=True, text=True, timeout=3
-            )
-            return 'h264_qsv' in result.stdout
-        except Exception:
-            return False
-
-    def _check_amf(self):
-        try:
-            result = subprocess.run(
-                ['ffmpeg', '-encoders'],
-                capture_output=True, text=True, timeout=3
-            )
-            return 'h264_amf' in result.stdout
-        except Exception:
-            return False
 
     def _check_cuda_filters(self):
         try:

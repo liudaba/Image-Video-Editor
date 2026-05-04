@@ -10,7 +10,7 @@ import tkinter as tk
 from video_generator.mixins.logging import safe_print_exc
 from tkinter import ttk, messagebox
 
-from video_generator.config import Config, get_http_session
+from video_generator.config import Config, get_http_session, validate_image_size
 from video_generator.ollama_client import (
     is_ollama_available,
     set_ollama_available,
@@ -18,6 +18,8 @@ from video_generator.ollama_client import (
     LLMConfig,
     get_available_models,
     try_start_ollama_service,
+    is_cloud_llm_active,
+    is_cloud_image_active,
 )
 from video_generator.multi_model import llm_optimizer
 from video_generator.app_state import (
@@ -29,14 +31,7 @@ class UIHandlersMixin:
     def _check_api_heartbeat(self):
         """周期性检测API连接状态，发现恢复时自动连接并提示"""
         try:
-            cloud_img = False
-            try:
-                from video_generator.cloud_image_client import is_cloud_image_enabled
-                cloud_img = is_cloud_image_enabled()
-            except ImportError:
-                pass
-
-            if not cloud_img:
+            if not is_cloud_image_active():
                 sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
                 sd_connected = getattr(self, '_sd_api_connected', False)
 
@@ -57,15 +52,7 @@ class UIHandlersMixin:
 
             ollama_connected = is_ollama_available()
             if not ollama_connected:
-                try:
-                    from video_generator.cloud_llm_client import is_cloud_llm_enabled
-                    if is_cloud_llm_enabled():
-                        pass
-                    else:
-                        if check_ollama_available():
-                            set_ollama_available(True)
-                            self.log("✅ Ollama服务已自动连接")
-                except ImportError:
+                if not is_cloud_llm_active():
                     if check_ollama_available():
                         set_ollama_available(True)
                         self.log("✅ Ollama服务已自动连接")
@@ -107,7 +94,7 @@ class UIHandlersMixin:
     def update_model_list(self):
         """更新模型列表，自动检测本地已安装的Ollama模型"""
         
-        model_sizes = {
+        _FALLBACK_MODEL_SIZES = {
             "qwen3.5:4b": "2.5GB",
             "qwen3:8b": "5.2GB",
             "qwen3:4b": "2.5GB",
@@ -120,14 +107,31 @@ class UIHandlersMixin:
             "llama3": "4.7GB",
         }
         
+        _api_model_sizes = {}
+        try:
+            from video_generator.ollama_client import is_ollama_available
+            if is_ollama_available():
+                resp = get_http_session().get(
+                    f"{Config.OLLAMA_BASE_URL}/api/tags",
+                    timeout=Config.API_TIMEOUT_SHORT
+                )
+                if resp.status_code == 200:
+                    for m in resp.json().get("models", []):
+                        name = m.get("name", "")
+                        size_bytes = m.get("size", 0)
+                        if name and size_bytes:
+                            gb = size_bytes / (1024 ** 3)
+                            _api_model_sizes[name] = f"{gb:.1f}GB"
+        except Exception:
+            pass
+        
         def get_model_label(model_name):
-            for key, size in model_sizes.items():
+            if model_name in _api_model_sizes:
+                return f"{model_name}  {_api_model_sizes[model_name]}"
+            for key, size in _FALLBACK_MODEL_SIZES.items():
                 if key in model_name:
                     return f"{model_name}  {size}"
             return model_name
-        
-        for widget in self.model_dropdown_inner_frame.winfo_children():
-            widget.destroy()
         
         ollama_connected = False
         if check_ollama_available():
@@ -138,37 +142,66 @@ class UIHandlersMixin:
                 set_ollama_available(True)
                 ollama_connected = True
         
+        model_labels = []
+        model_ids = []
         try:
             if is_ollama_available() or ollama_connected:
                 available_models = get_available_models()
-                model_names = available_models
-                    
-                if model_names:
-                    for model in model_names:
-                        model_label = get_model_label(model)
-                        btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                        btn.pack(fill=tk.X, pady=1, padx=5)
+                if available_models:
+                    for model in available_models:
+                        model_labels.append(get_model_label(model))
+                        model_ids.append(model)
                 else:
-                    default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
-                    for model in default_models:
-                        model_label = get_model_label(model)
-                        btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                        btn.pack(fill=tk.X, pady=1, padx=5)
+                    for model in ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]:
+                        model_labels.append(get_model_label(model))
+                        model_ids.append(model)
             else:
-                default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
-                for model in default_models:
-                    model_label = get_model_label(model)
-                    btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                    btn.pack(fill=tk.X, pady=1, padx=5)
+                for model in ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]:
+                    model_labels.append(get_model_label(model))
+                    model_ids.append(model)
         except Exception as e:
             error_msg = str(e)
-            status_code = getattr(e, 'code', None) or getattr(e, 'status', None) or '未知'
-            self.log(f"获取Ollama模型列表失败: {error_msg} (status code: {status_code})")
-            default_models = ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]
-            for model in default_models:
-                model_label = get_model_label(model)
-                btn = ttk.Button(self.model_dropdown_inner_frame, text=model_label, command=lambda m=model: self.select_ollama_model(m), style="Medium.TButton")
-                btn.pack(fill=tk.X, pady=1, padx=5)
+            self.log(f"获取Ollama模型列表失败: {error_msg}")
+            for model in ["qwen3.5:4b", "qwen3:4b", "gemma3:4b", "deepseek-r1:8b"]:
+                model_labels.append(get_model_label(model))
+                model_ids.append(model)
+        
+        self._ollama_model_ids = model_ids
+        
+        if hasattr(self, '_ollama_combo') and self._ollama_combo.winfo_exists():
+            self._ollama_combo['values'] = model_labels
+            current = self.ollama_model_var.get()
+            if current:
+                for i, mid in enumerate(model_ids):
+                    if mid == current:
+                        self._ollama_combo.current(i)
+                        break
+
+
+    def _on_ollama_model_selected(self, event=None):
+        """Combobox选择模型后的回调"""
+        idx = self._ollama_combo.current()
+        if 0 <= idx < len(self._ollama_model_ids):
+            model = self._ollama_model_ids[idx]
+            self.ollama_model_var.set(model)
+            self.log(f"✅ 已选择Ollama模型: {model}")
+
+
+    def _on_ollama_combo_wheel(self, event):
+        """鼠标滚轮在Combobox上切换模型"""
+        try:
+            current = self._ollama_combo.current()
+            values = self._ollama_combo['values']
+            if not values:
+                return
+            if event.delta > 0 or event.num == 4:
+                new_idx = max(0, current - 1)
+            else:
+                new_idx = min(len(values) - 1, current + 1)
+            self._ollama_combo.current(new_idx)
+            self._on_ollama_model_selected()
+        except Exception:
+            pass
 
 
     def toggle_advanced_settings(self):
@@ -184,86 +217,61 @@ class UIHandlersMixin:
         else:
             self.advanced_window = tk.Toplevel(self.root)
             self.advanced_window.title("⚙️ 高级设置")
-            self.advanced_window.geometry("960x680")
-            self.advanced_window.minsize(760, 520)
+            self.advanced_window.geometry("1050x680")
+            self.advanced_window.minsize(900, 600)
             self.advanced_window.resizable(True, True)
             self.advanced_window.configure(bg="#2a2d35")
             
             self.advanced_window.protocol("WM_DELETE_WINDOW", self._on_advanced_window_close)
             
-            main_frame = ttk.Frame(self.advanced_window, padding=6, style="Adv.TFrame")
+            main_frame = ttk.Frame(self.advanced_window, padding=4, style="Adv.TFrame")
             main_frame.pack(fill=tk.BOTH, expand=True)
             
-            main_frame.columnconfigure(0, weight=1, minsize=10)
-            main_frame.columnconfigure(1, weight=1, minsize=10)
-            
-            main_frame.rowconfigure(0, weight=0, minsize=10)
-            main_frame.rowconfigure(1, weight=0, minsize=10)
-            main_frame.rowconfigure(2, weight=0, minsize=10)
-            main_frame.rowconfigure(3, weight=0, minsize=10)
-            main_frame.rowconfigure(4, weight=1, minsize=10)
-            main_frame.rowconfigure(5, weight=0, minsize=10)
+            main_frame.columnconfigure(0, weight=1, uniform="col")
+            main_frame.columnconfigure(1, weight=1, uniform="col")
+            main_frame.columnconfigure(2, weight=1, uniform="col")
+            for i in range(5):
+                main_frame.rowconfigure(i, weight=1, uniform="row")
             
             self._adv_panels = {}
             
             self._adv_panels["draw"] = ttk.Frame(main_frame)
-            self._adv_panels["draw"].grid(row=0, column=0, sticky="new", padx=3, pady=2)
+            self._adv_panels["draw"].grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+            
+            self._adv_panels["video"] = ttk.Frame(main_frame)
+            self._adv_panels["video"].grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
+            
+            self._adv_panels["cloud_llm"] = ttk.Frame(main_frame)
+            self._adv_panels["cloud_llm"].grid(row=0, column=2, rowspan=2, sticky="nsew", padx=2, pady=2)
             
             self._adv_panels["style"] = ttk.Frame(main_frame)
-            self._adv_panels["style"].grid(row=1, column=0, sticky="new", padx=3, pady=2)
+            self._adv_panels["style"].grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
+            
+            self._adv_panels["thread"] = ttk.Frame(main_frame)
+            self._adv_panels["thread"].grid(row=1, column=1, sticky="nsew", padx=2, pady=2)
             
             self._adv_panels["sd_api"] = ttk.Frame(main_frame)
-            self._adv_panels["sd_api"].grid(row=2, column=0, sticky="new", padx=3, pady=2)
+            self._adv_panels["sd_api"].grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
             
-            video_thread_frame = ttk.Frame(main_frame)
-            video_thread_frame.grid(row=3, column=0, sticky="new", padx=3, pady=2)
-            video_thread_frame.columnconfigure(0, weight=1)
+            self._adv_panels["prompt"] = ttk.Frame(main_frame)
+            self._adv_panels["prompt"].grid(row=2, column=1, sticky="nsew", padx=2, pady=2)
             
-            self._adv_panels["video"] = ttk.Frame(video_thread_frame)
-            self._adv_panels["video"].grid(row=0, column=0, sticky="ew", pady=1)
+            self._adv_panels["cloud_asr"] = ttk.Frame(main_frame)
+            self._adv_panels["cloud_asr"].grid(row=2, column=2, sticky="nsew", padx=2, pady=2)
             
-            self._adv_panels["thread"] = ttk.Frame(video_thread_frame)
-            self._adv_panels["thread"].grid(row=1, column=0, sticky="ew", pady=1)
+            self._adv_panels["optimize"] = ttk.Frame(main_frame)
+            self._adv_panels["optimize"].grid(row=3, column=0, sticky="nsew", padx=2, pady=2)
             
-            prompt_theme_frame = ttk.Frame(main_frame)
-            prompt_theme_frame.grid(row=4, column=0, sticky="nsew", padx=3, pady=2)
-            prompt_theme_frame.rowconfigure(0, weight=0, minsize=10)
-            prompt_theme_frame.rowconfigure(1, weight=1, minsize=10)
-            prompt_theme_frame.columnconfigure(0, weight=1)
+            self._adv_panels["theme"] = ttk.Frame(main_frame)
+            self._adv_panels["theme"].grid(row=3, column=1, sticky="nsew", padx=2, pady=2)
             
-            self._adv_panels["theme"] = ttk.Frame(prompt_theme_frame)
-            self._adv_panels["theme"].grid(row=0, column=0, sticky="new", pady=0)
-            
-            self._adv_panels["prompt"] = ttk.Frame(prompt_theme_frame)
-            self._adv_panels["prompt"].grid(row=1, column=0, sticky="nsew", pady=1)
-            
-            right_container = ttk.Frame(main_frame)
-            right_container.grid(row=0, column=1, rowspan=5, sticky="nsew", padx=3, pady=2)
-            right_container.rowconfigure(0, weight=2, minsize=10)
-            right_container.rowconfigure(1, weight=0, minsize=10)
-            right_container.rowconfigure(2, weight=1, minsize=10)
-            right_container.columnconfigure(0, weight=1)
-            
-            self._adv_panels["cloud_llm"] = ttk.Frame(right_container)
-            self._adv_panels["cloud_llm"].grid(row=0, column=0, sticky="nsew", pady=(2, 0))
-            
-            cloud_asr_img_frame = ttk.Frame(right_container)
-            cloud_asr_img_frame.grid(row=1, column=0, sticky="new", pady=0)
-            cloud_asr_img_frame.columnconfigure(0, weight=1)
-            
-            self._adv_panels["cloud_asr"] = ttk.Frame(cloud_asr_img_frame)
-            self._adv_panels["cloud_asr"].grid(row=0, column=0, sticky="new", pady=0)
-            
-            self._adv_panels["cloud_img"] = ttk.Frame(cloud_asr_img_frame)
-            self._adv_panels["cloud_img"].grid(row=1, column=0, sticky="new", pady=0)
-            
-            self._adv_panels["optimize"] = ttk.Frame(right_container)
-            self._adv_panels["optimize"].grid(row=2, column=0, sticky="nsew", pady=(0, 2))
+            self._adv_panels["cloud_img"] = ttk.Frame(main_frame)
+            self._adv_panels["cloud_img"].grid(row=3, column=2, sticky="nsew", padx=2, pady=2)
             
             btn_frame = ttk.Frame(main_frame)
-            btn_frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=6)
+            btn_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=4, pady=1)
             style = ttk.Style()
-            style.configure("LargeGreen.TButton", font=('Microsoft YaHei', 14, 'bold'))
+            style.configure("LargeGreen.TButton", font=('Microsoft YaHei', 12, 'bold'), padding=(0, 2))
             btn_apply = ttk.Button(btn_frame, text="✅ 应用设置", command=self.apply_advanced_settings, style="LargeGreen.TButton")
             btn_apply.pack(fill=tk.X, padx=5)
             
@@ -334,22 +342,13 @@ class UIHandlersMixin:
     
 
     def toggle_model_dropdown(self):
-        """切换模型选择下拉菜单的显示/隐藏"""
-        if self.model_dropdown_visible:
-            self.model_dropdown_frame.pack_forget()
-            self.model_dropdown_visible = False
-        else:
-            self.update_model_list()
-            self.model_dropdown_inner_frame.pack(fill=tk.X)
-            self.model_dropdown_frame.pack(fill=tk.X, pady=2)
-            self.model_dropdown_visible = True
+        """刷新Ollama模型列表"""
+        self.update_model_list()
 
 
     def select_ollama_model(self, model):
-        """选择Ollama模型"""
+        """选择Ollama模型（兼容旧调用）"""
         self.ollama_model_var.set(model)
-        self.model_dropdown_frame.pack_forget()
-        self.model_dropdown_visible = False
         self.log(f"✅ 已选择Ollama模型: {model}")
     
 
@@ -982,27 +981,6 @@ class UIHandlersMixin:
         self.log(f"☁️ 已选择云端模型: {selected_display}")
 
 
-    def _toggle_api_key_visibility(self):
-        """切换API Key显示/隐藏"""
-        if hasattr(self, 'cloud_llm_api_key_var'):
-            current = self.cloud_llm_api_key_var.get()
-            for widget in self.advanced_window.winfo_children() if self.advanced_window else []:
-                self._toggle_entry_show(widget, current)
-    
-    def _toggle_entry_show(self, parent, current_value):
-        """递归查找并切换API Key输入框的显示模式"""
-        for child in parent.winfo_children():
-            if isinstance(child, ttk.Entry) and hasattr(child, 'cget'):
-                try:
-                    current_show = child.cget('show')
-                    if current_show == '*':
-                        child.config(show='')
-                    else:
-                        child.config(show='*')
-                except Exception:
-                    pass
-            self._toggle_entry_show(child, current_value)
-
 
     def _test_cloud_llm_connection(self):
         """测试云端大模型连接"""
@@ -1376,6 +1354,12 @@ class UIHandlersMixin:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                 
+                try:
+                    from video_generator.crypto_utils import decrypt_config
+                    decrypt_config(config, self.base_dir)
+                except ImportError:
+                    pass
+                
                 # 加载绘图设置
                 if 'model' in config:
                     self.model_var.set(config['model'])
@@ -1507,8 +1491,8 @@ class UIHandlersMixin:
             
             config = {
                 'model': self.model_var.get(),
-                'width': int(self.width_var.get()),
-                'height': int(self.height_var.get()),
+                'width': validate_image_size(self.width_var.get(), self.height_var.get())[0],
+                'height': validate_image_size(self.width_var.get(), self.height_var.get())[1],
                 'api_type': self.api_var.get(),
                 'api_url': self.sd_api_url_var.get(),
                 'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b',
@@ -1535,6 +1519,12 @@ class UIHandlersMixin:
                 'cloud_image_model': self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else '',
                 'cloud_image_custom_url': self.cloud_image_custom_url_var.get() if hasattr(self, 'cloud_image_custom_url_var') else '',
             }
+            
+            try:
+                from video_generator.crypto_utils import encrypt_config
+                encrypt_config(config, self.base_dir)
+            except ImportError:
+                pass
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)

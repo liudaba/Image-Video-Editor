@@ -1,1 +1,1 @@
-"""Mixin modules for DocuMakerLiteV7."""
+"""Mixin modules for VideoGenApp."""

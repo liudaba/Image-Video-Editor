@@ -1,5 +1,7 @@
-"""Logging mixin - thread-safe logging with smart auto-scroll."""
+"""Logging mixin - thread-safe logging with smart auto-scroll and file persistence."""
 import datetime
+import logging
+import os
 import threading
 import traceback
 import tkinter as tk
@@ -9,6 +11,35 @@ _MAX_LOG_LINES = 5000
 _TRIM_LOG_LINES = 4000
 
 _print_lock = threading.Lock()
+
+_file_logger = None
+_file_logger_lock = threading.Lock()
+
+
+def _get_file_logger(base_dir):
+    global _file_logger
+    if _file_logger is not None:
+        return _file_logger
+    with _file_logger_lock:
+        if _file_logger is not None:
+            return _file_logger
+        log_dir = os.path.join(base_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        logger = logging.getLogger("videogen")
+        logger.setLevel(logging.DEBUG)
+        if logger.handlers:
+            _file_logger = logger
+            return _file_logger
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        fh = logging.FileHandler(
+            os.path.join(log_dir, f"app_{today}.log"),
+            encoding="utf-8",
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+        logger.addHandler(fh)
+        _file_logger = logger
+        return _file_logger
 
 
 def safe_print(*args, **kwargs):
@@ -46,6 +77,14 @@ class LoggingMixin:
                 print(log_message, flush=True)
             except Exception:
                 pass
+
+        try:
+            if hasattr(self, 'base_dir') and self.base_dir:
+                fl = _get_file_logger(self.base_dir)
+                if fl:
+                    fl.info(message)
+        except Exception:
+            pass
 
         if not hasattr(self, '_user_scrolling'):
             self._user_scrolling = False

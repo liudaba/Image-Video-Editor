@@ -21,7 +21,7 @@ class Config:
 
     PROMPT_CACHE_SIZE = 500
     PROMPT_CACHE_TTL = 7200
-    IMAGE_CACHE_SIZE = 200
+    IMAGE_CACHE_SIZE = 50
     IMAGE_CACHE_TTL = 3600
 
     MAX_RETRY_COUNT = 3
@@ -31,6 +31,31 @@ class Config:
     PROGRESS_UPDATE_INTERVAL_MS = 100
 
     DEFAULT_MIN_SHOT_DURATION = 4.0
+
+    IMAGE_WIDTH_MIN = 256
+    IMAGE_WIDTH_MAX = 4096
+    IMAGE_HEIGHT_MIN = 256
+    IMAGE_HEIGHT_MAX = 4096
+    IMAGE_SIZE_STEP = 8
+
+
+def validate_image_size(width_str, height_str, default_w=1024, default_h=576):
+    """验证并修正图片尺寸，确保在合法范围内且为8的倍数"""
+    try:
+        w = int(width_str)
+    except (ValueError, TypeError):
+        w = default_w
+    try:
+        h = int(height_str)
+    except (ValueError, TypeError):
+        h = default_h
+    w = max(Config.IMAGE_WIDTH_MIN, min(Config.IMAGE_WIDTH_MAX, w))
+    h = max(Config.IMAGE_HEIGHT_MIN, min(Config.IMAGE_HEIGHT_MAX, h))
+    w = (w // Config.IMAGE_SIZE_STEP) * Config.IMAGE_SIZE_STEP
+    h = (h // Config.IMAGE_SIZE_STEP) * Config.IMAGE_SIZE_STEP
+    w = max(Config.IMAGE_SIZE_STEP, w)
+    h = max(Config.IMAGE_SIZE_STEP, h)
+    return w, h
 
 
 RE_BOLD = re.compile(r'\*\*([^*]+)\*\*')

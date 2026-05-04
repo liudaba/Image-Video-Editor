@@ -11,20 +11,92 @@ import tkinter as tk
 
 from video_generator.mixins.logging import safe_print_exc
 
-from video_generator.config import Config, get_http_session
+from video_generator.config import Config, get_http_session, validate_image_size
 from video_generator.cache import image_cache
 from video_generator.model_profiles import get_model_profile
+from video_generator.ollama_client import is_cloud_image_active
 
 class ImagesMixin:
+    def _consume_image_results(self, result_queue, save_queue, total_tasks, saver_thread=None, producer_thread=None):
+        """公共消费者逻辑：从 result_queue 取结果，更新进度，统计计数"""
+        generated_count = 0
+        failed_count = 0
+        cached_count = 0
+        batch_start_time = time.time()
+        received = 0
+        task_cancelled = False
+
+        while received < total_tasks:
+            try:
+                item = result_queue.get(timeout=30)
+            except queue.Empty:
+                if not self.task_running:
+                    task_cancelled = True
+                    self.log("❌ 任务已被取消")
+                    break
+                continue
+            if item is None:
+                break
+
+            result_type = item[3] if len(item) > 3 else "unknown"
+
+            if result_type == "cancelled":
+                task_cancelled = True
+                self.log("❌ 任务已被取消")
+                break
+
+            idx = item[0]
+            progress = 40 + (received / total_tasks) * 50
+            self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
+
+            if received % 5 == 0 or received == total_tasks - 1:
+                elapsed = time.time() - batch_start_time
+                avg_time = elapsed / (received + 1)
+                remaining = (total_tasks - received - 1) * avg_time
+                self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
+
+            if result_type == "cached":
+                cached_count += 1
+                img_path = item[5]
+                save_queue.put((idx, img_path, item[2]), timeout=30)
+                self.log(f"   ✅ 缓存命中")
+
+            elif result_type == "generated":
+                generated_count += 1
+                req_time = item[4]
+                img_path = item[5]
+                save_queue.put((idx, img_path, item[2]), timeout=30)
+                self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
+
+            elif result_type == "connection_error":
+                failed_count += 1
+                self.log(f"   ❌ 连接失败: SD服务未响应")
+                self.log(f"   💡 请检查 SD WebUI 是否正常运行")
+                break
+
+            else:
+                failed_count += 1
+                self.log(f"   ❌ 生成失败")
+
+            received += 1
+            result_queue.task_done()
+
+        while not result_queue.empty():
+            try:
+                result_queue.get_nowait()
+                result_queue.task_done()
+            except queue.Empty:
+                break
+
+        if generated_count + cached_count > 0 and not task_cancelled:
+            self.state_manager['images']['generated'] = True
+        self.state_manager['images']['count'] = generated_count + cached_count
+
+        return task_cancelled, saver_thread, producer_thread
+
     def _check_sd_api_impl(self, silent=False):
         """实际执行SD API连接检查（内部方法）"""
-        cloud_img = False
-        try:
-            from video_generator.cloud_image_client import is_cloud_image_enabled
-            cloud_img = is_cloud_image_enabled()
-        except ImportError:
-            pass
-        if cloud_img:
+        if is_cloud_image_active():
             if not silent:
                 self.log("☁️ 云端生图已启用，无需连接本地SD API")
             return True
@@ -127,12 +199,7 @@ class ImagesMixin:
             from PIL import Image
             from io import BytesIO
 
-            cloud_image_enabled = False
-            try:
-                from video_generator.cloud_image_client import is_cloud_image_enabled
-                cloud_image_enabled = is_cloud_image_enabled()
-            except ImportError:
-                pass
+            cloud_image_enabled = is_cloud_image_active()
 
             if cloud_image_enabled:
                 self._generate_images_cloud()
@@ -181,8 +248,10 @@ class ImagesMixin:
         provider_name = IMAGE_PROVIDER_CONFIG.get(cloud_config.get("provider", ""), {}).get("name", "未知")
         cloud_model = cloud_config.get("model", "未知")
 
-        width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
-        height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+        width, height = validate_image_size(
+            self.width_var.get() if hasattr(self, 'width_var') else '1024',
+            self.height_var.get() if hasattr(self, 'height_var') else '576'
+        )
         selected_styles = self.get_selected_styles()
 
         self.log("")
@@ -353,73 +422,7 @@ class ImagesMixin:
         producer_thread = threading.Thread(target=cloud_producer, daemon=True, name="Cloud-Image-Producer")
         producer_thread.start()
 
-        generated_count = 0
-        failed_count = 0
-        cached_count = 0
-        batch_start_time = time.time()
-        total_tasks = len(tasks)
-        received = 0
-        task_cancelled = False
-
-        while received < total_tasks:
-            try:
-                item = result_queue.get(timeout=30)
-            except queue.Empty:
-                if not self.task_running:
-                    task_cancelled = True
-                    self.log("❌ 任务已被取消")
-                    break
-                continue
-            if item is None:
-                break
-
-            result_type = item[3] if len(item) > 3 else "unknown"
-
-            if result_type == "cancelled":
-                task_cancelled = True
-                self.log("❌ 任务已被取消")
-                break
-
-            idx = item[0]
-            progress = 40 + (received / total_tasks) * 50
-            self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
-
-            if received % 5 == 0 or received == total_tasks - 1:
-                elapsed = time.time() - batch_start_time
-                avg_time = elapsed / (received + 1)
-                remaining = (total_tasks - received - 1) * avg_time
-                self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
-
-            if result_type == "cached":
-                cached_count += 1
-                img_path = item[5]
-                save_queue.put((idx, img_path, item[2]), timeout=30)
-                self.log(f"   ✅ 缓存命中")
-
-            elif result_type == "generated":
-                generated_count += 1
-                req_time = item[4]
-                img_path = item[5]
-                save_queue.put((idx, img_path, item[2]), timeout=30)
-                self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
-
-            else:
-                failed_count += 1
-                self.log(f"   ❌ 生成失败")
-
-            received += 1
-            result_queue.task_done()
-
-        while not result_queue.empty():
-            try:
-                result_queue.get_nowait()
-                result_queue.task_done()
-            except queue.Empty:
-                break
-
-        if generated_count + cached_count > 0 and not task_cancelled:
-            self.state_manager['images']['generated'] = True
-        self.state_manager['images']['count'] = generated_count + cached_count
+        task_cancelled, _, _ = self._consume_image_results(result_queue, save_queue, len(tasks), saver_thread=saver_thread, producer_thread=producer_thread)
 
         try:
             save_queue.put(None, timeout=5)
@@ -436,15 +439,6 @@ class ImagesMixin:
 
     def _generate_images_local(self):
         """本地SD生图流程（原有逻辑）"""
-        try:
-            from video_generator.cloud_image_client import is_cloud_image_enabled
-            if is_cloud_image_enabled():
-                self.log("⚠️ 云端生图已启用，切换到云端流程")
-                self._generate_images_cloud()
-                return
-        except ImportError:
-            pass
-
         # 检查是否有分镜数据，如果没有则尝试从文件加载
         if not self.shots_data:
             shots_file = os.path.join(self.output_dir, "shots_data.json")
@@ -476,8 +470,10 @@ class ImagesMixin:
         current_sd_model = "未知"  # 当前实际使用的SD模型
             
         # 获取用户设置的像素尺寸
-        width = int(self.width_var.get()) if hasattr(self, 'width_var') else 1920
-        height = int(self.height_var.get()) if hasattr(self, 'height_var') else 1080
+        width, height = validate_image_size(
+            self.width_var.get() if hasattr(self, 'width_var') else '1024',
+            self.height_var.get() if hasattr(self, 'height_var') else '576'
+        )
             
         # 调试：显示原始设置值
         raw_width = self.width_var.get() if hasattr(self, 'width_var') else "未设置"
@@ -833,97 +829,20 @@ class ImagesMixin:
             producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
             producer_thread.start()
 
-            # --- 主线程（消费者）: 从队列取结果，更新UI ---
-            generated_count = 0
-            failed_count = 0
-            cached_count = 0
-            batch_start_time = time.time()
-            total_tasks = len(tasks)
-            received = 0
-            task_cancelled = False
+            task_cancelled, _, _ = self._consume_image_results(result_queue, save_queue, len(tasks), saver_thread=saver_thread, producer_thread=producer_thread)
 
-            while received < total_tasks:
-                try:
-                    item = result_queue.get(timeout=10)
-                except queue.Empty:
-                    if not self.task_running:
-                        task_cancelled = True
-                        self.log("❌ 任务已被取消")
-                        break
-                    continue
-                if item is None:
-                    break
-
-                result_type = item[3] if len(item) > 3 else "unknown"
-
-                if result_type == "cancelled":
-                    task_cancelled = True
-                    self.log("❌ 任务已被取消")
-                    break
-
-                idx = item[0]
-
-                progress = 40 + (received / total_tasks) * 50
-                self.update_task_progress(f"生成图像 {received+1}/{total_tasks}...", progress)
-
-                if received % 5 == 0 or received == total_tasks - 1:
-                    elapsed = time.time() - batch_start_time
-                    avg_time = elapsed / (received + 1)
-                    remaining = (total_tasks - received - 1) * avg_time
-                    self.log(f"📷 [{received+1}/{total_tasks}] (已用{elapsed:.0f}s, 预计剩余{remaining:.0f}s)")
-
-                if result_type == "cached":
-                    cached_count += 1
-                    img_path = item[5]
-                    save_queue.put((idx, img_path, item[2]), timeout=30)
-                    self.log(f"   ✅ 缓存命中")
-
-                elif result_type == "generated":
-                    generated_count += 1
-                    req_time = item[4]
-                    img_path = item[5]
-                    save_queue.put((idx, img_path, item[2]), timeout=30)
-                    self.log(f"   ✅ 完成 (耗时 {req_time:.1f}s)")
-
-                elif result_type == "connection_error":
-                    failed_count += 1
-                    self.log(f"   ❌ 连接失败: SD服务未响应")
-                    self.log(f"   💡 请检查 SD WebUI 是否正常运行")
-                    break
-
-                else:
-                    failed_count += 1
-                    self.log(f"   ❌ 生成失败")
-
-                received += 1
-                result_queue.task_done()
-
-            while not result_queue.empty():
-                try:
-                    result_queue.get_nowait()
-                    result_queue.task_done()
-                except queue.Empty:
-                    break
-
-        if generated_count + cached_count > 0 and not task_cancelled:
-            self.state_manager['images']['generated'] = True
-        self.state_manager['images']['count'] = generated_count + cached_count
-
-        if 'save_queue' in locals():
-            try:
-                save_queue.put(None, timeout=5)
-            except Exception:
-                pass
-        if 'saver_thread' in locals():
-            try:
-                saver_thread.join(timeout=10)
-            except Exception:
-                pass
-        if 'producer_thread' in locals():
-            try:
-                producer_thread.join(timeout=5)
-            except Exception:
-                pass
+        try:
+            save_queue.put(None, timeout=5)
+        except Exception:
+            pass
+        try:
+            saver_thread.join(timeout=10)
+        except Exception:
+            pass
+        try:
+            producer_thread.join(timeout=5)
+        except Exception:
+            pass
     
     # =======================================================================
     # 第十一部分：音视频导入与渲染 (行 9398-10278)

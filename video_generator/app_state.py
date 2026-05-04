@@ -11,11 +11,7 @@ from video_generator.ollama_client import (
 )
 from video_generator.config import Config
 
-# 修复：统一引用 Config 中的值，避免多处定义不同步
 DEFAULT_MIN_SHOT_DURATION = Config.DEFAULT_MIN_SHOT_DURATION
-
-# Ollama availability state (mirrors ollama_client internal state)
-OLLAMA_AVAILABLE = False
 
 
 def get_ollama_available():
@@ -29,13 +25,10 @@ def get_llm_available():
 
 
 def set_ollama_available_global(value):
-    """Set Ollama availability (thread-safe), also updates local cache."""
-    global OLLAMA_AVAILABLE
-    OLLAMA_AVAILABLE = value
+    """Set Ollama availability (thread-safe)."""
     set_ollama_available(value)
 
 
-# Performance monitoring state
 PERFORMANCE_MONITOR_AVAILABLE = False
 psutil = None
 GPUtil = None

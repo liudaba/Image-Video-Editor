@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox
 
 from video_generator.config import Config
 from video_generator.cache import prompt_cache, image_cache
+from video_generator.version import get_version
 from video_generator.ollama_client import (
     LLMConfig,
 )
@@ -18,8 +19,6 @@ try:
     ARV_OPTIMIZATION_AVAILABLE = True
 except ImportError:
     ARV_OPTIMIZATION_AVAILABLE = False
-
-DEFAULT_MIN_SHOT_DURATION = Config.DEFAULT_MIN_SHOT_DURATION
 
 class UIInitMixin:
     def __init__(self, root):
@@ -47,7 +46,7 @@ class UIInitMixin:
 
     def _initialize_ui(self):
         """初始化用户界面"""
-        self.root.title("DocuMaker Pro Lite V7 | 智能分镜工作流 (SD API 连通版)")
+        self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         

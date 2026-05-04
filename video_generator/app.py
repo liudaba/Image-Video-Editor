@@ -96,7 +96,7 @@ print()
 warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version", module="requests")
 
 
-class DocuMakerLiteV7(
+class VideoGenApp(
     LoggingMixin,
     UIInitMixin,
     UIPanelsMixin,
@@ -111,11 +111,11 @@ class DocuMakerLiteV7(
     pass
 
 
-# 创建根窗口
-root = tk.Tk()
+def main():
+    root = tk.Tk()
+    app = VideoGenApp(root)
+    root.mainloop()
 
-# 初始化应用程序
-app = DocuMakerLiteV7(root)
 
-# 启动主循环
-root.mainloop()
+if __name__ == "__main__":
+    main()

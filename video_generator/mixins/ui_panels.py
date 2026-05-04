@@ -5,8 +5,38 @@ import tkinter as tk
 from tkinter import ttk
 
 from video_generator.config import Config
-# 修复：导入模块而非值，运行时读取实际状态
 import video_generator.app_state as app_state
+
+
+class ToolTip:
+    """轻量级 Tooltip 悬停提示"""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, event=None):
+        if self.tip_window:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.attributes("-topmost", True)
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", foreground="#333333",
+                         relief=tk.SOLID, borderwidth=1,
+                         font=("Microsoft YaHei", 10),
+                         padx=8, pady=4)
+        label.pack()
+
+    def _hide(self, event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
 
 class UIPanelsMixin:
     def setup_left_panel(self):
@@ -34,6 +64,7 @@ class UIPanelsMixin:
         # 添加文件夹按钮，点击打开output_project文件夹
         btn_open_folder = ttk.Button(title_frame, text="📁 打开文件夹", command=self.open_output_folder, style="Medium.TButton")
         btn_open_folder.grid(row=0, column=1, padx=(10, 0), sticky="e")
+        ToolTip(btn_open_folder, "打开视频输出文件夹")
 
         # ========== 新增: 版本更新按钮 ==========
         update_frame = ttk.Frame(frame)
@@ -43,6 +74,7 @@ class UIPanelsMixin:
         
         btn_check_update = ttk.Button(update_frame, text="🔄 检查更新", command=self.check_for_updates, style="Medium.TButton")
         btn_check_update.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(btn_check_update, "检查是否有新版本可用")
         
         # 分隔线
         sep_update = ttk.Separator(frame, orient='horizontal')
@@ -55,8 +87,9 @@ class UIPanelsMixin:
         section1.rowconfigure(0, weight=1)
         section1.rowconfigure(1, weight=1)
         
-        btn_import = ttk.Button(section1, text="📂 导入音频", command=self.import_audio, style="LargeBlue.TButton")
+        btn_import = ttk.Button(section1, text="📂 ① 导入音频", command=self.import_audio, style="LargeBlue.TButton")
         btn_import.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(btn_import, "第一步：导入音频文件（MP3/WAV/M4A/FLAC）\n程序将自动识别语音内容并生成文字")
         
         # 音频状态和清理按钮
         audio_status_frame = ttk.Frame(section1)
@@ -68,6 +101,7 @@ class UIPanelsMixin:
         # 添加垃圾筐按钮
         btn_clear_audio = ttk.Button(audio_status_frame, text="🗑️", command=self.clear_audio, style="Small.TButton")
         btn_clear_audio.pack(side=tk.RIGHT, padx=5)
+        ToolTip(btn_clear_audio, "清除当前音频及所有分镜数据")
 
         # 分隔线
         sep1 = ttk.Separator(frame, orient='horizontal')
@@ -79,8 +113,9 @@ class UIPanelsMixin:
         section2.columnconfigure(0, weight=1)
         section2.rowconfigure(0, weight=1)
         
-        btn_generate = ttk.Button(section2, text="🎬 生成分镜脚本", command=self.generate_shots_threaded, style="LargeBlue.TButton")
+        btn_generate = ttk.Button(section2, text="🎬 ② 生成分镜脚本", command=self.generate_shots_threaded, style="LargeBlue.TButton")
         btn_generate.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(btn_generate, "第二步：AI自动分析音频内容\n生成视频分镜脚本和配图提示词")
 
         # 分隔线
         sep2 = ttk.Separator(frame, orient='horizontal')
@@ -93,8 +128,9 @@ class UIPanelsMixin:
         section5.rowconfigure(0, weight=1)
         section5.rowconfigure(1, weight=1)
         
-        btn_render = ttk.Button(section5, text="🎞️ 生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
+        btn_render = ttk.Button(section5, text="🎞️ ③ 生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
         btn_render.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(btn_render, "第三步：根据分镜脚本自动生成图片\n并合成带动画效果的视频")
         
 
 
@@ -119,6 +155,7 @@ class UIPanelsMixin:
         # 高级设置按钮
         btn_advanced = ttk.Button(status_frame, text="⚙️ 高级设置", command=self.toggle_advanced_settings, style="Medium.TButton")
         btn_advanced.pack(fill=tk.X, pady=5)
+        ToolTip(btn_advanced, "配置模型、云端API、风格、动画等高级选项")
 
         # 性能监控面板（运行时检查，确保 lazy_import 后的状态正确）
         if app_state.PERFORMANCE_MONITOR_AVAILABLE:
@@ -162,93 +199,86 @@ class UIPanelsMixin:
 
 
     def setup_advanced_panel_content(self, panels):
-        """创建高级设置面板内容 - 网格均匀分布布局
-        
-        panels: dict，key为板块名，value为对应的Frame容器
-        """
-        large_font_size = self.font_size + 4
-        small_font_size = self.font_size + 2
-        enable_font_size = self.font_size + 3
+        """创建高级设置面板内容 - 3列均匀网格布局"""
+        large_font_size = self.font_size + 2
+        small_font_size = self.font_size + 1
+        enable_font_size = self.font_size + 2
 
         style = ttk.Style()
         style.configure("Cloud.TCheckbutton", font=('Microsoft YaHei', enable_font_size, 'bold'), foreground="#e0e0e0")
-        
+
         # ==================== 绘图设置 ====================
-        section_frame = ttk.LabelFrame(panels["draw"], text="🎨 绘图设置", padding=6, style="Adv.TLabelframe")
-        section_frame.pack(fill=tk.X)
-        
-        # 绘图模型
+        section_frame = ttk.LabelFrame(panels["draw"], text="🎨 绘图设置", padding=4, style="Adv.TLabelframe")
+        section_frame.pack(fill=tk.BOTH, expand=True)
+
         model_frame = ttk.Frame(section_frame)
-        model_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(model_frame, text="模型:", width=12, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        model_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(model_frame, text="模型:", width=8, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'model_var') or self.model_var.get() == "":
             self.model_var = tk.StringVar(value="使用当前模型")
-        
+
         self._default_models = ["使用当前模型", "Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3"]
-        
+
         models = self._default_models
-        
+
         model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=models, state="readonly", font=("Microsoft YaHei", large_font_size))
-        model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
-        
+        model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+
         self.model_combo = model_combo
         self._sd_model_combo = model_combo
-        
+
         refresh_btn = ttk.Button(model_frame, text="🔄", width=3,
             command=self._refresh_model_list, style="Accent.TButton")
-        refresh_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        refresh_btn.pack(side=tk.LEFT, padx=1, pady=1)
         self._model_refresh_btn = refresh_btn
-        
+
         self._async_update_sd_models()
-        
-        # 图片像素设置
+
         pixel_frame = ttk.Frame(section_frame)
-        pixel_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(pixel_frame, text="像素尺寸:", width=12, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        pixel_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(pixel_frame, text="像素:", width=8, font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT, padx=2)
+
         width_frame = ttk.Frame(pixel_frame)
-        width_frame.pack(side=tk.LEFT, padx=5)
+        width_frame.pack(side=tk.LEFT, padx=2)
         ttk.Label(width_frame, text="宽:", font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT)
-        
-        # 如果变量不存在，则初始化
+
         if not hasattr(self, 'width_var') or self.width_var.get() == "":
-            self.width_var = tk.StringVar(value="1920")
-        
-        self._width_entry = ttk.Entry(width_frame, textvariable=self.width_var, width=10, font=("Microsoft YaHei", large_font_size))
-        self._width_entry.pack(side=tk.LEFT, padx=5, pady=2)
-        
+            self.width_var = tk.StringVar(value="1024")
+
+        self._width_entry = ttk.Entry(width_frame, textvariable=self.width_var, width=7, font=("Microsoft YaHei", large_font_size))
+        self._width_entry.pack(side=tk.LEFT, padx=2, pady=1)
+
         height_frame = ttk.Frame(pixel_frame)
-        height_frame.pack(side=tk.LEFT, padx=5)
+        height_frame.pack(side=tk.LEFT, padx=2)
         ttk.Label(height_frame, text="高:", font=("Microsoft YaHei", large_font_size)).pack(side=tk.LEFT)
-        
-        # 如果变量不存在，则初始化
+
         if not hasattr(self, 'height_var') or self.height_var.get() == "":
-            self.height_var = tk.StringVar(value="1080")
-        
-        self._height_entry = ttk.Entry(height_frame, textvariable=self.height_var, width=10, font=("Microsoft YaHei", large_font_size))
-        self._height_entry.pack(side=tk.LEFT, padx=5, pady=2)
+            self.height_var = tk.StringVar(value="576")
+
+        self._height_entry = ttk.Entry(height_frame, textvariable=self.height_var, width=7, font=("Microsoft YaHei", large_font_size))
+        self._height_entry.pack(side=tk.LEFT, padx=2, pady=1)
 
         # ==================== 风格设置 ====================
-        style_section = ttk.LabelFrame(panels["style"], text="🎨 风格设置", padding=6, style="Adv.TLabelframe")
-        style_section.pack(fill=tk.X)
-        
+        style_section = ttk.LabelFrame(panels["style"], text="🎨 风格设置", padding=4, style="Adv.TLabelframe")
+        style_section.pack(fill=tk.BOTH, expand=True)
+
         self.style_control_frame = ttk.Frame(style_section)
-        self.style_control_frame.pack(fill=tk.X, pady=3)
-        
+        self.style_control_frame.pack(fill=tk.X, pady=1)
+
         self.style_dropdown_visible = False
         self.style_dropdown_frame = ttk.Frame(style_section)
-        
+
         style_button = ttk.Button(self.style_control_frame, text="展开风格选项", command=self.toggle_style_dropdown, style="Medium.TButton")
-        style_button.pack(fill=tk.X, padx=5, pady=2)
-        
+        style_button.pack(fill=tk.X, padx=2, pady=1)
+
         self.style_grid = ttk.Frame(self.style_dropdown_frame)
-        self.style_grid.pack(fill=tk.X, pady=3)
-        
+        self.style_grid.pack(fill=tk.X, pady=1)
+
         style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
-        
+
         existing_vars = {name: var for name, var in self.dlr_vars}
-        
+
         for i, opt in enumerate(style_options):
             if opt in existing_vars:
                 var = existing_vars[opt]
@@ -258,35 +288,21 @@ class UIPanelsMixin:
             row = i // 3
             col = i % 3
             chk = ttk.Checkbutton(self.style_grid, text=opt, variable=var)
-            chk.grid(row=row, column=col, sticky=tk.W, padx=10, pady=8)
-        
-        try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                if 'selected_styles' in config:
-                    selected_styles = config['selected_styles']
-                    for style_name, var in self.dlr_vars:
-                        if style_name in selected_styles:
-                            var.set(True)
-                        else:
-                            var.set(False)
-        except Exception as e:
-            pass
-        
+            chk.grid(row=row, column=col, sticky=tk.W, padx=4, pady=2)
+
         # ==================== SD API设置 ====================
-        api_section = ttk.LabelFrame(panels["sd_api"], text="🔌 SD API 设置", padding=6, style="Adv.TLabelframe")
-        api_section.pack(fill=tk.X)
-        
+        api_section = ttk.LabelFrame(panels["sd_api"], text="🔌 SD API 设置", padding=4, style="Adv.TLabelframe")
+        api_section.pack(fill=tk.BOTH, expand=True)
+
         api_url_frame = ttk.Frame(api_section)
-        api_url_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(api_url_frame, text="API URL:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        api_url_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(api_url_frame, text="URL:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         self._sd_api_url_entry = ttk.Entry(api_url_frame, textvariable=self.sd_api_url_var, font=('Microsoft YaHei', large_font_size))
-        self._sd_api_url_entry.pack(fill=tk.X, padx=5, pady=2)
-        
+        self._sd_api_url_entry.pack(fill=tk.X, padx=2, pady=1)
+
         api_control_frame = ttk.Frame(api_section)
-        api_control_frame.pack(fill=tk.X, pady=3)
-        
+        api_control_frame.pack(fill=tk.X, pady=1)
+
         if not hasattr(self, 'sd_api_status_var'):
             self.sd_api_status_var = tk.StringVar(value="❌ 未连接")
         self.sd_api_status_label = ttk.Label(api_control_frame, textvariable=self.sd_api_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
@@ -294,77 +310,77 @@ class UIPanelsMixin:
             self.sd_api_status_label.config(foreground="green")
         else:
             self.sd_api_status_label.config(foreground="red")
-        self.sd_api_status_label.pack(side=tk.LEFT, padx=5)
-        
+        self.sd_api_status_label.pack(side=tk.LEFT, padx=2)
+
         btn_frame = ttk.Frame(api_control_frame)
         btn_frame.pack(side=tk.RIGHT)
-        
-        self._btn_connect_api = ttk.Button(btn_frame, text="🔗 连接 API", command=self.check_sd_api_connection, style="Medium.TButton")
-        self._btn_connect_api.pack(side=tk.LEFT, padx=5, pady=2)
-        
-        self._btn_disconnect_api = ttk.Button(btn_frame, text="🔌 断开连接", command=self.close_sd_api_connection, style="Medium.TButton")
-        self._btn_disconnect_api.pack(side=tk.LEFT, padx=5, pady=2)
-        
+
+        self._btn_connect_api = ttk.Button(btn_frame, text="🔗 连接", command=self.check_sd_api_connection, style="Medium.TButton")
+        self._btn_connect_api.pack(side=tk.LEFT, padx=2, pady=1)
+
+        self._btn_disconnect_api = ttk.Button(btn_frame, text="🔌 断开", command=self.close_sd_api_connection, style="Medium.TButton")
+        self._btn_disconnect_api.pack(side=tk.LEFT, padx=2, pady=1)
+
         # ==================== 视频设置 ====================
-        video_section = ttk.LabelFrame(panels["video"], text="🎬 视频设置", padding=6, style="Adv.TLabelframe")
-        video_section.pack(fill=tk.X)
-        
+        video_section = ttk.LabelFrame(panels["video"], text="🎬 视频设置", padding=4, style="Adv.TLabelframe")
+        video_section.pack(fill=tk.BOTH, expand=True)
+
         animation_frame = ttk.Frame(video_section)
-        animation_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(animation_frame, text="单张画面动画:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        animation_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(animation_frame, text="动画:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'animation_var'):
             self.animation_var = tk.StringVar(value="无")
-        
+
         animation_options = ["无", "缩放", "左移", "右移", "上移", "下移"]
         animation_combo = ttk.Combobox(animation_frame, textvariable=self.animation_var, values=animation_options, state="readonly", font=('Microsoft YaHei', large_font_size))
-        animation_combo.pack(fill=tk.X, padx=5, pady=2)
-        
+        animation_combo.pack(fill=tk.X, padx=2, pady=1)
+
         transition_frame = ttk.Frame(video_section)
-        transition_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(transition_frame, text="过渡效果:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        transition_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(transition_frame, text="过渡:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'transition_var'):
             self.transition_var = tk.StringVar(value="硬切")
-        
+
         transition_options = ["硬切", "交叉淡化"]
         transition_combo = ttk.Combobox(transition_frame, textvariable=self.transition_var, values=transition_options, state="readonly", font=('Microsoft YaHei', large_font_size))
-        transition_combo.pack(fill=tk.X, padx=5, pady=2)
-        
+        transition_combo.pack(fill=tk.X, padx=2, pady=1)
+
         # ==================== 提示词设置 ====================
         prompt_section = ttk.LabelFrame(panels["prompt"], text="💬 提示词设置", padding=4, style="Adv.TLabelframe")
-        prompt_section.pack(fill=tk.X)
-        
+        prompt_section.pack(fill=tk.BOTH, expand=True)
+
         prompt_frame = ttk.Frame(prompt_section)
-        prompt_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(prompt_frame, text="提示词类型:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        prompt_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(prompt_frame, text="类型:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'prompt_type_var'):
             self.prompt_type_var = tk.StringVar(value="SD提示词")
-        
+
         prompt_options = ttk.Frame(prompt_frame)
         prompt_options.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        sd_prompt_btn = ttk.Button(prompt_options, text="SD提示词", command=lambda: self._on_prompt_type_changed("SD提示词"), style="Medium.TButton")
-        sd_prompt_btn.pack(side=tk.LEFT, padx=5, pady=2, fill=tk.X, expand=True)
 
-        arv_prompt_btn = ttk.Button(prompt_options, text="ARV写实提示词", command=lambda: self._on_prompt_type_changed("ARV写实提示词"), style="Medium.TButton")
-        arv_prompt_btn.pack(side=tk.LEFT, padx=5, pady=2, fill=tk.X, expand=True)
-        
+        sd_prompt_btn = ttk.Button(prompt_options, text="SD提示词", command=lambda: self._on_prompt_type_changed("SD提示词"), style="Medium.TButton")
+        sd_prompt_btn.pack(side=tk.LEFT, padx=2, pady=1, fill=tk.X, expand=True)
+
+        arv_prompt_btn = ttk.Button(prompt_options, text="ARV写实", command=lambda: self._on_prompt_type_changed("ARV写实提示词"), style="Medium.TButton")
+        arv_prompt_btn.pack(side=tk.LEFT, padx=2, pady=1, fill=tk.X, expand=True)
+
         prompt_status_frame = ttk.Frame(prompt_section)
-        prompt_status_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(prompt_status_frame, text="当前选择:", width=12, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        prompt_status_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(prompt_status_frame, text="当前:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         prompt_status_label = ttk.Label(prompt_status_frame, textvariable=self.prompt_type_var, font=('Microsoft YaHei', large_font_size, 'bold'))
-        prompt_status_label.pack(side=tk.LEFT, padx=5)
-        
+        prompt_status_label.pack(side=tk.LEFT, padx=2)
+
         # ==================== 云端大模型 ====================
-        cloud_section = ttk.LabelFrame(panels["cloud_llm"], text="☁️ 云端大模型 · AI思考大脑", padding=4, style="Adv.TLabelframe")
-        cloud_section.pack(fill=tk.X)
-        
+        cloud_section = ttk.LabelFrame(panels["cloud_llm"], text="☁️ 云端大模型", padding=4, style="Adv.TLabelframe")
+        cloud_section.pack(fill=tk.BOTH, expand=True)
+
         from video_generator.cloud_llm_client import PROVIDER_CONFIG, get_cloud_llm_config, get_provider_models
-        
+
         cloud_config = get_cloud_llm_config()
-        
+
         if not hasattr(self, 'cloud_llm_enabled_var'):
             self.cloud_llm_enabled_var = tk.BooleanVar(value=cloud_config.get("enabled", False))
         if not hasattr(self, 'cloud_llm_provider_var'):
@@ -375,70 +391,68 @@ class UIPanelsMixin:
             self.cloud_llm_model_var = tk.StringVar(value=cloud_config.get("model", "deepseek-chat"))
         if not hasattr(self, 'cloud_llm_custom_url_var'):
             self.cloud_llm_custom_url_var = tk.StringVar(value=cloud_config.get("custom_base_url", ""))
-        
+
         enable_frame = ttk.Frame(cloud_section)
-        enable_frame.pack(fill=tk.X, pady=3)
+        enable_frame.pack(fill=tk.X, pady=1)
         cloud_enable_chk = ttk.Checkbutton(enable_frame, text="启用云端大模型（替代本地Ollama）", variable=self.cloud_llm_enabled_var, style="Cloud.TCheckbutton")
-        cloud_enable_chk.pack(anchor=tk.W, padx=5)
-        cloud_enable_label = tk.Label(enable_frame, text="⚡ 启用后所有AI思考任务由云端完成，不使用本地Ollama", font=('Microsoft YaHei', small_font_size), foreground="white", bg=self.panel_bg)
-        cloud_enable_label.pack(anchor=tk.W, padx=20)
-        
+        cloud_enable_chk.pack(anchor=tk.W, padx=2)
+
         provider_frame = ttk.Frame(cloud_section)
-        provider_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(provider_frame, text="服务商:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        provider_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(provider_frame, text="服务商:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         provider_names = [f"{PROVIDER_CONFIG[pid]['name']}" for pid in PROVIDER_CONFIG]
         provider_ids = list(PROVIDER_CONFIG.keys())
         self._cloud_provider_ids = provider_ids
-        
+
         provider_combo = ttk.Combobox(provider_frame, textvariable=self.cloud_llm_provider_var, values=provider_names, state="readonly", font=('Microsoft YaHei', large_font_size))
-        provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
+        provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
         provider_combo.bind('<<ComboboxSelected>>', self._on_cloud_provider_changed)
-        
+
         api_key_frame = ttk.Frame(cloud_section)
-        api_key_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(api_key_frame, text="API Key:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        api_key_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(api_key_frame, text="Key:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         api_key_entry = ttk.Entry(api_key_frame, textvariable=self.cloud_llm_api_key_var, font=('Microsoft YaHei', large_font_size), show="*")
-        api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
-        
-        toggle_key_btn = ttk.Button(api_key_frame, text="👁", width=3, command=self._toggle_api_key_visibility, style="Small.TButton")
-        toggle_key_btn.pack(side=tk.LEFT, padx=2)
-        
+        api_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+
+        toggle_key_btn = ttk.Button(api_key_frame, text="👁", width=3, command=lambda: self._toggle_entry_visibility(api_key_entry), style="Small.TButton")
+        toggle_key_btn.pack(side=tk.LEFT, padx=1)
+
         cloud_model_frame = ttk.Frame(cloud_section)
-        cloud_model_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(cloud_model_frame, text="模型:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        cloud_model_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(cloud_model_frame, text="模型:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         current_provider = cloud_config.get("provider", "deepseek")
         current_models = get_provider_models(current_provider)
         model_names = [f"{m['name']} - {m['desc']}" for m in current_models]
         self._cloud_model_ids = [m['id'] for m in current_models]
-        
+
         cloud_model_combo = ttk.Combobox(cloud_model_frame, textvariable=self.cloud_llm_model_var, values=model_names, state="readonly", font=('Microsoft YaHei', large_font_size))
-        cloud_model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
+        cloud_model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
         cloud_model_combo.bind('<<ComboboxSelected>>', self._on_cloud_model_changed)
         self._cloud_model_combo = cloud_model_combo
-        
+
         custom_url_frame = ttk.Frame(cloud_section)
-        custom_url_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(custom_url_frame, text="自定义URL:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        custom_url_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(custom_url_frame, text="URL:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         custom_url_entry = ttk.Entry(custom_url_frame, textvariable=self.cloud_llm_custom_url_var, font=('Microsoft YaHei', large_font_size))
-        custom_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
-        
+        custom_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+
         cloud_btn_frame = ttk.Frame(cloud_section)
-        cloud_btn_frame.pack(fill=tk.X, pady=3)
-        
+        cloud_btn_frame.pack(fill=tk.X, pady=1)
+
         self.btn_test_cloud = ttk.Button(cloud_btn_frame, text="🔗 测试连接", command=self._test_cloud_llm_connection, style="Medium.TButton")
-        self.btn_test_cloud.pack(side=tk.LEFT, padx=5, pady=2)
-        
+        self.btn_test_cloud.pack(side=tk.LEFT, padx=2, pady=1)
+
         if not hasattr(self, 'cloud_llm_status_var'):
             self.cloud_llm_status_var = tk.StringVar(value="❌ 未连接")
         self.cloud_llm_status_label = ttk.Label(cloud_btn_frame, textvariable=self.cloud_llm_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
-        self.cloud_llm_status_label.pack(side=tk.LEFT, padx=10)
-        
+        self.cloud_llm_status_label.pack(side=tk.LEFT, padx=5)
+
         # ==================== 云端语音识别 ====================
-        asr_section = ttk.LabelFrame(panels["cloud_asr"], text="🎙️ 云端语音识别 · 替代Whisper", padding=4, style="Adv.TLabelframe")
-        asr_section.pack(fill=tk.X)
-        
+        asr_section = ttk.LabelFrame(panels["cloud_asr"], text="🎙️ 云端语音识别", padding=4, style="Adv.TLabelframe")
+        asr_section.pack(fill=tk.BOTH, expand=True)
+
         try:
             from video_generator.cloud_llm_client import get_cloud_asr_config
             asr_config = get_cloud_asr_config()
@@ -446,32 +460,29 @@ class UIPanelsMixin:
         except ImportError:
             asr_available = False
             asr_config = {}
-        
+
         if not hasattr(self, 'cloud_asr_enabled_var'):
             self.cloud_asr_enabled_var = tk.BooleanVar(value=asr_config.get("enabled", False))
         if not hasattr(self, 'cloud_asr_api_key_var'):
             self.cloud_asr_api_key_var = tk.StringVar(value=asr_config.get("api_key", ""))
-        
+
         asr_enable_frame = ttk.Frame(asr_section)
-        asr_enable_frame.pack(fill=tk.X, pady=3)
-        asr_enable_chk = ttk.Checkbutton(asr_enable_frame, text="启用云端语音识别（替代本地Whisper，无需GPU）", variable=self.cloud_asr_enabled_var, style="Cloud.TCheckbutton")
-        asr_enable_chk.pack(anchor=tk.W, padx=5)
-        asr_enable_label = tk.Label(asr_enable_frame, text="⚡ 启用后语音识别由OpenAI Whisper API完成，不使用本地Whisper", font=('Microsoft YaHei', small_font_size), foreground="white", bg=self.panel_bg)
-        asr_enable_label.pack(anchor=tk.W, padx=20)
-        
+        asr_enable_frame.pack(fill=tk.X, pady=1)
+        asr_enable_chk = ttk.Checkbutton(asr_enable_frame, text="启用云端语音识别（替代本地Whisper）", variable=self.cloud_asr_enabled_var, style="Cloud.TCheckbutton")
+        asr_enable_chk.pack(anchor=tk.W, padx=2)
+
         asr_key_frame = ttk.Frame(asr_section)
-        asr_key_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(asr_key_frame, text="API Key:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        asr_key_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(asr_key_frame, text="Key:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         asr_key_entry = ttk.Entry(asr_key_frame, textvariable=self.cloud_asr_api_key_var, font=('Microsoft YaHei', large_font_size), show="*")
-        asr_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
-        
-        asr_note = ttk.Label(asr_section, text="💡 使用OpenAI Whisper API，识别精度相当于本地large模型", font=('Microsoft YaHei', small_font_size), foreground="white")
-        asr_note.pack(anchor=tk.W, padx=5)
-        
+        asr_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+        asr_toggle_btn = ttk.Button(asr_key_frame, text="👁", width=3, command=lambda: self._toggle_entry_visibility(asr_key_entry), style="Small.TButton")
+        asr_toggle_btn.pack(side=tk.LEFT, padx=1)
+
         # ==================== 云端生图 ====================
-        cloud_img_section = ttk.LabelFrame(panels["cloud_img"], text="🎨 云端生图 · 替代本地SD", padding=4, style="Adv.TLabelframe")
-        cloud_img_section.pack(fill=tk.X)
-        
+        cloud_img_section = ttk.LabelFrame(panels["cloud_img"], text="🎨 云端生图", padding=4, style="Adv.TLabelframe")
+        cloud_img_section.pack(fill=tk.BOTH, expand=True)
+
         try:
             from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG, get_cloud_image_config, get_image_provider_models
             img_config = get_cloud_image_config()
@@ -480,7 +491,7 @@ class UIPanelsMixin:
             img_available = False
             img_config = {}
             IMAGE_PROVIDER_CONFIG = {}
-        
+
         if not hasattr(self, 'cloud_image_enabled_var'):
             self.cloud_image_enabled_var = tk.BooleanVar(value=img_config.get("enabled", False))
         if not hasattr(self, 'cloud_image_provider_var'):
@@ -491,126 +502,123 @@ class UIPanelsMixin:
             self.cloud_image_model_var = tk.StringVar(value=img_config.get("model", "stabilityai/stable-diffusion-xl-base-1.0"))
         if not hasattr(self, 'cloud_image_custom_url_var'):
             self.cloud_image_custom_url_var = tk.StringVar(value=img_config.get("custom_base_url", ""))
-        
+
         cimg_enable_frame = ttk.Frame(cloud_img_section)
-        cimg_enable_frame.pack(fill=tk.X, pady=3)
-        cimg_enable_chk = ttk.Checkbutton(cimg_enable_frame, text="启用云端生图（替代本地SD，无需本地GPU画图）", variable=self.cloud_image_enabled_var, style="Cloud.TCheckbutton")
-        cimg_enable_chk.pack(anchor=tk.W, padx=5)
-        cimg_enable_label = tk.Label(cimg_enable_frame, text="⚡ 启用后所有图片由云端生成，风格预设将作为指令传递给云端模型", font=('Microsoft YaHei', small_font_size), foreground="white", bg=self.panel_bg)
-        cimg_enable_label.pack(anchor=tk.W, padx=20)
-        
+        cimg_enable_frame.pack(fill=tk.X, pady=1)
+        cimg_enable_chk = ttk.Checkbutton(cimg_enable_frame, text="启用云端生图（替代本地SD）", variable=self.cloud_image_enabled_var, style="Cloud.TCheckbutton")
+        cimg_enable_chk.pack(anchor=tk.W, padx=2)
+
         if img_available:
             cimg_provider_frame = ttk.Frame(cloud_img_section)
-            cimg_provider_frame.pack(fill=tk.X, pady=3)
-            ttk.Label(cimg_provider_frame, text="服务商:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-            
+            cimg_provider_frame.pack(fill=tk.X, pady=1)
+            ttk.Label(cimg_provider_frame, text="服务商:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
             img_provider_names = [f"{IMAGE_PROVIDER_CONFIG[pid]['name']}" for pid in IMAGE_PROVIDER_CONFIG]
             img_provider_ids = list(IMAGE_PROVIDER_CONFIG.keys())
             self._cloud_img_provider_ids = img_provider_ids
-            
+
             cimg_provider_combo = ttk.Combobox(cimg_provider_frame, textvariable=self.cloud_image_provider_var, values=img_provider_names, state="readonly", font=('Microsoft YaHei', large_font_size))
-            cimg_provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
+            cimg_provider_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
             cimg_provider_combo.bind('<<ComboboxSelected>>', self._on_cloud_image_provider_changed)
-        
+
         cimg_key_frame = ttk.Frame(cloud_img_section)
-        cimg_key_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(cimg_key_frame, text="API Key:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
+        cimg_key_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(cimg_key_frame, text="Key:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         cimg_key_entry = ttk.Entry(cimg_key_frame, textvariable=self.cloud_image_api_key_var, font=('Microsoft YaHei', large_font_size), show="*")
-        cimg_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
-        
+        cimg_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
+
         cimg_toggle_btn = ttk.Button(cimg_key_frame, text="👁", width=3, command=lambda: self._toggle_entry_visibility(cimg_key_entry), style="Small.TButton")
-        cimg_toggle_btn.pack(side=tk.LEFT, padx=2)
-        
+        cimg_toggle_btn.pack(side=tk.LEFT, padx=1)
+
         if img_available:
             cimg_model_frame = ttk.Frame(cloud_img_section)
-            cimg_model_frame.pack(fill=tk.X, pady=3)
-            ttk.Label(cimg_model_frame, text="模型:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-            
+            cimg_model_frame.pack(fill=tk.X, pady=1)
+            ttk.Label(cimg_model_frame, text="模型:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
             current_img_provider = img_config.get("provider", "siliconflow")
             current_img_models = get_image_provider_models(current_img_provider)
             img_model_names = [f"{m['name']} - {m['desc']}" for m in current_img_models]
             self._cloud_img_model_ids = [m['id'] for m in current_img_models]
-            
+
             cimg_model_combo = ttk.Combobox(cimg_model_frame, textvariable=self.cloud_image_model_var, values=img_model_names, state="readonly", font=('Microsoft YaHei', large_font_size))
-            cimg_model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=2)
+            cimg_model_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
             cimg_model_combo.bind('<<ComboboxSelected>>', self._on_cloud_image_model_changed)
             self._cloud_img_model_combo = cimg_model_combo
-        
+
         cimg_btn_frame = ttk.Frame(cloud_img_section)
-        cimg_btn_frame.pack(fill=tk.X, pady=3)
-        
+        cimg_btn_frame.pack(fill=tk.X, pady=1)
+
         self.btn_test_cloud_image = ttk.Button(cimg_btn_frame, text="🔗 测试连接", command=self._test_cloud_image_connection, style="Medium.TButton")
-        self.btn_test_cloud_image.pack(side=tk.LEFT, padx=5, pady=2)
-        
+        self.btn_test_cloud_image.pack(side=tk.LEFT, padx=2, pady=1)
+
         if not hasattr(self, 'cloud_image_status_var'):
             self.cloud_image_status_var = tk.StringVar(value="❌ 未连接")
         self.cloud_image_status_label = ttk.Label(cimg_btn_frame, textvariable=self.cloud_image_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
-        self.cloud_image_status_label.pack(side=tk.LEFT, padx=10)
-        
-        cimg_note = ttk.Label(cloud_img_section, text="💡 启用后，所有图片由云端生成，无需本地SD WebUI", font=('Microsoft YaHei', small_font_size), foreground="white")
-        cimg_note.pack(anchor=tk.W, padx=5)
-        
+        self.cloud_image_status_label.pack(side=tk.LEFT, padx=5)
+
         # ==================== 本地模型预选 ====================
         model_section = ttk.LabelFrame(panels["optimize"], text="🔧 本地模型预选", padding=4, style="Adv.TLabelframe")
-        model_section.pack(fill=tk.X)
-        
+        model_section.pack(fill=tk.BOTH, expand=True)
+
         whisper_frame = ttk.Frame(model_section)
-        whisper_frame.pack(fill=tk.X, pady=3)
-        self._whisper_label = ttk.Label(whisper_frame, text="语音模型:", width=12, font=('Microsoft YaHei', large_font_size))
-        self._whisper_label.pack(side=tk.LEFT, padx=5)
-        
+        whisper_frame.pack(fill=tk.X, pady=1)
+        self._whisper_label = ttk.Label(whisper_frame, text="语音模型:", width=10, font=('Microsoft YaHei', large_font_size))
+        self._whisper_label.pack(side=tk.LEFT, padx=2)
+
         whisper_options = ["tiny", "base", "small", "medium", "large"]
         self._whisper_combo = ttk.Combobox(whisper_frame, textvariable=self.whisper_model_var, values=whisper_options, state="readonly", font=('Microsoft YaHei', large_font_size))
-        self._whisper_combo.pack(fill=tk.X, padx=5, pady=2)
-        
+        self._whisper_combo.pack(fill=tk.X, padx=2, pady=1)
+
         ollama_frame = ttk.Frame(model_section)
-        ollama_frame.pack(fill=tk.X, pady=3)
-        self._ollama_label = ttk.Label(ollama_frame, text="Ollama模型:", width=12, font=('Microsoft YaHei', large_font_size))
-        self._ollama_label.pack(side=tk.LEFT, padx=5)
-        
+        ollama_frame.pack(fill=tk.X, pady=1)
+        self._ollama_label = ttk.Label(ollama_frame, text="Ollama:", width=10, font=('Microsoft YaHei', large_font_size))
+        self._ollama_label.pack(side=tk.LEFT, padx=2)
+
         ollama_frame_right = ttk.Frame(ollama_frame)
         ollama_frame_right.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        self._ollama_button = ttk.Button(ollama_frame_right, textvariable=self.ollama_model_var, command=self.toggle_model_dropdown, style="Medium.TButton")
-        self._ollama_button.pack(fill=tk.X, padx=5, pady=2)
-        
+
+        self._ollama_combo = ttk.Combobox(ollama_frame_right, textvariable=self.ollama_model_var, state="readonly", font=('Microsoft YaHei', large_font_size))
+        self._ollama_combo.pack(fill=tk.X, padx=2, pady=1)
+        self._ollama_combo.bind('<<ComboboxSelected>>', self._on_ollama_model_selected)
+        self._ollama_combo.bind('<MouseWheel>', self._on_ollama_combo_wheel)
+
         self.model_dropdown_frame = ttk.Frame(ollama_frame_right)
         self.model_dropdown_inner_frame = ttk.Frame(self.model_dropdown_frame)
-        
+
         config_frame = ttk.Frame(model_section)
-        config_frame.pack(fill=tk.X, pady=3)
-        self._config_label = ttk.Label(config_frame, text="配置模式:", width=12, font=('Microsoft YaHei', large_font_size, 'bold'))
-        self._config_label.pack(side=tk.LEFT, padx=5)
-        
+        config_frame.pack(fill=tk.X, pady=1)
+        self._config_label = ttk.Label(config_frame, text="配置模式:", width=10, font=('Microsoft YaHei', large_font_size, 'bold'))
+        self._config_label.pack(side=tk.LEFT, padx=2)
+
         self._config_combo = ttk.Combobox(
-            config_frame, 
-            textvariable=self.llm_config_preset_var, 
-            values=self.llm_config_presets, 
+            config_frame,
+            textvariable=self.llm_config_preset_var,
+            values=self.llm_config_presets,
             state="readonly",
             style="Config.TCombobox",
             height=10
         )
-        self._config_combo.pack(fill=tk.X, padx=5, pady=2, ipady=3)
+        self._config_combo.pack(fill=tk.X, padx=2, pady=1, ipady=2)
         self._config_combo.bind('<<ComboboxSelected>>', self.on_llm_config_changed)
-        
+
         self._cloud_mode_note = ttk.Label(model_section, text="", font=('Microsoft YaHei', small_font_size), foreground="#ff9800")
-        self._cloud_mode_note.pack(anchor=tk.W, padx=5, pady=(2, 0))
-        
+        self._cloud_mode_note.pack(anchor=tk.W, padx=2, pady=(1, 0))
+
         self.cloud_llm_enabled_var.trace_add('write', self._on_cloud_llm_toggle_ui)
         self.cloud_asr_enabled_var.trace_add('write', self._on_cloud_asr_toggle_ui)
         self._update_local_model_panel_state()
-        
+
         # ==================== 并发设置 ====================
         thread_section = ttk.LabelFrame(panels["thread"], text="⚡ 并发设置", padding=4, style="Adv.TLabelframe")
-        thread_section.pack(fill=tk.X)
-        
+        thread_section.pack(fill=tk.BOTH, expand=True)
+
         thread_frame = ttk.Frame(thread_section)
-        thread_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(thread_frame, text="分镜创建线程:", width=14, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        thread_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(thread_frame, text="分镜线程:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'thread_count_var'):
             self.thread_count_var = tk.IntVar(value=16)
-        
+
         thread_options = [4, 8, 12, 16, 24, 32]
         thread_combo = ttk.Combobox(
             thread_frame,
@@ -620,15 +628,15 @@ class UIPanelsMixin:
             font=('Microsoft YaHei', large_font_size),
             width=8
         )
-        thread_combo.pack(side=tk.LEFT, padx=5, pady=2)
-        
+        thread_combo.pack(side=tk.LEFT, padx=2, pady=1)
+
         prompt_thread_frame = ttk.Frame(thread_section)
-        prompt_thread_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(prompt_thread_frame, text="提示词生成线程:", width=14, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        prompt_thread_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(prompt_thread_frame, text="提示词线程:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         if not hasattr(self, 'prompt_thread_count_var'):
             self.prompt_thread_count_var = tk.IntVar(value=4)
-        
+
         prompt_thread_options = [1, 2, 3, 4, 6, 8]
         prompt_thread_combo = ttk.Combobox(
             prompt_thread_frame,
@@ -638,25 +646,25 @@ class UIPanelsMixin:
             font=('Microsoft YaHei', large_font_size),
             width=8
         )
-        prompt_thread_combo.pack(side=tk.LEFT, padx=5, pady=2)
-        
+        prompt_thread_combo.pack(side=tk.LEFT, padx=2, pady=1)
+
         # ==================== 主题自定义 ====================
         theme_section = ttk.LabelFrame(panels["theme"], text="🎯 主题自定义", padding=4, style="Adv.TLabelframe")
-        theme_section.pack(fill=tk.X)
-        
+        theme_section.pack(fill=tk.BOTH, expand=True)
+
         theme_frame = ttk.Frame(theme_section)
-        theme_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(theme_frame, text="核心主题:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        theme_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(theme_frame, text="核心主题:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         theme_entry = ttk.Entry(theme_frame, textvariable=self.custom_theme_var, font=('Microsoft YaHei', large_font_size))
-        theme_entry.pack(fill=tk.X, padx=5, pady=2)
-        
+        theme_entry.pack(fill=tk.X, padx=2, pady=1)
+
         tone_frame = ttk.Frame(theme_section)
-        tone_frame.pack(fill=tk.X, pady=3)
-        ttk.Label(tone_frame, text="视觉基调:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=5)
-        
+        tone_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(tone_frame, text="视觉基调:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
         tone_entry = ttk.Entry(tone_frame, textvariable=self.custom_visual_tone_var, font=('Microsoft YaHei', large_font_size))
-        tone_entry.pack(fill=tk.X, padx=5, pady=2)
+        tone_entry.pack(fill=tk.X, padx=2, pady=1)
 
 
     def setup_script_area(self):

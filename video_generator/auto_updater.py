@@ -22,25 +22,15 @@ class UpdateManager:
     
     _instance = None
     UPDATE_API_URL = "https://api.videogen.com/api/version/latest"
-    CURRENT_VERSION = "1.0.0"  # 从配置文件读取
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.version_info = None
-            cls._instance.load_config()
+            from video_generator.version import get_version, compare_versions
+            cls._instance.CURRENT_VERSION = get_version()
+            cls._instance._compare_versions = compare_versions
         return cls._instance
-    
-    def load_config(self):
-        """加载配置获取当前版本"""
-        try:
-            config_file = os.path.join(os.path.dirname(__file__), '..', 'config.json')
-            if os.path.exists(config_file):
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                self.CURRENT_VERSION = config.get('version', '1.0.0')
-        except:
-            pass
     
     def check_for_updates(self, callback=None):
         """检查更新(异步)

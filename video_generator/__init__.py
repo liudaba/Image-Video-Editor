@@ -6,14 +6,7 @@ from .cache import SmartCache, prompt_cache, image_cache
 from .parallel import ParallelPromptGenerator
 from .sd_generator import BatchSDGenerator
 from .hardware import HardwareAcceleratedRenderer
-from .optimization import (
-    ProgressManager,
-    ResourceManager,
-    GPUScheduler,
-    ResourceGuard,
-    BatchImageLoader,
-    VideoRendererOptimizer
-)
+from .optimization import ResourceManager
 from .ollama_client import (
     LLMConfig,
     call_ollama_model,

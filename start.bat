@@ -1,4 +1,3 @@
-@echo off
-cd /d "%~dp0"
-py -3.13 run.py
-pause
+@echo off
+cd /d "%~dp0"
+start "" pythonw run.pyw

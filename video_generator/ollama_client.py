@@ -27,18 +27,32 @@ _ollama_models_cache_time = 0
 _OLLAMA_MODELS_CACHE_TTL = 30
 
 
+def is_cloud_llm_active():
+    """统一云端LLM检测，消除各处分散的 try/except ImportError 模式"""
+    try:
+        from video_generator.cloud_llm_client import is_cloud_llm_enabled
+        return is_cloud_llm_enabled()
+    except ImportError:
+        return False
+
+
+def is_cloud_image_active():
+    """统一云端生图检测"""
+    try:
+        from video_generator.cloud_image_client import is_cloud_image_enabled
+        return is_cloud_image_enabled()
+    except ImportError:
+        return False
+
+
 def is_ollama_available():
     with _ollama_state_lock:
         return _ollama_available
 
 
 def is_llm_available():
-    try:
-        from video_generator.cloud_llm_client import is_cloud_llm_enabled
-        if is_cloud_llm_enabled():
-            return True
-    except ImportError:
-        pass
+    if is_cloud_llm_active():
+        return True
     with _ollama_state_lock:
         return _ollama_available
 
@@ -244,10 +258,10 @@ _ollama_call_semaphore = threading.Semaphore(2)
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
                       log_callback=None, num_predict=512, num_ctx=4096,
-                      llm_config=None, timeout=120):
-    try:
-        from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
-        if is_cloud_llm_enabled():
+                      llm_config=None, extra_options=None, timeout=120):
+    if is_cloud_llm_active():
+        try:
+            from video_generator.cloud_llm_client import call_cloud_llm
             result, model = call_cloud_llm(
                 system_prompt, user_prompt,
                 log_callback=log_callback,
@@ -255,8 +269,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 llm_config=llm_config,
             )
             return result, model
-    except ImportError:
-        pass
+        except Exception:
+            pass
 
     if not is_ollama_available():
         if not check_ollama_available():
@@ -269,6 +283,9 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
         if log_callback:
             log_callback("⚠️ 获取模型列表失败")
         return None, None
+
+    if isinstance(model_list, str):
+        model_list = [model_list]
 
     candidate_models = [m for m in model_list if m in available_models]
 
@@ -288,6 +305,9 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             num_predict=num_predict,
             num_ctx=num_ctx
         )
+
+    if extra_options:
+        options.update(extra_options)
 
     options["num_gpu"] = -1
 
@@ -349,94 +369,22 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
                        llm_config=None, extra_options=None, timeout=120):
-    try:
-        from video_generator.cloud_llm_client import is_cloud_llm_enabled, call_cloud_llm
-        if is_cloud_llm_enabled():
-            result, used_model = call_cloud_llm(
-                system_prompt, user_prompt,
-                log_callback=log_callback,
-                num_predict=num_predict,
-                llm_config=llm_config,
-            )
-            return result, used_model
-    except ImportError:
-        pass
-
-    if not is_ollama_available():
-        if not check_ollama_available():
-            if log_callback:
-                log_callback("⚠️ Ollama 服务不可用")
-            return None, None
-
-    options = {}
-    if llm_config:
-        options = llm_config.get_options(
-            num_predict=num_predict,
-            num_ctx=num_ctx
-        )
-    else:
-        options = LLMConfig().get_options(
-            num_predict=num_predict,
-            num_ctx=num_ctx
-        )
-
-    if extra_options:
-        options.update(extra_options)
-
-    options["num_gpu"] = -1
-
-    try:
-        with _ollama_call_semaphore:
-            request_body = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "stream": False,
-                "keep_alive": 60,
-                "options": options,
-                "think": False
-            }
-            response = get_http_session().post(
-                f"{Config.OLLAMA_BASE_URL}/api/chat",
-                json=request_body,
-                timeout=(10, timeout)
-            )
-
-        if response.status_code != 200:
-            if log_callback:
-                log_callback(f"⚠️ 模型 {model} HTTP错误: {response.status_code}")
-            return None, None
-
-        result_data = response.json()
-        message = result_data.get("message", {})
-        raw_content = message.get("content", "")
-
-        content = _strip_think_tags(raw_content)
-
-        if not content:
-            if log_callback:
-                log_callback(f"⚠️ 模型 {model} 返回空结果")
-            return None, None
-
-        return content, model
-
-    except Exception as e:
-        if log_callback:
-            log_callback(f"⚠️ 模型 {model} 调用失败: {str(e)[:80]}")
-        return None, None
+    return call_ollama_model(
+        [model], system_prompt, user_prompt,
+        log_callback=log_callback,
+        num_predict=num_predict,
+        num_ctx=num_ctx,
+        llm_config=llm_config,
+        extra_options=extra_options,
+        timeout=timeout,
+    )
 
 
 def warmup_model(model, log_callback=None):
-    try:
-        from video_generator.cloud_llm_client import is_cloud_llm_enabled
-        if is_cloud_llm_enabled():
-            if log_callback:
-                log_callback("☁️ 云端模式已启用，跳过本地模型预热")
-            return True
-    except ImportError:
-        pass
+    if is_cloud_llm_active():
+        if log_callback:
+            log_callback("☁️ 云端模式已启用，跳过本地模型预热")
+        return True
     try:
         with _ollama_call_semaphore:
             response = get_http_session().post(
