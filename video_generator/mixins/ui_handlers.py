@@ -10,7 +10,7 @@ import tkinter as tk
 from video_generator.mixins.logging import safe_print_exc
 from tkinter import ttk, messagebox
 
-from video_generator.config import Config, get_http_session, validate_image_size
+from video_generator.config import Config, get_http_session, validate_image_size, sanitize_url
 from video_generator.ollama_client import (
     is_ollama_available,
     set_ollama_available,
@@ -314,7 +314,7 @@ class UIHandlersMixin:
             print("━" * 50)
             print(f"  SD模型:       {model}")
             print(f"  图片尺寸:     {width} x {height}")
-            print(f"  SD API地址:   {api_url}")
+            print(f"  SD API地址:   {sanitize_url(api_url)}")
             print(f"  Ollama模型:   {ollama_model}")
             print(f"  LLM配置:      {llm_preset}")
             print(f"  Whisper模型:  {whisper_model}")
@@ -531,7 +531,7 @@ class UIHandlersMixin:
             confirm_msg += f"风格预设: {', '.join(selected_styles)}\n"
         else:
             confirm_msg += "风格预设: 无\n"
-        confirm_msg += f"SD API地址: {self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL}\n"
+        confirm_msg += f"SD API地址: {sanitize_url(self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL)}\n"
         confirm_msg += f"Ollama模型: {self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'}\n"
         confirm_msg += f"语音模型: {self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'}\n"
         confirm_msg += f"配置模式: {self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先'}\n"
@@ -836,7 +836,8 @@ class UIHandlersMixin:
             msg = "缺少以下核心依赖项:\n"
             for dep, install_cmd in missing_core:
                 msg += f"- {dep}: {install_cmd}\n"
-            messagebox.showwarning("警告", msg)
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, lambda: messagebox.showwarning("警告", msg))
             return False
         else:
             self.log("✅ 核心依赖项已安装")

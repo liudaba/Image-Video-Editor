@@ -740,17 +740,19 @@ class UIPanelsMixin:
         import threading
         import time
         
+        if not hasattr(self, '_update_check_event'):
+            self._update_check_event = threading.Event()
+        
         def periodic_check():
             """后台定期检查更新"""
             while True:
-                time.sleep(interval_hours * 3600)  # 转换为秒
+                self._update_check_event.wait(timeout=interval_hours * 3600)
+                self._update_check_event.clear()
                 try:
                     self.log("🔄 正在后台检查更新...")
                     from video_generator.auto_updater import check_and_notify_update
-                    # 静默检查,不打扰用户
                     check_and_notify_update(self.root, auto_check=True, silent=True)
-                except Exception as e:
-                    # 静默失败,不影响主程序
+                except Exception:
                     pass
         
         # 启动后台线程

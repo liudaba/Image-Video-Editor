@@ -81,6 +81,29 @@ def check_ollama_available():
         return False
 
 
+_ollama_serve_process = None
+
+
+def get_ollama_process():
+    """获取当前 Ollama 服务进程引用"""
+    return _ollama_serve_process
+
+
+def stop_ollama_serve():
+    """终止由本程序启动的 Ollama 服务进程"""
+    global _ollama_serve_process
+    if _ollama_serve_process is not None:
+        try:
+            _ollama_serve_process.terminate()
+            _ollama_serve_process.wait(timeout=5)
+        except Exception:
+            try:
+                _ollama_serve_process.kill()
+            except Exception:
+                pass
+        _ollama_serve_process = None
+
+
 _ollama_models_lock = threading.Lock()
 
 
@@ -168,7 +191,8 @@ def try_start_ollama_service():
 
     if ollama_path:
         try:
-            subprocess.Popen(
+            global _ollama_serve_process
+            _ollama_serve_process = subprocess.Popen(
                 [ollama_path, "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -366,6 +390,39 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
             return content, model
 
+        except requests.exceptions.ConnectionError:
+            if log_callback:
+                log_callback(f"   ⚠️ 无法连接 Ollama 服务，尝试自动重连...")
+            if try_start_ollama_service():
+                try:
+                    with _ollama_call_semaphore:
+                        response = get_http_session().post(
+                            f"{Config.OLLAMA_BASE_URL}/api/chat",
+                            json={
+                                "model": model,
+                                "messages": [
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_prompt}
+                                ],
+                                "stream": False,
+                                "keep_alive": 60,
+                                "options": model_options,
+                                "think": False
+                            },
+                            timeout=(10, timeout)
+                        )
+                    if response.status_code == 200:
+                        result_data = response.json()
+                        message = result_data.get("message", {})
+                        raw_content = message.get("content", "")
+                        content = _strip_think_tags(raw_content)
+                        if content:
+                            if log_callback:
+                                log_callback(f"   ✅ 重连成功，使用模型: {model}")
+                            return content, model
+                except Exception:
+                    pass
+            continue
         except Exception as e:
             if log_callback:
                 log_callback(f"   ⚠️ 模型 {model} 调用失败: {str(e)[:80]}")

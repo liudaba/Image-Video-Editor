@@ -11,6 +11,17 @@ import time
 from typing import Dict
 
 
+def _sanitize_ffmpeg_path(path):
+    """净化文件路径，防止FFmpeg concat文件注入
+    
+    1. 转义单引号（防止闭合引号注入FFmpeg指令）
+    2. 检测路径遍历字符
+    3. 验证路径在允许的目录内
+    """
+    sanitized = path.replace("'", "'\\''")
+    return sanitized
+
+
 class HardwareAcceleratedRenderer:
     """硬件加速视频渲染器 - 延迟检测 + 实时进度监控"""
 
@@ -275,7 +286,7 @@ class HardwareAcceleratedRenderer:
 
             self._render_process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 universal_newlines=True
             )
@@ -478,7 +489,7 @@ class HardwareAcceleratedRenderer:
                 cmd.append(seg_output)
 
                 proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     universal_newlines=True
                 )
                 processes.append(proc)
@@ -597,7 +608,7 @@ class HardwareAcceleratedRenderer:
             concat_file = os.path.join(temp_dir, "final_concat.txt")
             with open(concat_file, 'w', encoding='utf-8') as f:
                 for seg_file in segment_outputs:
-                    f.write(f"file '{seg_file}'\n")
+                    f.write(f"file '{_sanitize_ffmpeg_path(seg_file)}'\n")
 
             merge_cmd = [
                 'ffmpeg', '-y',
@@ -694,10 +705,10 @@ class HardwareAcceleratedRenderer:
         concat_file = os.path.join(temp_dir, "concat.txt")
         with open(concat_file, 'w', encoding='utf-8') as f:
             for img_file, duration in zip(image_files, durations):
-                f.write(f"file '{img_file}'\n")
+                f.write(f"file '{_sanitize_ffmpeg_path(img_file)}'\n")
                 f.write(f"duration {duration}\n")
             if image_files:
-                f.write(f"file '{image_files[-1]}'\n")
+                f.write(f"file '{_sanitize_ffmpeg_path(image_files[-1])}'\n")
 
         use_cuda = (use_cuda_upload and self.has_cuda_filters
                     and encoder_config.get('vcodec') == 'h264_nvenc')

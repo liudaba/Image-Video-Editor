@@ -97,3 +97,17 @@ def get_http_session():
                 _http_session.mount('http://', adapter)
                 _http_session.mount('https://', adapter)
     return _http_session
+
+
+_RE_URL_SENSITIVE = re.compile(r'([?&](?:token|key|api_key|secret|password|auth)=)[^&\s]+', re.IGNORECASE)
+
+
+def sanitize_url(url):
+    """脱敏URL中的敏感参数，用于日志输出
+    
+    sanitize_url("http://host:8080?token=abc123&mode=json")
+    → "http://host:8080?token=***&mode=json"
+    """
+    if not url:
+        return url
+    return _RE_URL_SENSITIVE.sub(r'\1***', url)

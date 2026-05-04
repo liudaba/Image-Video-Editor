@@ -50,7 +50,7 @@ def _verify_signature(data: dict) -> bool:
         return False
     secret = _get_verify_secret()
     if not secret:
-        return True
+        return False
     expected = data[_HMAC_KEY]
     check = {k: v for k, v in data.items() if k != _HMAC_KEY}
     payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -117,8 +117,8 @@ class LicenseManager:
                 return False, error_msg
         except requests.exceptions.ConnectionError:
             return False, "无法连接到服务器,请检查网络连接"
-        except Exception as e:
-            return False, f"注册失败: {str(e)}"
+        except Exception:
+            return False, "注册失败，请稍后重试"
 
     def login_user(self, username, password):
         try:
@@ -149,8 +149,8 @@ class LicenseManager:
                 return False, error_msg
         except requests.exceptions.ConnectionError:
             return False, "无法连接到服务器,请检查网络连接"
-        except Exception as e:
-            return False, f"登录失败: {str(e)}"
+        except Exception:
+            return False, "登录失败，请稍后重试"
 
     def check_license(self):
         if not self.license_data:
@@ -245,8 +245,8 @@ class LicenseManager:
             else:
                 error_msg = response.json().get("detail", "激活失败")
                 return False, error_msg
-        except Exception as e:
-            return False, f"激活失败: {str(e)}"
+        except Exception:
+            return False, "激活失败，请稍后重试"
 
     def purchase_subscription(self, plan_type, payment_method):
         try:
@@ -262,8 +262,8 @@ class LicenseManager:
                 return True, data
             else:
                 return False, response.json().get("detail", "创建订单失败")
-        except Exception as e:
-            return False, f"创建订单失败: {str(e)}"
+        except Exception:
+            return False, "创建订单失败，请稍后重试"
 
     def refresh_license(self):
         try:

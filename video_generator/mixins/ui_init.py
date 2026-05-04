@@ -492,9 +492,11 @@ class UIInitMixin:
         threading.Thread(target=preload_whisper, daemon=True).start()
         
         self._api_heartbeat_running = True
+        self._api_heartbeat_event = threading.Event()
         def api_heartbeat():
             while self._api_heartbeat_running:
-                time.sleep(30)
+                self._api_heartbeat_event.wait(timeout=30)
+                self._api_heartbeat_event.clear()
                 if not self._api_heartbeat_running:
                     break
                 self._check_api_heartbeat()

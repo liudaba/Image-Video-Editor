@@ -19,6 +19,7 @@ from .ollama_client import (
     get_available_models,
     try_start_ollama_service,
     restart_ollama_service,
+    stop_ollama_serve,
 )
 from .multi_model import LLMPerformanceOptimizer, llm_optimizer
 from .templates import PromptTemplates
