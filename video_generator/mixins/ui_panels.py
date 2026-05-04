@@ -577,10 +577,23 @@ class UIPanelsMixin:
         ollama_frame_right = ttk.Frame(ollama_frame)
         ollama_frame_right.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self._ollama_combo = ttk.Combobox(ollama_frame_right, textvariable=self.ollama_model_var, state="readonly", font=('Microsoft YaHei', large_font_size))
-        self._ollama_combo.pack(fill=tk.X, padx=2, pady=1)
-        self._ollama_combo.bind('<<ComboboxSelected>>', self._on_ollama_model_selected)
-        self._ollama_combo.bind('<MouseWheel>', self._on_ollama_combo_wheel)
+        self._ollama_btn = ttk.Button(ollama_frame_right, textvariable=self.ollama_model_var, command=self._toggle_ollama_listbox, style="Medium.TButton")
+        self._ollama_btn.pack(fill=tk.X, padx=2, pady=1)
+
+        self._ollama_listbox_frame = ttk.Frame(ollama_frame_right)
+        self._ollama_listbox_visible = False
+
+        self._ollama_listbox = tk.Listbox(
+            self._ollama_listbox_frame,
+            font=('Microsoft YaHei', large_font_size),
+            height=1,
+            exportselection=False,
+            activestyle='none',
+            selectbackground="#4a90d9",
+            selectforeground="white",
+        )
+        self._ollama_listbox.pack(fill=tk.X, padx=2)
+        self._ollama_listbox.bind('<<ListboxSelect>>', self._on_ollama_listbox_select)
 
         self.model_dropdown_frame = ttk.Frame(ollama_frame_right)
         self.model_dropdown_inner_frame = ttk.Frame(self.model_dropdown_frame)

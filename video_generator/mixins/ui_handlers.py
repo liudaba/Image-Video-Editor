@@ -168,40 +168,45 @@ class UIHandlersMixin:
         
         self._ollama_model_ids = model_ids
         
-        if hasattr(self, '_ollama_combo') and self._ollama_combo.winfo_exists():
-            self._ollama_combo['values'] = model_labels
+        if hasattr(self, '_ollama_listbox') and self._ollama_listbox.winfo_exists():
+            self._ollama_listbox.delete(0, tk.END)
+            for label in model_labels:
+                self._ollama_listbox.insert(tk.END, label)
+            self._ollama_listbox.config(height=min(len(model_labels), 15))
             current = self.ollama_model_var.get()
             if current:
                 for i, mid in enumerate(model_ids):
                     if mid == current:
-                        self._ollama_combo.current(i)
+                        self._ollama_listbox.selection_set(i)
+                        self._ollama_listbox.see(i)
                         break
 
+    def _toggle_ollama_listbox(self):
+        """切换Ollama模型列表的展开/收起"""
+        if self._ollama_listbox_visible:
+            self._ollama_listbox_frame.pack_forget()
+            self._ollama_listbox_visible = False
+        else:
+            count = self._ollama_listbox.size()
+            if count == 0:
+                self.update_model_list()
+                count = self._ollama_listbox.size()
+            self._ollama_listbox.config(height=min(count, 15))
+            self._ollama_listbox_frame.pack(fill=tk.X, after=self._ollama_btn, pady=1)
+            self._ollama_listbox_visible = True
 
-    def _on_ollama_model_selected(self, event=None):
-        """Combobox选择模型后的回调"""
-        idx = self._ollama_combo.current()
+    def _on_ollama_listbox_select(self, event=None):
+        """Listbox选择模型后的回调"""
+        selection = self._ollama_listbox.curselection()
+        if not selection:
+            return
+        idx = selection[0]
         if 0 <= idx < len(self._ollama_model_ids):
             model = self._ollama_model_ids[idx]
             self.ollama_model_var.set(model)
             self.log(f"✅ 已选择Ollama模型: {model}")
-
-
-    def _on_ollama_combo_wheel(self, event):
-        """鼠标滚轮在Combobox上切换模型"""
-        try:
-            current = self._ollama_combo.current()
-            values = self._ollama_combo['values']
-            if not values:
-                return
-            if event.delta > 0 or event.num == 4:
-                new_idx = max(0, current - 1)
-            else:
-                new_idx = min(len(values) - 1, current + 1)
-            self._ollama_combo.current(new_idx)
-            self._on_ollama_model_selected()
-        except Exception:
-            pass
+        self._ollama_listbox_frame.pack_forget()
+        self._ollama_listbox_visible = False
 
 
     def toggle_advanced_settings(self):
