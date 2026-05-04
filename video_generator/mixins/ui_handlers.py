@@ -222,8 +222,8 @@ class UIHandlersMixin:
         else:
             self.advanced_window = tk.Toplevel(self.root)
             self.advanced_window.title("⚙️ 高级设置")
-            self.advanced_window.geometry("1050x680")
-            self.advanced_window.minsize(900, 600)
+            self.advanced_window.geometry("1050x640")
+            self.advanced_window.minsize(900, 560)
             self.advanced_window.resizable(True, True)
             self.advanced_window.configure(bg="#2a2d35")
             
@@ -235,8 +235,9 @@ class UIHandlersMixin:
             main_frame.columnconfigure(0, weight=1, uniform="col")
             main_frame.columnconfigure(1, weight=1, uniform="col")
             main_frame.columnconfigure(2, weight=1, uniform="col")
-            for i in range(5):
+            for i in range(4):
                 main_frame.rowconfigure(i, weight=1, uniform="row")
+            main_frame.rowconfigure(4, weight=0, minsize=10)
             
             self._adv_panels = {}
             
@@ -274,9 +275,9 @@ class UIHandlersMixin:
             self._adv_panels["cloud_img"].grid(row=3, column=2, sticky="nsew", padx=2, pady=2)
             
             btn_frame = ttk.Frame(main_frame)
-            btn_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=4, pady=1)
+            btn_frame.grid(row=4, column=0, columnspan=3, sticky="ew", padx=4, pady=(2, 2))
             style = ttk.Style()
-            style.configure("LargeGreen.TButton", font=('Microsoft YaHei', 12, 'bold'), padding=(0, 2))
+            style.configure("LargeGreen.TButton", font=('Microsoft YaHei', 13, 'bold'), padding=(10, 10))
             btn_apply = ttk.Button(btn_frame, text="✅ 应用设置", command=self.apply_advanced_settings, style="LargeGreen.TButton")
             btn_apply.pack(fill=tk.X, padx=5)
             
