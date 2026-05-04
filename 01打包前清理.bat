@@ -106,21 +106,25 @@ echo.
 echo 📋 保留的核心文件:
 echo   ✅ video_generator/      - 核心程序模块
 echo   ✅ config.json           - 配置文件
-echo   ✅ start.bat             - 启动脚本
+echo   ✅ 启动.vbs              - 启动程序（无黑框，推荐）
+echo   ✅ start.bat             - 启动程序（无黑框，备选）
 echo   ✅ README.md             - 用户手册
+echo   ✅ 快速上手指南.md        - 快速入门指南
 echo   ✅ LICENSE               - 许可证
 echo   ✅ assets/icon.ico       - 图标文件
 echo.
 echo 📋 保留的开发文件(不打包但需要保留):
 echo   ℹ️  backend/             - 后端服务器(开发用)
 echo   ℹ️  models/              - AI模型(用户自动下载)
-echo   ℹ️  docs/                - 技术文档
-echo   ℹ️  build_exe.py         - 打包脚本
+echo   ℹ️  model_aware_patch/   - 模型补丁(开发用)
+echo   ℹ️  docs/                - 开发者技术文档
+echo   ℹ️  02build_exe.py       - 打包脚本
 echo   ℹ️  release_helper.py    - 发布助手
 echo   ℹ️  installer_setup.iss  - Inno Setup脚本
+echo   ℹ️  run.py / run.pyw     - Python调试入口
 echo.
 echo 💡 下一步操作:
-echo   1. 运行 python build_exe.py 进行打包
-echo   2. 或双击: python build_exe.py
+echo   1. 运行 python 02build_exe.py 进行打包
+echo   2. 或双击: 02build_exe.py
 echo.
 pause

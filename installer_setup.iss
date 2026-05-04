@@ -47,8 +47,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-; 首次运行时检查并安装依赖
-Filename: "{app}\check_and_install_deps.bat"; Description: "检查并安装运行环境"; Flags: postinstall skipifsilent
+Filename: "{app}\启动.vbs"; Description: "启动短视频生成器"; Flags: postinstall nowait skipifsilent
 
 [Code]
 var
@@ -67,60 +66,20 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  PythonInstalled: Boolean;
-  ResultCode: Integer;
 begin
   Result := True;
-  
-  if CurPageID = wpReady then
-  begin
-    // 检查Python是否已安装
-    PythonInstalled := RegKeyExists(HKLM, 'SOFTWARE\Python\PythonCore\3.10\InstallPath') or
-                       RegKeyExists(HKLM, 'SOFTWARE\Python\PythonCore\3.11\InstallPath');
-    
-    if not PythonInstalled then
-    begin
-      if MsgBox('检测到您的系统未安装Python 3.10+,是否需要自动下载安装?', mbConfirmation, MB_YESNO) = IDYES then
-      begin
-        DownloadPage.Clear;
-        DownloadPage.Add('https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe', 'python-3.11.9-amd64.exe', '');
-        DownloadPage.Show;
-        
-        try
-          DownloadPage.Download;
-          
-          // 安装Python
-          Exec(ExpandConstant('{tmp}\python-3.11.9-amd64.exe'), '/quiet InstallAllUsers=1 PrependPath=1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-          
-          if ResultCode <> 0 then
-          begin
-            MsgBox('Python安装失败,请手动安装Python 3.10+', mbError, MB_OK);
-            Result := False;
-          end;
-        except
-          MsgBox('Python下载失败,请检查网络连接', mbError, MB_OK);
-          Result := False;
-        end;
-        
-        DownloadPage.Hide;
-      end;
-    end;
-  end;
 end;
 
 function InitializeSetup(): Boolean;
 begin
   Result := True;
   
-  // 检查系统架构
   if not IsWin64 then
   begin
     MsgBox('本软件仅支持64位Windows系统', mbError, MB_OK);
     Result := False;
   end;
   
-  // 检查Windows版本
   if GetWindowsVersion < EncodeVer(10, 0, 0, 0) then
   begin
     MsgBox('本软件需要Windows 10或更高版本', mbError, MB_OK);

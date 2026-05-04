@@ -74,34 +74,24 @@ def build_executable():
     
     # 步骤3: 构建PyInstaller参数
     args = [
-        'run.py',  # 入口文件
+        'run.py',
         
-        # ========== 基本配置 ==========
         '--name=短视频生成器',
-        '--onedir',  # 单目录模式(便于更新)
-        '--windowed',  # 无控制台窗口
-        '--icon=assets/icon.ico',  # 图标(如果存在)
+        '--onedir',
+        '--windowed',
+        '--icon=assets/icon.ico',
         
-        # ========== 添加必要的文件和模块 ==========
-        '--add-data=video_generator;video_generator',  # 核心程序模块
-        '--add-data=config.json;.',  # 配置文件
-        '--add-data=start.bat;.',  # 启动脚本
-        '--add-data=README.md;.',  # 用户手册(完整版)
-        '--add-data=docs/USER_GUIDE.md;.',  # 快速上手指南(简化版)
-        '--add-data=docs/CUSTOMER_GUIDE.md;.',  # 客户使用完整指南
-        '--add-data=LICENSE;.',  # 许可证
+        '--add-data=video_generator;video_generator',
+        '--add-data=config.json;.',
+        '--add-data=启动.vbs;.',
+        '--add-data=start.bat;.',
+        '--add-data=README.md;.',
+        '--add-data=快速上手指南.md;.',
+        '--add-data=LICENSE;.',
         
-        # ========== 预打包Whisper语音识别模型(开箱即用!) ==========
-        # Whisper是Python库,可以被PyInstaller打包
-        # 默认打包medium模型(~1.5GB),平衡速度和准确度
         '--hidden-import=whisper',
         '--collect-all=whisper',
         
-        # 注意: Ollama和SD WebUI无法打包,它们是独立的可执行程序
-        # 本地模式需要用户手动安装这两个软件
-
-        # ========== 隐藏导入(避免遗漏依赖) ==========
-        '--hidden-import=PyQt5',
         '--hidden-import=moviepy',
         '--hidden-import=torch',
         '--hidden-import=numpy',
@@ -113,14 +103,11 @@ def build_executable():
         '--hidden-import=datetime',
         '--hidden-import=queue',
         '--hidden-import=logging',
-        '--hidden-import=tkinter',  # Tkinter用于GUI
-        '--hidden-import=ttkbootstrap',  # 如果使用ttkbootstrap
+        '--hidden-import=tkinter',
+        '--hidden-import=cryptography',
         
-        # ========== 收集所有依赖 ==========
-        '--collect-all=PyQt5',
         '--collect-submodules=moviepy',
         
-        # ========== 排除不必要的Python模块(减小体积) ==========
         '--exclude-module=test',
         '--exclude-module=tests',
         '--exclude-module=unittest',
@@ -128,32 +115,28 @@ def build_executable():
         '--exclude-module=pip',
         '--exclude-module=easy_install',
         '--exclude-module=pkg_resources',
+        '--exclude-module=PyQt5',
         
-        # ========== 排除开发文件夹(重要!) ==========
         '--exclude=.git',
         '--exclude=.idea',
         '--exclude=.vscode',
         '--exclude=.venv',
         '--exclude=__pycache__',
         
-        # ========== 排除大型资源文件夹 ==========
-        '--exclude=backend',  # Flask服务器(桌面版不需要)
-        '--exclude=models',  # AI模型(用户首次运行自动下载,2-5GB)
-        '--exclude=model_aware_patch',  # 模型补丁
+        '--exclude=backend',
+        '--exclude=models',
+        '--exclude=model_aware_patch',
         
-        # ========== 排除输出和临时文件夹 ==========
-        '--exclude=output_project',  # 用户生成的视频项目
-        '--exclude=垃圾桶',  # 清理的旧文件
-        '--exclude=build',  # 构建产物
-        '--exclude=dist',  # 分发目录
+        '--exclude=output_project',
+        '--exclude=垃圾桶',
+        '--exclude=build',
+        '--exclude=dist',
         
-        # ========== 排除技术文档文件夹 ==========
-        '--exclude=docs',  # 技术文档(已单独添加README.md)
+        '--exclude=docs',
         
-        # ========== 优化选项 ==========
-        '--clean',  # 清理缓存
-        '--noconfirm',  # 不确认直接覆盖
-        '--noupx',  # 不使用UPX压缩(避免杀毒软件误报)
+        '--clean',
+        '--noconfirm',
+        '--noupx',
     ]
     
     # 步骤4: 显示打包信息
@@ -164,8 +147,10 @@ def build_executable():
     print("\n📦 打包内容清单:")
     print("  ✅ video_generator/     - 核心程序模块")
     print("  ✅ config.json          - 配置文件")
-    print("  ✅ start.bat            - 启动脚本")
+    print("  ✅ 启动.vbs             - 启动程序（无黑框，推荐）")
+    print("  ✅ start.bat            - 启动程序（无黑框，备选）")
     print("  ✅ README.md            - 用户使用手册")
+    print("  ✅ 快速上手指南.md       - 快速入门指南")
     print("  ✅ LICENSE              - 开源许可证")
     print("  ✅ _internal/           - PyInstaller依赖库")
     
@@ -176,14 +161,18 @@ def build_executable():
     print("  ❌ model_aware_patch/   - 模型补丁")
     print("  ❌ output_project/      - 用户输出文件")
     print("  ❌ 垃圾桶/              - 清理的临时文件")
-    print("  ❌ docs/                - 技术文档")
+    print("  ❌ docs/                - 开发者技术文档")
+    print("  ❌ run.py / run.pyw     - Python调试入口(exe模式不需要)")
     print("  ❌ *.bat (除start.bat)  - 开发工具脚本")
     print("  ❌ *.py (除run.py)      - 开发脚本")
-    print("  ❌ *.bak, *TEMP*.mp4    - 临时文件")
-    print("  ❌ requirements.txt     - Python依赖列表")
+    print("  ❌ PyQt5                - 已移除的旧依赖")
+    print("  ❌ requirements.txt     - Python依赖列表(exe不需要)")
     print("  ❌ installer_setup.iss  - Inno Setup脚本")
     print("  ❌ release_helper.py    - 发布助手")
-    print("  ❌ build_exe.py         - 打包脚本")
+    print("  ❌ 02build_exe.py       - 打包脚本本身")
+    print("  ❌ GITHUB_IMPROVEMENT_GUIDE.md - 开发者文档")
+    print("  ❌ .gitignore           - Git配置")
+    print("  ❌ 回收站.lnk           - 开发调试快捷方式")
     
     print("\n⏳ 预计耗时: 5-10分钟")
     print("📊 预期大小: 800MB - 1.5GB (不含AI模型)\n")
@@ -208,8 +197,12 @@ def build_executable():
             should_not_exist = [
                 '.git', '.idea', '.venv', 'backend', 'models',
                 'output_project', '垃圾桶', 'docs',
-                'build_exe.py', 'release_helper.py', 'installer_setup.iss',
-                'requirements.txt', 'check_and_install_deps.bat'
+                '02build_exe.py', 'release_helper.py', 'installer_setup.iss',
+                'requirements.txt', 'check_and_install_deps.bat',
+                'run.py', 'run.pyw', 'generate_placeholders.py',
+                'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
+                '01打包前清理.bat', '03验证打包结果.bat', '快速发布.bat',
+                '推送代码.bat', '检查环境.bat', '生成Demo素材.bat',
             ]
             
             has_error = False
@@ -225,7 +218,7 @@ def build_executable():
             print(f"\n💡 分发说明:")
             print(f"  1. 将整个 '{output_dir}' 文件夹压缩成ZIP")
             print(f"  2. 上传到网盘或CDN")
-            print(f"  3. 用户解压后双击 start.bat 即可运行")
+            print(f"  3. 用户解压后双击 启动.vbs 即可运行")
             print(f"  4. 首次运行会自动下载AI模型(约2-5GB)")
             
             if size > 2000:  # 超过2GB

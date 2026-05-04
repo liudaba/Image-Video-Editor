@@ -57,7 +57,7 @@ REM ========== 检查不应该存在的文件 ==========
 echo 🔍 检查不应该存在的文件...
 set HAS_ERROR=0
 
-for %%F in (build_exe.py release_helper.py installer_setup.iss requirements.txt check_and_install_deps.bat generate_placeholders.py run.py My-Video^ Generator.py.bak) do (
+for %%F in (02build_exe.py release_helper.py installer_setup.iss requirements.txt check_and_install_deps.bat generate_placeholders.py run.py run.pyw GITHUB_IMPROVEMENT_GUIDE.md) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
         set HAS_ERROR=1
@@ -65,15 +65,15 @@ for %%F in (build_exe.py release_helper.py installer_setup.iss requirements.txt 
 )
 
 REM 检查其他.bat文件(除了start.bat)
-for %%F in (快速发布.bat 打包前清理.bat 推送代码.bat 检查环境.bat 生成Demo素材.bat) do (
+for %%F in (01打包前清理.bat 03验证打包结果.bat 快速发布.bat 推送代码.bat 检查环境.bat 生成Demo素材.bat check_and_install_deps.bat) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
         set HAS_ERROR=1
     )
 )
 
-REM 检查其他.md文件(除了README.md)
-for %%F in (快速上手指南.md GITHUB_IMPROVEMENT_GUIDE.md) do (
+REM 检查其他.md文件(除了README.md和快速上手指南.md)
+for %%F in (GITHUB_IMPROVEMENT_GUIDE.md) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
         set HAS_ERROR=1
@@ -89,7 +89,7 @@ REM ========== 检查应该存在的文件 ==========
 echo 🔍 检查应该存在的文件...
 set HAS_ERROR=0
 
-for %%F in (短视频生成器.exe start.bat README.md LICENSE config.json video_generator) do (
+for %%F in (短视频生成器.exe 启动.vbs start.bat README.md 快速上手指南.md LICENSE config.json video_generator) do (
     if not exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 缺少必要文件 %%F
         set HAS_ERROR=1
