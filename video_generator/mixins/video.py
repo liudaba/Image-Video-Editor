@@ -734,13 +734,9 @@ class VideoMixin:
 
         支持动画类型:
         - "缩放": 缓慢放大 (Ken Burns效果, 1.0x→1.10x)
-        - "左移": 画面向左缓慢平移
-        - "右移": 画面向右缓慢平移
-        - "上移": 画面向上缓慢平移
-        - "下移": 画面向下缓慢平移
 
         核心优化:
-        1. 预渲染放大/扩展帧，后续每帧仅做仿射变换
+        1. 预渲染放大帧，后续每帧仅做仿射变换
         2. 使用PIL Image.transform()实现亚像素级插值，消除整数截断导致的抖动
         3. 使用smoothstep缓动曲线，起止更自然
         4. BICUBIC重采样保证画面清晰
@@ -795,98 +791,6 @@ class VideoMixin:
                         return arr
                     except Exception:
                         return base_frame
-
-            elif animation_type in ("左移", "右移"):
-                pan_ratio = 1.15
-                max_w = int(w * pan_ratio)
-                source_img = base_img.resize((max_w, h), Image.LANCZOS)
-                source_arr = np.array(source_img)
-                source_img.close()
-                base_img.close()
-                total_offset = float(max_w - w)
-
-                if animation_type == "左移":
-                    def make_frame(t):
-                        try:
-                            progress = min(t / original_duration, 1.0)
-                            progress = progress * progress * (3 - 2 * progress)
-                            offset = total_offset * progress
-                            src = Image.fromarray(source_arr)
-                            result = src.transform(
-                                (w, h), Image.AFFINE,
-                                (1, 0, offset, 0, 1, 0),
-                                Image.BICUBIC
-                            )
-                            arr = np.array(result)
-                            result.close()
-                            src.close()
-                            return arr
-                        except Exception:
-                            return base_frame
-                else:
-                    def make_frame(t):
-                        try:
-                            progress = min(t / original_duration, 1.0)
-                            progress = progress * progress * (3 - 2 * progress)
-                            offset = total_offset * (1 - progress)
-                            src = Image.fromarray(source_arr)
-                            result = src.transform(
-                                (w, h), Image.AFFINE,
-                                (1, 0, offset, 0, 1, 0),
-                                Image.BICUBIC
-                            )
-                            arr = np.array(result)
-                            result.close()
-                            src.close()
-                            return arr
-                        except Exception:
-                            return base_frame
-
-            elif animation_type in ("上移", "下移"):
-                pan_ratio = 1.15
-                max_h = int(h * pan_ratio)
-                source_img = base_img.resize((w, max_h), Image.LANCZOS)
-                source_arr = np.array(source_img)
-                source_img.close()
-                base_img.close()
-                total_offset = float(max_h - h)
-
-                if animation_type == "上移":
-                    def make_frame(t):
-                        try:
-                            progress = min(t / original_duration, 1.0)
-                            progress = progress * progress * (3 - 2 * progress)
-                            offset = total_offset * progress
-                            src = Image.fromarray(source_arr)
-                            result = src.transform(
-                                (w, h), Image.AFFINE,
-                                (1, 0, 0, 0, 1, offset),
-                                Image.BICUBIC
-                            )
-                            arr = np.array(result)
-                            result.close()
-                            src.close()
-                            return arr
-                        except Exception:
-                            return base_frame
-                else:
-                    def make_frame(t):
-                        try:
-                            progress = min(t / original_duration, 1.0)
-                            progress = progress * progress * (3 - 2 * progress)
-                            offset = total_offset * (1 - progress)
-                            src = Image.fromarray(source_arr)
-                            result = src.transform(
-                                (w, h), Image.AFFINE,
-                                (1, 0, 0, 0, 1, offset),
-                                Image.BICUBIC
-                            )
-                            arr = np.array(result)
-                            result.close()
-                            src.close()
-                            return arr
-                        except Exception:
-                            return base_frame
             else:
                 base_img.close()
                 return clip
