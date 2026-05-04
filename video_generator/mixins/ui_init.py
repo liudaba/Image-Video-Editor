@@ -95,18 +95,16 @@ class UIInitMixin:
     
 
     def _setup_styles(self):
-        """设置UI样式"""
+        """设置UI样式（只在初始化时调用一次）"""
         try:
             self.style = ttk.Style()
             if 'clam' in self.style.theme_names():
                 self.style.theme_use('clam')
             
-            # 基础样式
             self.style.configure("TFrame", background=self.bg_color)
             self.style.configure("TLabel", background=self.bg_color, foreground=self.text_fg, font=("Microsoft YaHei", self.font_size + 2))
             self.style.configure("Header.TLabel", background=self.bg_color, foreground="#00bcd4", font=("Microsoft YaHei", self.font_size + 4, "bold"))
             
-            # 按钮样式
             self.style.configure("LargeBlue.TButton", background=self.accent_blue, foreground="#ffffff", 
                                font=("Microsoft YaHei", self.font_size + 6, "bold"), padding=(15, 15), relief="flat")
             self.style.map("LargeBlue.TButton", background=[('active', '#1976d2')])
@@ -123,25 +121,21 @@ class UIInitMixin:
                                font=("Microsoft YaHei", self.font_size + 2), padding=(5, 5), relief="flat")
             self.style.map("Small.TButton", background=[('active', '#505050')])
             
-            # 复选框样式
             self.style.configure("TCheckbutton", background=self.bg_color, foreground=self.text_fg, 
                                font=("Microsoft YaHei", self.font_size))
             
-            # LabelFrame 样式 - 板块标题字体加大加粗
             self.style.configure("TLabelframe", background=self.panel_bg, foreground="#e0e0e0",
                                font=("Microsoft YaHei", self.font_size + 4, "bold"),
                                relief="groove", borderwidth=2)
             self.style.configure("TLabelframe.Label", background=self.panel_bg, foreground="#90caf9",
                                font=("Microsoft YaHei", self.font_size + 4, "bold"))
             
-            # 高级设置面板专用 LabelFrame 样式
             self.style.configure("Adv.TLabelframe", background="#2a2d35", foreground="#e0e0e0",
                                font=("Microsoft YaHei", self.font_size + 5, "bold"),
                                relief="groove", borderwidth=2)
             self.style.configure("Adv.TLabelframe.Label", background="#2a2d35", foreground="#90caf9",
                                font=("Microsoft YaHei", self.font_size + 5, "bold"))
             
-            # 高级设置面板内部控件样式
             self.style.configure("Adv.TFrame", background="#2a2d35")
             self.style.configure("Adv.TLabel", background="#2a2d35", foreground="#cccccc",
                                font=("Microsoft YaHei", self.font_size + 2))
@@ -157,14 +151,12 @@ class UIInitMixin:
                                font=("Microsoft YaHei", self.font_size + 2),
                                padding=(4, 4))
             
-            # 进度条样式 - 使用亮绿色进度条，与深色背景形成鲜明对比
             self.style.configure("TProgressbar", 
                                thickness=20,
-                               background="#00FF00",  # 亮绿色进度条
-                               troughcolor="#1a1a1a",  # 深色背景
+                               background="#00FF00",
+                               troughcolor="#1a1a1a",
                                borderwidth=0)
             
-            # 配置模式下拉框样式 - 使用亮白色字体和更大的高度
             self.style.configure("Config.TCombobox", 
                                font=("Microsoft YaHei", self.font_size + 4),
                                padding=(10, 8))
@@ -175,6 +167,38 @@ class UIInitMixin:
                           foreground=[('readonly', '#ffffff')])
         except Exception as e:
             self.log(f"样式设置失败: {e}")
+
+    _FONT_STYLES = {
+        "TLabel": 2, "Header.TLabel": 4,
+        "LargeBlue.TButton": 6, "LargeRed.TButton": 6, "LargeGreen.TButton": 6,
+        "Medium.TButton": 4, "Small.TButton": 2,
+        "TCheckbutton": 0,
+        "TLabelframe": 4, "TLabelframe.Label": 4,
+        "Adv.TLabelframe": 5, "Adv.TLabelframe.Label": 5,
+        "Adv.TLabel": 2, "Adv.TCheckbutton": 2,
+        "Adv.TButton": 3, "Adv.TCombobox": 2, "Adv.TEntry": 2,
+        "Config.TCombobox": 4,
+    }
+
+    def _update_fonts_only(self):
+        """仅更新字体属性，不重建样式表（窗口缩放时调用）"""
+        try:
+            for style_name, offset in self._FONT_STYLES.items():
+                bold = "bold" if style_name in (
+                    "Header.TLabel", "LargeBlue.TButton", "LargeRed.TButton",
+                    "LargeGreen.TButton",
+                    "TLabelframe", "TLabelframe.Label",
+                    "Adv.TLabelframe", "Adv.TLabelframe.Label", "Adv.TButton",
+                ) else ""
+                font = ("Microsoft YaHei", self.font_size + offset, bold) if bold else ("Microsoft YaHei", self.font_size + offset)
+                self.style.configure(style_name, font=font)
+            
+            if hasattr(self, 'txt_script') and self.txt_script:
+                self.txt_script.configure(font=("Microsoft YaHei", self.font_size + 4))
+            if hasattr(self, 'txt_log') and self.txt_log:
+                self.txt_log.configure(font=("Microsoft YaHei", self.font_size + 4))
+        except Exception:
+            pass
     
 
     def on_window_resize(self, event):
@@ -222,16 +246,7 @@ class UIInitMixin:
 
     def _update_fonts_async(self):
         """异步更新字体，避免阻塞UI"""
-        try:
-            self._setup_styles()
-            
-            # 更新文本框字体大小
-            if hasattr(self, 'txt_script') and self.txt_script:
-                self.txt_script.configure(font=("Microsoft YaHei", self.font_size + 4))
-            if hasattr(self, 'txt_log') and self.txt_log:
-                self.txt_log.configure(font=("Microsoft YaHei", self.font_size + 4))
-        except Exception:
-            pass
+        self.root.after_idle(self._update_fonts_only)
     
 
     def _create_layout(self):

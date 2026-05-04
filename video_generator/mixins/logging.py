@@ -6,9 +6,11 @@ import threading
 import traceback
 import tkinter as tk
 import sys
+import queue
 
 _MAX_LOG_LINES = 5000
 _TRIM_LOG_LINES = 4000
+_LOG_FLUSH_INTERVAL_MS = 50
 
 _print_lock = threading.Lock()
 
@@ -63,10 +65,54 @@ def safe_print_exc():
 
 
 class LoggingMixin:
-    def log(self, message):
-        """线程安全日志 - GUI智能滚动 + 控制台同步输出
+    def _ensure_log_queue(self):
+        if not hasattr(self, '_log_queue'):
+            self._log_queue = queue.Queue()
+            self._log_flush_scheduled = False
+            self._user_scrolling = False
+            self._log_line_count = 0
 
-        GUI日志：完整输出所有日志，智能滚动，行数上限保护
+    def _flush_log_queue(self):
+        """主线程批量消费日志队列，减少 UI 调度次数"""
+        self._log_flush_scheduled = False
+        if not hasattr(self, 'txt_log') or not self.txt_log:
+            try:
+                while True:
+                    self._log_queue.get_nowait()
+            except queue.Empty:
+                pass
+            return
+
+        messages = []
+        try:
+            while True:
+                messages.append(self._log_queue.get_nowait())
+        except queue.Empty:
+            pass
+
+        if not messages:
+            return
+
+        try:
+            self.txt_log.configure(state=tk.NORMAL)
+            for msg in messages:
+                self.txt_log.insert(tk.END, msg + '\n')
+                self._log_line_count += 1
+
+            if self._log_line_count > _MAX_LOG_LINES:
+                delete_count = self._log_line_count - _TRIM_LOG_LINES
+                self.txt_log.delete('1.0', f'{delete_count}.0')
+                self._log_line_count = _TRIM_LOG_LINES
+
+            if not self._user_scrolling:
+                self.txt_log.see(tk.END)
+        except Exception:
+            pass
+
+    def log(self, message):
+        """线程安全日志 - Queue批量消费 + GUI智能滚动 + 控制台同步输出
+
+        GUI日志：通过Queue批量刷新，减少root.after调度，智能滚动，行数上限保护
         控制台：完整输出所有日志，线程安全，顺序与GUI一致
         """
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -86,31 +132,15 @@ class LoggingMixin:
         except Exception:
             pass
 
-        if not hasattr(self, '_user_scrolling'):
-            self._user_scrolling = False
+        self._ensure_log_queue()
+        self._log_queue.put(log_message)
 
-        if not hasattr(self, '_log_line_count'):
-            self._log_line_count = 0
-
-        def update_ui():
-            if hasattr(self, 'txt_log') and self.txt_log:
-                try:
-                    self.txt_log.configure(state=tk.NORMAL)
-                    self.txt_log.insert(tk.END, log_message + '\n')
-                    self._log_line_count += 1
-
-                    if self._log_line_count > _MAX_LOG_LINES:
-                        delete_count = self._log_line_count - _TRIM_LOG_LINES
-                        self.txt_log.delete('1.0', f'{delete_count}.0')
-                        self._log_line_count = _TRIM_LOG_LINES
-
-                    if not self._user_scrolling:
-                        self.txt_log.see(tk.END)
-                except Exception:
-                    pass
-
-        if hasattr(self, 'root') and self.root:
-            self.root.after(0, update_ui)
+        if hasattr(self, 'root') and self.root and not self._log_flush_scheduled:
+            self._log_flush_scheduled = True
+            try:
+                self.root.after(_LOG_FLUSH_INTERVAL_MS, self._flush_log_queue)
+            except Exception:
+                self._log_flush_scheduled = False
 
     def _log_exception(self, prefix, exc=None):
         """线程安全异常日志 - GUI显示摘要，控制台显示完整堆栈
@@ -192,8 +222,7 @@ class LoggingMixin:
         if not hasattr(self, 'txt_log') or not self.txt_log:
             return
 
-        self._user_scrolling = False
-        self._log_line_count = 0
+        self._ensure_log_queue()
 
         self.txt_log.bind('<MouseWheel>', self._on_log_scroll)
         self.txt_log.bind('<Button-4>', self._on_log_scroll)

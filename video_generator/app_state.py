@@ -40,12 +40,15 @@ def lazy_import():
     try:
         try:
             import psutil as _psutil
-            import GPUtil as _GPUtil
             psutil = _psutil
-            GPUtil = _GPUtil
-            PERFORMANCE_MONITOR_AVAILABLE = True
         except ImportError:
             pass
+        try:
+            import GPUtil as _GPUtil
+            GPUtil = _GPUtil
+        except ImportError:
+            pass
+        PERFORMANCE_MONITOR_AVAILABLE = psutil is not None and GPUtil is not None
         check_ollama_available()
     except Exception as e:
         print(f"延迟导入模块失败: {e}")

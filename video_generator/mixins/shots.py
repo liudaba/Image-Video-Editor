@@ -56,6 +56,177 @@ try:
 except ImportError:
     ARV_PROMPTS_AVAILABLE = False
 
+_ENTITY_COUNTRY_MAPPING = {
+    '伊朗': 'Iran, Iranian', '美国': 'USA, American', '美國': 'USA, American', '中国': 'China, Chinese', '中國': 'China, Chinese',
+    '俄罗斯': 'Russia, Russian', '俄羅斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
+    '英国': 'UK, British', '英國': 'UK, British', '法国': 'France, French', '法國': 'France, French', '德国': 'Germany, German', '德國': 'Germany, German',
+    '朝鲜': 'North Korea, Korean', '朝鮮': 'North Korea, Korean', '北韩': 'North Korea, Korean', '北韓': 'North Korea, Korean',
+    '韩国': 'South Korea, Korean', '韓國': 'South Korea, Korean', '南韩': 'South Korea, Korean', '南韓': 'South Korea, Korean',
+    '乌克兰': 'Ukraine, Ukrainian', '烏克蘭': 'Ukraine, Ukrainian', '欧洲': 'Europe, European', '歐洲': 'Europe, European',
+    '中东': 'Middle East', '中東': 'Middle East', '亚洲': 'Asia, Asian', '亞洲': 'Asia, Asian',
+    '厄立特里亚': 'Eritrea, Eritrean', '厄利垂亞': 'Eritrea, Eritrean', '俄利特里亞': 'Eritrea, Eritrean',
+    '埃塞俄比亚': 'Ethiopia, Ethiopian', '埃塞俄比亞': 'Ethiopia, Ethiopian', '衣索比亞': 'Ethiopia, Ethiopian',
+    '索马里': 'Somalia, Somali', '索馬里': 'Somalia, Somali',
+    '苏丹': 'Sudan, Sudanese', '蘇丹': 'Sudan, Sudanese',
+    '南非': 'South Africa, South African',
+    '埃及': 'Egypt, Egyptian',
+}
+
+_ENTITY_MILITARY_MAPPING = {
+    '革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+    '革命衛隊': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+    '伊朗革命卫队': 'Islamic Revolutionary Guard Corps, IRGC, Iranian military',
+    '美军': 'US military, American forces', '美軍': 'US military, American forces', '美军方': 'US military, Pentagon',
+    '军队': 'military, armed forces, troops', '軍隊': 'military, armed forces, troops', '部队': 'troops, military unit', '部隊': 'troops, military unit',
+    '海军': 'navy, naval forces', '海軍': 'navy, naval forces', '空军': 'air force, aviation', '空軍': 'air force, aviation',
+    '陆军': 'army, ground forces', '陸軍': 'army, ground forces', '导弹': 'missile, rocket', '導彈': 'missile, rocket',
+    '无人机': 'drone, UAV', '無人機': 'drone, UAV', '战斗机': 'fighter jet, aircraft', '戰鬥機': 'fighter jet, aircraft',
+    '航母': 'aircraft carrier', '军舰': 'warship, naval vessel', '軍艦': 'warship, naval vessel',
+    '武器': 'weapons, armaments', '军事': 'military, armed', '軍事': 'military, armed',
+    '国防部': 'Ministry of Defense, Pentagon', '國防部': 'Ministry of Defense, Pentagon', '五角大楼': 'Pentagon, US Defense Department', '五角大樓': 'Pentagon, US Defense Department',
+}
+
+_ENTITY_POLITICAL_MAPPING = {
+    '政府': 'government, officials', '总统': 'president, head of state', '總統': 'president, head of state',
+    '总理': 'prime minister', '總理': 'prime minister', '首相': 'prime minister',
+    '外交部': 'foreign ministry, diplomatic', '联合国': 'United Nations, UN', '聯合國': 'United Nations, UN',
+    '安理会': 'UN Security Council', '安理會': 'UN Security Council', '北约': 'NATO, NATO alliance', '北約': 'NATO, NATO alliance',
+    '欧盟': 'European Union, EU', '歐盟': 'European Union, EU', '国会': 'congress, parliament', '國會': 'congress, parliament',
+    '议会': 'parliament, legislative', '議會': 'parliament, legislative', '政党': 'political party', '政黨': 'political party',
+    '官员': 'officials, authorities', '官員': 'officials, authorities', '发言人': 'spokesperson, official spokesperson', '發言人': 'spokesperson, official spokesperson',
+}
+
+_ENTITY_EVENT_MAPPING = {
+    '战争': 'war, warfare, conflict', '戰爭': 'war, warfare, conflict', '冲突': 'conflict, clash', '衝突': 'conflict, clash',
+    '战斗': 'battle, combat, fighting', '戰鬥': 'battle, combat, fighting', '袭击': 'attack, strike, assault', '襲擊': 'attack, strike, assault',
+    '爆炸': 'explosion, blast', '发射': 'launch', '發射': 'launch',
+    '试射': 'test, missile test', '試射': 'test, missile test', '军演': 'military exercise, drill', '軍演': 'military exercise, drill',
+    '谈判': 'negotiation, talks', '談判': 'negotiation, talks', '会议': 'meeting, conference', '會議': 'meeting, conference',
+    '声明': 'statement, announcement', '聲明': 'statement, announcement', '宣布': 'announcement, declare',
+    '签署': 'signing, agreement', '簽署': 'signing, agreement', '协议': 'agreement, deal, pact', '協議': 'agreement, deal, pact',
+    '制裁': 'sanctions, embargo', '援助': 'aid, assistance',
+}
+
+_ENTITY_LOCATION_MAPPING = {
+    '基地': 'base, military base', '机场': 'airport, air base', '機場': 'airport, air base',
+    '港口': 'port, harbor, naval base', '城市': 'city, urban',
+    '农村': 'rural, countryside', '農村': 'rural, countryside', '山区': 'mountain, mountainous', '山區': 'mountain, mountainous',
+    '沙漠': 'desert', '海边': 'coastal, seaside', '海邊': 'coastal, seaside',
+    '海峡': 'strait, waterway', '海峽': 'strait, waterway', '油田': 'oil field, oil facility',
+    '核设施': 'nuclear facility', '核設施': 'nuclear facility', '工厂': 'factory, facility', '工廠': 'factory, facility',
+    '大使馆': 'embassy', '大使館': 'embassy', '领事馆': 'consulate', '領事館': 'consulate',
+}
+
+_ENTITY_MEDIA_MAPPING = {
+    '新闻': 'news, news report, breaking news', '新聞': 'news, news report, breaking news', '记者': 'journalist, reporter', '記者': 'journalist, reporter',
+    '主持人': 'anchor, presenter', '直播': 'live broadcast, livestream',
+    '报道': 'report, coverage', '報道': 'report, coverage', '采访': 'interview', '採訪': 'interview',
+    '发布会': 'press conference', '發布會': 'press conference', '声明': 'official statement', '聲明': 'official statement',
+}
+
+_ENTITY_GENERIC_KEYWORDS = {
+    '今天': 'today, current events, breaking news',
+    '消息': 'news, information, report',
+    '全球': 'global, worldwide, international',
+    '牵动': 'impact, concern, attention', '牽動': 'impact, concern, attention',
+    '最新': 'latest, recent, breaking',
+    '关注': 'attention, focus, interest', '關注': 'attention, focus, interest',
+    '热点': 'hot topic, trending, viral', '熱點': 'hot topic, trending, viral',
+    '重大': 'major, significant, important',
+    '紧急': 'urgent, emergency, breaking', '緊急': 'urgent, emergency, breaking',
+    '刚刚': 'just happened, breaking, latest', '剛剛': 'just happened, breaking, latest',
+    '最新消息': 'breaking news, latest update, recent development',
+    '据报道': 'according to reports, sources say', '據報道': 'according to reports, sources say',
+    '业内人士': 'industry sources, experts, insiders', '業內人士': 'industry sources, experts, insiders',
+}
+
+_ENTITY_ALL_MAPPINGS = [
+    (_ENTITY_MILITARY_MAPPING, 'military'),
+    (_ENTITY_POLITICAL_MAPPING, 'political'),
+    (_ENTITY_EVENT_MAPPING, 'event'),
+    (_ENTITY_LOCATION_MAPPING, 'location'),
+    (_ENTITY_COUNTRY_MAPPING, 'country'),
+    (_ENTITY_MEDIA_MAPPING, 'media'),
+    (_ENTITY_GENERIC_KEYWORDS, 'generic'),
+]
+
+_TRANSLATION_MAPPING = {
+    '人': 'person', '男人': 'man', '女人': 'woman', '老人': 'elderly person',
+    '小孩': 'child', '年轻人': 'young person', '学生': 'student', '医生': 'doctor',
+    '护士': 'nurse', '警察': 'police officer', '军人': 'soldier', '教师': 'teacher',
+    '记者': 'journalist', '商人': 'businessman', '科学家': 'scientist',
+    '工程师': 'engineer', '运动员': 'athlete', '演员': 'actor', '歌手': 'singer',
+    '总统': 'president', '总理': 'prime minister', '部长': 'minister',
+    '司令': 'commander', '长官': 'officer', '領導人': 'leader',
+    '人群': 'crowd', '群众': 'people', '群眾': 'people',
+    '總統': 'president', '總理': 'prime minister', '部長': 'minister',
+    '長官': 'officer',
+    '年輕人': 'young person', '學生': 'student', '醫生': 'doctor',
+    '護士': 'nurse', '軍人': 'soldier', '教師': 'teacher',
+    '科學家': 'scientist', '工程師': 'engineer', '運動員': 'athlete',
+    '演員': 'actor', '歌手': 'singer',
+    '城市': 'city', '城镇': 'town', '农村': 'countryside', '乡村': 'village',
+    '街道': 'street', '道路': 'road', '商场': 'shopping mall', '餐厅': 'restaurant',
+    '医院': 'hospital', '学校': 'school', '工厂': 'factory', '办公室': 'office',
+    '图书馆': 'library', '公园': 'park', '海滩': 'beach', '山': 'mountain',
+    '河': 'river', '湖': 'lake', '海': 'sea', '森林': 'forest',
+    '草原': 'grassland', '沙漠': 'desert', '房间': 'room', '楼': 'building',
+    '机场': 'airport', '车站': 'station', '码头': 'dock',
+    '城鎮': 'town', '農村': 'countryside', '鄉村': 'village',
+    '商場': 'shopping mall', '餐廳': 'restaurant',
+    '醫院': 'hospital', '學校': 'school', '工廠': 'factory', '辦公室': 'office',
+    '圖書館': 'library', '公園': 'park', '海灘': 'beach',
+    '房間': 'room', '樓': 'building',
+    '機場': 'airport', '車站': 'station', '碼頭': 'dock',
+    '伊朗': 'Iran', '美国': 'United States', '中国': 'China', '俄罗斯': 'Russia',
+    '欧洲': 'Europe', '亚洲': 'Asia', '中东': 'Middle East',
+    '美國': 'United States', '中國': 'China', '俄羅斯': 'Russia',
+    '歐洲': 'Europe', '亞洲': 'Asia', '中東': 'Middle East',
+    '车': 'car', '汽车': 'car', '火车': 'train', '飞机': 'airplane', '船': 'ship',
+    '車': 'car', '汽車': 'car', '火車': 'train', '飛機': 'airplane',
+    '手机': 'mobile phone', '电脑': 'computer', '电视': 'television',
+    '书': 'book', '文件': 'document', '照片': 'photo', '图片': 'image',
+    '手機': 'mobile phone', '電腦': 'computer', '電視': 'television',
+    '書': 'book', '圖片': 'image',
+    '走': 'walking', '跑': 'running', '跳': 'jumping', '飞': 'flying',
+    '坐': 'sitting', '躺': 'lying', '站': 'standing', '看': 'looking',
+    '听': 'listening', '说': 'speaking', '笑': 'smiling', '哭': 'crying',
+    '唱': 'singing', '跳舞': 'dancing', '吃': 'eating', '喝': 'drinking',
+    '工作': 'working', '学习': 'studying', '开车': 'driving',
+    '打电话': 'making phone call', '拍照': 'taking photo',
+    '采访': 'interviewing', '演讲': 'giving speech', '表演': 'performing',
+    '比赛': 'competing', '战斗': 'fighting', '战争': 'war',
+    '飛': 'flying',
+    '聽': 'listening', '說': 'speaking',
+    '學習': 'studying', '開車': 'driving',
+    '打電話': 'making phone call',
+    '採訪': 'interviewing', '演講': 'giving speech',
+    '比賽': 'competing', '戰鬥': 'fighting', '戰爭': 'war',
+    '白天': 'daytime', '夜晚': 'night', '早晨': 'morning', '黄昏': 'dusk',
+    '黃昏': 'dusk',
+    '晴天': 'sunny', '雨天': 'rainy', '雪天': 'snowy', '阴天': 'cloudy',
+    '陰天': 'cloudy',
+    '紧张': 'tense', '危机': 'crisis', '危险': 'dangerous',
+    '平静': 'peaceful', '安静': 'quiet', '宁静': 'serene',
+    '高兴': 'happy', '快乐': 'joyful', '开心': 'cheerful',
+    '悲伤': 'sad', '难过': 'sad', '伤心': 'heartbreaking',
+    '愤怒': 'angry', '生气': 'furious', '害怕': 'scared', '恐惧': 'fearful',
+    '緊張': 'tense', '危機': 'crisis', '危險': 'dangerous',
+    '平靜': 'peaceful', '安靜': 'quiet', '寧靜': 'serene',
+    '高興': 'happy', '快樂': 'joyful', '開心': 'cheerful',
+    '悲傷': 'sad', '難過': 'sad', '傷心': 'heartbreaking',
+    '憤怒': 'angry', '生氣': 'furious', '害怕': 'scared', '恐懼': 'fearful',
+    '导弹': 'missile',
+    '武器': 'weapon', '坦克': 'tank', '军舰': 'warship',
+    '導彈': 'missile', '軍艦': 'warship',
+    '火': 'fire', '炸弹': 'bomb', '定时炸弹': 'time bomb',
+    '地缘': 'geopolitical', '棋盘': 'chessboard',
+    '投降': 'surrender', '谈判': 'negotiation',
+    '炸彈': 'bomb', '定時炸彈': 'time bomb',
+    '地緣': 'geopolitical', '棋盤': 'chessboard',
+    '談判': 'negotiation',
+}
+
 class ShotsMixin:
     def _get_current_model(self):
         return (self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else None) or "gemma3:4b"
@@ -1543,8 +1714,28 @@ Requirements:
             except Exception as e:
                 self._log_exception("⚠️ 增强版实体识别失败，使用内置识别", e)
         
-        # 回退到内置识别逻辑
-        # 国家/地区实体 - 扩展版本，包含更多国家和常见误识别纠正
+        # 回退到内置识别逻辑（使用模块级常量，避免重复实例化）
+        for mapping, mtype in _ENTITY_ALL_MAPPINGS:
+            for cn_key, en_value in mapping.items():
+                if cn_key in dubbing_clean:
+                    entities.append(en_value)
+                    break
+
+        if content_type:
+            content_lower = content_type.lower()
+            if 'military' in content_lower:
+                entities.append('military scene, combat zone')
+            elif 'politics' in content_lower:
+                entities.append('political scene, government setting')
+            elif 'science' in content_lower:
+                entities.append('scientific scene, laboratory')
+
+        if entities:
+            return ", ".join(entities)
+
+        return ""
+
+    # Placeholder for removed code - START
         country_mapping = {
             '伊朗': 'Iran, Iranian', '美国': 'USA, American', '美國': 'USA, American', '中国': 'China, Chinese', '中國': 'China, Chinese',
             '俄罗斯': 'Russia, Russian', '俄羅斯': 'Russia, Russian', '以色列': 'Israel, Israeli', '日本': 'Japan, Japanese',
@@ -1714,116 +1905,12 @@ Requirements:
     
 
     def _translate_to_english(self, chinese_text):
-        """简单的中文到英文翻译"""
-        
-        # 常见词汇映射 - 扩展版本
-        mapping = {
-            # 人物（简体+繁体）
-            '人': 'person', '男人': 'man', '女人': 'woman', '老人': 'elderly person',
-            '小孩': 'child', '年轻人': 'young person', '学生': 'student', '医生': 'doctor',
-            '护士': 'nurse', '警察': 'police officer', '军人': 'soldier', '教师': 'teacher',
-            '记者': 'journalist', '商人': 'businessman', '科学家': 'scientist',
-            '工程师': 'engineer', '运动员': 'athlete', '演员': 'actor', '歌手': 'singer',
-            '总统': 'president', '总理': 'prime minister', '部长': 'minister',
-            '司令': 'commander', '长官': 'officer', '領導人': 'leader',
-            '人': 'people', '人群': 'crowd', '群众': 'people',
-            # 繁体人物
-            '總統': 'president', '總理': 'prime minister', '部長': 'minister',
-            '司令': 'commander', '長官': 'officer', '領導人': 'leader', '人': 'people',
-            '人群': 'crowd', '群眾': 'people', '男人': 'man', '女人': 'woman',
-            '老人': 'elderly person', '小孩': 'child', '年輕人': 'young person',
-            '學生': 'student', '醫生': 'doctor', '護士': 'nurse', '警察': 'police officer',
-            '軍人': 'soldier', '教師': 'teacher', '記者': 'journalist', '商人': 'businessman',
-            '科學家': 'scientist', '工程師': 'engineer', '運動員': 'athlete',
-            '演員': 'actor', '歌手': 'singer',
-            # 地点（简体+繁体）
-            '城市': 'city', '城镇': 'town', '农村': 'countryside', '乡村': 'village',
-            '街道': 'street', '道路': 'road', '商场': 'shopping mall', '餐厅': 'restaurant',
-            '医院': 'hospital', '学校': 'school', '工厂': 'factory', '办公室': 'office',
-            '图书馆': 'library', '公园': 'park', '海滩': 'beach', '山': 'mountain',
-            '河': 'river', '湖': 'lake', '海': 'sea', '森林': 'forest',
-            '草原': 'grassland', '沙漠': 'desert', '房间': 'room', '楼': 'building',
-            '机场': 'airport', '车站': 'station', '码头': 'dock',
-            # 繁体地点
-            '城市': 'city', '城鎮': 'town', '農村': 'countryside', '鄉村': 'village',
-            '街道': 'street', '道路': 'road', '商場': 'shopping mall', '餐廳': 'restaurant',
-            '醫院': 'hospital', '學校': 'school', '工廠': 'factory', '辦公室': 'office',
-            '圖書館': 'library', '公園': 'park', '海灘': 'beach', '山': 'mountain',
-            '河': 'river', '湖': 'lake', '海': 'sea', '森林': 'forest',
-            '草原': 'grassland', '沙漠': 'desert', '房間': 'room', '樓': 'building',
-            '機場': 'airport', '車站': 'station', '碼頭': 'dock',
-            # 国家/地区
-            '伊朗': 'Iran', '美国': 'United States', '中国': 'China', '俄罗斯': 'Russia',
-            '欧洲': 'Europe', '亚洲': 'Asia', '中东': 'Middle East',
-            '伊朗': 'Iran', '美國': 'United States', '中國': 'China', '俄羅斯': 'Russia',
-            '歐洲': 'Europe', '亞洲': 'Asia', '中東': 'Middle East',
-            # 交通工具
-            '车': 'car', '汽车': 'car', '火车': 'train', '飞机': 'airplane', '船': 'ship',
-            '車': 'car', '汽車': 'car', '火車': 'train', '飛機': 'airplane', '船': 'ship',
-            # 物品
-            '手机': 'mobile phone', '电脑': 'computer', '电视': 'television',
-            '书': 'book', '文件': 'document', '照片': 'photo', '图片': 'image',
-            '手機': 'mobile phone', '電腦': 'computer', '電視': 'television',
-            '書': 'book', '文件': 'document', '照片': 'photo', '圖片': 'image',
-            # 动作
-            '走': 'walking', '跑': 'running', '跳': 'jumping', '飞': 'flying',
-            '坐': 'sitting', '躺': 'lying', '站': 'standing', '看': 'looking',
-            '听': 'listening', '说': 'speaking', '笑': 'smiling', '哭': 'crying',
-            '唱': 'singing', '跳舞': 'dancing', '吃': 'eating', '喝': 'drinking',
-            '工作': 'working', '学习': 'studying', '开车': 'driving',
-            '打电话': 'making phone call', '拍照': 'taking photo',
-            '采访': 'interviewing', '演讲': 'giving speech', '表演': 'performing',
-            '比赛': 'competing', '战斗': 'fighting', '战争': 'war',
-            # 繁体动作
-            '走': 'walking', '跑': 'running', '跳': 'jumping', '飛': 'flying',
-            '坐': 'sitting', '躺': 'lying', '站': 'standing', '看': 'looking',
-            '聽': 'listening', '說': 'speaking', '笑': 'smiling', '哭': 'crying',
-            '唱': 'singing', '跳舞': 'dancing', '吃': 'eating', '喝': 'drinking',
-            '工作': 'working', '學習': 'studying', '開車': 'driving',
-            '打電話': 'making phone call', '拍照': 'taking photo',
-            '採訪': 'interviewing', '演講': 'giving speech', '表演': 'performing',
-            '比賽': 'competing', '戰鬥': 'fighting', '戰爭': 'war',
-            # 时间
-            '白天': 'daytime', '夜晚': 'night', '早晨': 'morning', '黄昏': 'dusk',
-            '白天': 'daytime', '夜晚': 'night', '早晨': 'morning', '黃昏': 'dusk',
-            # 天气
-            '晴天': 'sunny', '雨天': 'rainy', '雪天': 'snowy', '阴天': 'cloudy',
-            '晴天': 'sunny', '雨天': 'rainy', '雪天': 'snowy', '陰天': 'cloudy',
-            # 氛围/情感
-            '紧张': 'tense', '危机': 'crisis', '危险': 'dangerous',
-            '平静': 'peaceful', '安静': 'quiet', '宁静': 'serene',
-            '高兴': 'happy', '快乐': 'joyful', '开心': 'cheerful',
-            '悲伤': 'sad', '难过': 'sad', '伤心': 'heartbreaking',
-            '愤怒': 'angry', '生气': 'furious', '害怕': 'scared', '恐惧': 'fearful',
-            '緊張': 'tense', '危機': 'crisis', '危險': 'dangerous',
-            '平靜': 'peaceful', '安靜': 'quiet', '寧靜': 'serene',
-            '高興': 'happy', '快樂': 'joyful', '開心': 'cheerful',
-            '悲傷': 'sad', '難過': 'sad', '傷心': 'heartbreaking',
-            '憤怒': 'angry', '生氣': 'furious', '害怕': 'scared', '恐懼': 'fearful',
-            # 战争/军事相关
-            '战争': 'war', '战斗': 'battle', '军队': 'army', '导弹': 'missile',
-            '武器': 'weapon', '坦克': 'tank', '飞机': 'aircraft', '军舰': 'warship',
-            '戰爭': 'war', '戰鬥': 'battle', '軍隊': 'army', '導彈': 'missile',
-            '武器': 'weapon', '坦克': 'tank', '飛機': 'aircraft', '軍艦': 'warship',
-            # 其他常见词
-            '火': 'fire', '炸弹': 'bomb', '定时炸弹': 'time bomb',
-            '地缘': 'geopolitical', '棋盘': 'chessboard',
-            '投降': 'surrender', '谈判': 'negotiation',
-            '火': 'fire', '炸彈': 'bomb', '定時炸彈': 'time bomb',
-            '地緣': 'geopolitical', '棋盤': 'chessboard',
-            '投降': 'surrender', '談判': 'negotiation',
-        }
-        
-        # 精确匹配
-        if chinese_text in mapping:
-            return mapping[chinese_text]
-        
-        # 尝试部分匹配
-        for key, value in mapping.items():
+        """简单的中文到英文翻译（使用模块级常量，避免重复实例化）"""
+        if chinese_text in _TRANSLATION_MAPPING:
+            return _TRANSLATION_MAPPING[chinese_text]
+        for key, value in _TRANSLATION_MAPPING.items():
             if key in chinese_text:
                 return value
-        
-        # 如果没有匹配，返回空字符串而不是原始文本
         return ""
     
     
@@ -1862,7 +1949,7 @@ Requirements:
                             applied_count += 1
                 if applied_count > 0:
                     return applied_count, f"直接解析成功: {applied_count}个"
-        except:
+        except Exception:
             pass
         
         # 方法2: 尝试提取JSON数组或对象
@@ -2127,7 +2214,7 @@ Requirements:
                     else:
                         # 如果没有匹配到，使用原始值
                         theme_info['content_type'] = type_match.replace('类', '').replace('型', '')
-                except:
+                except Exception:
                     theme_info['content_type'] = ''
 
             # 提取核心主题（支持有冒号和无冒号的情况）
@@ -2135,7 +2222,7 @@ Requirements:
                 try:
                     core_match = cleaned_result.split('核心主题')[1].split('\n')[0]
                     core_match = core_match.replace('：', '').replace(':', '').strip()
-                except:
+                except Exception:
                     core_match = ""
             elif '中心思想' in cleaned_result:
                 core_match = cleaned_result.split('中心思想')[1].split('\n')[0].strip()
@@ -2156,7 +2243,7 @@ Requirements:
                     theme_info['emotional_tone'] = emotion_match
                     if not theme_info.get('visual_tone'):
                         theme_info['visual_tone'] = emotion_match
-                except:
+                except Exception:
                     pass
 
             if '视觉基调' in cleaned_result:
@@ -2170,7 +2257,7 @@ Requirements:
                     theme_info['visual_style'] = style_match
                     if not theme_info.get('visual_tone'):
                         theme_info['visual_tone'] = style_match
-                except:
+                except Exception:
                     theme_info['visual_style'] = theme_info.get('visual_tone', '')
 
             # 提取主题元素
@@ -2181,7 +2268,7 @@ Requirements:
                     elements_text = elements_text.replace('：', '').replace(':', '').strip()
                     elements = re.split(r'[，、,\n]', elements_text)
                     theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()][:8]
-                except:
+                except Exception:
                     theme_info['theme_elements'] = []
             elif 'Theme Elements:' in cleaned_result:
                 elements_text = cleaned_result.split('Theme Elements:')[1].split('\n')[0].strip()

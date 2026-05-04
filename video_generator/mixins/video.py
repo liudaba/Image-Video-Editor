@@ -261,7 +261,7 @@ class VideoMixin:
                             resized_path = os.path.join(temp_render_dir, resized_name)
                             
                             with PILImageForResize.open(image_path) as orig_img:
-                                fitted = self._resize_image_to_fit(orig_img.copy(), width, height)
+                                fitted = self._resize_image_to_fit(orig_img, width, height)
                                 fitted.save(resized_path, 'JPEG', quality=95)
                             
                             resized_images.append(resized_path)
@@ -352,7 +352,7 @@ class VideoMixin:
                     return (shot, None)
                 try:
                     with PILImage.open(image_path) as orig_img:
-                        img = self._resize_image_to_fit(orig_img.copy(), w, h)
+                        img = self._resize_image_to_fit(orig_img, w, h)
                     return (shot, img)
                 except Exception:
                     return (shot, None)
@@ -381,13 +381,13 @@ class VideoMixin:
                     # 修复：同时清理 clips 和 intermediate_clips
                     for img in shot_img_map.values():
                         try: img.close()
-                        except: pass
+                        except Exception: pass
                     for ic in intermediate_clips:
                         try: ic.close()
-                        except: pass
+                        except Exception: pass
                     for c in clips:
                         try: c.close()
-                        except: pass
+                        except Exception: pass
                     return
                 
                 processed_shots += 1
@@ -403,7 +403,7 @@ class VideoMixin:
                 if shot_duration <= 0:
                     self.log(f"      ⚠️ 分镜时间戳无效，跳过: {shot.get('image_file', '未知')}")
                     try: img.close()
-                    except: pass
+                    except Exception: pass
                     continue
                 
                 clip = ImageClip(np.array(img)).with_duration(shot_duration)
@@ -702,23 +702,23 @@ class VideoMixin:
         finally:
             for clip in clips:
                 try: clip.close()
-                except: pass
+                except Exception: pass
             for ic in intermediate_clips:
                 try: ic.close()
-                except: pass
+                except Exception: pass
             if background:
                 try: background.close()
-                except: pass
+                except Exception: pass
             if final_clip:
                 try: final_clip.close()
-                except: pass
+                except Exception: pass
             if audio:
                 try: audio.close()
-                except: pass
+                except Exception: pass
             if 'shot_img_map' in locals():
                 for img in shot_img_map.values():
                     try: img.close()
-                    except: pass
+                    except Exception: pass
             self._active_audio = None
             self._active_clips = None
             self._active_background = None

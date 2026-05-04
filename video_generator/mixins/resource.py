@@ -510,7 +510,7 @@ class ResourceMixin:
             if active_clips is not None:
                 for c in active_clips:
                     try: c.close()
-                    except: pass
+                    except Exception: pass
                 self._active_clips = None
         except Exception:
             pass

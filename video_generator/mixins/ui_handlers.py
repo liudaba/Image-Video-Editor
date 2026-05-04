@@ -415,19 +415,28 @@ class UIHandlersMixin:
             self.style_dropdown_visible = False
     
 
+    _PROGRESS_THROTTLE_SEC = 0.3
+
     def update_task_progress(self, message, progress=None):
-        """更新任务进度"""
+        """更新任务进度（带节流，避免UI事件洪水）"""
+        now = time.time()
+        if not hasattr(self, '_last_progress_time'):
+            self._last_progress_time = 0
+
         def _update():
             try:
                 if hasattr(self, 'lbl_progress'):
                     self.lbl_progress.config(text=message)
                 if hasattr(self, 'progress_var') and progress is not None:
                     self.progress_var.set(progress)
+                self._last_progress_time = time.time()
             except Exception:
                 pass
-        
+
         if hasattr(self, 'root') and self.root:
-            self.root.after(0, _update)
+            elapsed = now - self._last_progress_time
+            delay = max(0, int((self._PROGRESS_THROTTLE_SEC - elapsed) * 1000))
+            self.root.after(delay, _update)
     
     
     
@@ -863,7 +872,7 @@ class UIHandlersMixin:
                                 gpu_memory_percent = gpus[0].memoryUtil * 100
                             else:
                                 gpu_memory_percent = 0
-                        except:
+                        except Exception:
                             gpu_memory_percent = 0
                     
                     try:

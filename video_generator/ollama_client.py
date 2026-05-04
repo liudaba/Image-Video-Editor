@@ -12,11 +12,15 @@ import time
 from .config import Config, get_http_session
 
 
+_RE_THINK_BLOCK = re.compile(r'<think>.*?</think>', re.DOTALL)
+_RE_THINK_TAG = re.compile(r'</?think>')
+
+
 def _strip_think_tags(text):
     if not text:
         return text
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    text = re.sub(r'</?think>', '', text)
+    text = _RE_THINK_BLOCK.sub('', text)
+    text = _RE_THINK_TAG.sub('', text)
     return text.strip()
 
 
@@ -77,13 +81,17 @@ def check_ollama_available():
         return False
 
 
+_ollama_models_lock = threading.Lock()
+
+
 def get_available_models(force_refresh=False):
     global _ollama_models_cache, _ollama_models_cache_time
 
-    now = time.time()
-    if not force_refresh and _ollama_models_cache is not None:
-        if now - _ollama_models_cache_time < _OLLAMA_MODELS_CACHE_TTL:
-            return _ollama_models_cache
+    with _ollama_models_lock:
+        now = time.time()
+        if not force_refresh and _ollama_models_cache is not None:
+            if now - _ollama_models_cache_time < _OLLAMA_MODELS_CACHE_TTL:
+                return list(_ollama_models_cache)
 
     try:
         response = get_http_session().get(
@@ -98,14 +106,16 @@ def get_available_models(force_refresh=False):
                     model_name = m.get("name", m.get("model", ""))
                     if model_name:
                         available_models.append(model_name)
-            _ollama_models_cache = available_models
-            _ollama_models_cache_time = now
+            with _ollama_models_lock:
+                _ollama_models_cache = available_models
+                _ollama_models_cache_time = now
             set_ollama_available(True)
-            return available_models
+            return list(available_models)
     except Exception:
         pass
 
-    return _ollama_models_cache or []
+    with _ollama_models_lock:
+        return list(_ollama_models_cache) if _ollama_models_cache else []
 
 
 def restart_ollama_service(log_callback=None):
