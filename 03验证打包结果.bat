@@ -11,7 +11,7 @@ set OUTPUT_DIR=dist\短视频生成器
 REM 检查输出目录是否存在
 if not exist "%OUTPUT_DIR%" (
     echo ❌ 错误: 输出目录不存在
-    echo 请先运行: python build_exe.py
+    echo 请先运行: python 02build_exe.py
     pause
     exit /b 1
 )
@@ -39,7 +39,6 @@ echo.
 
 REM ========== 检查不应该存在的文件夹 ==========
 echo 🔍 检查不应该存在的文件夹...
-set HAS_ERROR=0
 
 for %%F in (.git .idea .vscode .venv __pycache__ backend models model_aware_patch output_project 垃圾桶 build dist docs) do (
     if exist "%OUTPUT_DIR%\%%F" (
@@ -48,14 +47,13 @@ for %%F in (.git .idea .vscode .venv __pycache__ backend models model_aware_patc
     )
 )
 
-if %HAS_ERROR%==0 (
+if not defined HAS_ERROR (
     echo   ✅ 验证通过: 没有发现不该存在的文件夹
 )
 echo.
 
 REM ========== 检查不应该存在的文件 ==========
 echo 🔍 检查不应该存在的文件...
-set HAS_ERROR=0
 
 for %%F in (02build_exe.py release_helper.py installer_setup.iss requirements.txt check_and_install_deps.bat generate_placeholders.py run.py run.pyw GITHUB_IMPROVEMENT_GUIDE.md) do (
     if exist "%OUTPUT_DIR%\%%F" (
@@ -80,14 +78,13 @@ for %%F in (GITHUB_IMPROVEMENT_GUIDE.md) do (
     )
 )
 
-if %HAS_ERROR%==0 (
+if not defined HAS_ERROR (
     echo   ✅ 验证通过: 没有发现不该存在的文件
 )
 echo.
 
 REM ========== 检查应该存在的文件 ==========
 echo 🔍 检查应该存在的文件...
-set HAS_ERROR=0
 
 for %%F in (短视频生成器.exe 启动.vbs start.bat README.md 快速上手指南.md LICENSE config.json video_generator) do (
     if not exist "%OUTPUT_DIR%\%%F" (
@@ -102,30 +99,39 @@ if not exist "%OUTPUT_DIR%\_internal" (
     set HAS_ERROR=1
 )
 
-if %HAS_ERROR%==0 (
+if not defined HAS_ERROR (
     echo   ✅ 验证通过: 所有必要文件都存在
 )
 echo.
 
 REM ========== 检查临时文件 ==========
 echo 🔍 检查临时文件...
-set HAS_TEMP=0
 
 for %%F in (*.bak *.tmp *.log *TEMP*.mp4) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ⚠️  发现临时文件: %%F
-        set HAS_TEMP=1
+        set HAS_ERROR=1
     )
 )
 
-if %HAS_TEMP%==0 (
+if not defined HAS_ERROR (
     echo   ✅ 没有发现临时文件
 )
 echo.
 
 REM ========== 最终结论 ==========
 echo ========================================
-if %HAS_ERROR%==0 (
+if defined HAS_ERROR (
+    echo   ❌❌❌ 打包验证失败!
+    echo.
+    echo   请修复上述问题后重新打包
+    echo.
+    echo   💡 解决步骤:
+    echo   1. 运行 01打包前清理.bat
+    echo   2. 检查 02build_exe.py 的排除规则
+    echo   3. 重新运行: python 02build_exe.py
+    echo   4. 再次运行本验证脚本
+) else (
     echo   ✅✅✅ 打包验证完全通过!
     echo.
     echo   可以将 %OUTPUT_DIR% 分发给用户
@@ -134,16 +140,6 @@ if %HAS_ERROR%==0 (
     echo   1. 将整个文件夹压缩成ZIP
     echo   2. 上传到网盘或CDN
     echo   3. 提供下载链接给用户
-) else (
-    echo   ❌❌❌ 打包验证失败!
-    echo.
-    echo   请修复上述问题后重新打包
-    echo.
-    echo   💡 解决步骤:
-    echo   1. 运行 打包前清理.bat
-    echo   2. 检查 build_exe.py 的排除规则
-    echo   3. 重新运行: python build_exe.py
-    echo   4. 再次运行本验证脚本
 )
 echo ========================================
 echo.

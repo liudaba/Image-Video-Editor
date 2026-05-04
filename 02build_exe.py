@@ -88,7 +88,16 @@ def build_executable():
         '--add-data=README.md;.',
         '--add-data=快速上手指南.md;.',
         '--add-data=LICENSE;.',
-        
+    ]
+    
+    if os.path.exists('.license_verify_key'):
+        args.append('--add-data=.license_verify_key;.')
+        print("  ✅ .license_verify_key (授权签名验证密钥)")
+    else:
+        print("  ⚠️  .license_verify_key 不存在，打包后将无法验证授权签名")
+        print("     部署服务端后，请将服务端生成的密钥文件复制到项目根目录")
+    
+    args += [
         '--hidden-import=whisper',
         '--collect-all=whisper',
         
@@ -153,6 +162,10 @@ def build_executable():
     print("  ✅ 快速上手指南.md       - 快速入门指南")
     print("  ✅ LICENSE              - 开源许可证")
     print("  ✅ _internal/           - PyInstaller依赖库")
+    if os.path.exists('.license_verify_key'):
+        print("  ✅ .license_verify_key  - 授权签名验证密钥")
+    else:
+        print("  ⚠️  .license_verify_key  - 缺失！部署服务端后需复制此文件")
     
     print("\n🚫 排除内容清单:")
     print("  ❌ .git/ .idea/ .venv/  - 开发环境文件")

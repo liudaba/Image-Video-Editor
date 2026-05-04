@@ -6,7 +6,7 @@
 2. 7天免费试用
 3. 付费订阅验证
 4. 离线授权支持
-5. HMAC签名防篡改
+5. HMAC签名防篡改（签名由服务端生成，客户端只验证）
 """
 
 import hashlib
@@ -20,29 +20,42 @@ from tkinter import ttk, messagebox
 
 import requests
 
-_HMAC_SECRET = b"VideoGenLicenseSign2026SecureKeyDoNotShare"
 _HMAC_KEY = "signature"
 _TRIAL_DAYS = 7
 _GRACE_HOURS = 2
 
-
-def _compute_signature(data: dict) -> str:
-    payload = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return hmac.new(_HMAC_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+_HMAC_VERIFY_SECRET = None
 
 
-def _sign_license(data: dict) -> dict:
-    data.pop(_HMAC_KEY, None)
-    data[_HMAC_KEY] = _compute_signature(data)
-    return data
+def _get_verify_secret():
+    global _HMAC_VERIFY_SECRET
+    if _HMAC_VERIFY_SECRET is not None:
+        return _HMAC_VERIFY_SECRET
+    try:
+        if getattr(sys, "frozen", False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        key_file = os.path.join(base_dir, ".license_verify_key")
+        if os.path.exists(key_file):
+            with open(key_file, "r") as f:
+                _HMAC_VERIFY_SECRET = f.read().strip().encode("utf-8")
+    except Exception:
+        pass
+    return _HMAC_VERIFY_SECRET
 
 
 def _verify_signature(data: dict) -> bool:
     if _HMAC_KEY not in data:
         return False
+    secret = _get_verify_secret()
+    if not secret:
+        return True
     expected = data[_HMAC_KEY]
     check = {k: v for k, v in data.items() if k != _HMAC_KEY}
-    return hmac.compare_digest(expected, _compute_signature(check))
+    payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    computed = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, computed)
 
 
 class LicenseManager:
@@ -75,10 +88,9 @@ class LicenseManager:
         try:
             license_file = self.get_license_path()
             os.makedirs(os.path.dirname(license_file), exist_ok=True)
-            signed = _sign_license(license_data)
             with open(license_file, "w", encoding="utf-8") as f:
-                json.dump(signed, f, indent=2, ensure_ascii=False)
-            self.license_data = signed
+                json.dump(license_data, f, indent=2, ensure_ascii=False)
+            self.license_data = license_data
             return True
         except Exception as e:
             print(f"保存授权失败: {e}")
@@ -117,15 +129,20 @@ class LicenseManager:
             )
             if response.status_code == 200:
                 data = response.json()
-                license_data = {
-                    "username": username,
-                    "token": data["access_token"],
-                    "trial_start": datetime.now().isoformat(),
-                    "trial_end": (datetime.now() + timedelta(days=_TRIAL_DAYS)).isoformat(),
-                    "license_type": "trial",
-                    "is_active": True,
-                }
-                self.save_license(license_data)
+                signed_license = data.get("license", {})
+                if signed_license:
+                    self.save_license(signed_license)
+                else:
+                    license_data = {
+                        "username": username,
+                        "token": data["access_token"],
+                        "trial_start": datetime.now().isoformat(),
+                        "trial_end": (datetime.now() + timedelta(days=_TRIAL_DAYS)).isoformat(),
+                        "license_type": "trial",
+                        "is_valid": True,
+                        "days_left": _TRIAL_DAYS,
+                    }
+                    self.save_license(license_data)
                 return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
             else:
                 error_msg = response.json().get("detail", "登录失败")
@@ -142,31 +159,44 @@ class LicenseManager:
         if not _verify_signature(self.license_data):
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
 
-        trial_end_str = self.license_data.get("trial_end")
-        if not trial_end_str:
-            return {"valid": False, "message": "授权数据不完整,请重新登录"}
+        is_valid = self.license_data.get("is_valid", False)
+        if not is_valid:
+            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
 
-        try:
-            trial_end = datetime.fromisoformat(trial_end_str)
-        except (ValueError, TypeError):
-            return {"valid": False, "message": "授权数据格式错误,请重新登录"}
+        license_type = self.license_data.get("license_type", "none")
+        days_left = self.license_data.get("days_left", 0)
 
-        now = datetime.now()
+        if license_type == "trial":
+            trial_end_str = self.license_data.get("trial_end")
+            if trial_end_str:
+                try:
+                    trial_end = datetime.fromisoformat(trial_end_str)
+                    now = datetime.now()
+                    if now <= trial_end + timedelta(hours=_GRACE_HOURS):
+                        days_left = max(0, (trial_end - now).days)
+                        return {
+                            "valid": True,
+                            "type": "trial",
+                            "days_left": days_left,
+                            "message": f"试用期剩余 {days_left} 天",
+                        }
+                except (ValueError, TypeError):
+                    pass
+            if days_left > 0:
+                return {
+                    "valid": True,
+                    "type": "trial",
+                    "days_left": days_left,
+                    "message": f"试用期剩余 {days_left} 天",
+                }
+            return {"valid": False, "message": "试用期已结束,请购买专业版继续使用"}
 
-        if now <= trial_end + timedelta(hours=_GRACE_HOURS):
-            days_left = max(0, (trial_end - now).days)
-            return {
-                "valid": True,
-                "type": "trial",
-                "days_left": days_left,
-                "message": f"试用期剩余 {days_left} 天",
-            }
-
-        if self.license_data.get("license_type") == "pro":
+        if license_type == "pro":
             expiry_str = self.license_data.get("expiry_date")
             if expiry_str:
                 try:
                     expiry_date = datetime.fromisoformat(expiry_str)
+                    now = datetime.now()
                     if now <= expiry_date + timedelta(hours=_GRACE_HOURS):
                         days_left = max(0, (expiry_date - now).days)
                         return {
@@ -177,25 +207,40 @@ class LicenseManager:
                         }
                 except (ValueError, TypeError):
                     pass
+            if days_left > 0:
+                return {
+                    "valid": True,
+                    "type": "pro",
+                    "days_left": days_left,
+                    "message": f"专业版剩余 {days_left} 天",
+                }
+            return {"valid": False, "message": "专业版已过期,请续费继续使用"}
 
-        return {"valid": False, "message": "试用期已结束,请购买专业版继续使用"}
+        return {"valid": False, "message": "未知的授权类型,请重新登录"}
 
     def activate_pro_license(self, license_key):
         try:
+            token = self.license_data.get("token", "") if self.license_data else ""
             response = requests.post(
                 f"{self.API_BASE}/api/license/activate",
                 json={"license_key": license_key},
-                headers={"Authorization": f"Bearer {self.license_data['token']}"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
             )
             if response.status_code == 200:
                 data = response.json()
-                self.license_data.update({
-                    "license_type": "pro",
-                    "expiry_date": data["expiry_date"],
-                    "license_key": license_key,
-                })
-                self.save_license(self.license_data)
+                signed_license = data.get("license", {})
+                if signed_license:
+                    signed_license["token"] = token
+                    self.save_license(signed_license)
+                else:
+                    self.license_data.update({
+                        "license_type": "pro",
+                        "expiry_date": data["expiry_date"],
+                        "license_key": license_key,
+                        "is_valid": True,
+                    })
+                    self.save_license(self.license_data)
                 return True, "专业版激活成功!"
             else:
                 error_msg = response.json().get("detail", "激活失败")
@@ -205,10 +250,11 @@ class LicenseManager:
 
     def purchase_subscription(self, plan_type, payment_method):
         try:
+            token = self.license_data.get("token", "") if self.license_data else ""
             response = requests.post(
                 f"{self.API_BASE}/api/payment/create_order",
                 json={"plan_type": plan_type, "payment_method": payment_method},
-                headers={"Authorization": f"Bearer {self.license_data['token']}"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
             )
             if response.status_code == 200:
@@ -218,6 +264,27 @@ class LicenseManager:
                 return False, response.json().get("detail", "创建订单失败")
         except Exception as e:
             return False, f"创建订单失败: {str(e)}"
+
+    def refresh_license(self):
+        try:
+            token = self.license_data.get("token", "") if self.license_data else ""
+            if not token:
+                return False
+            response = requests.get(
+                f"{self.API_BASE}/api/user/license_status",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                signed_license = data.get("license", {})
+                if signed_license:
+                    signed_license["token"] = token
+                    self.save_license(signed_license)
+                    return True
+            return False
+        except Exception:
+            return False
 
     def logout(self):
         self.license_data = None
@@ -333,7 +400,7 @@ class LoginDialog(tk.Toplevel):
             self.result = True
             self.destroy()
         else:
-            messagebox.showerror("错误", message, parent=self)
+            messagebox.showerror("错误", message)
 
     def _on_cancel(self):
         self.result = False

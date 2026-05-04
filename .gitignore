@@ -81,6 +81,9 @@ Thumbs.db
 # 安全相关
 .secret_key
 .key_salt
+.license_sign_key
+.license_verify_key
+.env
 *.db
 license.json
 logs/
