@@ -71,7 +71,7 @@ def build_license_response(license_obj: License, username: str) -> LicenseData:
     signed = sign_license_data(raw_data)
 
     return LicenseData(
-        _sig=signed["_sig"],
+        _sig=signed.get("_sig"),
         username=signed["username"],
         license_type=signed["license_type"],
         is_valid=signed["is_valid"],
@@ -128,9 +128,11 @@ PLAN_PRICING = {
 
 async def extend_license(db, user_id: int, days: int) -> License:
     from sqlalchemy import select
-    result = await db.execute(
-        select(License).where(License.user_id == user_id).with_for_update()
-    )
+    from app.database import engine
+    q = select(License).where(License.user_id == user_id)
+    if not str(engine.url).startswith("sqlite"):
+        q = q.with_for_update()
+    result = await db.execute(q)
     license_obj = result.scalar_one_or_none()
 
     if not license_obj:

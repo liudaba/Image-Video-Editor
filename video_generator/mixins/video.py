@@ -225,6 +225,7 @@ class VideoMixin:
             # ========== 快速路径: 无动画+硬切 → FFmpeg直接渲染 ==========
             if self.video_renderer is None:
                 try:
+                    from video_generator.hardware import HardwareAcceleratedRenderer
                     self.video_renderer = HardwareAcceleratedRenderer()
                 except Exception:
                     self.video_renderer = None
@@ -328,6 +329,7 @@ class VideoMixin:
                             self.state_manager['video']['generated'] = True
                             self.state_manager['video']['path'] = output_path
                             
+                            self.task_running = False
                             self.log("\n📂 打开输出文件夹...")
                             self._open_folder(os.path.dirname(output_path))
                             return
@@ -495,6 +497,7 @@ class VideoMixin:
             except Exception as e:
                 self._log_exception(f"   ❌ 视频片段合成失败: {type(e).__name__}", e)
                 self.update_task_progress("就绪")
+                self.task_running = False
                 return
 
             if check_cancelled():
@@ -845,11 +848,13 @@ class VideoMixin:
             if not self.audio_path:
                 self.log("❌ 没有导入音频文件，无法执行任务")
                 messagebox.showwarning("缺少音频", "请先导入音频文件，再执行跑图生成视频任务！")
+                self.task_running = False
                 return
             
             if not os.path.exists(self.audio_path):
                 self.log(f"❌ 音频文件不存在: {self.audio_path}")
                 messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
+                self.task_running = False
                 return
             
             # 检查2: 检查是否存在分镜脚本文件

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -29,7 +29,9 @@ class HeartbeatRequest(BaseModel):
 
 
 class LicenseData(BaseModel):
-    _sig: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True)
+
+    sig: Optional[str] = Field(None, alias="_sig")
     username: str
     license_type: str
     is_valid: bool
@@ -75,3 +77,4 @@ class VersionInfo(BaseModel):
 class TokenData(BaseModel):
     user_id: int
     username: str
+    exp: float = 0

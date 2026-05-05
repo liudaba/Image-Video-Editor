@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.database import get_db
+from app.database import get_db, engine
 from app.models import User, License, LicenseKey, LicenseKeyStatus, LicenseType
 from app.schemas import LicenseActivate, ActivateResponse
 from app.auth import get_current_user
@@ -23,22 +23,23 @@ async def activate_license(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(License).where(License.user_id == user.id).with_for_update()
-    )
+    _sqlite = str(engine.url).startswith("sqlite")
+    q1 = select(License).where(License.user_id == user.id)
+    if not _sqlite:
+        q1 = q1.with_for_update()
+    result = await db.execute(q1)
     license_obj = result.scalar_one_or_none()
 
     if not license_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到授权记录")
 
-    key_result = await db.execute(
-        select(LicenseKey)
-        .where(
+    q2 = select(LicenseKey).where(
             LicenseKey.license_key == body.license_key,
             LicenseKey.status == LicenseKeyStatus.UNUSED,
         )
-        .with_for_update()
-    )
+    if not _sqlite:
+        q2 = q2.with_for_update()
+    key_result = await db.execute(q2)
     license_key_obj = key_result.scalar_one_or_none()
 
     if not license_key_obj:

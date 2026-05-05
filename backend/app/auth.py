@@ -48,9 +48,10 @@ def decode_access_token(token: str) -> TokenData:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_id: int = payload.get("user_id")
         username: str = payload.get("username")
+        exp: float = payload.get("exp", 0)
         if user_id is None or username is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭据")
-        return TokenData(user_id=user_id, username=username)
+        return TokenData(user_id=user_id, username=username, exp=exp)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="认证凭据已过期或无效")
 

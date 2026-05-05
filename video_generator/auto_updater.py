@@ -8,13 +8,10 @@
 """
 
 import hashlib
-import json
 import os
-import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import datetime
 
 from .config import get_http_session, get_api_base_url
 
@@ -36,7 +33,7 @@ class UpdateManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.version_info = None
-            from video_generator.version import get_version, compare_versions
+            from .version import get_version, compare_versions
             cls._instance.CURRENT_VERSION = get_version()
             cls._instance._compare_versions = compare_versions
         return cls._instance
@@ -112,6 +109,13 @@ class UpdateManager:
                 with open(save_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
+                            if not self.is_downloading:
+                                f.close()
+                                if os.path.exists(save_path):
+                                    os.remove(save_path)
+                                if error_callback:
+                                    error_callback("下载已取消")
+                                return
                             f.write(chunk)
                             hasher.update(chunk)
                             downloaded += len(chunk)
@@ -371,7 +375,6 @@ class UpdateDialog(tk.Toplevel):
 
 def check_and_notify_update(parent_window, auto_check=False, silent=False):
     if silent:
-        from video_generator.auto_updater import UpdateManager
         update_mgr = UpdateManager()
 
         def on_check_complete(has_update, result):

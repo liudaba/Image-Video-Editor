@@ -535,6 +535,12 @@ class ResourceMixin:
             pass
 
         try:
+            from video_generator.license_manager import LicenseManager
+            LicenseManager().stop_heartbeat()
+        except Exception:
+            pass
+
+        try:
             session = get_http_session()
             if session is not None:
                 session.close()

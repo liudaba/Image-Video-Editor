@@ -6,9 +6,13 @@ from sqlalchemy import select
 from app.models import License, MachineBinding, HeartbeatLog, LicenseType, User
 from app.services.license_service import is_license_expired, build_license_response
 from app.schemas import LicenseData
-
+from app.database import engine
 
 MAX_MACHINE_BINDINGS = 3
+
+
+def _supports_for_update():
+    return not str(engine.url).startswith("sqlite")
 
 
 async def check_and_bind_machine(
@@ -19,11 +23,10 @@ async def check_and_bind_machine(
     if not fingerprint:
         return True
 
-    result = await db.execute(
-        select(MachineBinding)
-        .where(MachineBinding.user_id == user_id)
-        .with_for_update()
-    )
+    q = select(MachineBinding).where(MachineBinding.user_id == user_id)
+    if _supports_for_update():
+        q = q.with_for_update()
+    result = await db.execute(q)
     bindings = result.scalars().all()
 
     for b in bindings:
@@ -68,9 +71,10 @@ async def validate_heartbeat(
     user_id: int,
     fingerprint: Optional[str],
 ) -> Optional[LicenseData]:
-    result = await db.execute(
-        select(License).where(License.user_id == user_id).with_for_update()
-    )
+    q = select(License).where(License.user_id == user_id)
+    if _supports_for_update():
+        q = q.with_for_update()
+    result = await db.execute(q)
     license_obj = result.scalar_one_or_none()
 
     if license_obj is None:

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.database import get_db
+from app.database import get_db, engine
 from app.models import User, License, Order, OrderStatus, PlanType, PaymentNotifyLog
 from app.schemas import PaymentCreateOrder, OrderResponse
 from app.auth import get_current_user
@@ -81,9 +81,11 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
             except IntegrityError:
                 return "success"
 
-        result = await db.execute(
-            select(Order).where(Order.order_no == out_trade_no).with_for_update()
-        )
+        _sqlite = str(engine.url).startswith("sqlite")
+        q = select(Order).where(Order.order_no == out_trade_no)
+        if not _sqlite:
+            q = q.with_for_update()
+        result = await db.execute(q)
         order = result.scalar_one_or_none()
 
         if not order or order.status != OrderStatus.PENDING:
@@ -144,9 +146,10 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
             except IntegrityError:
                 return {"return_code": "SUCCESS", "return_msg": "OK"}
 
-            result = await db.execute(
-                select(Order).where(Order.order_no == out_trade_no).with_for_update()
-            )
+            q = select(Order).where(Order.order_no == out_trade_no)
+            if not _sqlite:
+                q = q.with_for_update()
+            result = await db.execute(q)
             order = result.scalar_one_or_none()
 
             if not order or order.status != OrderStatus.PENDING:
