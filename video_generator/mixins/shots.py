@@ -2159,7 +2159,9 @@ Requirements:
             'content_type': '',
             'core_theme': '',
             'visual_tone': '',
+            'visual_tone_en': '',
             'visual_style': '',
+            'visual_style_en': '',
             'theme_elements': [],
             'emotional_tone': '',
             'correction_dict': {}
@@ -2248,17 +2250,48 @@ Requirements:
 
             if '视觉基调' in cleaned_result:
                 tone_match = cleaned_result.split('视觉基调')[1].split('\n')[0].replace('：', '').replace(':', '').strip()
+                tone_en_map = {
+                    '严肃': 'serious, solemn',
+                    '紧张': 'tense, suspenseful',
+                    '轻松': 'light, relaxed',
+                    '温馨': 'warm, cozy',
+                    '激昂': 'passionate, stirring',
+                    '悲伤': 'sad, melancholic',
+                    '欢快': 'cheerful, joyful',
+                    '平静': 'calm, peaceful',
+                    '震撼': 'shocking, impactful',
+                    '忧郁': 'melancholic, gloomy',
+                }
                 theme_info['visual_tone'] = tone_match
+                if tone_match in tone_en_map:
+                    theme_info['visual_tone_en'] = tone_en_map[tone_match]
+                else:
+                    theme_info['visual_tone_en'] = tone_match
 
-            if '视觉风格' in cleaned_result:
+            if '英文视觉风格' in cleaned_result:
                 try:
-                    style_match = cleaned_result.split('视觉风格')[1].split('\n')[0]
+                    en_style_match = cleaned_result.split('英文视觉风格')[1].split('\n')[0]
+                    en_style_match = en_style_match.replace('：', '').replace(':', '').strip()
+                    if en_style_match and en_style_match != '无':
+                        theme_info['visual_style_en'] = en_style_match
+                        theme_info['visual_style'] = en_style_match
+                except Exception:
+                    pass
+
+            cn_style_text = cleaned_result
+            if '英文视觉风格' in cn_style_text:
+                cn_style_text = cn_style_text.split('英文视觉风格')[0]
+            if '视觉风格' in cn_style_text:
+                try:
+                    style_match = cn_style_text.split('视觉风格')[1].split('\n')[0]
                     style_match = style_match.replace('：', '').replace(':', '').strip()
-                    theme_info['visual_style'] = style_match
+                    if not theme_info.get('visual_style'):
+                        theme_info['visual_style'] = style_match
                     if not theme_info.get('visual_tone'):
                         theme_info['visual_tone'] = style_match
                 except Exception:
-                    theme_info['visual_style'] = theme_info.get('visual_tone', '')
+                    if not theme_info.get('visual_style'):
+                        theme_info['visual_style'] = theme_info.get('visual_tone', '')
 
             # 提取主题元素
             if '主题元素' in cleaned_result or '核心元素' in cleaned_result:
@@ -2267,7 +2300,18 @@ Requirements:
                     elements_text = cleaned_result.split(elements_key)[1].split('\n')[0]
                     elements_text = elements_text.replace('：', '').replace(':', '').strip()
                     elements = re.split(r'[，、,\n]', elements_text)
-                    theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()][:8]
+                    cleaned_elements = []
+                    for e in elements:
+                        e = e.strip()
+                        if not e:
+                            continue
+                        if '→' in e:
+                            e = e.split('→')[-1].strip()
+                        elif '->' in e:
+                            e = e.split('->')[-1].strip()
+                        if e:
+                            cleaned_elements.append(e)
+                    theme_info['theme_elements'] = cleaned_elements[:8]
                 except Exception:
                     theme_info['theme_elements'] = []
             elif 'Theme Elements:' in cleaned_result:
@@ -2277,6 +2321,7 @@ Requirements:
 
             # 提取纠错说明并应用纠正
             correction_dict = {}
+            skipped_noop = 0
             self.log(f"   🔍 检查是否存在'纠错说明'...")
             if '纠错说明' in cleaned_result:
                 self.log(f"   🔍 找到纠错说明，正在解析...")
@@ -2313,37 +2358,42 @@ Requirements:
                                 new = new.strip()
                                 if old and new and old != new:
                                     correction_dict[old] = new
+                                elif old and new and old == new:
+                                    skipped_noop += 1
                             except Exception as e:
                                 self.log(f"   ⚠️ 解析单项纠错失败: {part}, 错误: {e}")
                                 continue
                         
+                        if skipped_noop > 0:
+                            self.log(f"   ℹ️ 跳过 {skipped_noop} 项无效纠错（前后内容相同，如繁体字→繁体字）")
+
                         if correction_dict:
-                            self.log(f"   🔍 解析到纠错字典: {correction_dict}")
+                            self.log(f"   🔍 有效纠错字典: {correction_dict}")
                             
-                            # 应用纠错到核心主题
                             if theme_info.get('core_theme'):
-                                self.log(f"   🔍 原始core_theme: {theme_info['core_theme']}")
                                 corrected_theme = theme_info['core_theme']
                                 for old, new in correction_dict.items():
                                     corrected_theme = corrected_theme.replace(old, new)
-                                theme_info['core_theme'] = corrected_theme
-                                self.log(f"   🔄 纠错后core_theme: {theme_info['core_theme']}")
+                                if corrected_theme != theme_info['core_theme']:
+                                    self.log(f"   🔄 主题纠错: {theme_info['core_theme']} → {corrected_theme}")
+                                    theme_info['core_theme'] = corrected_theme
                             
-                            # 应用纠错到核心元素
                             if theme_info.get('theme_elements'):
-                                self.log(f"   🔍 原始theme_elements: {theme_info['theme_elements']}")
                                 corrected_elements = []
                                 for elem in theme_info['theme_elements']:
                                     corrected_elem = elem
                                     for old, new in correction_dict.items():
                                         corrected_elem = corrected_elem.replace(old, new)
                                     corrected_elements.append(corrected_elem)
+                                if corrected_elements != theme_info['theme_elements']:
+                                    self.log(f"   🔄 元素纠错: {theme_info['theme_elements']} → {corrected_elements}")
                                 theme_info['theme_elements'] = corrected_elements
-                                self.log(f"   🔄 纠错后theme_elements: {theme_info['theme_elements']}")
                             
-                            # 保存纠错字典供后续使用
                             theme_info['correction_dict'] = correction_dict
                             self.log(f"   ✅ 纠错已应用到主题信息")
+                        else:
+                            self.log(f"   ✅ 无有效纠错项（所有纠错前后内容相同），文本无需纠错")
+                            theme_info['correction_dict'] = {}
                     else:
                         self.log(f"   ℹ️ 纠错说明为'无'，无需纠错")
                         theme_info['correction_dict'] = {}
@@ -2865,6 +2915,9 @@ Requirements:
             theme_info = {
                 'core_theme': '', 
                 'visual_tone': '', 
+                'visual_tone_en': '',
+                'visual_style': '',
+                'visual_style_en': '',
                 'theme_elements': [],
                 'content_type': content_type,
                 'correction_dict': {}
@@ -3007,15 +3060,14 @@ Requirements:
                                     # 使用新的主题分析模板
                                     template = PromptTemplates.get_template("theme_analysis", text=full_text)
                                     
-                                    # 如果用户指定了主题/基调，在系统提示中补充说明
                                     if custom_theme or custom_visual_tone:
                                         user_addition = f"\n\n【用户指定的核心主题】: {custom_theme}" if custom_theme else ""
                                         user_addition += f"\n【用户指定的视觉基调】: {custom_visual_tone}" if custom_visual_tone else ""
                                         system_content = template["system"]
-                                        user_content = f"语音转录文本：\n{full_text}{user_addition}"
+                                        user_content = template["user"] + user_addition
                                     else:
                                         system_content = template["system"]
-                                        user_content = f"语音转录文本：\n{full_text}"
+                                        user_content = template["user"]
                                     
                                     result_content, _ = call_ollama_single(
                                         model=model_name,
@@ -3173,8 +3225,10 @@ Requirements:
                                 'content_type': '', 
                                 'core_theme': '', 
                                 'visual_tone': '', 
+                                'visual_tone_en': '',
                                 'theme_elements': [],
                                 'visual_style': '',
+                                'visual_style_en': '',
                                 'emotional_tone': '',
                                 'correction_dict': {}
                             }
@@ -3281,13 +3335,14 @@ Requirements:
                     dubbing = task.get('text', '')
                     if dubbing:
                         effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
+                        effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
                         
                         prompt = self._generate_prompt_with_llm(
                             dubbing, 
                             content_type=theme_info.get('content_type', ''), 
                             prompt_type=user_prompt_type,
                             core_theme=theme_info.get('core_theme', ''),
-                            visual_tone=theme_info.get('visual_tone', ''),
+                            visual_tone=effective_visual_tone,
                             theme_elements=theme_info.get('theme_elements', []),
                             visual_style=effective_visual_style,
                             original_dubbing=dubbing,
@@ -3311,8 +3366,8 @@ Requirements:
             except ImportError:
                 _cloud_llm = False
             
-            if not _cloud_llm and prompt_max_workers > 3:
-                self.log(f"   💡 本地Ollama串行处理请求，{prompt_max_workers}线程排队执行")
+            if not _cloud_llm and prompt_max_workers > 2:
+                self.log(f"   💡 本地Ollama最多2个并发请求，{prompt_max_workers}线程排队执行（云端模式可完全并行）")
             
             total_tasks = len(final_tasks)
             self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
@@ -3516,65 +3571,6 @@ Requirements:
                 json.dump(shots, f, ensure_ascii=False, indent=2)
             self.log(f"   ✅ 分镜数据已保存: {shots_file}")
 
-            # 验证分镜主题一致性（如果大模型分析成功）
-            if theme_info.get('core_theme'):
-                # 手动模式（auto_mode=False）：始终执行完整的主题一致性检查和修正
-                # 自动模式（auto_mode=True）：基于偏离率智能决策
-                if not auto_mode:
-                    # 手动模式：强制执行完整检查和修正
-                    self.log(f"\n🔍 手动模式：执行完整的主题一致性检查与修正...")
-                    is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info)
-                    if is_consistent:
-                        self.log(f"✅ {consistency_msg}")
-                    else:
-                        self.log(f"⚠️ {consistency_msg}")
-                        self.log(f"💡 建议: 检查分镜提示词是否围绕主题'{theme_info['core_theme']}'展开")
-                        if not is_consistent:
-                            with open(shots_file, 'w', encoding='utf-8') as f:
-                                json.dump(shots, f, ensure_ascii=False, indent=2)
-                            self.log(f"   ✅ 修正后的分镜数据已重新保存")
-                else:
-                    # 自动模式：先执行快速预检查，根据偏离率决定是否深度修正
-                    is_consistent, deviation_count, total_checked, deviation_indices = self.quick_theme_consistency_check(shots, theme_info)
-                    
-                    if deviation_count == 0:
-                        self.log(f"✅ 主题一致性检查通过")
-                    else:
-                        deviation_ratio = (deviation_count / total_checked * 100) if total_checked > 0 else 0
-                        self.log(f"\n🔍 主题一致性预检查: 偏离率 {deviation_ratio:.1f}% ({deviation_count}/{total_checked})")
-                        
-                        # 根据偏离率决定是否执行深度修正
-                        if deviation_ratio < 15:
-                            self.log(f"ℹ️ 偏离率较低({deviation_ratio:.1f}%)，跳过深度修正以加速流程")
-                        elif deviation_ratio < 25:
-                            self.log(f"⚠️ 偏离率中等({deviation_ratio:.1f}%)，对偏离分镜追加主题关键词...")
-                            for idx in deviation_indices:
-                                if idx < len(shots):
-                                    shot = shots[idx]
-                                    desc = shot.get('description', '')
-                                    prompt_en = shot.get('prompt_en', '')
-                                    if core_theme and core_theme not in desc:
-                                        shot['description'] = f"{desc} {core_theme}".strip()
-                                    if check_keywords_en and prompt_en:
-                                        extra_kw = ', '.join(check_keywords_en[:3])
-                                        shot['prompt_en'] = f"{prompt_en}, {extra_kw}"
-                            with open(shots_file, 'w', encoding='utf-8') as f:
-                                json.dump(shots, f, ensure_ascii=False, indent=2)
-                            self.log(f"   ✅ 已对 {len(deviation_indices)} 个偏离分镜追加主题关键词")
-                        else:
-                            # 偏离率较高，执行完整的主题一致性检查和自动修正
-                            self.log(f"\n⚠️ 偏离率较高({deviation_ratio:.1f}%)，正在执行深度检查与自动修正...")
-                            is_consistent, consistency_msg = self.validate_theme_consistency(shots, theme_info, deviation_indices)
-                            if is_consistent:
-                                self.log(f"✅ {consistency_msg}")
-                            else:
-                                self.log(f"⚠️ {consistency_msg}")
-                                if not is_consistent:
-                                    with open(shots_file, 'w', encoding='utf-8') as f:
-                                        json.dump(shots, f, ensure_ascii=False, indent=2)
-                                    self.log(f"   ✅ 修正后的分镜数据已重新保存")
-
-            # 主题一致性检查完成后，卸载Ollama释放GPU（后续步骤不再需要Ollama）
             self._unload_ollama_models()
 
             # 云端生图启用时，额外释放Whisper GPU（后续图像生成不需要本地GPU）

@@ -502,7 +502,7 @@ class HardwareAcceleratedRenderer:
 
             render_start_time = time.time()
             duration_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.\d+)')
-            last_log_time = 0.0
+            last_log_time = time.time()
             last_progress = 0.0
             last_update_time = render_start_time
 
@@ -525,6 +525,16 @@ class HardwareAcceleratedRenderer:
                     return_code = proc.poll()
                     if return_code is not None:
                         progress_data[i]['done'] = True
+                        try:
+                            for line in proc.stderr:
+                                match = duration_pattern.search(line)
+                                if match:
+                                    hours = int(match.group(1))
+                                    minutes = int(match.group(2))
+                                    seconds = float(match.group(3))
+                                    progress_data[i]['current_time'] = hours * 3600 + minutes * 60 + seconds
+                        except Exception:
+                            pass
                         if return_code != 0:
                             if log_callback:
                                 log_callback(f"❌ 分段{i}编码失败 (退出码:{return_code})")

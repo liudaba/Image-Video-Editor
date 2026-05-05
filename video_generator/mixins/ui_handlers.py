@@ -396,21 +396,7 @@ class UIHandlersMixin:
         """提示词类型切换时联动控制风格设置"""
         self.prompt_type_var.set(prompt_type)
         
-        is_sd = prompt_type == "SD提示词"
-        
-        if hasattr(self, 'style_grid') and self.style_grid:
-            for child in self.style_grid.winfo_children():
-                if isinstance(child, ttk.Checkbutton):
-                    state = 'normal' if is_sd else 'disabled'
-                    child.configure(state=state)
-        
-        if hasattr(self, 'style_control_frame') and self.style_control_frame:
-            for child in self.style_control_frame.winfo_children():
-                if isinstance(child, ttk.Button):
-                    state = 'normal' if is_sd else 'disabled'
-                    child.configure(state=state)
-        
-        if not is_sd and hasattr(self, 'style_dropdown_frame') and self.style_dropdown_visible:
+        if prompt_type != "SD提示词" and hasattr(self, 'style_dropdown_frame') and self.style_dropdown_visible:
             self.style_dropdown_frame.pack_forget()
             self.style_dropdown_visible = False
     
@@ -1464,7 +1450,7 @@ class UIHandlersMixin:
                     self.cloud_llm_api_key_var.set(config['cloud_llm_api_key'])
                 if 'cloud_llm_model' in config and hasattr(self, 'cloud_llm_model_var'):
                     self.cloud_llm_model_var.set(config['cloud_llm_model'])
-                    self._cloud_selected_model_id = config['cloud_llm_model']
+                    self._cloud_selected_model_id = config.get('cloud_llm_model_id', config['cloud_llm_model'])
                 if 'cloud_llm_custom_url' in config and hasattr(self, 'cloud_llm_custom_url_var'):
                     self.cloud_llm_custom_url_var.set(config['cloud_llm_custom_url'])
                 if 'cloud_asr_enabled' in config and hasattr(self, 'cloud_asr_enabled_var'):
@@ -1480,6 +1466,7 @@ class UIHandlersMixin:
                     self.cloud_image_api_key_var.set(config['cloud_image_api_key'])
                 if 'cloud_image_model' in config and hasattr(self, 'cloud_image_model_var'):
                     self.cloud_image_model_var.set(config['cloud_image_model'])
+                    self._cloud_selected_image_model_id = config.get('cloud_image_model_id', config['cloud_image_model'])
                 if 'cloud_image_custom_url' in config and hasattr(self, 'cloud_image_custom_url_var'):
                     self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
                 
@@ -1533,9 +1520,10 @@ class UIHandlersMixin:
                 'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16,
                 'prompt_thread_count': self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS,
                 'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
-                'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'deepseek',
+                'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'DeepSeek 深度求索',
                 'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',
                 'cloud_llm_model': self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else 'deepseek-chat',
+                'cloud_llm_model_id': getattr(self, '_cloud_selected_model_id', '') or 'deepseek-chat',
                 'cloud_llm_custom_url': self.cloud_llm_custom_url_var.get() if hasattr(self, 'cloud_llm_custom_url_var') else '',
                 'cloud_asr_enabled': self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False,
                 'cloud_asr_api_key': self.cloud_asr_api_key_var.get() if hasattr(self, 'cloud_asr_api_key_var') else '',
@@ -1543,6 +1531,7 @@ class UIHandlersMixin:
                 'cloud_image_provider': self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else 'siliconflow',
                 'cloud_image_api_key': self.cloud_image_api_key_var.get() if hasattr(self, 'cloud_image_api_key_var') else '',
                 'cloud_image_model': self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else '',
+                'cloud_image_model_id': getattr(self, '_cloud_selected_image_model_id', '') or '',
                 'cloud_image_custom_url': self.cloud_image_custom_url_var.get() if hasattr(self, 'cloud_image_custom_url_var') else '',
             }
             

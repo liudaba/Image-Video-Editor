@@ -190,8 +190,14 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
     request_body = {
         "model": model,
         "messages": messages,
-        "max_tokens": num_predict,
     }
+
+    effective_num_predict = num_predict
+    if llm_config:
+        config_num_predict = llm_config.config.get("num_predict")
+        if config_num_predict and config_num_predict > num_predict:
+            effective_num_predict = config_num_predict
+    request_body["max_tokens"] = effective_num_predict
 
     if llm_config:
         sampling = llm_config.get_options()
