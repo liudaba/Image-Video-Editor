@@ -84,6 +84,7 @@ class VideoMixin:
                 else:
                     self.log("❌ 没有分镜数据，请先生成分镜")
                     self.update_task_progress("就绪")
+                    self.task_running = False
                     return
             else:
                 self.log(f"   ✅ 使用内存中的分镜数据: {len(self.shots_data)} 个")
@@ -94,12 +95,14 @@ class VideoMixin:
             if not self.audio_path:
                 self.log("❌ 没有音频文件，请先导入音频")
                 self.update_task_progress("就绪")
+                self.task_running = False
                 return
             
             if not os.path.exists(self.audio_path):
                 self.log(f"❌ 音频文件不存在: {self.audio_path}")
                 self.log("   请重新导入音频文件")
                 self.update_task_progress("就绪")
+                self.task_running = False
                 return
             self.log(f"   ✅ 音频文件存在: {os.path.basename(self.audio_path)}")
             
@@ -137,6 +140,7 @@ class VideoMixin:
                         if len(missing_files) > 5:
                             self.log(f"      ... 还有 {len(missing_files) - 5} 张")
                         self.update_task_progress("就绪")
+                        self.task_running = False
                         return
                     else:
                         self.log("   ✅ 所有图片已补全")
@@ -271,6 +275,7 @@ class VideoMixin:
                         if not resized_images:
                             self.log("❌ 没有可用的图片文件")
                             self.update_task_progress("就绪")
+                            self.task_running = False
                             return
                         
                         self.update_task_progress("正在渲染视频...", 60)
@@ -432,6 +437,7 @@ class VideoMixin:
             if not clips:
                 self.log("❌ 没有有效的图片文件")
                 self.update_task_progress("就绪")
+                self.task_running = False
                 return
             
             self.log(f"   ✅ 视频片段创建完成: {len(clips)} 个片段")

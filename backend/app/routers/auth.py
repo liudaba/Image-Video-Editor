@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models import User, License
@@ -24,11 +25,15 @@ async def register(body: UserRegister, db: AsyncSession = Depends(get_db)):
         hashed_password=hash_password(body.password),
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或邮箱已存在")
 
     trial = create_trial_license(user.id)
     db.add(trial)
-    await db.commit()
+    await db.flush()
     await db.refresh(user)
     await db.refresh(trial)
 
@@ -54,7 +59,7 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
 
     if license_obj and is_license_expired(license_obj):
         license_obj.is_valid = False
-        await db.commit()
+        await db.flush()
         await db.refresh(license_obj)
 
     token = create_access_token(data={"user_id": user.id, "username": user.username})

@@ -31,7 +31,7 @@ async def _log_audit(db: AsyncSession, admin: User, action: str, detail: str = N
         ip_address=request.client.host if request and request.client else None,
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
 
 
 class VersionCreate(BaseModel):
@@ -129,7 +129,7 @@ async def admin_generate_license_keys(
         db.add(license_key)
         keys.append(key_str)
 
-    await db.commit()
+    await db.flush()
     await _log_audit(db, user, "generate_license_keys", f"count={len(keys)}, plan={body.plan_type}", request)
     return {"keys": keys, "count": len(keys)}
 
@@ -147,7 +147,7 @@ async def toggle_user_active(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     target.is_active = not target.is_active
-    await db.commit()
+    await db.flush()
     await _log_audit(db, user, "toggle_user_active", f"user_id={user_id}, is_active={target.is_active}", request)
     return {"success": True, "is_active": target.is_active}
 
@@ -168,6 +168,6 @@ async def create_version(
         force_update=body.force_update,
     )
     db.add(new_version)
-    await db.commit()
+    await db.flush()
     await _log_audit(db, user, "create_version", f"version={body.version}", request)
     return {"success": True, "version": body.version}

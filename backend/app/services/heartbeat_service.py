@@ -20,14 +20,16 @@ async def check_and_bind_machine(
         return True
 
     result = await db.execute(
-        select(MachineBinding).where(MachineBinding.user_id == user_id)
+        select(MachineBinding)
+        .where(MachineBinding.user_id == user_id)
+        .with_for_update()
     )
     bindings = result.scalars().all()
 
     for b in bindings:
         if b.fingerprint == fingerprint:
             b.last_seen = datetime.now(timezone.utc)
-            await db.commit()
+            await db.flush()
             return True
 
     if len(bindings) >= MAX_MACHINE_BINDINGS:
@@ -38,7 +40,7 @@ async def check_and_bind_machine(
         fingerprint=fingerprint,
     )
     db.add(new_binding)
-    await db.commit()
+    await db.flush()
     return True
 
 
@@ -58,7 +60,7 @@ async def record_heartbeat(
         license_type=license_type,
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
 
 
 async def validate_heartbeat(
@@ -67,7 +69,7 @@ async def validate_heartbeat(
     fingerprint: Optional[str],
 ) -> Optional[LicenseData]:
     result = await db.execute(
-        select(License).where(License.user_id == user_id)
+        select(License).where(License.user_id == user_id).with_for_update()
     )
     license_obj = result.scalar_one_or_none()
 
@@ -76,7 +78,7 @@ async def validate_heartbeat(
 
     if is_license_expired(license_obj):
         license_obj.is_valid = False
-        await db.commit()
+        await db.flush()
         return None
 
     if fingerprint:
@@ -86,7 +88,7 @@ async def validate_heartbeat(
 
     license_obj.last_heartbeat = datetime.now(timezone.utc)
     license_obj.heartbeat_fingerprint = fingerprint
-    await db.commit()
+    await db.flush()
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

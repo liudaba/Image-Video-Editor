@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
+import sqlalchemy
 
 from app.config import settings, check_production_safety
 from app.database import init_db, engine
@@ -56,6 +57,17 @@ app = FastAPI(
     redoc_url=None,
 )
 
+
+@app.exception_handler(sqlalchemy.exc.IntegrityError)
+async def integrity_error_handler(request: Request, exc: sqlalchemy.exc.IntegrityError):
+    return JSONResponse(status_code=409, content={"detail": "数据冲突，请检查输入"})
+
+
+@app.exception_handler(sqlalchemy.exc.DBAPIError)
+async def db_error_handler(request: Request, exc: sqlalchemy.exc.DBAPIError):
+    return JSONResponse(status_code=503, content={"detail": "数据库暂时不可用，请稍后重试"})
+
+
 app.add_middleware(RateLimitMiddleware, rate_limit=settings.RATE_LIMIT_PER_MINUTE)
 
 app.add_middleware(
@@ -90,9 +102,8 @@ app.include_router(admin.router)
 async def health_check():
     db_ok = False
     try:
-        from app.database import engine
         async with engine.connect() as conn:
-            await conn.execute(type(conn).text_type("SELECT 1") if hasattr(conn, 'text_type') else __import__('sqlalchemy').text("SELECT 1"))
+            await conn.execute(sqlalchemy.text("SELECT 1"))
         db_ok = True
     except Exception:
         pass

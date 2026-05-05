@@ -66,6 +66,7 @@ class VersionInfo(BaseModel):
     release_date: Optional[str] = None
     changelog: Optional[List[str]] = None
     file_size: Optional[int] = None
+    file_hash: Optional[str] = None
     download_url: Optional[str] = None
     priority: Optional[str] = "normal"
     force_update: Optional[bool] = False

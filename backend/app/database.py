@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.exc import SQLAlchemyError
 from app.config import settings
 
 is_sqlite = settings.DATABASE_URL.startswith("sqlite")
@@ -28,8 +29,13 @@ async def get_db() -> AsyncSession:
     async with async_session() as session:
         try:
             yield session
-        finally:
-            await session.close()
+            await session.commit()
+        except SQLAlchemyError:
+            await session.rollback()
+            raise
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def init_db():

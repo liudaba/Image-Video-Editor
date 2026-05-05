@@ -171,9 +171,9 @@ class ResourceMixin:
             import psutil
             cpu_count = os.cpu_count() or 4
             available_memory = psutil.virtual_memory().available / (1024 ** 3)
-            self.max_workers = min(cpu_count, int(available_memory / 2), 8)
+            self.max_workers = max(1, min(cpu_count, int(available_memory / 2), 8))
         except ImportError:
-            self.max_workers = min(os.cpu_count() or 4, 4)
+            self.max_workers = max(1, min(os.cpu_count() or 4, 4))
         
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
         self.thread_pool = {

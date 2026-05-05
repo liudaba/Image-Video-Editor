@@ -24,7 +24,7 @@ async def _log_audit(db: AsyncSession, user: User, action: str, detail: str = No
         ip_address=request.client.host if request and request.client else None,
     )
     db.add(log)
-    await db.commit()
+    await db.flush()
 
 
 @router.get("/license_status", response_model=LicenseStatusResponse)
@@ -40,7 +40,7 @@ async def get_license_status(
 
     if is_license_expired(license_obj):
         license_obj.is_valid = False
-        await db.commit()
+        await db.flush()
         await db.refresh(license_obj)
 
     license_data = build_license_response(license_obj, user.username)
@@ -110,7 +110,7 @@ async def unbind_machine(
             MachineBinding.fingerprint == body.fingerprint,
         )
     )
-    await db.commit()
+    await db.flush()
 
     if result.rowcount == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该设备绑定记录")

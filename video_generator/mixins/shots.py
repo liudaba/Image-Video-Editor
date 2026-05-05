@@ -2032,6 +2032,8 @@ Requirements:
             if applied_count > 0:
                 return applied_count, f"逐行解析成功: {applied_count}个"
         
+        return 0, "无法解析"
+        
 
     def _translate_theme_elements_to_english(self, theme_elements):
         """将主题元素翻译成英文（双层策略 + 自动学习）
@@ -2651,12 +2653,6 @@ Requirements:
                             'generated': False,
                             'count': 0,
                             'data': []
-                        }
-                    if 'audio' in self.state_manager:
-                        self.state_manager['audio'] = {
-                            'loaded': False,
-                            'path': None,
-                            'duration': 0
                         }
                     if 'images' in self.state_manager:
                         self.state_manager['images'] = {

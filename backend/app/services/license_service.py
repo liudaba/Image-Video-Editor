@@ -128,7 +128,9 @@ PLAN_PRICING = {
 
 async def extend_license(db, user_id: int, days: int) -> License:
     from sqlalchemy import select
-    result = await db.execute(select(License).where(License.user_id == user_id))
+    result = await db.execute(
+        select(License).where(License.user_id == user_id).with_for_update()
+    )
     license_obj = result.scalar_one_or_none()
 
     if not license_obj:
@@ -138,14 +140,15 @@ async def extend_license(db, user_id: int, days: int) -> License:
     license_obj.license_type = LicenseType.PRO
     license_obj.is_valid = True
 
-    if license_obj.expiry_date and license_obj.expiry_date > now:
-        license_obj.expiry_date = license_obj.expiry_date + timedelta(days=days)
+    expiry_date = _ensure_aware(license_obj.expiry_date)
+    if expiry_date and expiry_date > now:
+        license_obj.expiry_date = expiry_date + timedelta(days=days)
     else:
         license_obj.expiry_date = now + timedelta(days=days)
 
     if not license_obj.license_key:
         license_obj.license_key = generate_license_key()
 
-    await db.commit()
+    await db.flush()
     await db.refresh(license_obj)
     return license_obj

@@ -67,7 +67,7 @@ def safe_print_exc():
 class LoggingMixin:
     def _ensure_log_queue(self):
         if not hasattr(self, '_log_queue'):
-            self._log_queue = queue.Queue()
+            self._log_queue = queue.Queue(maxsize=10000)
             self._log_flush_scheduled = False
             self._user_scrolling = False
             self._log_line_count = 0
@@ -133,7 +133,14 @@ class LoggingMixin:
             pass
 
         self._ensure_log_queue()
-        self._log_queue.put(log_message)
+        try:
+            self._log_queue.put_nowait(log_message)
+        except queue.Full:
+            try:
+                self._log_queue.get_nowait()
+                self._log_queue.put_nowait(log_message)
+            except Exception:
+                pass
 
         if hasattr(self, 'root') and self.root and not self._log_flush_scheduled:
             self._log_flush_scheduled = True

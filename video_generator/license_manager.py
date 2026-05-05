@@ -7,6 +7,8 @@
 3. 付费订阅验证
 4. 离线授权支持
 5. HMAC签名防篡改（签名由服务端生成，客户端只验证）
+6. 心跳验证（30分钟间隔，3次连续失败吊销）
+7. 时钟回拨检测
 """
 
 import hashlib
@@ -30,6 +32,7 @@ _HEARTBEAT_JITTER = 300
 _HEARTBEAT_MAX_CONSECUTIVE_FAILURES = 3
 
 _HMAC_VERIFY_SECRET = None
+_last_known_time = time.time()
 
 
 def _get_verify_secret():
@@ -63,18 +66,29 @@ def _verify_signature(data: dict) -> bool:
     return hmac.compare_digest(expected, computed)
 
 
+def _check_clock_rollback():
+    global _last_known_time
+    now = time.time()
+    if now < _last_known_time - 300:
+        return True
+    _last_known_time = now
+    return False
+
+
 class LicenseManager:
     _instance = None
+    _init_lock = threading.Lock()
     API_BASE = "https://api.videogen.com"
 
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.license_data = None
-            cls._instance._heartbeat_thread = None
-            cls._instance._heartbeat_stop = threading.Event()
-            cls._instance._consecutive_failures = 0
-            cls._instance.load_license()
+        with cls._init_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance.license_data = None
+                cls._instance._heartbeat_thread = None
+                cls._instance._heartbeat_stop = threading.Event()
+                cls._instance._consecutive_failures = 0
+                cls._instance.load_license()
         return cls._instance
 
     @staticmethod
@@ -85,7 +99,33 @@ class LicenseManager:
             user = getpass.getuser()
             machine = platform.node()
             raw = f"VideoGen::{user}@{machine}".encode("utf-8")
-            return hashlib.sha256(raw).hexdigest()
+            base_hash = hashlib.sha256(raw).hexdigest()
+
+            extra_parts = []
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                    guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+                    extra_parts.append(guid)
+            except Exception:
+                pass
+
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["wmic", "diskdrive", "get", "serialnumber"],
+                    capture_output=True, text=True, timeout=5
+                )
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip() and "SerialNumber" not in l]
+                if lines:
+                    extra_parts.append(lines[0])
+            except Exception:
+                pass
+
+            if extra_parts:
+                combined = f"{base_hash}::{'::'.join(extra_parts)}".encode("utf-8")
+                return hashlib.sha256(combined).hexdigest()
+            return base_hash
         except Exception:
             return "unknown"
 
@@ -136,18 +176,18 @@ class LicenseManager:
                 else:
                     remote_license = data.get("license")
                     if remote_license:
-                        remote_license["token"] = token
-                        self.save_license(remote_license)
+                        if _verify_signature(remote_license):
+                            remote_license["token"] = token
+                            self.save_license(remote_license)
+                        else:
+                            self._consecutive_failures += 1
             elif response.status_code == 401:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
                     self.license_data["is_valid"] = False
                     self.save_license(self.license_data)
         except Exception:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
-                self.license_data["is_valid"] = False
-                self.save_license(self.license_data)
+            pass
 
     @staticmethod
     def _get_app_version():
@@ -215,19 +255,11 @@ class LicenseManager:
             if response.status_code == 200:
                 data = response.json()
                 signed_license = data.get("license", {})
-                if signed_license:
+                if signed_license and _verify_signature(signed_license):
+                    signed_license["token"] = data["access_token"]
                     self.save_license(signed_license)
                 else:
-                    license_data = {
-                        "username": username,
-                        "token": data["access_token"],
-                        "trial_start": datetime.now().isoformat(),
-                        "trial_end": (datetime.now() + timedelta(days=_TRIAL_DAYS)).isoformat(),
-                        "license_type": "trial",
-                        "is_valid": True,
-                        "days_left": _TRIAL_DAYS,
-                    }
-                    self.save_license(license_data)
+                    return False, "服务器返回的授权数据无效,请联系客服"
                 self.start_heartbeat()
                 return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
             else:
@@ -245,6 +277,9 @@ class LicenseManager:
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
         if not has_signature:
             return {"valid": False, "message": "授权数据缺少签名,请重新登录"}
+
+        if _check_clock_rollback():
+            return {"valid": False, "message": "检测到系统时钟异常,请校正后重试"}
 
         is_valid = self.license_data.get("is_valid", False)
         if not is_valid:
@@ -317,17 +352,11 @@ class LicenseManager:
             if response.status_code == 200:
                 data = response.json()
                 signed_license = data.get("license", {})
-                if signed_license:
+                if signed_license and _verify_signature(signed_license):
                     signed_license["token"] = token
                     self.save_license(signed_license)
                 else:
-                    self.license_data.update({
-                        "license_type": "pro",
-                        "expiry_date": data["expiry_date"],
-                        "license_key": license_key,
-                        "is_valid": True,
-                    })
-                    self.save_license(self.license_data)
+                    return False, "激活响应数据无效,请联系客服"
                 return True, "专业版激活成功!"
             else:
                 error_msg = response.json().get("detail", "激活失败")
@@ -365,7 +394,7 @@ class LicenseManager:
             if response.status_code == 200:
                 data = response.json()
                 signed_license = data.get("license", {})
-                if signed_license:
+                if signed_license and _verify_signature(signed_license):
                     signed_license["token"] = token
                     self.save_license(signed_license)
                     return True

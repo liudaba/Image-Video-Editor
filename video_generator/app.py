@@ -17,7 +17,7 @@ from ctypes import wintypes
 if __name__ == "__main__":
     print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.append(os.path.dirname(__file__))
 
 # ============ Mixin imports ============
 from video_generator.mixins.ui_init import UIInitMixin

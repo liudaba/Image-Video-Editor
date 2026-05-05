@@ -90,23 +90,20 @@ class AudioMixin:
                 messagebox.showerror("错误", "音频文件不存在")
                 return
             
-            # 检查文件大小（限制为500MB）
             file_size = os.path.getsize(file_path) / (1024 * 1024)
             if file_size > 500:
                 self.log(f"❌ 音频文件过大: {file_size:.2f}MB")
                 messagebox.showerror("错误", f"音频文件过大，请选择小于500MB的文件")
                 return
             
-            # 保存音频路径
-            self.audio_path = file_path
-            self.state_manager['audio']['loaded'] = True
-            self.state_manager['audio']['path'] = file_path
-            
-            # 清除旧的分镜数据和缓存，防止新音频混入旧音频的转录内容
             if self.state_manager.get('audio', {}).get('loaded', False):
                 if not messagebox.askyesno("确认", "导入新音频将清除当前所有分镜数据和图片，是否继续？"):
                     self.log("ℹ️ 已取消导入新音频")
                     return
+            
+            self.audio_path = file_path
+            self.state_manager['audio']['loaded'] = True
+            self.state_manager['audio']['path'] = file_path
             self.log("🗑️ 清除旧分镜数据，防止混入旧音频内容...")
             
             # 释放Whisper GPU资源（如果上次任务异常退出未释放）

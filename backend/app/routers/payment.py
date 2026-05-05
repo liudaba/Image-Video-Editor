@@ -3,6 +3,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import logging
 
 from app.database import get_db
 from app.models import User, License, Order, OrderStatus, PlanType
@@ -10,6 +11,8 @@ from app.schemas import PaymentCreateOrder, OrderResponse
 from app.auth import get_current_user
 from app.services.payment_service import generate_order_no, create_alipay_order, create_wechat_order
 from app.services.license_service import PLAN_PRICING
+
+logger = logging.getLogger("videogen")
 
 router = APIRouter(prefix="/api/payment", tags=["支付"])
 
@@ -35,7 +38,7 @@ async def create_order(
         status=OrderStatus.PENDING,
     )
     db.add(order)
-    await db.commit()
+    await db.flush()
 
     if body.payment_method == "alipay":
         result = await create_alipay_order(order_no, body.plan_type, user.id)
@@ -65,13 +68,16 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
     total_amount = data.get("total_amount")
 
     if trade_status == "TRADE_SUCCESS":
-        result = await db.execute(select(Order).where(Order.order_no == out_trade_no))
+        result = await db.execute(
+            select(Order).where(Order.order_no == out_trade_no).with_for_update()
+        )
         order = result.scalar_one_or_none()
 
         if not order or order.status != OrderStatus.PENDING:
             return "success"
 
         if total_amount and Decimal(total_amount) != order.amount:
+            logger.warning(f"Alipay amount mismatch: order={order.order_no}, expected={order.amount}, got={total_amount}")
             return "fail"
 
         order.status = OrderStatus.PAID
@@ -83,8 +89,6 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         if pricing:
             from app.services.license_service import extend_license
             await extend_license(db, order.user_id, pricing["days"])
-
-        await db.commit()
 
     return "success"
 
@@ -112,7 +116,9 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
         total_fee = root.findtext(".//total_fee")
 
         if result_code == "SUCCESS" and out_trade_no:
-            result = await db.execute(select(Order).where(Order.order_no == out_trade_no))
+            result = await db.execute(
+                select(Order).where(Order.order_no == out_trade_no).with_for_update()
+            )
             order = result.scalar_one_or_none()
 
             if not order or order.status != OrderStatus.PENDING:
@@ -121,6 +127,7 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
             if total_fee:
                 expected_cents = int(order.amount * 100)
                 if int(total_fee) != expected_cents:
+                    logger.warning(f"WeChat amount mismatch: order={order.order_no}, expected={expected_cents}, got={total_fee}")
                     return {"return_code": "FAIL", "return_msg": "金额不匹配"}
 
             order.status = OrderStatus.PAID
@@ -132,9 +139,7 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
             if pricing:
                 from app.services.license_service import extend_license
                 await extend_license(db, order.user_id, pricing["days"])
-
-            await db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"WeChat notify processing error: {e}")
 
     return {"return_code": "SUCCESS", "return_msg": "OK"}

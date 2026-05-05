@@ -362,7 +362,7 @@ class ImagesMixin:
                             pass
                         break
 
-                ck = hashlib.md5(f"{prompt}_{neg or ''}_{width}_{height}".encode()).hexdigest()
+                ck = hashlib.md5(f"{prompt}_{neg or ''}_{width}_{height}_{cloud_model}".encode()).hexdigest()
                 cached = image_cache.get(ck)
                 if cached:
                     try:
@@ -724,7 +724,7 @@ class ImagesMixin:
                                 pass
                             break
 
-                    ck = hashlib.md5(f"{prompt}_{neg}_{width}_{height}".encode()).hexdigest()
+                    ck = hashlib.md5(f"{prompt}_{neg}_{width}_{height}_{current_sd_model}".encode()).hexdigest()
                     cached = image_cache.get(ck)
                     if cached:
                         try:

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, Numeric, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
@@ -47,7 +47,7 @@ class License(Base):
     __table_args__ = (UniqueConstraint("user_id", name="uq_license_user_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     license_type = Column(Enum(LicenseType), default=LicenseType.TRIAL, nullable=False)
     license_key = Column(String(100), unique=True, nullable=True, index=True)
     is_valid = Column(Boolean, default=True, nullable=False)
@@ -75,6 +75,7 @@ class LicenseKey(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (Index("ix_orders_status", "status"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -91,6 +92,9 @@ class Order(Base):
 
 class MachineBinding(Base):
     __tablename__ = "machine_bindings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "fingerprint", name="uq_machine_binding_user_fingerprint"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -108,6 +112,7 @@ class AppVersion(Base):
     release_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     changelog = Column(Text, nullable=True)
     download_url = Column(String(500), nullable=False)
+    file_hash = Column(String(64), nullable=True)
     file_size = Column(Integer, nullable=False)
     priority = Column(String(20), default="normal", nullable=False)
     force_update = Column(Boolean, default=False, nullable=False)
@@ -129,6 +134,10 @@ class HeartbeatLog(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_action", "action"),
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     operator_id = Column(Integer, nullable=True)
