@@ -180,6 +180,7 @@ def try_start_ollama_service():
 
     ollama_path = None
     for path in [
+        r"D:\Ollama\ollama.exe",
         r"C:\Ollama\ollama.exe",
         r"C:\Program Files\Ollama\ollama.exe",
         os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
@@ -347,7 +348,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
     for model in candidate_models:
         try:
-            if log_callback:
+            if log_callback and len(candidate_models) > 1:
                 log_callback(f"   尝试模型: {model}")
 
             model_options = dict(options)
@@ -385,7 +386,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                     log_callback(f"   ⚠️ 模型 {model} 返回空结果")
                 continue
 
-            if log_callback:
+            if log_callback and len(candidate_models) > 1:
                 log_callback(f"   ✅ 使用模型: {model}")
 
             return content, model
