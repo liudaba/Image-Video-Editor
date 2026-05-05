@@ -2,6 +2,7 @@
 """全局配置、预编译正则、HTTP Session - 唯一配置源"""
 
 import re
+import sys
 import requests
 import threading
 
@@ -9,6 +10,7 @@ import threading
 class Config:
     OLLAMA_BASE_URL = "http://localhost:11434"
     SD_API_BASE_URL = "http://127.0.0.1:8080"
+    API_BASE_URL = "https://api.videogen.com"
     API_TIMEOUT_SHORT = 3
     API_TIMEOUT_MEDIUM = 5
     API_TIMEOUT_LONG = 180
@@ -99,3 +101,24 @@ def sanitize_url(url):
     if not url:
         return url
     return _RE_URL_SENSITIVE.sub(r'\1***', url)
+
+
+def get_api_base_url():
+    """从config.json读取API基础地址，失败则使用默认值"""
+    try:
+        import os
+        import json
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config_path = os.path.join(base_dir, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            url = data.get("api_base_url", "").strip()
+            if url:
+                return url.rstrip("/")
+    except Exception:
+        pass
+    return Config.API_BASE_URL

@@ -1,4 +1,5 @@
 {
+  "api_base_url": "https://api.videogen.com",
   "model": "absoluteRealisticVision_v51",
   "width": 1024,
   "height": 576,
@@ -8,7 +9,9 @@
   "llm_config_preset": "质量优先",
   "whisper_model": "medium",
   "transition": "硬切",
-  "selected_styles": ["电影感"],
+  "selected_styles": [
+    "电影感"
+  ],
   "custom_theme": "",
   "custom_visual_tone": "",
   "prompt_type": "SD提示词",

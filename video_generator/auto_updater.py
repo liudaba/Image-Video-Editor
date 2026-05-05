@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 
-from .config import get_http_session
+from .config import get_http_session, get_api_base_url
 
 _ALLOWED_DOWNLOAD_HOSTS = {
     "api.videogen.com",
@@ -27,7 +27,10 @@ _ALLOWED_DOWNLOAD_HOSTS = {
 
 class UpdateManager:
     _instance = None
-    UPDATE_API_URL = "https://api.videogen.com/api/version/latest"
+
+    @property
+    def UPDATE_API_URL(self):
+        return f"{get_api_base_url()}/api/version/latest"
 
     def __new__(cls):
         if cls._instance is None:

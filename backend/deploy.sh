@@ -42,8 +42,11 @@ docker compose up -d --build api
 sleep 3
 
 echo ""
-echo "4️⃣ 初始化数据库（创建表+管理员+版本记录）..."
-docker compose exec api python init_db.py
+echo "4️⃣ 运行数据库迁移（Alembic）..."
+docker compose exec api alembic upgrade head 2>/dev/null || {
+    echo "   ⚠️  Alembic 迁移失败，尝试直接初始化..."
+    docker compose exec api python init_db.py
+}
 
 echo ""
 echo "5️⃣ 配置 Nginx..."
@@ -56,17 +59,23 @@ else
 fi
 
 echo ""
-echo "6️⃣ 检查 SSL 证书..."
+echo "6️⃣ 配置 SSL 证书..."
 SSL_DIR="/etc/nginx/ssl"
 if [ ! -f "$SSL_DIR/videogen.com.pem" ]; then
-    echo "   ⚠️  未找到 SSL 证书，请手动安装:"
-    echo "   mkdir -p $SSL_DIR"
-    echo "   cp 你的证书.pem $SSL_DIR/videogen.com.pem"
-    echo "   cp 你的密钥.key $SSL_DIR/videogen.com.key"
-    echo ""
-    echo "   或使用 Let's Encrypt 免费证书:"
-    echo "   apt install certbot python3-certbot-nginx"
-    echo "   certbot --nginx -d api.videogen.com"
+    if command -v certbot &> /dev/null; then
+        echo "   🔐 使用 Let's Encrypt 申请证书..."
+        certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com
+        echo "   ✅ SSL 证书已安装"
+        echo "   📋 设置自动续期..."
+        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
+        echo "   ✅ 自动续期已配置（每天凌晨3点检查）"
+    else
+        echo "   📦 安装 Certbot..."
+        apt install -y certbot python3-certbot-nginx
+        certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com
+        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
+        echo "   ✅ SSL 证书已安装并配置自动续期"
+    fi
 else
     echo "   ✅ SSL 证书已就绪"
 fi
@@ -90,16 +99,18 @@ echo "=========================================="
 echo ""
 echo "  API 地址: https://api.videogen.com"
 echo "  健康检查: https://api.videogen.com/health"
-echo "  API 文档: https://api.videogen.com/docs"
 echo ""
 echo "  管理员登录: admin / (你在.env中设置的密码)"
 echo ""
 echo "  下一步:"
 echo "  1. 将 keys/.license_verify_key 的内容复制到客户端的 .license_verify_key"
-echo "  2. 打包客户端并分发"
-echo "  3. 在管理后台创建版本记录"
+echo "  2. 运行 python obfuscate_build.py 混淆核心模块"
+echo "  3. 运行 python 01build_exe.py 打包客户端"
+echo "  4. 在管理后台创建版本记录"
 echo ""
 echo "  常用命令:"
 echo "  - 查看日志: docker compose logs -f api"
 echo "  - 重启服务: docker compose restart api"
 echo "  - 停止服务: docker compose down"
+echo "  - 数据库迁移: docker compose exec api alembic upgrade head"
+echo "  - 查看迁移历史: docker compose exec api alembic history"

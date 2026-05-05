@@ -22,7 +22,7 @@ import time
 from datetime import datetime, timedelta
 from tkinter import ttk, messagebox
 
-from .config import get_http_session
+from .config import get_http_session, get_api_base_url
 
 _HMAC_KEY = "_sig"
 _TRIAL_DAYS = 7
@@ -30,6 +30,7 @@ _GRACE_HOURS = 2
 _HEARTBEAT_INTERVAL = 1800
 _HEARTBEAT_JITTER = 300
 _HEARTBEAT_MAX_CONSECUTIVE_FAILURES = 3
+_OFFLINE_TOLERANCE_HOURS = 48
 
 _HMAC_VERIFY_SECRET = None
 _last_known_time = time.time()
@@ -78,7 +79,10 @@ def _check_clock_rollback():
 class LicenseManager:
     _instance = None
     _init_lock = threading.Lock()
-    API_BASE = "https://api.videogen.com"
+
+    @property
+    def API_BASE(self):
+        return get_api_base_url()
 
     def __new__(cls):
         with cls._init_lock:
@@ -172,20 +176,29 @@ class LicenseManager:
                 self._consecutive_failures = 0
                 if not data.get("is_valid", False):
                     self.license_data["is_valid"] = False
+                    self.license_data["last_heartbeat"] = datetime.now().isoformat()
                     self.save_license(self.license_data)
                 else:
                     remote_license = data.get("license")
                     if remote_license:
                         if _verify_signature(remote_license):
                             remote_license["token"] = token
+                            remote_license["last_heartbeat"] = datetime.now().isoformat()
                             self.save_license(remote_license)
                         else:
                             self._consecutive_failures += 1
+                    else:
+                        self.license_data["last_heartbeat"] = datetime.now().isoformat()
+                        self.save_license(self.license_data)
             elif response.status_code == 401:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
                     self.license_data["is_valid"] = False
                     self.save_license(self.license_data)
+        except requests.exceptions.ConnectionError:
+            pass
+        except requests.exceptions.Timeout:
+            pass
         except Exception:
             pass
 
@@ -280,6 +293,16 @@ class LicenseManager:
 
         if _check_clock_rollback():
             return {"valid": False, "message": "检测到系统时钟异常,请校正后重试"}
+
+        last_heartbeat_str = self.license_data.get("last_heartbeat")
+        if last_heartbeat_str:
+            try:
+                last_hb = datetime.fromisoformat(last_heartbeat_str)
+                offline_hours = (datetime.now() - last_hb).total_seconds() / 3600
+                if offline_hours > _OFFLINE_TOLERANCE_HOURS:
+                    return {"valid": False, "message": f"已离线超过{_OFFLINE_TOLERANCE_HOURS}小时,请连接网络验证授权"}
+            except (ValueError, TypeError):
+                pass
 
         is_valid = self.license_data.get("is_valid", False)
         if not is_valid:
