@@ -15,6 +15,8 @@ import json
 import os
 import sys
 import tkinter as tk
+import threading
+import time
 from datetime import datetime, timedelta
 from tkinter import ttk, messagebox
 
@@ -23,6 +25,9 @@ from .config import get_http_session
 _HMAC_KEY = "_sig"
 _TRIAL_DAYS = 7
 _GRACE_HOURS = 2
+_HEARTBEAT_INTERVAL = 1800
+_HEARTBEAT_JITTER = 300
+_HEARTBEAT_MAX_CONSECUTIVE_FAILURES = 3
 
 _HMAC_VERIFY_SECRET = None
 
@@ -66,8 +71,91 @@ class LicenseManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.license_data = None
+            cls._instance._heartbeat_thread = None
+            cls._instance._heartbeat_stop = threading.Event()
+            cls._instance._consecutive_failures = 0
             cls._instance.load_license()
         return cls._instance
+
+    @staticmethod
+    def get_machine_fingerprint():
+        try:
+            import getpass
+            import platform
+            user = getpass.getuser()
+            machine = platform.node()
+            raw = f"VideoGen::{user}@{machine}".encode("utf-8")
+            return hashlib.sha256(raw).hexdigest()
+        except Exception:
+            return "unknown"
+
+    def start_heartbeat(self):
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_stop.clear()
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+
+    def stop_heartbeat(self):
+        self._heartbeat_stop.set()
+
+    def _heartbeat_loop(self):
+        import random
+        while not self._heartbeat_stop.is_set():
+            interval = _HEARTBEAT_INTERVAL + random.randint(-_HEARTBEAT_JITTER, _HEARTBEAT_JITTER)
+            if self._heartbeat_stop.wait(timeout=interval):
+                break
+            try:
+                self._do_heartbeat()
+            except Exception:
+                pass
+
+    def _do_heartbeat(self):
+        if not self.license_data:
+            return
+        token = self.license_data.get("token", "")
+        if not token:
+            return
+        try:
+            fingerprint = self.get_machine_fingerprint()
+            response = get_http_session().post(
+                f"{self.API_BASE}/api/user/heartbeat",
+                json={
+                    "fingerprint": fingerprint,
+                    "app_version": self._get_app_version(),
+                },
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self._consecutive_failures = 0
+                if not data.get("is_valid", False):
+                    self.license_data["is_valid"] = False
+                    self.save_license(self.license_data)
+                else:
+                    remote_license = data.get("license")
+                    if remote_license:
+                        remote_license["token"] = token
+                        self.save_license(remote_license)
+            elif response.status_code == 401:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+                    self.license_data["is_valid"] = False
+                    self.save_license(self.license_data)
+        except Exception:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+                self.license_data["is_valid"] = False
+                self.save_license(self.license_data)
+
+    @staticmethod
+    def _get_app_version():
+        try:
+            from .version import __version__
+            return __version__
+        except Exception:
+            return "unknown"
 
     def load_license(self):
         try:
@@ -140,6 +228,7 @@ class LicenseManager:
                         "days_left": _TRIAL_DAYS,
                     }
                     self.save_license(license_data)
+                self.start_heartbeat()
                 return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
             else:
                 error_msg = response.json().get("detail", "登录失败")
@@ -154,6 +243,8 @@ class LicenseManager:
         has_signature = _HMAC_KEY in self.license_data
         if has_signature and not _verify_signature(self.license_data):
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
+        if not has_signature:
+            return {"valid": False, "message": "授权数据缺少签名,请重新登录"}
 
         is_valid = self.license_data.get("is_valid", False)
         if not is_valid:
@@ -411,7 +502,10 @@ def check_and_show_login():
         dialog.wait_window()
         if dialog.result:
             license_status = license_mgr.check_license()
+            if license_status["valid"]:
+                license_mgr.start_heartbeat()
             return license_status
         else:
             return {"valid": False, "message": "用户取消登录"}
+    license_mgr.start_heartbeat()
     return license_status

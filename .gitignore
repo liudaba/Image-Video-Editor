@@ -55,6 +55,7 @@ output_project/
 
 # JSON配置文件 (除了config.json模板)
 *.json
+!config.json
 
 # 临时文件
 *.tmp

@@ -169,7 +169,7 @@ def build_executable():
     
     print("\n🚫 排除内容清单:")
     print("  ❌ .git/ .idea/ .venv/  - 开发环境文件")
-    print("  ❌ backend/             - Flask后端服务器(桌面版不需要)")
+    print("  ❌ backend/             - FastAPI后端服务器(桌面版不需要)")
     print("  ❌ models/              - AI模型文件(2-5GB,用户自动下载)")
     print("  ❌ model_aware_patch/   - 模型补丁")
     print("  ❌ output_project/      - 用户输出文件")
