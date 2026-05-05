@@ -9,6 +9,9 @@ import re
 import subprocess
 import threading
 import time
+
+import requests
+
 from .config import Config, get_http_session
 
 
@@ -304,8 +307,13 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 llm_config=llm_config,
             )
             return result, model
-        except Exception:
-            pass
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ 云端模型调用失败: {e}")
+            if not is_ollama_available():
+                if log_callback:
+                    log_callback("⚠️ 本地 Ollama 也不可用（云端模式下已释放），请检查云端配置")
+                return None, None
 
     if not is_ollama_available():
         if not check_ollama_available():

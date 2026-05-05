@@ -3096,60 +3096,61 @@ Requirements:
                             current_model_index = 0
                             max_retries = len(candidate_models)
                             
-                            while current_model_index < max_retries and not analysis_result:
-                                current_model = candidate_models[current_model_index]
-                                
-                                self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
-                                
-                                try:
-                                    with ThreadPoolExecutor() as executor:
-                                        future = executor.submit(call_ollama_with_model, current_model)
-                                        self.log(f"   等待模型响应中...")
+                            try:
+                                with ThreadPoolExecutor(max_workers=1) as analysis_executor:
+                                    while current_model_index < max_retries and not analysis_result:
+                                        current_model = candidate_models[current_model_index]
                                         
-                                        start_time = time.time()
-                                        analysis_result = future.result(timeout=180)
-                                        elapsed_time = time.time() - start_time
+                                        self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
                                         
-                                        if analysis_result:
-                                            self.log(f"✅ 模型 {current_model} 响应成功！")
-                                            self.log(f"   响应时间: {elapsed_time:.1f}秒")
-                                            self.log(f"   响应长度: {len(analysis_result)} 字符")
-                                            self.log(f"   响应内容预览: {analysis_result[:100]}...")
+                                        try:
+                                            future = analysis_executor.submit(call_ollama_with_model, current_model)
+                                            self.log(f"   等待模型响应中...")
                                             
-                                            # 如果成功使用的不是用户指定的模型，显示提醒
-                                            if current_model != user_model:
-                                                self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
-                                                self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
-                                            break
-                                        else:
-                                            self.log(f"⚠️ 模型 {current_model} 返回空结果")
-                                            self.log(f"   🔍 请检查上方的调试日志以了解详情")
+                                            start_time = time.time()
+                                            analysis_result = future.result(timeout=180)
+                                            elapsed_time = time.time() - start_time
+                                            
+                                            if analysis_result:
+                                                self.log(f"✅ 模型 {current_model} 响应成功！")
+                                                self.log(f"   响应时间: {elapsed_time:.1f}秒")
+                                                self.log(f"   响应长度: {len(analysis_result)} 字符")
+                                                self.log(f"   响应内容预览: {analysis_result[:100]}...")
+                                                
+                                                if current_model != user_model:
+                                                    self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
+                                                    self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
+                                                break
+                                            else:
+                                                self.log(f"⚠️ 模型 {current_model} 返回空结果")
+                                                self.log(f"   🔍 请检查上方的调试日志以了解详情")
+                                                current_model_index += 1
+                                                
+                                        except TimeoutError:
+                                            self.log(f"⚠️ 模型 {current_model} 响应超时（超过180秒）")
+                                            self.log(f"   可能原因: 模型计算量大或GPU资源不足")
                                             current_model_index += 1
                                             
-                                except TimeoutError:
-                                    self.log(f"⚠️ 模型 {current_model} 响应超时（超过180秒）")
-                                    self.log(f"   可能原因: 模型计算量大或GPU资源不足")
-                                    current_model_index += 1
-                                    
-                                    if current_model_index < max_retries:
-                                        next_model = candidate_models[current_model_index]
-                                        self.log(f"   自动切换到下一个模型: {next_model}")
-                                        time.sleep(1)  # 超时后等待稍长时间再重试
-                                except Exception as e:
-                                    error_msg = str(e).lower()
-                                    self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
-                                    
-                                    # 如果是连接错误，直接退出
-                                    if "connection" in error_msg or "refused" in error_msg:
-                                        self.log(f"   ❌ Ollama服务连接失败，停止尝试")
-                                        break
-                                    
-                                    current_model_index += 1
-                                    
-                                    if current_model_index < max_retries:
-                                        next_model = candidate_models[current_model_index]
-                                        self.log(f"   自动切换到下一个模型: {next_model}")
-                                        time.sleep(0.5)  # 短暂延迟后重试
+                                            if current_model_index < max_retries:
+                                                next_model = candidate_models[current_model_index]
+                                                self.log(f"   自动切换到下一个模型: {next_model}")
+                                                time.sleep(1)
+                                        except Exception as e:
+                                            error_msg = str(e).lower()
+                                            self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
+                                            
+                                            if "connection" in error_msg or "refused" in error_msg:
+                                                self.log(f"   ❌ Ollama服务连接失败，停止尝试")
+                                                break
+                                            
+                                            current_model_index += 1
+                                            
+                                            if current_model_index < max_retries:
+                                                next_model = candidate_models[current_model_index]
+                                                self.log(f"   自动切换到下一个模型: {next_model}")
+                                                time.sleep(0.5)
+                            except Exception as e:
+                                self._log_exception("⚠️ 分析步骤异常", e)
                             
                             # 如果所有模型都失败
                             if not analysis_result:
@@ -3286,8 +3287,13 @@ Requirements:
                     _need_restart = True
                 
                 if _need_restart:
-                    from video_generator.ollama_client import restart_ollama_service
-                    restart_ollama_service(log_callback=self.log)
+                    from video_generator.ollama_client import is_ollama_available, check_ollama_available
+                    if not is_ollama_available() and not check_ollama_available():
+                        from video_generator.ollama_client import restart_ollama_service
+                        self.log("⚠️ Ollama 服务不可用，尝试重启...")
+                        restart_ollama_service(log_callback=self.log)
+                    else:
+                        self.log("✅ Ollama 服务可用，无需重启")
                 
                 self.log("🔥 预热模型中...")
                 try:
@@ -3378,9 +3384,9 @@ Requirements:
             completed_count = 0
             with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
                 future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
-                for future in as_completed(future_to_idx):
+                for future in as_completed(future_to_idx, timeout=Config.API_TIMEOUT_LLM_PROMPT):
                     try:
-                        idx, prompt, error = future.result()
+                        idx, prompt, error = future.result(timeout=30)
                         if error:
                             failed_count += 1
                             error_display = error[:200] if len(error) > 200 else error
@@ -3704,10 +3710,13 @@ Requirements:
             
             gc.collect()
             
-            # 兜底卸载Ollama模型释放GPU显存
             self._unload_ollama_models()
             
-            set_ollama_available_global(False)
+            from video_generator.ollama_client import check_ollama_available
+            if not check_ollama_available():
+                set_ollama_available_global(False)
+            else:
+                set_ollama_available_global(True)
             
             # 更新进度为完成
             self.update_task_progress("分镜生成完成", 100)

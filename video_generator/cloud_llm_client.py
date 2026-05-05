@@ -233,7 +233,7 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
                 url,
                 headers=headers,
                 json=request_body,
-                timeout=120,
+                timeout=(10, 120),
             )
 
             if response.status_code == 401:

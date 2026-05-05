@@ -1254,7 +1254,10 @@ class UIHandlersMixin:
         
         provider_display = PROVIDER_CONFIG.get(provider_id, {}).get("name", provider_id)
         if enabled:
-            if is_ollama_available():
+            if getattr(self, 'task_running', False):
+                self.log("⚠️ 有任务正在运行，云端模式配置已保存，将在下次任务时生效")
+                self.log("⚠️ 不会在任务运行期间释放本地Ollama资源")
+            elif is_ollama_available():
                 try:
                     self._unload_ollama_models(log_prefix="☁️ ")
                     set_ollama_available(False)
