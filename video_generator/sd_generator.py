@@ -15,23 +15,6 @@ class BatchSDGenerator:
     def __init__(self, api_url=None, max_workers=4):
         self.api_url = api_url or Config.SD_API_BASE_URL
         self.max_workers = max_workers
-        self.session = None
-        self._init_session()
-    
-    def _init_session(self):
-        """初始化连接池会话"""
-        import requests
-        from requests.adapters import HTTPAdapter
-        
-        self.session = requests.Session()
-        adapter = HTTPAdapter(
-            pool_connections=self.max_workers * 2,
-            pool_maxsize=self.max_workers * 4,
-            max_retries=3,
-            pool_block=False
-        )
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
     
     def generate_batch(self, prompts_data, width=768, height=512, 
                       steps=28, cfg_scale=7.5, progress_callback=None, log_callback=None):
@@ -83,7 +66,7 @@ class BatchSDGenerator:
                 max_retries = 2
                 for retry in range(max_retries):
                     try:
-                        response = self.session.post(
+                        response = get_http_session().post(
                             f"{self.api_url}/sdapi/v1/txt2img",
                             json={
                                 "prompt": prompt,
@@ -169,7 +152,5 @@ class BatchSDGenerator:
         return results
     
     def close(self):
-        """关闭会话"""
-        if self.session:
-            self.session.close()
+        pass
 

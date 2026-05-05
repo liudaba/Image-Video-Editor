@@ -18,7 +18,7 @@ import tkinter as tk
 from datetime import datetime, timedelta
 from tkinter import ttk, messagebox
 
-import requests
+from .config import get_http_session
 
 _HMAC_KEY = "signature"
 _TRIAL_DAYS = 7
@@ -105,7 +105,7 @@ class LicenseManager:
 
     def register_user(self, username, email, password):
         try:
-            response = requests.post(
+            response = get_http_session().post(
                 f"{self.API_BASE}/api/auth/register",
                 json={"username": username, "email": email, "password": password},
                 timeout=10,
@@ -115,14 +115,12 @@ class LicenseManager:
             else:
                 error_msg = response.json().get("detail", "注册失败")
                 return False, error_msg
-        except requests.exceptions.ConnectionError:
-            return False, "无法连接到服务器,请检查网络连接"
         except Exception:
-            return False, "注册失败，请稍后重试"
+            return False, "无法连接到服务器,请检查网络连接"
 
     def login_user(self, username, password):
         try:
-            response = requests.post(
+            response = get_http_session().post(
                 f"{self.API_BASE}/api/auth/login",
                 json={"username": username, "password": password},
                 timeout=10,
@@ -147,10 +145,8 @@ class LicenseManager:
             else:
                 error_msg = response.json().get("detail", "登录失败")
                 return False, error_msg
-        except requests.exceptions.ConnectionError:
-            return False, "无法连接到服务器,请检查网络连接"
         except Exception:
-            return False, "登录失败，请稍后重试"
+            return False, "无法连接到服务器,请检查网络连接"
 
     def check_license(self):
         if not self.license_data:
@@ -221,7 +217,7 @@ class LicenseManager:
     def activate_pro_license(self, license_key):
         try:
             token = self.license_data.get("token", "") if self.license_data else ""
-            response = requests.post(
+            response = get_http_session().post(
                 f"{self.API_BASE}/api/license/activate",
                 json={"license_key": license_key},
                 headers={"Authorization": f"Bearer {token}"},
@@ -251,7 +247,7 @@ class LicenseManager:
     def purchase_subscription(self, plan_type, payment_method):
         try:
             token = self.license_data.get("token", "") if self.license_data else ""
-            response = requests.post(
+            response = get_http_session().post(
                 f"{self.API_BASE}/api/payment/create_order",
                 json={"plan_type": plan_type, "payment_method": payment_method},
                 headers={"Authorization": f"Bearer {token}"},
@@ -270,7 +266,7 @@ class LicenseManager:
             token = self.license_data.get("token", "") if self.license_data else ""
             if not token:
                 return False
-            response = requests.get(
+            response = get_http_session().get(
                 f"{self.API_BASE}/api/user/license_status",
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10,

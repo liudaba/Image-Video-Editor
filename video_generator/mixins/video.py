@@ -526,28 +526,21 @@ class VideoMixin:
                     self.log(f"   🖥️ 使用缓存检测结果: CPU渲染 (libx264)")
             else:
                 try:
-                    result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=10)
-                    if 'h264_nvenc' in result.stdout:
+                    if self.video_renderer is None:
+                        from video_generator.hardware import HardwareAcceleratedRenderer
+                        self.video_renderer = HardwareAcceleratedRenderer()
+                    enc_info = self.video_renderer.get_encoder_info()
+                    enc_name = enc_info['encoder']
+                    if enc_name != 'libx264':
                         use_gpu = True
-                        gpu_encoder = 'h264_nvenc'
-                        gpu_preset = "p4"
-                        self.log(f"   ⚡ 检测到NVIDIA GPU加速 (h264_nvenc)")
-                    elif 'h264_qsv' in result.stdout:
-                        use_gpu = True
-                        gpu_encoder = 'h264_qsv'
-                        gpu_preset = "medium"
-                        self.log(f"   ⚡ 检测到Intel QuickSync加速 (h264_qsv)")
-                    elif 'h264_amf' in result.stdout:
-                        use_gpu = True
-                        gpu_encoder = 'h264_amf'
-                        gpu_preset = "quality"
-                        self.log(f"   ⚡ 检测到AMD AMF加速 (h264_amf)")
+                        gpu_encoder = enc_name
+                        gpu_preset = enc_info.get('preset', 'medium')
+                        hw_desc = {"h264_nvenc": "NVIDIA GPU", "h264_qsv": "Intel QuickSync", "h264_amf": "AMD AMF"}.get(enc_name, "GPU")
+                        self.log(f"   ⚡ 检测到{hw_desc}加速 ({enc_name})")
                     else:
                         self.log("      🖥️ 未检测到硬件编码器，将使用CPU渲染")
-                except FileNotFoundError:
-                    self.log(f"      ⚠️ 未找到ffmpeg，GPU加速检测跳过")
                 except Exception as e:
-                    self._log_exception(f"      ⚠️ ffmpeg检测失败: {type(e).__name__}", e)
+                    self._log_exception(f"      ⚠️ 编码器检测失败: {type(e).__name__}", e)
                 
                 self._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
             
@@ -765,6 +758,7 @@ class VideoMixin:
                 max_h = int(h * max_scale)
                 source_img = base_img.resize((max_w, max_h), Image.LANCZOS)
                 source_arr = np.array(source_img)
+                cached_source = Image.fromarray(source_arr)
                 source_img.close()
                 base_img.close()
 
@@ -779,15 +773,13 @@ class VideoMixin:
                         top = (max_h - crop_h) / 2.0
                         sx = crop_w / w
                         sy = crop_h / h
-                        src = Image.fromarray(source_arr)
-                        result = src.transform(
+                        result = cached_source.transform(
                             (w, h), Image.AFFINE,
                             (sx, 0, left, 0, sy, top),
                             Image.BICUBIC
                         )
                         arr = np.array(result)
                         result.close()
-                        src.close()
                         return arr
                     except Exception:
                         return base_frame
@@ -813,7 +805,7 @@ class VideoMixin:
         new_width = int(orig_width * scale)
         new_height = int(orig_height * scale)
         resized = img.resize((new_width, new_height), Image.LANCZOS)
-        if orig_width < target_width or orig_height < target_height:
+        if new_width > orig_width or new_height > orig_height:
             resized = resized.filter(ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=3))
         new_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
         paste_x = (target_width - new_width) // 2

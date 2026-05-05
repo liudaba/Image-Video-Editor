@@ -119,28 +119,26 @@ def get_available_models(force_refresh=False):
             if now - _ollama_models_cache_time < _OLLAMA_MODELS_CACHE_TTL:
                 return list(_ollama_models_cache)
 
-    try:
-        response = get_http_session().get(
-            f"{Config.OLLAMA_BASE_URL}/api/tags",
-            timeout=Config.API_TIMEOUT_MEDIUM
-        )
-        if response.status_code == 200:
-            models_info = response.json()
-            available_models = []
-            if "models" in models_info:
-                for m in models_info["models"]:
-                    model_name = m.get("name", m.get("model", ""))
-                    if model_name:
-                        available_models.append(model_name)
-            with _ollama_models_lock:
+        try:
+            response = get_http_session().get(
+                f"{Config.OLLAMA_BASE_URL}/api/tags",
+                timeout=Config.API_TIMEOUT_MEDIUM
+            )
+            if response.status_code == 200:
+                models_info = response.json()
+                available_models = []
+                if "models" in models_info:
+                    for m in models_info["models"]:
+                        model_name = m.get("name", m.get("model", ""))
+                        if model_name:
+                            available_models.append(model_name)
                 _ollama_models_cache = available_models
                 _ollama_models_cache_time = now
-            set_ollama_available(True)
-            return list(available_models)
-    except Exception:
-        pass
+                set_ollama_available(True)
+                return list(available_models)
+        except Exception:
+            pass
 
-    with _ollama_models_lock:
         return list(_ollama_models_cache) if _ollama_models_cache else []
 
 

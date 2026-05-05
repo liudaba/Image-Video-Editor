@@ -10,11 +10,12 @@
 import json
 import os
 import sys
-import requests
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
+
+from .config import get_http_session
 
 
 class UpdateManager:
@@ -40,7 +41,7 @@ class UpdateManager:
         """
         def check_thread():
             try:
-                response = requests.get(
+                response = get_http_session().get(
                     self.UPDATE_API_URL,
                     params={"current_version": self.CURRENT_VERSION},
                     timeout=10
@@ -79,15 +80,9 @@ class UpdateManager:
                     if callback:
                         callback(None, f"服务器错误: {response.status_code}")
             
-            except requests.exceptions.Timeout:
-                if callback:
-                    callback(None, "检查超时,请检查网络连接")
-            except requests.exceptions.ConnectionError:
-                if callback:
-                    callback(None, "无法连接到更新服务器")
             except Exception as e:
                 if callback:
-                    callback(None, f"检查失败: {str(e)}")
+                    callback(None, "检查超时或无法连接到更新服务器" if isinstance(e, (ConnectionError, TimeoutError, OSError)) else f"检查失败: {str(e)}")
         
         thread = threading.Thread(target=check_thread, daemon=True)
         thread.start()
@@ -104,7 +99,7 @@ class UpdateManager:
         """
         def download_thread():
             try:
-                response = requests.get(download_url, stream=True, timeout=30)
+                response = get_http_session().get(download_url, stream=True, timeout=30)
                 response.raise_for_status()
                 
                 total_size = int(response.headers.get('content-length', 0))

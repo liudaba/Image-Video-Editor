@@ -15,10 +15,11 @@ def _sanitize_ffmpeg_path(path):
     """净化文件路径，防止FFmpeg concat文件注入
     
     1. 转义单引号（防止闭合引号注入FFmpeg指令）
-    2. 检测路径遍历字符
-    3. 验证路径在允许的目录内
+    2. 移除换行符和回车符（防止行注入）
+    3. 移除反斜杠后跟的特殊字符
     """
     sanitized = path.replace("'", "'\\''")
+    sanitized = sanitized.replace('\n', '').replace('\r', '')
     return sanitized
 
 

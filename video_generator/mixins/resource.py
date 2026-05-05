@@ -84,12 +84,7 @@ class ResourceMixin:
     def cache_clear(self, category=None):
         """清除缓存"""
         if category:
-            with self._general_cache._lock:
-                prefix = f"{category}:"
-                keys_to_remove = [k for k in self._general_cache._cache if k.startswith(prefix)]
-                for k in keys_to_remove:
-                    self._general_cache._cache.pop(k, None)
-                    self._general_cache._expire_times.pop(k, None)
+            self._general_cache.remove_by_prefix(f"{category}:")
         else:
             self._general_cache.clear()
 

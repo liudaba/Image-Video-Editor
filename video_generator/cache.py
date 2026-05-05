@@ -107,6 +107,16 @@ class SmartCache:
             self._access_times.clear()
         gc.collect()
 
+    def remove_by_prefix(self, prefix):
+        """按前缀批量删除缓存项"""
+        with self._lock:
+            keys_to_remove = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys_to_remove:
+                self._cache.pop(k, None)
+                self._expire_times.pop(k, None)
+                self._access_times.pop(k, None)
+            return len(keys_to_remove)
+
 
 prompt_cache = SmartCache(max_size=Config.PROMPT_CACHE_SIZE, default_ttl=Config.PROMPT_CACHE_TTL)
 image_cache = SmartCache(max_size=Config.IMAGE_CACHE_SIZE, default_ttl=Config.IMAGE_CACHE_TTL)
