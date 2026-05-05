@@ -91,8 +91,8 @@ class MultiModelFusion:
                 self.available_models.append(model_name)
                 self.model_weights[model_name] = self._calculate_model_weight(model_name)
             return self.available_models
-        except Exception as e:
-            print(f"发现模型失败: {e}")
+        except Exception:
+            pass
         return []
 
     def _calculate_model_weight(self, model_name):

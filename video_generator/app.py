@@ -14,9 +14,10 @@ from ctypes import wintypes
 
 # ============ Sub-module imports ============
 
-print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
+if __name__ == "__main__":
+    print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.dirname(__file__))
 
 # ============ Mixin imports ============
 from video_generator.mixins.ui_init import UIInitMixin
@@ -79,19 +80,22 @@ if sys.platform == "win32":
 
     ctypes.windll.kernel32.SetConsoleTitleW("短视频生成器 - 日志控制台")
 
-print("=" * 60)
-print("🎬 短视频生成器 - 日志控制台")
-print("=" * 60)
-print(f"启动时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"运行模式: {'pythonw.exe (GUI模式)' if _is_pythonw else 'python.exe (控制台模式)'}")
-print("=" * 60)
-print()
-print("💡 提示: 此窗口显示程序运行日志")
-print("   • 可以最小化到任务栏")
-print("   • 关闭按钮已锁定，请通过主程序退出")
-print("   • 关闭主程序时此窗口会自动关闭")
-print("=" * 60)
-print()
+
+def _print_console_banner():
+    print("=" * 60)
+    print("🎬 短视频生成器 - 日志控制台")
+    print("=" * 60)
+    print(f"启动时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"运行模式: {'pythonw.exe (GUI模式)' if _is_pythonw else 'python.exe (控制台模式)'}")
+    print("=" * 60)
+    print()
+    print("💡 提示: 此窗口显示程序运行日志")
+    print("   • 可以最小化到任务栏")
+    print("   • 关闭按钮已锁定，请通过主程序退出")
+    print("   • 关闭主程序时此窗口会自动关闭")
+    print("=" * 60)
+    print()
+
 
 warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version", module="requests")
 
@@ -112,6 +116,7 @@ class VideoGenApp(
 
 
 def main():
+    _print_console_banner()
     root = tk.Tk()
     app = VideoGenApp(root)
     root.mainloop()

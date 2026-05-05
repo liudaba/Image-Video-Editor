@@ -52,7 +52,7 @@ class BatchSDGenerator:
             
             try:
                 # 检查图像缓存
-                cache_key = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                cache_key = hashlib.md5(f"{prompt}_{negative_prompt or ''}_{width}_{height}_{steps}_{cfg_scale}".encode()).hexdigest()
                 cached = image_cache.get(cache_key)
                 if cached:
                     log(f"📷 [{idx+1}/{total}] 缓存命中，跳过生成")
@@ -150,7 +150,4 @@ class BatchSDGenerator:
             log(f"   3. 降低图像分辨率或步数")
         
         return results
-    
-    def close(self):
-        pass
 

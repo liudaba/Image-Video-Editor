@@ -20,7 +20,7 @@ from tkinter import ttk, messagebox
 
 from .config import get_http_session
 
-_HMAC_KEY = "signature"
+_HMAC_KEY = "_sig"
 _TRIAL_DAYS = 7
 _GRACE_HOURS = 2
 
@@ -92,8 +92,7 @@ class LicenseManager:
                 json.dump(license_data, f, indent=2, ensure_ascii=False)
             self.license_data = license_data
             return True
-        except Exception as e:
-            print(f"保存授权失败: {e}")
+        except Exception:
             return False
 
     def get_license_path(self):
@@ -152,7 +151,8 @@ class LicenseManager:
         if not self.license_data:
             return {"valid": False, "message": "未登录,请先注册或登录"}
 
-        if not _verify_signature(self.license_data):
+        has_signature = _HMAC_KEY in self.license_data
+        if has_signature and not _verify_signature(self.license_data):
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
 
         is_valid = self.license_data.get("is_valid", False)

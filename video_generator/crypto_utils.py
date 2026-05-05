@@ -71,7 +71,7 @@ def encrypt_value(plaintext, base_dir):
         base_dir: 项目根目录，用于定位盐值文件
 
     Returns:
-        加密后的字符串（带 ENC: 前缀），加密失败返回原值
+        加密后的字符串（带 ENC: 前缀），加密失败返回空字符串
     """
     if not plaintext:
         return ""
@@ -80,9 +80,9 @@ def encrypt_value(plaintext, base_dir):
         encrypted = f.encrypt(plaintext.encode("utf-8"))
         return "ENC:" + encrypted.decode("ascii")
     except ImportError:
-        return plaintext
+        return ""
     except Exception:
-        return plaintext
+        return ""
 
 
 def decrypt_value(ciphertext, base_dir):

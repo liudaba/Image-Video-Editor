@@ -1,8 +1,9 @@
 """Resource management mixin - cache, thread pool, cleanup, file management."""
 import os
 import sys
-import time
 import gc
+import time
+import ctypes
 import datetime
 import threading
 import shutil

@@ -100,12 +100,6 @@ class AbsoluteRealisticPrompts:
     def __init__(self):
         self.continuity_manager = SceneContinuityManager()
 
-    def has_semantic_match(self, text, core_theme):
-        return False
-
-    def analyze_semantic_structure(self, text, core_theme, visual_tone):
-        return [], [], [], []
-
     def generate_arv_prompt(self, text, content_type, core_theme, visual_tone, shot_data=None):
         content_prompts = self.CONTENT_ARV_PROMPTS.get(content_type, self.CONTENT_ARV_PROMPTS["general"])
         continuity_tags = self.continuity_manager.get_continuity_tags()

@@ -22,6 +22,7 @@ class ParallelPromptGenerator:
         self._active_tasks = 0
         self._cancelled = False
         self._watcher_thread = None
+        self._watcher_stop = threading.Event()
 
     def _get_executor(self):
         with self._lock:
@@ -30,6 +31,7 @@ class ParallelPromptGenerator:
                     max_workers=self.max_workers,
                     thread_name_prefix="prompt_"
                 )
+                self._watcher_stop.clear()
                 self._start_watcher()
             self._last_use_time = time.time()
             self._active_tasks += 1
@@ -50,8 +52,7 @@ class ParallelPromptGenerator:
             self._watcher_thread.start()
 
     def _idle_watcher(self):
-        while True:
-            time.sleep(self._CHECK_INTERVAL)
+        while not self._watcher_stop.wait(self._CHECK_INTERVAL):
             with self._lock:
                 if (self._active_tasks <= 0
                         and self.executor is not None
@@ -67,7 +68,8 @@ class ParallelPromptGenerator:
 
     def cancel(self):
         """取消当前所有任务"""
-        self._cancelled = True
+        with self._lock:
+            self._cancelled = True
 
     def generate_batch(self, shots_data, generate_func, progress_callback=None):
         """批量并行生成提示词
@@ -130,6 +132,7 @@ class ParallelPromptGenerator:
 
     def shutdown(self):
         """关闭线程池"""
+        self._watcher_stop.set()
         with self._lock:
             if self.executor:
                 try:

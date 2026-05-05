@@ -14,49 +14,44 @@ from typing import Dict, List, Tuple, Optional
 # 包含常见的中文别名、繁体字、误识别纠正
 
 COUNTRY_MAPPING = {
-    # 亚洲
     '中国': 'China, Chinese', '中華': 'China, Chinese', '中國': 'China, Chinese',
-    '美国': 'United States, USA, American', '美國': 'United States, USA, American', '美': 'USA, American',
-    '日本': 'Japan, Japanese', '日': 'Japan, Japanese',
+    '美国': 'United States, USA, American', '美國': 'United States, USA, American',
+    '日本': 'Japan, Japanese',
     '韩国': 'South Korea, Korean', '韓國': 'South Korea, Korean', '南韩': 'South Korea, Korean', '南韓': 'South Korea, Korean',
     '朝鲜': 'North Korea, Korean', '北韩': 'North Korea, Korean', '北韓': 'North Korea, Korean', '朝鮮': 'North Korea, Korean',
-    '伊朗': 'Iran, Iranian', '伊': 'Iran, Iranian',
-    '以色列': 'Israel, Israeli', '以': 'Israel, Israeli',
-    '俄罗斯': 'Russia, Russian', '俄羅斯': 'Russia, Russian', '俄': 'Russia, Russian',
+    '伊朗': 'Iran, Iranian',
+    '以色列': 'Israel, Israeli',
+    '俄罗斯': 'Russia, Russian', '俄羅斯': 'Russia, Russian',
     '沙特': 'Saudi Arabia, Saudi', '沙特阿拉伯': 'Saudi Arabia, Saudi',
     '阿联酋': 'UAE, United Arab Emirates', '阿聯酋': 'UAE, United Arab Emirates',
-    '土耳其': 'Turkey, Turkish', '土': 'Turkey, Turkish',
-    '印度': 'India, Indian', '印': 'India, Indian',
-    '巴基斯坦': 'Pakistan, Pakistani', '巴': 'Pakistan, Pakistani',
-    '阿富汗': 'Afghanistan, Afghan', '阿富汗': 'Afghanistan, Afghan',
-    '伊拉克': 'Iraq, Iraqi', '伊': 'Iraq, Iraqi',  # 注意：伊朗和伊拉克都有"伊"，需要上下文区分
+    '土耳其': 'Turkey, Turkish',
+    '印度': 'India, Indian',
+    '巴基斯坦': 'Pakistan, Pakistani',
+    '阿富汗': 'Afghanistan, Afghan',
+    '伊拉克': 'Iraq, Iraqi',
     '叙利亚': 'Syria, Syrian', '敘利亞': 'Syria, Syrian',
     '黎巴嫩': 'Lebanon, Lebanese',
     '约旦': 'Jordan, Jordanian', '約旦': 'Jordan, Jordanian',
-    '埃及': 'Egypt, Egyptian', '埃': 'Egypt, Egyptian',
-    '越南': 'Vietnam, Vietnamese', '越': 'Vietnam, Vietnamese',
-    '泰国': 'Thailand, Thai', '泰': 'Thailand, Thai',
+    '埃及': 'Egypt, Egyptian',
+    '越南': 'Vietnam, Vietnamese',
+    '泰国': 'Thailand, Thai',
     '印尼': 'Indonesia, Indonesian', '印度尼西亚': 'Indonesia, Indonesian', '印度尼西亞': 'Indonesia, Indonesian',
     '马来西亚': 'Malaysia, Malaysian', '馬來西亞': 'Malaysia, Malaysian',
     '新加坡': 'Singapore, Singaporean',
-    '菲律宾': 'Philippines, Filipino', '菲': 'Philippines, Filipino',
+    '菲律宾': 'Philippines, Filipino',
     '缅甸': 'Myanmar, Burmese', '緬甸': 'Myanmar, Burmese',
     '孟加拉': 'Bangladesh, Bangladeshi',
-    
-    # 欧洲
-    '英国': 'UK, United Kingdom, British', '英國': 'UK, United Kingdom, British', '英': 'UK, British',
-    '法国': 'France, French', '法國': 'France, French', '法': 'France, French',
-    '德国': 'Germany, German', '德國': 'Germany, German', '德': 'Germany, German',
+    '英国': 'UK, United Kingdom, British', '英國': 'UK, United Kingdom, British',
+    '法国': 'France, French', '法國': 'France, French',
+    '德国': 'Germany, German', '德國': 'Germany, German',
     '意大利': 'Italy, Italian', '義大利': 'Italy, Italian',
-    '西班牙': 'Spain, Spanish', '西': 'Spain, Spanish',
+    '西班牙': 'Spain, Spanish',
     '荷兰': 'Netherlands, Dutch', '荷蘭': 'Netherlands, Dutch',
     '波兰': 'Poland, Polish', '波蘭': 'Poland, Polish',
     '乌克兰': 'Ukraine, Ukrainian', '烏克蘭': 'Ukraine, Ukrainian',
     '瑞典': 'Sweden, Swedish', '瑞士': 'Switzerland, Swiss',
-    
-    # 非洲 - 重点添加之前遗漏的国家
     '厄立特里亚': 'Eritrea, Eritrean', '厄利垂亞': 'Eritrea, Eritrean', '俄利特里亞': 'Eritrea, Eritrean',
-    '厄立特': 'Eritrea, Eritrean',  # 常见简写/误写
+    '厄立特': 'Eritrea, Eritrean',
     '埃塞俄比亚': 'Ethiopia, Ethiopian', '埃塞俄比亞': 'Ethiopia, Ethiopian', '衣索比亞': 'Ethiopia, Ethiopian',
     '索马里': 'Somalia, Somali', '索馬里': 'Somalia, Somali',
     '苏丹': 'Sudan, Sudanese', '蘇丹': 'Sudan, Sudanese',
@@ -68,16 +63,12 @@ COUNTRY_MAPPING = {
     '突尼斯': 'Tunisia, Tunisian',
     '利比亚': 'Libya, Libyan', '利比亞': 'Libya, Libyan',
     '刚果': 'Congo, Congolese', '剛果': 'Congo, Congolese',
-    
-    # 美洲
     '加拿大': 'Canada, Canadian',
     '墨西哥': 'Mexico, Mexican',
     '巴西': 'Brazil, Brazilian',
     '阿根廷': 'Argentina, Argentine',
     '委内瑞拉': 'Venezuela, Venezuelan', '委內瑞拉': 'Venezuela, Venezuelan',
-    
-    # 大洋洲
-    '澳大利亚': 'Australia, Australian', '澳': 'Australia, Australian', '澳洲': 'Australia, Australian',
+    '澳大利亚': 'Australia, Australian', '澳洲': 'Australia, Australian',
     '新西兰': 'New Zealand, NZ', '新西蘭': 'New Zealand, NZ',
 }
 
@@ -86,7 +77,7 @@ REGION_MAPPING = {
     '中东': 'Middle East', '中東': 'Middle East',
     '欧洲': 'Europe, European', '歐洲': 'Europe, European',
     '亚洲': 'Asia, Asian', '亞洲': 'Asia, Asian',
-    '非洲': 'Africa, African', '非': 'Africa, African',
+    '非洲': 'Africa, African',
     '美洲': 'Americas, American',
     '北美': 'North America',
     '南美': 'South America',

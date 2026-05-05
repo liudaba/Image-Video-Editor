@@ -357,10 +357,12 @@ class UIInitMixin:
         self.task_running = False
         self.task_paused = False
         self.task_lock = threading.Lock()
-        self.resource_lock = threading.RLock()  # 用于保护共享资源的可重入锁
+        self.resource_lock = threading.RLock()
         self.task_executor = None
         self.max_workers = min((os.cpu_count() or 4) // 2, 4)
         self.pause_event = threading.Event()
+        self._sd_api_connected = False
+        self._waiting_for_sd = False
         self.pause_event.set()
         
         # 任务优先级和状态

@@ -8,7 +8,8 @@ import datetime
 import traceback
 import threading
 from video_generator.mixins.logging import safe_print_exc
-from video_generator.config import validate_image_size
+from video_generator.config import validate_image_size, Config
+from video_generator.config import get_http_session
 import subprocess
 import tempfile
 import shutil
@@ -51,7 +52,6 @@ class VideoMixin:
         
         try:
             from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip, ColorClip, vfx
-            import numpy as np
             
             # 步骤1: 准备阶段
             self.update_task_progress("正在准备...", 10)
@@ -738,7 +738,6 @@ class VideoMixin:
               调用方必须在调用此函数后重新设置 with_start()
         """
         try:
-            import numpy as np
             from moviepy import VideoClip
             from PIL import Image
 
@@ -931,6 +930,25 @@ class VideoMixin:
             safe_print_exc()
     
 
+    def _check_sd_available(self):
+        """检查SD API是否可用（本地或云端）"""
+        try:
+            from video_generator.cloud_image_client import is_cloud_image_enabled
+            if is_cloud_image_enabled():
+                return True
+        except ImportError:
+            pass
+
+        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+        try:
+            resp = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=5)
+            if resp.status_code == 200:
+                self._sd_api_connected = True
+                return True
+        except Exception:
+            pass
+        return False
+
     def _start_render_thread(self, mode="full_generation"):
         """启动渲染线程
         
@@ -949,7 +967,6 @@ class VideoMixin:
                 self.log("=" * 60)
                 
                 if mode == "use_existing_shots_only":
-                    # 情况1: 分镜和图片都已就绪，直接加载分镜数据，跳过生成分镜和生成图片
                     self.log("✅ 分镜脚本和图片已就绪，直接加载分镜数据")
                     try:
                         with open(shots_file, 'r', encoding='utf-8') as f:
@@ -962,7 +979,6 @@ class VideoMixin:
                         safe_print_exc()
                         return
                 elif mode == "use_existing_shots" and os.path.exists(shots_file):
-                    # 使用现有分镜脚本
                     self.log("✅ 检测到已存在的分镜脚本文件")
                     self.log("ℹ️ 将直接使用文件夹内分镜脚本生成图片")
                     try:
@@ -976,11 +992,9 @@ class VideoMixin:
                         self.log("🔄 将重新生成分镜脚本")
                         self.generate_shots(auto_mode=True)
                 else:
-                    # 从头生成分镜
                     self.log("📝 未检测到分镜脚本，开始从头生成...")
                     self.log("🔄 正在清除上一次任务的缓存...")
                     
-                    # 清除旧的分镜数据
                     self.shots_data = []
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
@@ -989,7 +1003,6 @@ class VideoMixin:
                     
                     self._move_output_to_trash(reason="一键生成视频")
                     
-                    # 清除音频分析缓存，强制重新转录
                     self.cache_clear()
                     try:
                         prompt_cache.clear()
@@ -1000,7 +1013,6 @@ class VideoMixin:
                     except Exception:
                         pass
                     
-                    # 重置状态管理器
                     try:
                         if hasattr(self, 'state_manager') and isinstance(self.state_manager, dict):
                             self.state_manager['shots'] = {
@@ -1014,7 +1026,6 @@ class VideoMixin:
                     self.log("✅ 旧数据已清除，开始生成分镜...")
                     self.generate_shots(auto_mode=True)
                     
-                    # 分镜生成完成后，立即记录日志确认
                     self.log("🔍 检查分镜生成结果...")
                 
                 # 验证分镜是否生成成功
@@ -1022,7 +1033,6 @@ class VideoMixin:
                 
                 if not hasattr(self, 'shots_data') or not self.shots_data:
                     self.log("⚠️ 内存中无分镜数据，尝试从文件加载...")
-                    # 尝试从文件加载
                     if os.path.exists(shots_file):
                         try:
                             with open(shots_file, 'r', encoding='utf-8') as f:
@@ -1049,10 +1059,61 @@ class VideoMixin:
                     self.log("🖼️ 阶段2/3: 生成图像")
                     self.log("=" * 60)
                     
+                    sd_available = self._check_sd_available()
+                    
+                    if not sd_available:
+                        self.log("")
+                        self.log("⚠️ SD API 当前未连接，先跳过生图步骤")
+                        self.log("   💡 分镜数据已保存，等待 SD API 连接后自动恢复生图...")
+                        self.log("   💡 请确保 Stable Diffusion Web UI 已启动")
+                        self.log("   💡 系统将每15秒自动检测SD连接状态")
+                        self.log("")
+                        self.update_task_progress("⏳ 等待SD API连接...", 35)
+                        
+                        self._waiting_for_sd = True
+                        sd_connected = False
+                        
+                        while self.task_running and self._waiting_for_sd:
+                            time.sleep(15)
+                            if not self.task_running:
+                                self.log("❌ 任务已被取消")
+                                return
+                            
+                            sd_available_now = self._check_sd_available()
+                            if sd_available_now:
+                                self.log("")
+                                self.log("✅ SD API 已自动连接！继续执行生图任务...")
+                                self._waiting_for_sd = False
+                                sd_connected = True
+                                break
+                            else:
+                                self.log("⏳ SD API 仍未连接，继续等待...（可随时取消任务）")
+                        
+                        if not sd_connected:
+                            self.log("")
+                            self.log("❌ SD API 始终未连接，任务已停止")
+                            self.log("   💡 分镜数据已保存，待SD连接后可重新执行任务")
+                            self.log("   💡 也可单独点击「生成图片」按钮手动生图")
+                            self.update_task_progress("就绪 - 等待SD API连接")
+                            return
+                    
                     self.generate_images()
                     
                     if not self.task_running:
                         self.log("❌ 任务已被取消")
+                        return
+
+                    # 检查图片是否实际生成成功
+                    images_ok = False
+                    if os.path.exists(self.images_dir):
+                        img_files = [f for f in os.listdir(self.images_dir)
+                                    if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp'))]
+                        images_ok = len(img_files) > 0
+                    
+                    if not images_ok:
+                        self.log("⚠️ 图像生成未成功，无法合成视频")
+                        self.log("   💡 分镜数据已保存，可稍后重试")
+                        self.update_task_progress("就绪")
                         return
 
                     self.log("✅ 阶段2完成: 图像生成结束")
@@ -1073,6 +1134,7 @@ class VideoMixin:
                 self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
                 safe_print_exc()
             finally:
+                self._waiting_for_sd = False
                 with self.task_lock:
                     self.task_running = False
                 if hasattr(self, '_pregenerated_prompts'):

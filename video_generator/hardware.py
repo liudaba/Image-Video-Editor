@@ -18,7 +18,8 @@ def _sanitize_ffmpeg_path(path):
     2. 移除换行符和回车符（防止行注入）
     3. 移除反斜杠后跟的特殊字符
     """
-    sanitized = path.replace("'", "'\\''")
+    sanitized = path.replace("\\", "/")
+    sanitized = sanitized.replace("'", "'\\''")
     sanitized = sanitized.replace('\n', '').replace('\r', '')
     return sanitized
 
@@ -382,7 +383,7 @@ class HardwareAcceleratedRenderer:
             if self._cancel_requested:
                 return False
 
-            if self._render_process is None and os.path.exists(output_file):
+            if os.path.exists(output_file):
                 elapsed = time.time() - render_start_time
                 file_size = os.path.getsize(output_file)
                 size_mb = file_size / (1024 * 1024)
@@ -405,7 +406,7 @@ class HardwareAcceleratedRenderer:
                 return True
             else:
                 if log_callback:
-                    log_callback("❌ 视频渲染失败")
+                    log_callback("❌ 视频渲染失败: 输出文件不存在")
                 return False
 
         except Exception as e:

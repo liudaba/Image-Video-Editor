@@ -180,7 +180,11 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
         provider = PROVIDER_CONFIG.get(provider_id, {})
         model = provider.get("default_model", "")
 
-    base_url = get_effective_base_url()
+    custom = config.get("custom_base_url", "").strip()
+    if custom:
+        base_url = custom.rstrip("/")
+    else:
+        base_url = PROVIDER_CONFIG.get(provider_id, {}).get("base_url", "").rstrip("/")
     url = f"{base_url}/chat/completions"
 
     messages = []

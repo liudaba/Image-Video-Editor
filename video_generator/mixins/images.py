@@ -17,6 +17,30 @@ from video_generator.model_profiles import get_model_profile
 from video_generator.ollama_client import is_cloud_image_active
 
 class ImagesMixin:
+    def _run_image_saver(self, save_queue):
+        """独立IO线程: 解码base64并保存图片到磁盘"""
+        from PIL import Image
+        from io import BytesIO
+        while True:
+            try:
+                item = save_queue.get(timeout=30)
+            except queue.Empty:
+                if not self.task_running:
+                    break
+                continue
+            if item is None:
+                save_queue.task_done()
+                break
+            try:
+                _, save_path, b64_data = item
+                img_bytes = base64.b64decode(b64_data)
+                with Image.open(BytesIO(img_bytes)) as image:
+                    image.save(save_path)
+            except Exception as e:
+                self._log_exception(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'}", e)
+            finally:
+                save_queue.task_done()
+
     def _consume_image_results(self, result_queue, save_queue, total_tasks, saver_thread=None, producer_thread=None):
         """公共消费者逻辑：从 result_queue 取结果，更新进度，统计计数"""
         generated_count = 0
@@ -316,28 +340,7 @@ class ImagesMixin:
 
         save_queue = queue.Queue(maxsize=8)
 
-        def image_saver():
-            while True:
-                try:
-                    item = save_queue.get(timeout=30)
-                except queue.Empty:
-                    if not self.task_running:
-                        break
-                    continue
-                if item is None:
-                    save_queue.task_done()
-                    break
-                try:
-                    _, save_path, b64_data = item
-                    img_bytes = base64.b64decode(b64_data)
-                    with Image.open(BytesIO(img_bytes)) as image:
-                        image.save(save_path)
-                except Exception as e:
-                    self._log_exception(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'}", e)
-                finally:
-                    save_queue.task_done()
-
-        saver_thread = threading.Thread(target=image_saver, daemon=True)
+        saver_thread = threading.Thread(target=self._run_image_saver, args=(save_queue,), daemon=True)
         saver_thread.start()
 
         result_queue = queue.Queue(maxsize=16)
@@ -359,7 +362,7 @@ class ImagesMixin:
                             pass
                         break
 
-                ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                ck = hashlib.md5(f"{prompt}_{neg or ''}_{width}_{height}".encode()).hexdigest()
                 cached = image_cache.get(ck)
                 if cached:
                     try:
@@ -698,29 +701,7 @@ class ImagesMixin:
 
             save_queue = queue.Queue(maxsize=8)
 
-            def image_saver():
-                """独立IO线程: 解码base64并保存图片到磁盘"""
-                while True:
-                    try:
-                        item = save_queue.get(timeout=30)
-                    except queue.Empty:
-                        if not self.task_running:
-                            break
-                        continue
-                    if item is None:
-                        save_queue.task_done()
-                        break
-                    try:
-                        _, save_path, b64_data = item
-                        img_bytes = base64.b64decode(b64_data)
-                        with Image.open(BytesIO(img_bytes)) as image:
-                            image.save(save_path)
-                    except Exception as e:
-                        self._log_exception(f"   ⚠️ 图片保存失败: {os.path.basename(save_path) if save_path else '未知'}", e)
-                    finally:
-                        save_queue.task_done()
-
-            saver_thread = threading.Thread(target=image_saver, daemon=True)
+            saver_thread = threading.Thread(target=self._run_image_saver, args=(save_queue,), daemon=True)
             saver_thread.start()
 
             result_queue = queue.Queue(maxsize=16)
@@ -743,7 +724,7 @@ class ImagesMixin:
                                 pass
                             break
 
-                    ck = hashlib.md5(f"{prompt}_{width}_{height}".encode()).hexdigest()
+                    ck = hashlib.md5(f"{prompt}_{neg}_{width}_{height}".encode()).hexdigest()
                     cached = image_cache.get(ck)
                     if cached:
                         try:

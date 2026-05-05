@@ -50,5 +50,5 @@ def lazy_import():
             pass
         PERFORMANCE_MONITOR_AVAILABLE = psutil is not None and GPUtil is not None
         check_ollama_available()
-    except Exception as e:
-        print(f"延迟导入模块失败: {e}")
+    except Exception:
+        pass
