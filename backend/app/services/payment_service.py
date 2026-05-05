@@ -80,7 +80,7 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
             "qr_code": None,
         }
     except Exception as e:
-        return {"error": f"支付宝订单创建失败: {str(e)}"}
+        return {"error": "支付宝订单创建失败,请稍后重试"}
 
 
 async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:
@@ -97,7 +97,7 @@ async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Di
             "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
         }
     except Exception as e:
-        return {"error": f"微信订单创建失败: {str(e)}"}
+        return {"error": "微信订单创建失败,请稍后重试"}
 
 
 async def verify_alipay_notification(data: dict) -> bool:

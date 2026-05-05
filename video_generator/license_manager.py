@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import tkinter as tk
 import threading
@@ -173,6 +174,10 @@ class LicenseManager:
             )
             if response.status_code == 200:
                 data = response.json()
+                server_ts = data.get("timestamp")
+                if server_ts and abs(time.time() - server_ts) > 300:
+                    self._consecutive_failures += 1
+                    return
                 self._consecutive_failures = 0
                 if not data.get("is_valid", False):
                     self.license_data["is_valid"] = False
@@ -195,9 +200,7 @@ class LicenseManager:
                 if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
                     self.license_data["is_valid"] = False
                     self.save_license(self.license_data)
-        except requests.exceptions.ConnectionError:
-            pass
-        except requests.exceptions.Timeout:
+        except (ConnectionError, TimeoutError, OSError):
             pass
         except Exception:
             pass
@@ -494,6 +497,14 @@ class LoginDialog(tk.Toplevel):
         self.switch_btn = ttk.Button(main, text="还没有账号?立即注册", command=self._toggle_mode)
         self.switch_btn.pack(fill=tk.X, pady=(0, 5))
 
+        self._agree_var = tk.BooleanVar(value=False)
+        self._agree_check = ttk.Checkbutton(
+            main, text="我同意《隐私政策》和《服务条款》",
+            variable=self._agree_var,
+        )
+        self._agree_check.pack(pady=(5, 0))
+        self._agree_check.pack_forget()
+
         trial_lbl = ttk.Label(main, text="✨ 注册即享7天免费试用!", font=("Microsoft YaHei", 9), foreground="#FF5722")
         trial_lbl.pack(pady=(5, 0))
 
@@ -507,6 +518,7 @@ class LoginDialog(tk.Toplevel):
             self.action_btn.config(text="注册")
             self.switch_btn.config(text="已有账号?立即登录")
             self.title("用户注册")
+            self._agree_check.pack(pady=(5, 0))
         else:
             self.email_entry.pack_forget()
             self._email_label.pack_forget()
@@ -515,6 +527,7 @@ class LoginDialog(tk.Toplevel):
             self.action_btn.config(text="登录")
             self.switch_btn.config(text="还没有账号?立即注册")
             self.title("用户登录")
+            self._agree_check.pack_forget()
 
     def _handle_action(self):
         username = self.username_var.get().strip()
@@ -525,13 +538,25 @@ class LoginDialog(tk.Toplevel):
         if self.mode == "login":
             success, message = LicenseManager().login_user(username, password)
         else:
+            if not re.match(r'^[a-zA-Z0-9_]{3,20}$', username):
+                messagebox.showwarning("提示", "用户名需3-20位字母数字下划线", parent=self)
+                return
             email = self.email_var.get().strip()
-            confirm = self.confirm_var.get().strip()
             if not email:
                 messagebox.showwarning("提示", "请填写邮箱", parent=self)
                 return
+            if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+                messagebox.showwarning("提示", "请输入有效的邮箱地址", parent=self)
+                return
+            if len(password) < 8:
+                messagebox.showwarning("提示", "密码至少8位,建议包含字母和数字", parent=self)
+                return
+            confirm = self.confirm_var.get().strip()
             if password != confirm:
                 messagebox.showwarning("提示", "两次密码不一致", parent=self)
+                return
+            if not self._agree_var.get():
+                messagebox.showwarning("提示", "请先同意隐私政策和服务条款", parent=self)
                 return
             success, message = LicenseManager().register_user(username, email, password)
         if success:
@@ -539,7 +564,7 @@ class LoginDialog(tk.Toplevel):
             self.result = True
             self.destroy()
         else:
-            messagebox.showerror("错误", message)
+            messagebox.showerror("错误", message, parent=self)
 
     def _on_cancel(self):
         self.result = False

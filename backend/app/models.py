@@ -38,6 +38,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -88,6 +89,17 @@ class Order(Base):
     paid_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class PaymentNotifyLog(Base):
+    __tablename__ = "payment_notify_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    notify_id = Column(String(128), unique=True, nullable=False, index=True)
+    order_no = Column(String(64), nullable=False, index=True)
+    payment_method = Column(String(20), nullable=False)
+    raw_data = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class MachineBinding(Base):

@@ -68,9 +68,9 @@ async def heartbeat(
     )
 
     if license_data is None:
-        return {"is_valid": False, "reason": "授权无效或已过期"}
+        return {"is_valid": False, "reason": "授权无效或已过期", "timestamp": datetime.now(timezone.utc).timestamp()}
 
-    return {"is_valid": True, "license": license_data}
+    return {"is_valid": True, "license": license_data, "timestamp": datetime.now(timezone.utc).timestamp()}
 
 
 @router.post("/bind_machine")

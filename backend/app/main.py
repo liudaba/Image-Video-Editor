@@ -1,5 +1,9 @@
 import asyncio
+import json
+import logging
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -11,42 +15,90 @@ from app.config import settings, check_production_safety
 from app.database import init_db, engine
 from app.routers import auth, license, payment, user, version, admin
 
+logger = logging.getLogger("videogen")
+
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+        if hasattr(record, "request_id"):
+            log_data["request_id"] = record.request_id
+        if record.exc_info:
+            log_data["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_data, ensure_ascii=False)
+
+
+def setup_logging():
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    root_logger = logging.getLogger()
+    root_logger.handlers = [handler]
+    root_logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, rate_limit: int = 60):
         super().__init__(app)
         self.rate_limit = rate_limit
-        self._requests = {}
+        self._fallback_requests = {}
+
+    def _check_redis_rate(self, client_ip: str, path: str) -> bool:
+        try:
+            import redis
+            r = redis.from_url(settings.REDIS_URL, socket_timeout=1)
+            now = int(time.time())
+            window_key = f"ratelimit:{client_ip}:{path}:{now // 60}"
+            count = r.incr(window_key)
+            if count == 1:
+                r.expire(window_key, 120)
+            return count <= self.rate_limit
+        except Exception:
+            return self._check_memory_rate(client_ip, path)
+
+    def _check_memory_rate(self, client_ip: str, path: str) -> bool:
+        now = time.time()
+        key = f"{client_ip}:{path}"
+        if key not in self._fallback_requests:
+            self._fallback_requests[key] = []
+        self._fallback_requests[key] = [t for t in self._fallback_requests[key] if now - t < 60]
+        if len(self._fallback_requests[key]) >= self.rate_limit:
+            return False
+        self._fallback_requests[key].append(now)
+        if len(self._fallback_requests) > 10000:
+            oldest_keys = sorted(self._fallback_requests.keys(), key=lambda k: self._fallback_requests[k][-1] if self._fallback_requests[k] else 0)[:5000]
+            for k in oldest_keys:
+                del self._fallback_requests[k]
+        return True
 
     async def dispatch(self, request: Request, call_next):
         client_ip = request.client.host if request.client else "unknown"
-        now = time.time()
-        key = f"{client_ip}:{request.url.path}"
-
-        if key not in self._requests:
-            self._requests[key] = []
-
-        self._requests[key] = [t for t in self._requests[key] if now - t < 60]
-
-        if len(self._requests[key]) >= self.rate_limit:
-            return JSONResponse(status_code=429, content={"detail": "请求过于频繁，请稍后再试"})
-
-        self._requests[key].append(now)
-
-        if len(self._requests) > 10000:
-            oldest_keys = sorted(self._requests.keys(), key=lambda k: self._requests[k][-1] if self._requests[k] else 0)[:5000]
-            for k in oldest_keys:
-                del self._requests[k]
-
+        if not self._check_redis_rate(client_ip, request.url.path):
+            return JSONResponse(status_code=429, content={"detail": "请求过于频繁,请稍后再试"})
         return await call_next(request)
+
+
+MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
     check_production_safety()
     await init_db()
+    logger.info("Application started")
     yield
+    logger.info("Application shutting down, draining connections...")
+    await asyncio.sleep(2)
     await engine.dispose()
+    logger.info("Application stopped")
 
 
 app = FastAPI(
@@ -60,12 +112,12 @@ app = FastAPI(
 
 @app.exception_handler(sqlalchemy.exc.IntegrityError)
 async def integrity_error_handler(request: Request, exc: sqlalchemy.exc.IntegrityError):
-    return JSONResponse(status_code=409, content={"detail": "数据冲突，请检查输入"})
+    return JSONResponse(status_code=409, content={"detail": "数据冲突,请检查输入"})
 
 
 @app.exception_handler(sqlalchemy.exc.DBAPIError)
 async def db_error_handler(request: Request, exc: sqlalchemy.exc.DBAPIError):
-    return JSONResponse(status_code=503, content={"detail": "数据库暂时不可用，请稍后重试"})
+    return JSONResponse(status_code=503, content={"detail": "数据库暂时不可用,请稍后重试"})
 
 
 app.add_middleware(RateLimitMiddleware, rate_limit=settings.RATE_LIMIT_PER_MINUTE)
@@ -74,9 +126,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.middleware("http")
@@ -90,6 +151,15 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH"):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
+            return JSONResponse(status_code=413, content={"detail": "请求体过大"})
+    return await call_next(request)
+
+
 app.include_router(auth.router)
 app.include_router(license.router)
 app.include_router(payment.router)
@@ -100,15 +170,30 @@ app.include_router(admin.router)
 
 @app.get("/health")
 async def health_check():
-    db_ok = False
+    checks = {}
+
     try:
         async with engine.connect() as conn:
             await conn.execute(sqlalchemy.text("SELECT 1"))
-        db_ok = True
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {str(e)[:50]}"
+
+    try:
+        import redis as _redis
+        r = _redis.from_url(settings.REDIS_URL, socket_timeout=2)
+        r.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "unavailable"
+
+    try:
+        import shutil
+        disk = shutil.disk_usage("/")
+        checks["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
+        checks["disk_percent"] = round(disk.used / disk.total * 100, 1)
     except Exception:
         pass
 
-    return {
-        "status": "ok" if db_ok else "degraded",
-        "database": "ok" if db_ok else "error",
-    }
+    all_ok = checks.get("database") == "ok"
+    return {"status": "ok" if all_ok else "degraded", **checks}

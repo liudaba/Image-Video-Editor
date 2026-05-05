@@ -1,8 +1,9 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,7 +13,19 @@ from app.database import get_db
 from app.models import User
 from app.schemas import TokenData
 
+logger = logging.getLogger("videogen")
 security = HTTPBearer()
+
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_SECONDS = 900
+
+
+def _get_redis():
+    try:
+        import redis
+        return redis.from_url(settings.REDIS_URL, socket_timeout=2)
+    except Exception:
+        return None
 
 
 def hash_password(password: str) -> str:
@@ -42,6 +55,47 @@ def decode_access_token(token: str) -> TokenData:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="认证凭据已过期或无效")
 
 
+def check_login_rate_limit(identifier: str) -> bool:
+    r = _get_redis()
+    if r is None:
+        return True
+    try:
+        fail_key = f"login_fail:{identifier}"
+        lock_key = f"login_lockout:{identifier}"
+        if r.exists(lock_key):
+            return False
+        fails = int(r.get(fail_key) or 0)
+        return fails < MAX_LOGIN_ATTEMPTS
+    except Exception:
+        return True
+
+
+def record_login_failure(identifier: str):
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        fail_key = f"login_fail:{identifier}"
+        lock_key = f"login_lockout:{identifier}"
+        fails = r.incr(fail_key)
+        r.expire(fail_key, LOCKOUT_SECONDS)
+        if fails >= MAX_LOGIN_ATTEMPTS:
+            r.setex(lock_key, LOCKOUT_SECONDS, "1")
+    except Exception:
+        pass
+
+
+def clear_login_failures(identifier: str):
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        r.delete(f"login_fail:{identifier}")
+        r.delete(f"login_lockout:{identifier}")
+    except Exception:
+        pass
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
@@ -53,4 +107,17 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户已被禁用")
+    if user.password_changed_at:
+        token_issued = token_data.exp - timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        if token_issued < user.password_changed_at.timestamp():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="密码已修改,请重新登录")
+    return user
+
+
+async def require_admin(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return user

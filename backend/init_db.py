@@ -60,7 +60,7 @@ async def init():
             f.write(sign_key)
         print(f"   ✅ 签名密钥已生成: {verify_key_path}")
         print(f"   📋 请将此密钥复制到客户端项目的 .license_verify_key 文件中")
-        print(f"   密钥内容: {sign_key[:8]}...{sign_key[-8:]}")
+        print(f"   密钥长度: {len(sign_key)} 字符")
 
         if settings.HMAC_SIGN_KEY.startswith("change-this"):
             print("\n   ⚠️  请更新 .env 中的 HMAC_SIGN_KEY 为上述密钥内容！")

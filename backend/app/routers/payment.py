@@ -1,19 +1,19 @@
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import logging
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models import User, License, Order, OrderStatus, PlanType
+from app.models import User, License, Order, OrderStatus, PlanType, PaymentNotifyLog
 from app.schemas import PaymentCreateOrder, OrderResponse
 from app.auth import get_current_user
 from app.services.payment_service import generate_order_no, create_alipay_order, create_wechat_order
 from app.services.license_service import PLAN_PRICING
 
 logger = logging.getLogger("videogen")
-
 router = APIRouter(prefix="/api/payment", tags=["支付"])
 
 
@@ -48,7 +48,8 @@ async def create_order(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的支付方式")
 
     if "error" in result:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["error"])
+        logger.error(f"Payment order creation failed: {result['error']}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="创建订单失败,请稍后重试")
 
     return result
 
@@ -66,8 +67,20 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
     out_trade_no = data.get("out_trade_no")
     trade_no = data.get("trade_no")
     total_amount = data.get("total_amount")
+    notify_id = data.get("notify_id", "")
 
     if trade_status == "TRADE_SUCCESS":
+        if notify_id:
+            try:
+                db.add(PaymentNotifyLog(
+                    notify_id=notify_id,
+                    order_no=out_trade_no or "",
+                    payment_method="alipay",
+                ))
+                await db.flush()
+            except IntegrityError:
+                return "success"
+
         result = await db.execute(
             select(Order).where(Order.order_no == out_trade_no).with_for_update()
         )
@@ -106,16 +119,31 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
         from defusedxml.ElementTree import fromstring as safe_fromstring
         root = safe_fromstring(body.decode("utf-8"))
     except ImportError:
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(body.decode("utf-8"))
+        logger.error("defusedxml未安装,拒绝处理微信回调")
+        return {"return_code": "FAIL", "return_msg": "服务配置错误"}
+    except Exception as e:
+        logger.error(f"WeChat XML parse error: {e}")
+        return {"return_code": "FAIL", "return_msg": "XML解析失败"}
 
     try:
         out_trade_no = root.findtext(".//out_trade_no")
         transaction_id = root.findtext(".//transaction_id")
         result_code = root.findtext(".//result_code")
         total_fee = root.findtext(".//total_fee")
+        nonce_str = root.findtext(".//nonce_str") or ""
 
         if result_code == "SUCCESS" and out_trade_no:
+            notify_id = f"wx:{transaction_id}:{nonce_str}"
+            try:
+                db.add(PaymentNotifyLog(
+                    notify_id=notify_id,
+                    order_no=out_trade_no,
+                    payment_method="wechat",
+                ))
+                await db.flush()
+            except IntegrityError:
+                return {"return_code": "SUCCESS", "return_msg": "OK"}
+
             result = await db.execute(
                 select(Order).where(Order.order_no == out_trade_no).with_for_update()
             )

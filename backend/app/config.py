@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str = "dev-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     HMAC_SIGN_KEY: str = "dev-hmac-key-change-in-production"
     TRIAL_DAYS: int = 7
@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["https://videogen.com", "https://www.videogen.com"]
 
     RATE_LIMIT_PER_MINUTE: int = 60
+
+    LOG_LEVEL: str = "INFO"
 
     class Config:
         env_file = ".env"
@@ -67,7 +69,9 @@ def check_production_safety():
     for key, default in _INSECURE_DEFAULTS.items():
         if getattr(settings, key) == default:
             unsafe.append(key)
-    if unsafe and os.getenv("VIDEOGEN_ENV") == "production":
-        print(f"❌ 生产环境检测到不安全的默认配置: {', '.join(unsafe)}")
-        print("   请修改 .env 文件中的上述配置项")
+    if unsafe and os.getenv("VIDEOGEN_ENV") != "development":
+        print(f"检测到不安全的默认配置: {', '.join(unsafe)}")
+        print("请修改 .env 文件中的上述配置项")
         sys.exit(1)
+    elif unsafe:
+        print(f"警告: 开发环境使用默认配置: {', '.join(unsafe)}，请勿在生产环境使用!")

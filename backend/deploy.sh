@@ -83,7 +83,72 @@ fi
 nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
 
 echo ""
-echo "7️⃣ 验证服务..."
+echo "7️⃣ 配置 fail2ban..."
+if ! command -v fail2ban-client &> /dev/null; then
+    apt install -y fail2ban
+fi
+cat > /etc/fail2ban/jail.local << 'F2BEOF'
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 3600
+findtime = 600
+
+[nginx-http-auth]
+enabled = true
+filter = nginx-http-auth
+logpath = /var/log/nginx/videogen_error.log
+maxretry = 5
+bantime = 1800
+F2BEOF
+systemctl enable fail2ban
+systemctl start fail2ban
+echo "   ✅ fail2ban 已配置"
+
+echo ""
+echo "8️⃣ 加固 SSH..."
+if [ -f /etc/ssh/sshd_config ]; then
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+    mkdir -p /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/hardening.conf << 'SSHEOF'
+PermitRootLogin no
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+SSHEOF
+    systemctl restart sshd 2>/dev/null || true
+    echo "   ✅ SSH 已加固（已禁用root登录，限制认证尝试）"
+else
+    echo "   ⏭️ SSH 配置未找到，跳过"
+fi
+
+echo ""
+echo "9️⃣ 配置防火墙..."
+if command -v ufw &> /dev/null; then
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw --force enable
+    echo "   ✅ UFW 防火墙已配置"
+elif command -v iptables &> /dev/null; then
+    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+    iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -P INPUT DROP
+    iptables-save > /etc/iptables.rules 2>/dev/null || true
+    echo "   ✅ iptables 防火墙已配置"
+else
+    echo "   ⚠️ 未找到防火墙工具，请手动配置"
+fi
+
+echo ""
+echo "🔟 验证服务..."
 sleep 2
 if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
     echo "   ✅ API 服务运行正常"

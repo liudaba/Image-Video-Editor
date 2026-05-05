@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: videogen
       POSTGRES_USER: videogen
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     expose:
@@ -19,6 +19,8 @@ services:
       retries: 5
     mem_limit: 512m
     cpus: 1
+    networks:
+      - backend
     logging:
       driver: json-file
       options:
@@ -28,13 +30,15 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme} --maxmemory 64mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env} --maxmemory 64mb --maxmemory-policy allkeys-lru
     expose:
       - "6379"
     volumes:
       - redisdata:/data
     mem_limit: 128m
     cpus: 0.5
+    networks:
+      - backend
     logging:
       driver: json-file
       options:
@@ -59,17 +63,50 @@ services:
       - ./logs:/app/logs
     mem_limit: 1g
     cpus: 2
+    stop_grace_period: 45s
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+    networks:
+      - backend
+      - frontend
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
+
+  backup:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      bash -c "while true; do
+        pg_dump -h db -U videogen videogen | gzip > /backups/videogen_$$(date +%%Y%%m%%d_%%H%%M%%S).sql.gz;
+        find /backups -name '*.sql.gz' -mtime +7 -delete;
+        sleep 86400;
+      done"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  backend:
+    internal: true
+  frontend:
 
 volumes:
   pgdata:
