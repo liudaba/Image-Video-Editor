@@ -291,6 +291,18 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
             if theme_elements and theme_elements != "根据配音内容确定":
                 theme_instruction += f"\n【Key Visual Elements】MUST include these elements in the scene: {theme_elements}"
 
+            visual_narrative_strategy = kwargs.get("visual_narrative_strategy", "")
+            if visual_narrative_strategy:
+                strategy_short = {
+                    '时间线叙事': 'TIMELINE: chronological visual progression (ancient→modern)',
+                    '空间探索': 'SPATIAL: wide shots→close-up details, macro/micro alternation',
+                    '主题递进': 'THEMATIC DEEPENING: surface→abstract, each shot adds new layer',
+                    '对比叙事': 'CONTRAST: alternate opposing elements (light/dark, old/new)',
+                    '隐喻主线': 'METAPHOR: ONE consistent metaphor throughout (tree/river/building)',
+                }
+                strategy_text = strategy_short.get(visual_narrative_strategy, visual_narrative_strategy)
+                theme_instruction += f"\n【Narrative Strategy】{strategy_text}"
+
             system_content = template["system"].format(
                 style_instruction=style_instruction,
                 theme_instruction=theme_instruction,

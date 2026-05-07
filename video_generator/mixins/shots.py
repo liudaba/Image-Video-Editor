@@ -1770,7 +1770,8 @@ class ShotsMixin:
             "visual_style": visual_style,
             "visual_tone": visual_tone or "",
             "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
-            "dubbing": dubbing
+            "dubbing": dubbing,
+            "visual_narrative_strategy": getattr(self, '_visual_narrative_strategy', '')
         }
         
         context_hint = ""
@@ -1782,7 +1783,7 @@ class ShotsMixin:
                     if hasattr(self, '_pregenerated_prompts_for_context'):
                         prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-2), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
                         if prev_prompts:
-                            context_hint += f"AVOID repeating: {', '.join(prev_prompts[-2:])}\n"
+                            context_hint += f"AVOID: {', '.join(prev_prompts[-2:])}\n"
                     
                     total_shots = len(shot_texts)
                     if idx == 0:
@@ -1795,18 +1796,6 @@ class ShotsMixin:
         entity_hint = self._extract_entities_for_prompt(dubbing)
         if entity_hint:
             context_hint += f"Entities: {entity_hint}\n"
-        
-        if hasattr(self, '_visual_narrative_strategy') and self._visual_narrative_strategy:
-            strategy = self._visual_narrative_strategy
-            strategy_instructions = {
-                '时间线叙事': 'Follow a TIMELINE visual narrative: early shots show ancient/historical scenes, gradually transitioning to modern/present day. Maintain chronological visual progression.',
-                '空间探索': 'Follow a SPATIAL visual narrative: start with wide/establishing shots, gradually zoom into details. Alternate between macro and micro perspectives.',
-                '主题递进': 'Follow a THEMATIC DEEPENING narrative: start with surface-level visuals, progressively reveal deeper/more abstract concepts. Each shot should add a new layer of understanding.',
-                '对比叙事': 'Follow a CONTRAST narrative: alternate between opposing visual elements (light/dark, old/new, nature/technology, individual/crowd). Use visual juxtaposition.',
-                '隐喻主线': 'Follow a METAPHOR narrative: use ONE consistent visual metaphor throughout (e.g., a growing tree, a flowing river, a building structure). Each shot shows a different aspect of the same metaphor.',
-            }
-            strategy_instruction = strategy_instructions.get(strategy, f'Follow this visual narrative strategy: {strategy}')
-            context_hint += f"Visual Narrative Strategy: {strategy_instruction}\n"
         
         template_params["context_hint"] = context_hint
         
