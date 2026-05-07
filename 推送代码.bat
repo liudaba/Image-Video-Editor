@@ -41,8 +41,8 @@ if "%changes%"=="" set "changes=更新代码"
 echo 检测到的更改: %changes%
 echo.
 
-echo [3/5] 添加所有更改...
-git add -A
+echo [3/5] 添加更改文件...
+git add video_generator/ config.json.example 01build_exe.py obfuscate_build.py pyarmor_config.json .gitignore
 
 echo.
 echo [4/5] 提交代码...

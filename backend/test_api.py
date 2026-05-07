@@ -21,7 +21,7 @@ if r.status_code == 200:
     data = r.json()
     token = data["access_token"]
     license_data = data.get("license")
-    print(f"   Token: {token[:30]}...")
+    print(f"   Token: {token[:8]}...")
     print(f"   License: type={license_data.get('license_type') if license_data else 'N/A'}, valid={license_data.get('is_valid') if license_data else 'N/A'}")
     print(f"   Days left: {license_data.get('days_left') if license_data else 'N/A'}")
 else:
@@ -39,7 +39,7 @@ if token:
     print(f"   POST /api/auth/login => {r.status_code}")
     if r.status_code == 200:
         login_data = r.json()
-        print(f"   Token: {login_data['access_token'][:30]}...")
+        print(f"   Token: {login_data['access_token'][:8]}...")
         token = login_data["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 

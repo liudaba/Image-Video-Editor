@@ -90,7 +90,7 @@ def decrypt_value(ciphertext, base_dir):
         decrypted = f.decrypt(encrypted)
         return decrypted.decode("utf-8")
     except ImportError:
-        return ciphertext
+        return ""
     except Exception:
         return ""
 

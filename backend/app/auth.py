@@ -68,10 +68,21 @@ def decode_access_token(token: str) -> TokenData:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="认证凭据已过期或无效")
 
 
+_memory_rate_limit: dict = {}
+
 def check_login_rate_limit(identifier: str) -> bool:
     r = _get_redis()
     if r is None:
-        return True
+        now = time.time()
+        entry = _memory_rate_limit.get(identifier)
+        if entry is None:
+            return True
+        if entry.get("lockout_until") and now < entry["lockout_until"]:
+            return False
+        if now - entry.get("first_fail", now) > LOCKOUT_SECONDS:
+            del _memory_rate_limit[identifier]
+            return True
+        return entry["fails"] < MAX_LOGIN_ATTEMPTS
     try:
         fail_key = f"login_fail:{identifier}"
         lock_key = f"login_lockout:{identifier}"
@@ -86,6 +97,12 @@ def check_login_rate_limit(identifier: str) -> bool:
 def record_login_failure(identifier: str):
     r = _get_redis()
     if r is None:
+        now = time.time()
+        entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
+        entry["fails"] += 1
+        if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
+            entry["lockout_until"] = now + LOCKOUT_SECONDS
+        _memory_rate_limit[identifier] = entry
         return
     try:
         fail_key = f"login_fail:{identifier}"

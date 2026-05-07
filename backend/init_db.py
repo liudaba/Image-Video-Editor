@@ -61,7 +61,6 @@ async def init():
         with open(verify_key_path, "w") as f:
             f.write(sign_key)
         print(f"   ✅ 签名密钥已生成: {verify_key_path}")
-        print(f"   密钥长度: {len(sign_key)} 字符")
 
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if os.path.exists(env_path):
@@ -88,7 +87,7 @@ async def init():
         else:
             print(f"   ⏭️ .env 中 HMAC_SIGN_KEY 已配置，跳过更新")
     else:
-        print(f"   ⚠️  未找到 .env 文件，请手动设置 HMAC_SIGN_KEY={sign_key}")
+        print(f"   ⚠️  未找到 .env 文件，请手动设置 HMAC_SIGN_KEY（密钥已保存至 {verify_key_path}）")
 
     print(f"   📋 请将签名密钥复制到客户端项目的 .license_verify_key 文件中")
 

@@ -58,7 +58,7 @@ def update_version_file(new_version):
 
 def git_commit_push(message):
     cmds = [
-        ["git", "add", "-A"],
+        ["git", "add", "video_generator/", "config.json.example", "01build_exe.py", "obfuscate_build.py", "pyarmor_config.json", ".gitignore"],
         ["git", "commit", "-m", message],
         ["git", "push"],
     ]

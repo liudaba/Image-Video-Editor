@@ -52,9 +52,9 @@ output_project/
 *.png
 *.gif
 
-# JSON配置文件 (保留config.json模板)
+# JSON配置文件 (保留config.json.example模板)
 *.json
-!config.json
+!config.json.example
 
 # 临时文件
 *.tmp

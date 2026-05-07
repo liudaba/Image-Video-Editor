@@ -28,7 +28,7 @@ def _get_file_logger(base_dir):
         log_dir = os.path.join(base_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         logger = logging.getLogger("videogen")
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         if logger.handlers:
             _file_logger = logger
             return _file_logger
@@ -37,7 +37,7 @@ def _get_file_logger(base_dir):
             os.path.join(log_dir, f"app_{today}.log"),
             encoding="utf-8",
         )
-        fh.setLevel(logging.DEBUG)
+        fh.setLevel(logging.INFO)
         fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         logger.addHandler(fh)
         _file_logger = logger

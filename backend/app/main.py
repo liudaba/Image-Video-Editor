@@ -145,6 +145,13 @@ async def db_error_handler(request: Request, exc: sqlalchemy.exc.DBAPIError):
     return JSONResponse(status_code=503, content={"detail": "数据库暂时不可用,请稍后重试"})
 
 
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception):
+    import logging
+    logging.getLogger(__name__).error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "服务器内部错误"})
+
+
 app.add_middleware(RateLimitMiddleware, rate_limit=settings.RATE_LIMIT_PER_MINUTE)
 
 app.add_middleware(
@@ -196,35 +203,12 @@ app.include_router(admin.router)
 
 @app.get("/health")
 async def health_check():
-    checks = {}
-
+    db_ok = False
     try:
         async with engine.connect() as conn:
             await conn.execute(sqlalchemy.text("SELECT 1"))
-        checks["database"] = "ok"
-    except Exception as e:
-        checks["database"] = f"error: {str(e)[:50]}"
-
-    try:
-        import redis as _redis
-        loop = asyncio.get_event_loop()
-        if RateLimitMiddleware._redis_pool:
-            r = _redis.Redis(connection_pool=RateLimitMiddleware._redis_pool)
-        else:
-            r = await loop.run_in_executor(None, lambda: _redis.from_url(settings.REDIS_URL, socket_timeout=2))
-        await loop.run_in_executor(None, r.ping)
-        checks["redis"] = "ok"
-    except Exception:
-        checks["redis"] = "unavailable"
-
-    try:
-        import shutil
-        loop = asyncio.get_event_loop()
-        disk = await loop.run_in_executor(None, shutil.disk_usage, "/")
-        checks["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
-        checks["disk_percent"] = round(disk.used / disk.total * 100, 1)
+        db_ok = True
     except Exception:
         pass
 
-    all_ok = checks.get("database") == "ok"
-    return {"status": "ok" if all_ok else "degraded", **checks}
+    return {"status": "ok" if db_ok else "degraded"}

@@ -104,7 +104,7 @@ def sanitize_url(url):
 
 
 def get_api_base_url():
-    """从config.json读取API基础地址，失败则使用默认值"""
+    """从config.json读取API基础地址，失败则使用默认值。强制HTTPS，拒绝HTTP非本地地址"""
     try:
         import os
         import json
@@ -118,7 +118,10 @@ def get_api_base_url():
                 data = json.load(f)
             url = data.get("api_base_url", "").strip()
             if url:
-                return url.rstrip("/")
+                url = url.rstrip("/")
+                if url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
+                    url = url.replace("http://", "https://", 1)
+                return url
     except Exception:
         pass
     return Config.API_BASE_URL

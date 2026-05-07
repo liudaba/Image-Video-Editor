@@ -90,13 +90,6 @@ def build_executable():
         '--add-data=LICENSE;.',
     ]
     
-    if os.path.exists('.license_verify_key'):
-        args.append('--add-data=.license_verify_key;.')
-        print("  ✅ .license_verify_key (授权签名验证密钥)")
-    else:
-        print("  ⚠️  .license_verify_key 不存在，打包后将无法验证授权签名")
-        print("     部署服务端后，请将服务端生成的密钥文件复制到项目根目录")
-    
     args += [
         '--hidden-import=whisper',
         '--collect-all=whisper',
@@ -131,6 +124,15 @@ def build_executable():
         '--exclude=.vscode',
         '--exclude=.venv',
         '--exclude=__pycache__',
+        
+        '--exclude=.env',
+        '--exclude=license.json',
+        '--exclude=.secret_key',
+        '--exclude=.license_sign_key',
+        '--exclude=.license_verify_key',
+        '--exclude=.key_salt',
+        '--exclude=*.pem',
+        '--exclude=*.db',
         
         '--exclude=backend',
         '--exclude=models',
@@ -216,6 +218,8 @@ def build_executable():
                 'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
                 '01打包前清理.bat', '03验证打包结果.bat', '快速发布.bat',
                 '推送代码.bat', '检查环境.bat', '生成Demo素材.bat',
+                '.env', 'license.json', '.secret_key', '.license_sign_key',
+                '.license_verify_key', '.key_salt',
             ]
             
             has_error = False

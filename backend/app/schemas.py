@@ -1,17 +1,29 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, List
 from datetime import datetime
+import re
 
 
 class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_\u4e00-\u9fa5]+$")
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v):
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("密码必须包含至少一个大写字母")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("密码必须包含至少一个小写字母")
+        if not re.search(r"\d", v):
+            raise ValueError("密码必须包含至少一个数字")
+        return v
 
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., max_length=50)
+    password: str = Field(..., max_length=128)
 
 
 class LicenseActivate(BaseModel):
@@ -24,8 +36,8 @@ class PaymentCreateOrder(BaseModel):
 
 
 class HeartbeatRequest(BaseModel):
-    fingerprint: Optional[str] = None
-    app_version: Optional[str] = None
+    fingerprint: Optional[str] = Field(None, max_length=255, pattern=r"^[a-zA-Z0-9:_\-\.]*$")
+    app_version: Optional[str] = Field(None, max_length=50, pattern=r"^[\d\.\-a-zA-Z]*$")
 
 
 class LicenseData(BaseModel):
