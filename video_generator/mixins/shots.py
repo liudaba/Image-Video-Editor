@@ -2494,14 +2494,31 @@ class ShotsMixin:
             if '纠错说明' in cleaned_result:
                 self.log(f"   🔍 找到纠错说明，正在解析...")
                 try:
-                    correction_match = cleaned_result.split('纠错说明')[1].split('\n')[0]
-                    correction_match = correction_match.replace('：', '').replace(':', '').strip()
-                    self.log(f"   🔍 纠错内容原始: {correction_match}")
+                    after_correction = cleaned_result.split('纠错说明')[1]
+                    if '视觉叙事策略' in cleaned_result.split('纠错说明')[0]:
+                        correction_text = after_correction.strip()
+                    else:
+                        next_section_markers = ['内容类型', '核心主题', '情感基调', '视觉风格', '英文视觉', '核心元素', '主题元素', '视觉叙事策略']
+                        correction_text = after_correction
+                        for marker in next_section_markers:
+                            if marker in correction_text:
+                                correction_text = correction_text.split(marker)[0]
+                                break
+                    correction_text = correction_text.replace('：', '').replace(':', '').strip()
+                    if not correction_text:
+                        lines = after_correction.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            if line and line != '：' and line != ':':
+                                correction_text = line.replace('：', '').replace(':', '').strip()
+                                if correction_text:
+                                    break
+                    self.log(f"   🔍 纠错内容原始: {correction_text}")
                     
-                    if correction_match and correction_match != '无' and correction_match != '无纠正':
+                    if correction_text and correction_text != '无' and correction_text != '无纠正':
                         # 支持多种分隔符：逗号、顿号、分号
                         separators = [',', '，', '、', ';', '；']
-                        parts = [correction_match]
+                        parts = [correction_text]
                         for sep in separators:
                             new_parts = []
                             for part in parts:
@@ -2909,90 +2926,59 @@ class ShotsMixin:
                         self.log("⚠️ 云端ASR失败，回退到本地Whisper")
                         cloud_asr_enabled = False
                 
-                if not cloud_asr_enabled:
-                    # 加载Whisper模型进行语音识别（本地模式或云端ASR失败时回退）
-                    self.update_task_progress("正在加载Whisper模型...", 20)
-                
                 # 本地Whisper语音识别（云端ASR成功时跳过）
                 if not cloud_asr_enabled:
                     self.update_task_progress("正在加载Whisper模型...", 20)
                     self._unload_ollama_models(log_prefix="   ")
                     warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                     
-                    if self.whisper_model:
-                        whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                        current_model_size = getattr(self, '_whisper_model_size', None)
-                        if current_model_size and current_model_size != whisper_model_size:
-                            self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
-                            self._safe_release_whisper_gpu()
-                            del self.whisper_model
-                            self.whisper_model = None
-                            gc.collect()
-                        if self.whisper_model is None:
-                            try:
-                                import torch
-                                import whisper
-                                device = "cuda" if torch.cuda.is_available() else "cpu"
-                                if device == "cuda":
-                                    gpu_name = torch.cuda.get_device_name(0)
-                                    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                    self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-                                self.whisper_model = whisper.load_model(whisper_model_size, device=device)
-                                self._whisper_model_size = whisper_model_size
-                                self._whisper_on_gpu = (device == "cuda")
-                                whisper_used_gpu = (device == "cuda")
-                                self.log(f"✅ Whisper {whisper_model_size} 已加载到{'GPU' if device == 'cuda' else 'CPU'}")
-                            except Exception as e:
-                                self._log_exception("⚠️ Whisper加载失败", e)
-                        else:
-                            try:
-                                import torch
-                                if torch.cuda.is_available():
-                                    gpu_name = torch.cuda.get_device_name(0)
-                                    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                    self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
-                                    self.whisper_model = self.whisper_model.to("cuda")
-                                    self._whisper_on_gpu = True
-                                    whisper_used_gpu = True
-                                    self.log(f"✅ Whisper {whisper_model_size} 已加载到GPU")
-                                else:
-                                    self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                            except Exception as e:
-                                self._log_exception("⚠️ Whisper移至GPU失败，使用CPU", e)
+                    whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
+                    current_model_size = getattr(self, '_whisper_model_size', None)
+                    
+                    if self.whisper_model and current_model_size and current_model_size != whisper_model_size:
+                        self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
+                        self._safe_release_whisper_gpu()
+                        del self.whisper_model
+                        self.whisper_model = None
+                        gc.collect()
+                    
+                    if self.whisper_model is not None and current_model_size == whisper_model_size:
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                self.whisper_model = self.whisper_model.to("cuda")
+                                self._whisper_on_gpu = True
+                                whisper_used_gpu = True
+                                self.log(f"✅ Whisper {whisper_model_size} 已迁移到GPU")
+                            else:
+                                self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
+                        except Exception as e:
+                            self._log_exception("⚠️ Whisper迁移GPU失败，使用CPU", e)
                     else:
-                        self.log("📦 正在加载Whisper模型...")
                         try:
                             import torch
                             import whisper
-                            whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
-                            if torch.cuda.is_available():
-                                device = "cuda"
+                            device = "cuda" if torch.cuda.is_available() else "cpu"
+                            if device == "cuda":
                                 gpu_name = torch.cuda.get_device_name(0)
                                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                cuda_version = torch.version.cuda
-                                self.log(f"🖥️ 使用GPU加速: {gpu_name}")
-                                self.log(f"   CUDA版本: {cuda_version}")
-                                self.log(f"   GPU显存: {gpu_memory:.1f} GB")
-                                self.log(f"   使用模型: Whisper {whisper_model_size}")
+                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
                             else:
-                                device = "cpu"
                                 self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                                self.log(f"   使用模型: Whisper {whisper_model_size}")
+                            self.log(f"   使用模型: Whisper {whisper_model_size}")
                             self.whisper_model = whisper.load_model(whisper_model_size, device=device)
+                            self._whisper_model_size = whisper_model_size
                             whisper_model_loaded = True
                             self._whisper_on_gpu = (device == "cuda")
-                            if torch.cuda.is_available():
-                                whisper_used_gpu = True
-                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (GPU加速)")
-                            else:
-                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
+                            whisper_used_gpu = (device == "cuda")
+                            self.log(f"✅ Whisper {whisper_model_size} 加载成功 ({'GPU加速' if device == 'cuda' else 'CPU模式'})")
                         except Exception as e:
                             self._log_exception("⚠️ GPU加载失败，回退到CPU", e)
-                            whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
                             try:
                                 self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
                                 whisper_model_loaded = True
-                                self.log(f"✅ Whisper {whisper_model_size}模型加载成功 (CPU模式)")
+                                self._whisper_on_gpu = False
+                                self.log(f"✅ Whisper {whisper_model_size} 加载成功 (CPU模式)")
                             except Exception as e2:
                                 self._log_exception("❌ 模型加载完全失败", e2)
                                 self.update_task_progress("就绪")
@@ -3037,22 +3023,24 @@ class ShotsMixin:
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
+            self.log("   流程: 调用模型 → 等待响应 → 解析结果（串行执行）")
             self.update_task_progress("正在分析文章内容...", 40)
             
             if not self.task_running:
                 self.log("❌ 任务已被取消")
                 return
             
-            # 初始化变量（修复：确保变量在所有代码路径中都有定义）
+            # 初始化变量（确保变量在所有代码路径中都有定义）
             content_type = "general"
             prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else "SD提示词"
+            correction_dict = {}
             
             # 显示当前使用的提示词类型
             self.log(f"💬 提示词类型: {prompt_type}")
             self.log(f"🤖 大模型: {self._get_current_model()}")
             
             audio_file_hash = hashlib.md5(self.audio_path.encode()).hexdigest()[:8]
-            cache_key_string = f"{audio_file_hash}_{full_text}_{content_type}_{prompt_type}"
+            cache_key_string = f"{audio_file_hash}_{full_text}_{prompt_type}"
             analysis_key = f"analysis_{hashlib.md5(cache_key_string.encode()).hexdigest()}"
 
             # 直接从原始segments创建分镜列表（每个片段一个分镜）
@@ -3098,9 +3086,9 @@ class ShotsMixin:
                 # 从缓存中提取主题信息
                 theme_info = self.extract_theme_info(analysis_result)
                 
-                # 重要：使用全局内容类型覆盖（用户选择的优先级最高）
-                if content_type:
-                    theme_info['content_type'] = content_type
+                # 同步 content_type 变量
+                if theme_info.get('content_type'):
+                    content_type = theme_info['content_type']
                 
                 # 确保visual_tone有值
                 if not theme_info.get('visual_tone'):
@@ -3267,7 +3255,7 @@ class ShotsMixin:
                                         
                                         try:
                                             future = analysis_executor.submit(call_ollama_with_model, current_model)
-                                            self.log(f"   等待模型响应中...")
+                                            self.log(f"   正在调用模型，等待响应（串行阻塞）...")
                                             
                                             start_time = time.time()
                                             analysis_result = future.result(timeout=180)
@@ -3329,13 +3317,14 @@ class ShotsMixin:
                                 self.log("✅ 大模型分析结果已缓存")
                             
                             # 解析分析结果 - 只提取主题信息，不生成分镜
-                            self.update_task_progress("正在提取主题信息...", 60)
+                            self.update_task_progress("正在提取主题信息...", 55)
                             
-                            # 首先记录大模型返回的内容
                             self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
                             
-                            # 直接从分析结果中提取主题信息
                             theme_info = self.extract_theme_info(analysis_result)
+                            
+                            if theme_info.get('content_type'):
+                                content_type = theme_info['content_type']
                             
                             # 简化核心主题：提取关键词，去除描述性内容
                             if theme_info.get('core_theme'):
@@ -3373,9 +3362,8 @@ class ShotsMixin:
                             if theme_info.get('theme_elements'):
                                 self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                             
-                            correction_dict = theme_info.get('correction_dict', {})
-                            if correction_dict:
-                                self.log(f"🔧 大模型纠错结果: {correction_dict}")
+                            if theme_info.get('correction_dict'):
+                                self.log(f"🔧 大模型纠错结果: {theme_info['correction_dict']}")
                                 self.log("✅ 主题分析完成，纠错结果将应用到分镜文本")
                             else:
                                 self.log("✅ 主题分析完成，文本无需纠错")
@@ -3411,6 +3399,9 @@ class ShotsMixin:
             
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
             self.log("\n📍 步骤 2.5/4: 准备分镜任务")
+            self.update_task_progress("正在准备分镜任务...", 60)
+            
+            correction_dict = theme_info.get('correction_dict', {})
             
             final_tasks = []
             for seg in original_shot_tasks:
@@ -3436,7 +3427,7 @@ class ShotsMixin:
             pregenerated_prompts = {}
             
             self.log("\n🎨 预先为原始分镜生成提示词...")
-            self.update_task_progress(f"正在生成分镜提示词 (0/{len(final_tasks)})...", 65)
+            self.update_task_progress(f"正在生成分镜提示词 (0/{len(final_tasks)})...", 62)
             
             if not final_tasks:
                 self.log("   ⚠️ 没有分镜数据")
@@ -3572,7 +3563,7 @@ class ShotsMixin:
                         pregenerated_prompts[idx] = ""
                         self._log_exception(f"   ⚠️ 第{idx+1}个生成异常", e)
                     completed_count += 1
-                    progress_pct = 65 + int((completed_count / total_tasks) * 15)
+                    progress_pct = 62 + int((completed_count / total_tasks) * 18)
                     self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
             except TimeoutError:
                 unfinished = [idx for idx in range(total_tasks) if idx not in pregenerated_prompts or not pregenerated_prompts[idx]]
@@ -3613,32 +3604,10 @@ class ShotsMixin:
             
             self._pregenerated_prompts = pregenerated_prompts
             
-            # 步骤3: 解析和校准分镜
-            self.log("\n📍 步骤 3/4: 解析和校准分镜")
-
-            if not theme_info.get('core_theme') and not theme_info.get('visual_tone'):
-                theme_info = self.extract_theme_info(analysis_result) if analysis_result else theme_info
-            
-            if theme_info.get('core_theme'):
-                final_theme = self._simplify_theme(theme_info['core_theme'])
-                if final_theme != theme_info['core_theme']:
-                    theme_info['core_theme'] = final_theme
-            
-            user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
-            user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
-            
-            display_theme = user_custom_theme if user_custom_theme else theme_info.get('core_theme', '')
-            display_tone = user_custom_tone if user_custom_tone else theme_info.get('visual_tone', '')
-            
-            if display_theme:
-                self.log(f"🎯 核心主题: {display_theme}")
-            if display_tone:
-                self.log(f"🎨 视觉基调: {display_tone}")
-            if theme_info.get('theme_elements'):
-                self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
-
+            # 步骤3: 创建分镜
+            self.log("\n📍 步骤 3/4: 创建分镜")
             self.update_task_progress("正在创建分镜...", 80)
-            self.log(f"📝 基于语义片段创建分镜（大模型已预生成提示词）")
+            self.log(f"📝 基于语音片段创建分镜（提示词已预生成）")
             
             if not self.task_running:
                 self.log("❌ 任务已被取消")
@@ -3679,29 +3648,9 @@ class ShotsMixin:
             core_theme = user_custom_theme if user_custom_theme else theme_info.get('core_theme', '')
             visual_tone = user_custom_tone if user_custom_tone else theme_info.get('visual_tone', '')
             theme_elements = theme_info.get('theme_elements', [])
-            correction_dict = theme_info.get('correction_dict', {})
-            
-            if correction_dict:
-                self.log(f"   🔧 大模型纠错字典: {correction_dict}")
             
             def create_shot_task(task_data):
                 idx, shot_start, shot_end, shot_text, shot_type = task_data
-                
-                if correction_dict and shot_text:
-                    original_text = shot_text
-                    for old, new in correction_dict.items():
-                        shot_text = shot_text.replace(old, new)
-                    if shot_text != original_text:
-                        self.log(f"   🔄 分镜{idx+1}大模型纠错: {original_text[:20]}... → {shot_text[:20]}...")
-                
-                if shot_text:
-                    asr_fixed = False
-                    for wrong, correct in _COMMON_ASR_ERROR_DICT.items():
-                        if wrong in shot_text:
-                            shot_text = shot_text.replace(wrong, correct)
-                            asr_fixed = True
-                    if asr_fixed:
-                        self.log(f"   🔄 分镜{idx+1}内置ASR纠错: {shot_text[:30]}...")
                 
                 shot_theme_elements = self._extract_shot_theme_elements(
                     shot_text, theme_elements
@@ -3731,7 +3680,7 @@ class ShotsMixin:
                                 elapsed = time.time() - create_start_time
                                 speed = completed_count / elapsed if elapsed > 0 else 0
                                 self.log(f"   📊 正在创建分镜: {completed_count}/{len(shot_tasks)} (速度: {speed:.1f}个/秒)")
-                                progress = 50 + int(completed_count / len(shot_tasks) * 30) if len(shot_tasks) > 0 else 50
+                                progress = 80 + int(completed_count / len(shot_tasks) * 10) if len(shot_tasks) > 0 else 80
                                 self.update_task_progress(f"正在创建分镜: {completed_count}/{len(shot_tasks)}", progress)
                     except Exception as e:
                         task_idx = futures[future]
@@ -3790,7 +3739,7 @@ class ShotsMixin:
             
             # 步骤4: 验证和完成
             self.log("\n📍 步骤 4/4: 验证分镜数据")
-            self.update_task_progress("正在验证分镜数据...", 90)
+            self.update_task_progress("正在验证时间戳...", 91)
             
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
             
@@ -3866,6 +3815,7 @@ class ShotsMixin:
                 i += 1
             if short_merged > 0:
                 self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {MIN_SHOT_DURATION}秒）")
+                self.update_task_progress("正在合并过短分镜...", 93)
                 for j in range(len(shots)):
                     shots[j]['id'] = j
                 with open(shots_file, 'w', encoding='utf-8') as f:
@@ -3890,6 +3840,8 @@ class ShotsMixin:
                 self.log(f"   ⚠️ 时长差异: 分镜{total_shots_duration:.2f}s vs 音频{audio_total_duration:.2f}s")
             else:
                 self.log(f"   ✅ 时间戳验证通过")
+            
+            self.update_task_progress("正在保存分镜数据...", 95)
             
             with open(shots_file, 'w', encoding='utf-8') as f:
                 json.dump(shots, f, ensure_ascii=False, indent=2)
