@@ -53,17 +53,44 @@ async def init():
 
     verify_key_path = os.path.join(key_dir, ".license_verify_key")
     if os.path.exists(verify_key_path):
-        print("   ⏭️ 签名密钥已存在，跳过")
+        with open(verify_key_path, "r") as f:
+            sign_key = f.read().strip()
+        print("   ⏭️ 签名密钥已存在，跳过生成")
     else:
         sign_key = secrets.token_hex(32)
         with open(verify_key_path, "w") as f:
             f.write(sign_key)
         print(f"   ✅ 签名密钥已生成: {verify_key_path}")
-        print(f"   📋 请将此密钥复制到客户端项目的 .license_verify_key 文件中")
         print(f"   密钥长度: {len(sign_key)} 字符")
 
-        if settings.HMAC_SIGN_KEY == "dev-hmac-key-change-in-production":
-            print("\n   ⚠️  请更新 .env 中的 HMAC_SIGN_KEY 为上述密钥内容！")
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            env_lines = f.readlines()
+
+        updated = False
+        new_lines = []
+        for line in env_lines:
+            if line.strip().startswith("HMAC_SIGN_KEY="):
+                current_val = line.strip().split("=", 1)[1]
+                if current_val in ("change-this-after-running-init-db", "dev-hmac-key-change-in-production", ""):
+                    new_lines.append(f"HMAC_SIGN_KEY={sign_key}\n")
+                    updated = True
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+
+        if updated:
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            print(f"   ✅ 已自动更新 .env 中的 HMAC_SIGN_KEY")
+        else:
+            print(f"   ⏭️ .env 中 HMAC_SIGN_KEY 已配置，跳过更新")
+    else:
+        print(f"   ⚠️  未找到 .env 文件，请手动设置 HMAC_SIGN_KEY={sign_key}")
+
+    print(f"   📋 请将签名密钥复制到客户端项目的 .license_verify_key 文件中")
 
     print("\n4️⃣ 创建首个版本记录...")
     async with async_session() as db:

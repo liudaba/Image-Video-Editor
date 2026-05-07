@@ -96,6 +96,9 @@ class UpdateManager:
                 error_callback("下载地址不合法，拒绝下载")
             return
 
+        self.is_downloading = True
+        self._cancel_requested = False
+
         def download_thread():
             try:
                 response = get_http_session().get(download_url, stream=True, timeout=30)
@@ -110,12 +113,13 @@ class UpdateManager:
                 with open(save_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
-                            if not self.is_downloading:
+                            if self._cancel_requested:
                                 f.close()
                                 if os.path.exists(save_path):
                                     os.remove(save_path)
                                 if error_callback:
                                     error_callback("下载已取消")
+                                self.is_downloading = False
                                 return
                             f.write(chunk)
                             hasher.update(chunk)
@@ -131,12 +135,15 @@ class UpdateManager:
                         os.remove(save_path)
                         if error_callback:
                             error_callback("文件完整性校验失败，下载文件可能被篡改")
+                        self.is_downloading = False
                         return
 
+                self.is_downloading = False
                 if complete_callback:
                     complete_callback(save_path)
 
             except Exception as e:
+                self.is_downloading = False
                 if os.path.exists(save_path):
                     try:
                         os.remove(save_path)
@@ -147,6 +154,9 @@ class UpdateManager:
 
         thread = threading.Thread(target=download_thread, daemon=True)
         thread.start()
+
+    def cancel_download(self):
+        self._cancel_requested = True
 
     @staticmethod
     def format_size(size_bytes):
@@ -368,6 +378,7 @@ class UpdateDialog(tk.Toplevel):
     def cancel_download(self):
         if self.is_downloading:
             self.is_downloading = False
+            self.update_manager.cancel_download()
             self.progress_var.set("已取消下载")
             self.cancel_btn.pack_forget()
             self.download_btn.pack(side=tk.LEFT, padx=5)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -29,9 +29,9 @@ async def _log_audit(db: AsyncSession, admin: User, action: str, detail: str = N
 
 
 class VersionCreate(BaseModel):
-    version: str
-    download_url: str
-    file_size: int
+    version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
+    download_url: str = Field(..., pattern=r"^https?://")
+    file_size: int = Field(..., gt=0)
     changelog: str = ""
     priority: str = "normal"
     force_update: bool = False

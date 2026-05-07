@@ -50,6 +50,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.rate_limit = rate_limit
         self._fallback_requests = {}
         self._redis_pool = None
+        self._last_cleanup = time.time()
+
+    def _cleanup_stale_entries(self):
+        now = time.time()
+        if now - self._last_cleanup < 60:
+            return
+        self._last_cleanup = now
+        stale_keys = [
+            k for k, v in self._fallback_requests.items()
+            if not v or now - v[-1] > 120
+        ]
+        for k in stale_keys:
+            del self._fallback_requests[k]
 
     def _get_redis_pool(self):
         if self._redis_pool is None:
@@ -87,10 +100,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if len(self._fallback_requests[key]) >= self.rate_limit:
             return False
         self._fallback_requests[key].append(now)
-        if len(self._fallback_requests) > 10000:
-            oldest_keys = sorted(self._fallback_requests.keys(), key=lambda k: self._fallback_requests[k][-1] if self._fallback_requests[k] else 0)[:5000]
-            for k in oldest_keys:
-                del self._fallback_requests[k]
+        self._cleanup_stale_entries()
         return True
 
     async def dispatch(self, request: Request, call_next):
@@ -197,15 +207,17 @@ async def health_check():
 
     try:
         import redis as _redis
-        r = _redis.from_url(settings.REDIS_URL, socket_timeout=2)
-        r.ping()
+        loop = asyncio.get_event_loop()
+        r = await loop.run_in_executor(None, lambda: _redis.from_url(settings.REDIS_URL, socket_timeout=2))
+        await loop.run_in_executor(None, r.ping)
         checks["redis"] = "ok"
     except Exception:
         checks["redis"] = "unavailable"
 
     try:
         import shutil
-        disk = shutil.disk_usage("/")
+        loop = asyncio.get_event_loop()
+        disk = await loop.run_in_executor(None, shutil.disk_usage, "/")
         checks["disk_free_gb"] = round(disk.free / (1024 ** 3), 2)
         checks["disk_percent"] = round(disk.used / disk.total * 100, 1)
     except Exception:

@@ -213,9 +213,16 @@ class LicenseManager:
                         token=self.license_data.get("token"),
                     )
         except (ConnectionError, TimeoutError, OSError):
-            pass
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+                signed_data = self.license_data.get("signed", self.license_data)
+                signed_data["is_valid"] = False
+                self._save_signed_license(
+                    signed_data,
+                    token=self.license_data.get("token"),
+                )
         except Exception:
-            pass
+            self._consecutive_failures += 1
 
     @staticmethod
     def _get_app_version():
@@ -558,8 +565,8 @@ class LoginDialog(tk.Toplevel):
         if self.mode == "login":
             success, message = LicenseManager().login_user(username, password)
         else:
-            if not re.match(r'^[a-zA-Z0-9_]{3,20}$', username):
-                messagebox.showwarning("提示", "用户名需3-20位字母数字下划线", parent=self)
+            if not re.match(r'^[a-zA-Z0-9_\u4e00-\u9fa5]{3,50}$', username):
+                messagebox.showwarning("提示", "用户名需3-50位，支持字母数字下划线和中文", parent=self)
                 return
             email = self.email_var.get().strip()
             if not email:
@@ -568,8 +575,8 @@ class LoginDialog(tk.Toplevel):
             if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
                 messagebox.showwarning("提示", "请输入有效的邮箱地址", parent=self)
                 return
-            if len(password) < 8:
-                messagebox.showwarning("提示", "密码至少8位,建议包含字母和数字", parent=self)
+            if len(password) < 6:
+                messagebox.showwarning("提示", "密码至少6位", parent=self)
                 return
             confirm = self.confirm_var.get().strip()
             if password != confirm:

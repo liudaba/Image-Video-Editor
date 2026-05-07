@@ -161,6 +161,9 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
                 if int(total_fee) != expected_cents:
                     logger.warning(f"WeChat amount mismatch: order={order.order_no}, expected={expected_cents}, got={total_fee}")
                     return {"return_code": "FAIL", "return_msg": "金额不匹配"}
+            else:
+                logger.warning(f"WeChat notify missing total_fee: order={order.order_no}")
+                return {"return_code": "FAIL", "return_msg": "金额校验失败"}
 
             order.status = OrderStatus.PAID
             order.transaction_id = transaction_id
