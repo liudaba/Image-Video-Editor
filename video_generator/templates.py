@@ -94,8 +94,17 @@ RULES:
 - Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
 - VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
 - Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- Abstract concepts→concrete visual metaphors (e.g. power→chess pieces, danger→iceberg, progress→ascending stairs)
 - NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
+
+VISUAL METAPHORS for abstract concepts:
+- compromise/coexistence → handshake, yin-yang, balance scale
+- unintended consequences → domino effect, ripple in water, butterfly effect
+- power/control → puppet strings, chess pieces, hand on lever
+- chaos vs order → wild garden vs manicured lawn, organic vs geometric
+- fragility → glass sculpture, soap bubble, delicate flower
+- progress/evolution → ascending stairs, growing tree, dawn light
+- hidden danger → crack in dam, iceberg below surface, shadow behind smile
+- ethical dilemma → crossroads, split path, figure at a fork
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -125,8 +134,17 @@ RULES:
 - Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
 - VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
 - Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- Abstract concepts→concrete visual metaphors (e.g. power→chess pieces, danger→iceberg, progress→ascending stairs)
 - NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
+
+VISUAL METAPHORS for abstract concepts:
+- compromise/coexistence → handshake, yin-yang, balance scale
+- unintended consequences → domino effect, ripple in water, butterfly effect
+- power/control → puppet strings, chess pieces, hand on lever
+- chaos vs order → wild garden vs manicured lawn, organic vs geometric
+- fragility → glass sculpture, soap bubble, delicate flower
+- progress/evolution → ascending stairs, growing tree, dawn light
+- hidden danger → crack in dam, iceberg below surface, shadow behind smile
+- ethical dilemma → crossroads, split path, figure at a fork
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -156,8 +174,17 @@ RULES:
 - Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
 - VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
 - Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- Abstract concepts→concrete visual metaphors (e.g. power→chess pieces, danger→iceberg, progress→ascending stairs)
 - NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
+
+VISUAL METAPHORS for abstract concepts:
+- compromise/coexistence → handshake, yin-yang, balance scale
+- unintended consequences → domino effect, ripple in water, butterfly effect
+- power/control → puppet strings, chess pieces, hand on lever
+- chaos vs order → wild garden vs manicured lawn, organic vs geometric
+- fragility → glass sculpture, soap bubble, delicate flower
+- progress/evolution → ascending stairs, growing tree, dawn light
+- hidden danger → crack in dam, iceberg below surface, shadow behind smile
+- ethical dilemma → crossroads, split path, figure at a fork
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -187,8 +214,17 @@ RULES:
 - Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
 - VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
 - Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- Abstract concepts→concrete visual metaphors (e.g. power→chess pieces, danger→iceberg, progress→ascending stairs)
 - NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
+
+VISUAL METAPHORS for abstract concepts:
+- compromise/coexistence → handshake, yin-yang, balance scale
+- unintended consequences → domino effect, ripple in water, butterfly effect
+- power/control → puppet strings, chess pieces, hand on lever
+- chaos vs order → wild garden vs manicured lawn, organic vs geometric
+- fragility → glass sculpture, soap bubble, delicate flower
+- progress/evolution → ascending stairs, growing tree, dawn light
+- hidden danger → crack in dam, iceberg below surface, shadow behind smile
+- ethical dilemma → crossroads, split path, figure at a fork
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}

@@ -1294,7 +1294,7 @@ class ShotsMixin:
                 user_prompt=user_prompt,
                 log_callback=self.log,
                 num_predict=256,
-                num_ctx=1024,
+                num_ctx=1532,
                 llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
@@ -1828,7 +1828,7 @@ class ShotsMixin:
                 user_prompt=template["user"],
                 log_callback=self.log,
                 num_predict=256,
-                num_ctx=1024,
+                num_ctx=1532,
                 llm_config=llm_config,
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
@@ -2256,7 +2256,7 @@ class ShotsMixin:
                 user_prompt=prompt,
                 log_callback=self.log,
                 num_predict=500,
-                num_ctx=1024,
+                num_ctx=1532,
                 llm_config=getattr(self, 'current_llm_config', None),
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
