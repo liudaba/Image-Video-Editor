@@ -3023,7 +3023,7 @@ class ShotsMixin:
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
-            self.log("   流程: 调用模型 → 等待响应 → 解析结果（串行执行）")
+            self.log("   流程: 调用模型 → 等待响应 → 解析结果")
             self.update_task_progress("正在分析文章内容...", 40)
             
             if not self.task_running:
@@ -3255,7 +3255,7 @@ class ShotsMixin:
                                         
                                         try:
                                             future = analysis_executor.submit(call_ollama_with_model, current_model)
-                                            self.log(f"   正在调用模型，等待响应（串行阻塞）...")
+                                            self.log(f"   正在调用模型，等待响应中...")
                                             
                                             start_time = time.time()
                                             analysis_result = future.result(timeout=180)
