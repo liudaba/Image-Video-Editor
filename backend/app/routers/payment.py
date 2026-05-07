@@ -91,7 +91,10 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         if not order or order.status != OrderStatus.PENDING:
             return "success"
 
-        if total_amount and Decimal(total_amount) != order.amount:
+        if not total_amount:
+            logger.warning(f"Alipay notify missing total_amount: order={order.order_no}")
+            return "fail"
+        if Decimal(total_amount) != order.amount:
             logger.warning(f"Alipay amount mismatch: order={order.order_no}, expected={order.amount}, got={total_amount}")
             return "fail"
 

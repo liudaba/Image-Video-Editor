@@ -208,7 +208,10 @@ async def health_check():
     try:
         import redis as _redis
         loop = asyncio.get_event_loop()
-        r = await loop.run_in_executor(None, lambda: _redis.from_url(settings.REDIS_URL, socket_timeout=2))
+        if RateLimitMiddleware._redis_pool:
+            r = _redis.Redis(connection_pool=RateLimitMiddleware._redis_pool)
+        else:
+            r = await loop.run_in_executor(None, lambda: _redis.from_url(settings.REDIS_URL, socket_timeout=2))
         await loop.run_in_executor(None, r.ping)
         checks["redis"] = "ok"
     except Exception:

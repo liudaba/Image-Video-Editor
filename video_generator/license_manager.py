@@ -20,7 +20,7 @@ import sys
 import tkinter as tk
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from tkinter import ttk, messagebox
 
 from .config import get_http_session, get_api_base_url
@@ -75,6 +75,16 @@ def _check_clock_rollback():
         return True
     _last_known_time = now
     return False
+
+
+def _parse_iso_to_naive(iso_str):
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except (ValueError, TypeError):
+        return None
 
 
 class LicenseManager:
@@ -328,10 +338,13 @@ class LicenseManager:
         last_heartbeat_str = self.license_data.get("last_heartbeat")
         if last_heartbeat_str:
             try:
-                last_hb = datetime.fromisoformat(last_heartbeat_str)
-                offline_hours = (datetime.now() - last_hb).total_seconds() / 3600
-                if offline_hours > _OFFLINE_TOLERANCE_HOURS:
-                    return {"valid": False, "message": f"已离线超过{_OFFLINE_TOLERANCE_HOURS}小时,请连接网络验证授权"}
+                last_hb = _parse_iso_to_naive(last_heartbeat_str)
+                if last_hb:
+                    from datetime import timezone as _tz
+                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                    offline_hours = (now_utc - last_hb).total_seconds() / 3600
+                    if offline_hours > _OFFLINE_TOLERANCE_HOURS:
+                        return {"valid": False, "message": f"已离线超过{_OFFLINE_TOLERANCE_HOURS}小时,请连接网络验证授权"}
             except (ValueError, TypeError):
                 pass
 
@@ -345,19 +358,18 @@ class LicenseManager:
         if license_type == "trial":
             trial_end_str = signed_data.get("trial_end")
             if trial_end_str:
-                try:
-                    trial_end = datetime.fromisoformat(trial_end_str)
-                    now = datetime.now()
-                    if now <= trial_end + timedelta(hours=_GRACE_HOURS):
-                        days_left = max(0, (trial_end - now).days)
+                trial_end = _parse_iso_to_naive(trial_end_str)
+                if trial_end:
+                    from datetime import timezone as _tz
+                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                    if now_utc <= trial_end + timedelta(hours=_GRACE_HOURS):
+                        days_left = max(0, (trial_end - now_utc).days)
                         return {
                             "valid": True,
                             "type": "trial",
                             "days_left": days_left,
                             "message": f"试用期剩余 {days_left} 天",
                         }
-                except (ValueError, TypeError):
-                    pass
             if days_left > 0:
                 return {
                     "valid": True,
@@ -370,19 +382,18 @@ class LicenseManager:
         if license_type == "pro":
             expiry_str = signed_data.get("expiry_date")
             if expiry_str:
-                try:
-                    expiry_date = datetime.fromisoformat(expiry_str)
-                    now = datetime.now()
-                    if now <= expiry_date + timedelta(hours=_GRACE_HOURS):
-                        days_left = max(0, (expiry_date - now).days)
+                expiry_date = _parse_iso_to_naive(expiry_str)
+                if expiry_date:
+                    from datetime import timezone as _tz
+                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                    if now_utc <= expiry_date + timedelta(hours=_GRACE_HOURS):
+                        days_left = max(0, (expiry_date - now_utc).days)
                         return {
                             "valid": True,
                             "type": "pro",
                             "days_left": days_left,
                             "message": f"专业版剩余 {days_left} 天",
                         }
-                except (ValueError, TypeError):
-                    pass
             if days_left > 0:
                 return {
                     "valid": True,

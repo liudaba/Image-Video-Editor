@@ -20,10 +20,22 @@ MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_SECONDS = 900
 
 
+_redis_pool = None
+
+
 def _get_redis():
+    global _redis_pool
+    if _redis_pool is None:
+        try:
+            import redis
+            _redis_pool = redis.ConnectionPool.from_url(
+                settings.REDIS_URL, socket_timeout=2, max_connections=10
+            )
+        except Exception:
+            return None
     try:
         import redis
-        return redis.from_url(settings.REDIS_URL, socket_timeout=2)
+        return redis.Redis(connection_pool=_redis_pool)
     except Exception:
         return None
 

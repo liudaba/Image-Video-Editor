@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.models import License, MachineBinding, HeartbeatLog, LicenseType, User
 from app.services.license_service import is_license_expired, build_license_response
@@ -64,6 +64,15 @@ async def record_heartbeat(
     )
     db.add(log)
     await db.flush()
+
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        await db.execute(
+            delete(HeartbeatLog).where(HeartbeatLog.created_at < cutoff)
+        )
+        await db.flush()
+    except Exception:
+        pass
 
 
 async def validate_heartbeat(

@@ -38,8 +38,8 @@ class VersionCreate(BaseModel):
 
 
 class LicenseKeyGenerate(BaseModel):
-    plan_type: str = "yearly"
-    count: int = 1
+    plan_type: str = Field("yearly", pattern=r"^(monthly|yearly|lifetime)$")
+    count: int = Field(1, ge=1, le=50)
 
 
 @router.get("/stats")
@@ -81,6 +81,8 @@ async def list_users(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
     offset = (page - 1) * page_size
     result = await db.execute(
         select(User).order_by(User.created_at.desc()).offset(offset).limit(page_size)
