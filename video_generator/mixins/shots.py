@@ -3262,7 +3262,7 @@ class ShotsMixin:
                                             elapsed_time = time.time() - start_time
                                             
                                             if analysis_result:
-                                                self.log(f"✅ 模型 {current_model} 响应成功！")
+                                                self.log(f"✅ 模型 {current_model} 分析完毕！")
                                                 self.log(f"   响应时间: {elapsed_time:.1f}秒")
                                                 self.log(f"   响应长度: {len(analysis_result)} 字符")
                                                 self.log(f"   响应内容预览: {analysis_result[:100]}...")
