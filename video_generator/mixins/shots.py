@@ -243,6 +243,18 @@ _COMMON_ASR_ERROR_DICT = {
     '父子關': '父子關係', '堂兄弟關': '堂兄弟關係',
 }
 
+def _fix_whisper_repeated_chars(text):
+    """修复Whisper语音识别产生的重复字错误
+    
+    常见模式：最后一个字被重复2-3次
+    例如："關係係係" → "關係", "的的了" → "的"
+    """
+    if not text:
+        return text
+    text = re.sub(r'(.)\1{2,}', r'\1', text)
+    text = re.sub(r'(.{2})\1{1,}', r'\1', text)
+    return text
+
 class ShotsMixin:
     def _get_current_model(self):
         return (self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else None) or "gemma3:4b"
@@ -833,8 +845,15 @@ class ShotsMixin:
                         alternatives = VISUAL_ALTERNATIVES[elem]
                         import random
                         replacement = random.choice(alternatives)
-                        new_prompt = re.sub(re.escape(elem), replacement, new_prompt, count=1, flags=re.IGNORECASE)
+                        pattern = r'\b' + re.escape(elem) + r'\b'
+                        new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
                 if new_prompt != curr_prompt:
+                    new_prompt = re.sub(r'(\w+ized)', lambda m: m.group(0).replace('ized', ''), new_prompt)
+                    new_prompt = re.sub(r'(\w+ized)\s+(\w+)', r'\2', new_prompt)
+                    new_prompt = re.sub(r'\b\w+ized\b', '', new_prompt)
+                    new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
+                    new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                    new_prompt = new_prompt.strip(' ,')
                     pregenerated_prompts[curr_idx] = new_prompt
                     self._pregenerated_prompts_for_context[curr_idx] = new_prompt
         
@@ -872,8 +891,15 @@ class ShotsMixin:
                         alternatives = VISUAL_ALTERNATIVES[elem]
                         import random
                         replacement = random.choice(alternatives)
-                        new_prompt = re.sub(re.escape(elem), replacement, dup_prompt, count=1, flags=re.IGNORECASE)
+                        pattern = r'\b' + re.escape(elem) + r'\b'
+                        new_prompt = re.sub(pattern, replacement, dup_prompt, count=1, flags=re.IGNORECASE)
                         if new_prompt != dup_prompt:
+                            new_prompt = re.sub(r'(\w+ized)', lambda m: m.group(0).replace('ized', ''), new_prompt)
+                            new_prompt = re.sub(r'(\w+ized)\s+(\w+)', r'\2', new_prompt)
+                            new_prompt = re.sub(r'\b\w+ized\b', '', new_prompt)
+                            new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
+                            new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                            new_prompt = new_prompt.strip(' ,')
                             pregenerated_prompts[dup_idx] = new_prompt
                             self._pregenerated_prompts_for_context[dup_idx] = new_prompt
                             duplicate_count += 1
@@ -3396,6 +3422,7 @@ class ShotsMixin:
                     for wrong, correct in _COMMON_ASR_ERROR_DICT.items():
                         if wrong in text:
                             text = text.replace(wrong, correct)
+                    text = _fix_whisper_repeated_chars(text)
                     seg_content_type = self.analyze_content_type(text)
                     final_tasks.append({
                         'text': text,
@@ -3509,24 +3536,28 @@ class ShotsMixin:
             
             if _cloud_llm:
                 prompt_max_workers = 4
-                self.log(f"   ☁️ 云端LLM模式，{prompt_max_workers}线程完全并行")
+                self.log(f"   ☁️ 云端LLM模式，{prompt_max_workers}线程并行生成")
             else:
                 prompt_max_workers = 1
-                self.log(f"   💡 本地Ollama使用单线程顺序执行（避免排队阻塞）")
+                self.log(f"   💡 本地Ollama模式，串行生成（Ollama内部串行处理，多线程仅增加排队开销）")
             
             total_tasks = len(final_tasks)
-            self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
+            mode_desc = "串行" if prompt_max_workers == 1 else f"{prompt_max_workers}线程并行"
+            self.log(f"   开始生成 {total_tasks} 个提示词（{mode_desc}）...")
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
             self._pregenerated_prompts_for_context = {}
             self._visual_narrative_strategy = theme_info.get('visual_narrative_strategy', '')
 
             completed_count = 0
-            with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
-                future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
-                for future in as_completed(future_to_idx, timeout=Config.API_TIMEOUT_LLM_PROMPT):
+            per_prompt_timeout = max(30, Config.API_TIMEOUT_LLM_PROMPT // max(1, total_tasks))
+            total_timeout = Config.API_TIMEOUT_LLM_PROMPT + total_tasks * per_prompt_timeout
+            executor = ThreadPoolExecutor(max_workers=prompt_max_workers)
+            future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
+            try:
+                for future in as_completed(future_to_idx, timeout=total_timeout):
                     try:
-                        idx, prompt, error = future.result(timeout=30)
+                        idx, prompt, error = future.result(timeout=per_prompt_timeout)
                         if error:
                             failed_count += 1
                             error_display = error[:200] if len(error) > 200 else error
@@ -3543,6 +3574,16 @@ class ShotsMixin:
                     completed_count += 1
                     progress_pct = 65 + int((completed_count / total_tasks) * 15)
                     self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
+            except TimeoutError:
+                unfinished = [idx for idx in range(total_tasks) if idx not in pregenerated_prompts or not pregenerated_prompts[idx]]
+                self.log(f"   ⚠️ 提示词生成超时，{len(unfinished)}个未完成（将使用回退生成）")
+                for idx in unfinished:
+                    pregenerated_prompts[idx] = ""
+                    failed_count += 1
+            finally:
+                for f in future_to_idx:
+                    f.cancel()
+                executor.shutdown(wait=False)
             
             elapsed = time.time() - start_time
             speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
@@ -3827,7 +3868,6 @@ class ShotsMixin:
                 self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {MIN_SHOT_DURATION}秒）")
                 for j in range(len(shots)):
                     shots[j]['id'] = j
-                    shots[j]['image_file'] = f"shot_{j+1:02d}.png"
                 with open(shots_file, 'w', encoding='utf-8') as f:
                     json.dump(shots, f, ensure_ascii=False, indent=2)
                 self.log(f"   ✅ 合并后分镜数据已重新保存: {shots_file}")

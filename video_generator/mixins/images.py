@@ -690,6 +690,24 @@ class ImagesMixin:
                 self._unload_ollama_models(log_prefix="   ")
             except Exception:
                 pass
+            
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    vram = torch.cuda.memory_allocated() / 1024**3
+                    self.log(f"   📊 GPU 显存占用: {vram:.1f} GB")
+                    if vram > 2.0:
+                        self.log(f"   ⚠️ GPU 显存仍较高，等待释放...")
+                        for _ in range(10):
+                            time.sleep(1)
+                            torch.cuda.empty_cache()
+                            vram = torch.cuda.memory_allocated() / 1024**3
+                            if vram < 1.5:
+                                break
+                        self.log(f"   📊 GPU 显存: {vram:.1f} GB")
+            except Exception:
+                pass
             self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
             self.log(f"   模式: 预取流水线（SD生成与图片保存并行）")
             self.log("")
@@ -767,8 +785,6 @@ class ImagesMixin:
                             override_settings = {}
                             if use_vae and vae_name:
                                 override_settings["sd_vae"] = vae_name
-                            if current_sd_model:
-                                override_settings["sd_model_checkpoint"] = current_sd_model
                             if override_settings:
                                 request_payload["override_settings"] = override_settings
 
