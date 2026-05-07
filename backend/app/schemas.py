@@ -29,7 +29,7 @@ class HeartbeatRequest(BaseModel):
 
 
 class LicenseData(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
 
     sig: Optional[str] = Field(None, alias="_sig")
     username: str
@@ -54,6 +54,13 @@ class ActivateResponse(BaseModel):
 
 class LicenseStatusResponse(BaseModel):
     license: Optional[LicenseData] = None
+
+
+class HeartbeatResponse(BaseModel):
+    is_valid: bool
+    license: Optional[LicenseData] = None
+    reason: Optional[str] = None
+    timestamp: Optional[float] = None
 
 
 class OrderResponse(BaseModel):

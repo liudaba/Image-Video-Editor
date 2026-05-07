@@ -10,6 +10,13 @@ _alipay_instance = None
 _alipay_instance_lock = None
 
 
+def _get_site_base_url() -> str:
+    origins = settings.CORS_ORIGINS
+    if origins:
+        return origins[0].rstrip("/")
+    return "http://localhost"
+
+
 def _get_alipay_instance():
     global _alipay_instance, _alipay_instance_lock
     try:
@@ -45,12 +52,13 @@ def generate_order_no() -> str:
 
 
 async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:
+    base_url = _get_site_base_url()
     try:
         alipay = _get_alipay_instance()
         if alipay is None:
             return {
                 "order_id": order_no,
-                "payment_url": f"https://videogen.com/pay/alipay?order={order_no}",
+                "payment_url": f"{base_url}/pay/alipay?order={order_no}",
                 "qr_code": None,
             }
 
@@ -62,7 +70,7 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
             out_trade_no=order_no,
             total_amount=str(pricing["price"]),
             subject=f"短视频生成器专业版-{plan_type}",
-            return_url="https://videogen.com/payment/success",
+            return_url=f"{base_url}/payment/success",
             notify_url=settings.ALIPAY_NOTIFY_URL,
         )
 
@@ -76,7 +84,7 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
     except ImportError:
         return {
             "order_id": order_no,
-            "payment_url": f"https://videogen.com/pay/alipay?order={order_no}",
+            "payment_url": f"{base_url}/pay/alipay?order={order_no}",
             "qr_code": None,
         }
     except Exception as e:
@@ -118,9 +126,9 @@ async def verify_wechat_notification(headers: dict, body: bytes) -> bool:
         return False
     try:
         import hashlib
-        from lxml import etree
+        from defusedxml.ElementTree import fromstring as safe_fromstring
 
-        root = etree.fromstring(body)
+        root = safe_fromstring(body)
         sign_node = root.find(".//sign")
         if sign_node is None:
             return False

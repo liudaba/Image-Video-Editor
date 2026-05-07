@@ -146,6 +146,7 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
             except IntegrityError:
                 return {"return_code": "SUCCESS", "return_msg": "OK"}
 
+            _sqlite = str(engine.url).startswith("sqlite")
             q = select(Order).where(Order.order_no == out_trade_no)
             if not _sqlite:
                 q = q.with_for_update()

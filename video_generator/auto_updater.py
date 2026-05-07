@@ -33,6 +33,7 @@ class UpdateManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.version_info = None
+            cls._instance.is_downloading = False
             from .version import get_version, compare_versions
             cls._instance.CURRENT_VERSION = get_version()
             cls._instance._compare_versions = compare_versions

@@ -10,16 +10,10 @@ from app.models import (
     User, License, Order, AppVersion, HeartbeatLog, AuditLog,
     LicenseType, OrderStatus, LicenseKey, LicenseKeyStatus, PlanType,
 )
-from app.auth import get_current_user
-from app.services.license_service import build_license_response, generate_license_key
+from app.auth import get_current_user, require_admin
+from app.services.license_service import generate_license_key
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
-
-
-async def require_admin(user: User = Depends(get_current_user)):
-    if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
-    return user
 
 
 async def _log_audit(db: AsyncSession, admin: User, action: str, detail: str = None, request: Request = None):

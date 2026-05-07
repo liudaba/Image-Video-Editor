@@ -62,7 +62,7 @@ def _verify_signature(data: dict) -> bool:
     if not secret:
         return False
     expected = data[_HMAC_KEY]
-    check = {k: v for k, v in data.items() if k != _HMAC_KEY}
+    check = {k: v for k, v in data.items() if k != _HMAC_KEY and v is not None}
     payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     computed = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, computed)
@@ -158,7 +158,7 @@ class LicenseManager:
     def _do_heartbeat(self):
         if not self.license_data:
             return
-        token = self.license_data.get("token", "")
+        token = self.license_data.get("token", "") if self.license_data else ""
         if not token:
             return
         try:
@@ -180,26 +180,38 @@ class LicenseManager:
                     return
                 self._consecutive_failures = 0
                 if not data.get("is_valid", False):
-                    self.license_data["is_valid"] = False
-                    self.license_data["last_heartbeat"] = datetime.now().isoformat()
-                    self.save_license(self.license_data)
+                    self.license_data["signed"]["is_valid"] = False
+                    self._save_signed_license(
+                        self.license_data["signed"],
+                        token=self.license_data.get("token"),
+                        last_heartbeat=datetime.now().isoformat(),
+                    )
                 else:
                     remote_license = data.get("license")
                     if remote_license:
                         if _verify_signature(remote_license):
-                            remote_license["token"] = token
-                            remote_license["last_heartbeat"] = datetime.now().isoformat()
-                            self.save_license(remote_license)
+                            self._save_signed_license(
+                                remote_license,
+                                token=self.license_data.get("token"),
+                                last_heartbeat=datetime.now().isoformat(),
+                            )
                         else:
                             self._consecutive_failures += 1
                     else:
-                        self.license_data["last_heartbeat"] = datetime.now().isoformat()
-                        self.save_license(self.license_data)
+                        self._save_signed_license(
+                            self.license_data.get("signed", self.license_data),
+                            token=self.license_data.get("token"),
+                            last_heartbeat=datetime.now().isoformat(),
+                        )
             elif response.status_code == 401:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
-                    self.license_data["is_valid"] = False
-                    self.save_license(self.license_data)
+                    signed_data = self.license_data.get("signed", self.license_data)
+                    signed_data["is_valid"] = False
+                    self._save_signed_license(
+                        signed_data,
+                        token=self.license_data.get("token"),
+                    )
         except (ConnectionError, TimeoutError, OSError):
             pass
         except Exception:
@@ -219,7 +231,8 @@ class LicenseManager:
             if os.path.exists(license_file):
                 with open(license_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                if not _verify_signature(data):
+                signed_part = data.get("signed", data)
+                if not _verify_signature(signed_part):
                     self.license_data = None
                     return
                 self.license_data = data
@@ -238,6 +251,14 @@ class LicenseManager:
             return True
         except Exception:
             return False
+
+    def _save_signed_license(self, signed_license, token=None, last_heartbeat=None):
+        save_data = {"signed": signed_license}
+        if token:
+            save_data["token"] = token
+        if last_heartbeat:
+            save_data["last_heartbeat"] = last_heartbeat
+        self.save_license(save_data)
 
     def get_license_path(self):
         if getattr(sys, "frozen", False):
@@ -272,8 +293,7 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    signed_license["token"] = data["access_token"]
-                    self.save_license(signed_license)
+                    self._save_signed_license(signed_license, token=data["access_token"])
                 else:
                     return False, "服务器返回的授权数据无效,请联系客服"
                 self.start_heartbeat()
@@ -288,8 +308,9 @@ class LicenseManager:
         if not self.license_data:
             return {"valid": False, "message": "未登录,请先注册或登录"}
 
-        has_signature = _HMAC_KEY in self.license_data
-        if has_signature and not _verify_signature(self.license_data):
+        signed_data = self.license_data.get("signed", self.license_data)
+        has_signature = _HMAC_KEY in signed_data
+        if has_signature and not _verify_signature(signed_data):
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
         if not has_signature:
             return {"valid": False, "message": "授权数据缺少签名,请重新登录"}
@@ -307,15 +328,15 @@ class LicenseManager:
             except (ValueError, TypeError):
                 pass
 
-        is_valid = self.license_data.get("is_valid", False)
+        is_valid = signed_data.get("is_valid", False)
         if not is_valid:
             return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
 
-        license_type = self.license_data.get("license_type", "none")
-        days_left = self.license_data.get("days_left", 0)
+        license_type = signed_data.get("license_type", "none")
+        days_left = signed_data.get("days_left", 0)
 
         if license_type == "trial":
-            trial_end_str = self.license_data.get("trial_end")
+            trial_end_str = signed_data.get("trial_end")
             if trial_end_str:
                 try:
                     trial_end = datetime.fromisoformat(trial_end_str)
@@ -340,7 +361,7 @@ class LicenseManager:
             return {"valid": False, "message": "试用期已结束,请购买专业版继续使用"}
 
         if license_type == "pro":
-            expiry_str = self.license_data.get("expiry_date")
+            expiry_str = signed_data.get("expiry_date")
             if expiry_str:
                 try:
                     expiry_date = datetime.fromisoformat(expiry_str)
@@ -379,8 +400,7 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    signed_license["token"] = token
-                    self.save_license(signed_license)
+                    self._save_signed_license(signed_license, token=token)
                 else:
                     return False, "激活响应数据无效,请联系客服"
                 return True, "专业版激活成功!"
@@ -421,14 +441,14 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    signed_license["token"] = token
-                    self.save_license(signed_license)
+                    self._save_signed_license(signed_license, token=token)
                     return True
             return False
         except Exception:
             return False
 
     def logout(self):
+        self.stop_heartbeat()
         self.license_data = None
         license_file = self.get_license_path()
         if os.path.exists(license_file):

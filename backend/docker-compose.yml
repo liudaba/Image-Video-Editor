@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   db:
     image: postgres:16-alpine
@@ -30,11 +28,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env} --maxmemory 64mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env} --maxmemory 64mb --maxmemory-policy allkeys-lru --appendonly yes
     expose:
       - "6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     mem_limit: 128m
     cpus: 0.5
     networks:
@@ -57,7 +60,7 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./keys:/app/keys
       - ./logs:/app/logs
@@ -95,6 +98,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
     networks:
       - backend
     logging:

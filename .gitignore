@@ -7,9 +7,11 @@ __pycache__/
 env/
 venv/
 ENV/
+.venv/
 build/
 develop-eggs/
 dist/
+dist_obfuscated/
 downloads/
 eggs/
 .eggs/
@@ -23,7 +25,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# 模型文件 (太大，从其他渠道下载)
+# 模型文件
 models/*.pt
 models/*.pth
 models/*.ckpt
@@ -34,10 +36,7 @@ output/
 outputs/
 output_project/
 
-# ⚠️ 注意: docs/ 目录下的演示素材需要提交到Git
-# 以下规则不忽略 docs/ 目录
-
-# 视频文件 (除了docs/demo/目录下的)
+# 视频文件
 *.mp4
 *.avi
 *.mov
@@ -47,13 +46,13 @@ output_project/
 *.wav
 *.mp3
 
-# 图片文件 (除了docs/screenshots/目录下的)
+# 图片文件
 *.jpg
 *.jpeg
 *.png
 *.gif
 
-# JSON配置文件 (除了config.json模板)
+# JSON配置文件 (保留config.json模板)
 *.json
 !config.json
 
@@ -78,13 +77,23 @@ Thumbs.db
 
 # 备份文件
 *.bak
+backups/
 
-# 安全相关
+# 安全相关 - 绝对不能提交
 .secret_key
 .key_salt
 .license_sign_key
 .license_verify_key
 .env
 *.db
+*.pem
 license.json
+keys/
 logs/
+
+# 测试脚本 (含敏感信息)
+test_api.sh
+test_server.sh
+
+# 安装包输出
+installer_output/

@@ -33,12 +33,12 @@ async def init():
     async with async_session() as db:
         from sqlalchemy import select
         result = await db.execute(select(User).where(User.username == settings.ADMIN_USERNAME))
-        if result.scalar_one_or_none():
+        if result.scalars().first():
             print(f"   ⏭️ 管理员 {settings.ADMIN_USERNAME} 已存在，跳过")
         else:
             admin = User(
                 username=settings.ADMIN_USERNAME,
-                email="admin@videogen.com",
+                email="admin@videogen.local",
                 hashed_password=hash_password(settings.ADMIN_PASSWORD),
                 is_active=True,
                 is_admin=True,
@@ -62,19 +62,19 @@ async def init():
         print(f"   📋 请将此密钥复制到客户端项目的 .license_verify_key 文件中")
         print(f"   密钥长度: {len(sign_key)} 字符")
 
-        if settings.HMAC_SIGN_KEY.startswith("change-this"):
+        if settings.HMAC_SIGN_KEY == "dev-hmac-key-change-in-production":
             print("\n   ⚠️  请更新 .env 中的 HMAC_SIGN_KEY 为上述密钥内容！")
 
     print("\n4️⃣ 创建首个版本记录...")
     async with async_session() as db:
         result = await db.execute(select(AppVersion))
-        if result.scalar_one_or_none():
+        if result.scalars().first():
             print("   ⏭️ 版本记录已存在，跳过")
         else:
             version = AppVersion(
                 version="2.0.0",
-                download_url="https://videogen.com/download/videogen-2.0.0-setup.exe",
-                file_size=1200000000,
+                download_url="",
+                file_size=0,
                 changelog="首个商业发布版本\n- 完整的音频转视频功能\n- 用户注册登录系统\n- 7天免费试用\n- 专业版订阅",
                 priority="normal",
                 force_update=False,
@@ -87,7 +87,7 @@ async def init():
     print("\n" + "=" * 60)
     print("  🎉 初始化完成!")
     print("=" * 60)
-    print(f"""
+    print("""
   下一步操作:
   1. 编辑 .env 文件，更新以下配置:
      - HMAC_SIGN_KEY: 设置为上面生成的签名密钥
@@ -99,7 +99,7 @@ async def init():
      docker compose up -d
 
   3. 验证服务:
-     curl https://api.videogen.com/health
+     curl http://<你的服务器IP>/health
 
   4. 将签名密钥复制到客户端:
      复制 keys/.license_verify_key 的内容到客户端项目的 .license_verify_key 文件

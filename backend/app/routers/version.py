@@ -44,6 +44,7 @@ async def check_update(
         release_date=latest.release_date.isoformat() if latest.release_date else None,
         changelog=changelog,
         file_size=latest.file_size,
+        file_hash=latest.file_hash,
         download_url=latest.download_url,
         priority=latest.priority,
         force_update=latest.force_update,

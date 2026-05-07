@@ -49,11 +49,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.rate_limit = rate_limit
         self._fallback_requests = {}
+        self._redis_pool = None
+
+    def _get_redis_pool(self):
+        if self._redis_pool is None:
+            try:
+                import redis
+                self._redis_pool = redis.ConnectionPool.from_url(
+                    settings.REDIS_URL, socket_timeout=1, max_connections=10
+                )
+            except Exception:
+                pass
+        return self._redis_pool
 
     def _check_redis_rate(self, client_ip: str, path: str) -> bool:
         try:
             import redis
-            r = redis.from_url(settings.REDIS_URL, socket_timeout=1)
+            pool = self._get_redis_pool()
+            if pool is None:
+                return self._check_memory_rate(client_ip, path)
+            r = redis.Redis(connection_pool=pool)
             now = int(time.time())
             window_key = f"ratelimit:{client_ip}:{path}:{now // 60}"
             count = r.incr(window_key)
@@ -146,7 +161,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = "no-store"
     return response
 

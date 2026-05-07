@@ -5,7 +5,7 @@ from sqlalchemy import select, delete
 
 from app.database import get_db
 from app.models import User, License, MachineBinding, HeartbeatLog, AuditLog
-from app.schemas import LicenseStatusResponse, HeartbeatRequest
+from app.schemas import LicenseStatusResponse, HeartbeatRequest, HeartbeatResponse
 from app.auth import get_current_user
 from app.services.license_service import build_license_response, is_license_expired
 from app.services.heartbeat_service import record_heartbeat, validate_heartbeat, check_and_bind_machine
@@ -47,7 +47,7 @@ async def get_license_status(
     return LicenseStatusResponse(license=license_data)
 
 
-@router.post("/heartbeat")
+@router.post("/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(
     body: HeartbeatRequest,
     user: User = Depends(get_current_user),

@@ -6,6 +6,9 @@ echo "  短视频生成器 - 一键部署脚本"
 echo "=========================================="
 echo ""
 
+DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DEPLOY_DIR"
+
 if [ ! -f ".env" ]; then
     echo "❌ 未找到 .env 文件，正在从模板创建..."
     cp .env.example .env
@@ -20,6 +23,11 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
+echo "0️⃣ 创建必要目录..."
+mkdir -p keys logs backups
+echo "   ✅ 目录创建完成"
+
+echo ""
 echo "1️⃣ 安装 Docker（如果未安装）..."
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com | sh
@@ -34,25 +42,31 @@ echo ""
 echo "2️⃣ 启动数据库和 Redis..."
 docker compose up -d db redis
 echo "   ⏳ 等待数据库就绪..."
-sleep 5
+sleep 10
 
 echo ""
 echo "3️⃣ 构建并启动 API 服务..."
 docker compose up -d --build api
-sleep 3
+sleep 5
 
 echo ""
-echo "4️⃣ 运行数据库迁移（Alembic）..."
-docker compose exec api alembic upgrade head 2>/dev/null || {
-    echo "   ⚠️  Alembic 迁移失败，尝试直接初始化..."
-    docker compose exec api python init_db.py
+echo "4️⃣ 运行数据库初始化..."
+docker compose exec api python init_db.py 2>/dev/null || {
+    echo "   ⚠️  初始化脚本失败，尝试 Alembic 迁移..."
+    docker compose exec api alembic upgrade head 2>/dev/null || {
+        echo "   ❌ 数据库迁移失败，请检查日志"
+    }
 }
 
 echo ""
 echo "5️⃣ 配置 Nginx..."
+if [ ! -d "/etc/nginx/sites-available" ]; then
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+fi
 if [ ! -f "/etc/nginx/sites-available/videogen" ]; then
     cp nginx.conf /etc/nginx/sites-available/videogen
     ln -sf /etc/nginx/sites-available/videogen /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
     echo "   ✅ Nginx 配置已安装"
 else
     echo "   ⏭️ Nginx 配置已存在"
@@ -60,27 +74,24 @@ fi
 
 echo ""
 echo "6️⃣ 配置 SSL 证书..."
-SSL_DIR="/etc/nginx/ssl"
-if [ ! -f "$SSL_DIR/videogen.com.pem" ]; then
-    if command -v certbot &> /dev/null; then
-        echo "   🔐 使用 Let's Encrypt 申请证书..."
-        certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com
-        echo "   ✅ SSL 证书已安装"
-        echo "   📋 设置自动续期..."
-        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
-        echo "   ✅ 自动续期已配置（每天凌晨3点检查）"
-    else
-        echo "   📦 安装 Certbot..."
-        apt install -y certbot python3-certbot-nginx
-        certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com
-        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
-        echo "   ✅ SSL 证书已安装并配置自动续期"
-    fi
+if command -v certbot &> /dev/null; then
+    echo "   🔐 使用 Let's Encrypt 申请证书..."
+    certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com || {
+        echo "   ⚠️  SSL 证书申请失败，请确认域名已解析到此服务器"
+    }
+    (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
+    echo "   ✅ 自动续期已配置（每天凌晨3点检查）"
 else
-    echo "   ✅ SSL 证书已就绪"
+    echo "   📦 安装 Certbot..."
+    apt install -y certbot python3-certbot-nginx
+    certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com || {
+        echo "   ⚠️  SSL 证书申请失败，请确认域名已解析到此服务器"
+    }
+    (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
+    echo "   ✅ 自动续期已配置"
 fi
 
-nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
+nginx -t && systemctl reload nginx || echo "   ⚠️  Nginx 重载失败，请检查配置"
 
 echo ""
 echo "7️⃣ 配置 fail2ban..."
@@ -148,8 +159,19 @@ else
 fi
 
 echo ""
-echo "🔟 验证服务..."
-sleep 2
+echo "🔟 安装 systemd 服务..."
+if [ -f "videogen-api.service" ]; then
+    cp videogen-api.service /etc/systemd/system/videogen-api.service
+    systemctl daemon-reload
+    systemctl enable videogen-api
+    echo "   ✅ systemd 服务已安装（开机自启）"
+else
+    echo "   ⏭️ systemd 服务文件未找到，跳过"
+fi
+
+echo ""
+echo "🔍 验证服务..."
+sleep 3
 if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
     echo "   ✅ API 服务运行正常"
 else

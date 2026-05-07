@@ -25,7 +25,7 @@ async def register(body: UserRegister, request: Request, db: AsyncSession = Depe
         raise HTTPException(status_code=429, detail="注册尝试过多,请15分钟后再试")
 
     result = await db.execute(select(User).where((User.username == body.username) | (User.email == body.email)))
-    if result.scalar_one_or_none():
+    if result.scalars().first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或邮箱已存在")
 
     user = User(
