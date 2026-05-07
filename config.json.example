@@ -16,7 +16,6 @@
   "prompt_type": "SD提示词",
   "animation": "缩放",
   "thread_count": 16,
-  "prompt_thread_count": 4,
   "cloud_llm_enabled": false,
   "cloud_llm_provider": "DeepSeek 深度求索",
   "cloud_llm_api_key": "",

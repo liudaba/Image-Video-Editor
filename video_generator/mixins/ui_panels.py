@@ -643,24 +643,6 @@ class UIPanelsMixin:
         )
         thread_combo.pack(side=tk.LEFT, padx=2, pady=1)
 
-        prompt_thread_frame = ttk.Frame(thread_section)
-        prompt_thread_frame.pack(fill=tk.X, pady=1)
-        ttk.Label(prompt_thread_frame, text="提示词线程:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
-
-        if not hasattr(self, 'prompt_thread_count_var'):
-            self.prompt_thread_count_var = tk.IntVar(value=4)
-
-        prompt_thread_options = [1, 2, 3, 4, 6, 8]
-        prompt_thread_combo = ttk.Combobox(
-            prompt_thread_frame,
-            textvariable=self.prompt_thread_count_var,
-            values=prompt_thread_options,
-            state="readonly",
-            font=('Microsoft YaHei', large_font_size),
-            width=8
-        )
-        prompt_thread_combo.pack(side=tk.LEFT, padx=2, pady=1)
-
         # ==================== 主题自定义 ====================
         theme_section = ttk.LabelFrame(panels["theme"], text="🎯 主题自定义", padding=4, style="Adv.TLabelframe")
         theme_section.pack(fill=tk.BOTH, expand=True)

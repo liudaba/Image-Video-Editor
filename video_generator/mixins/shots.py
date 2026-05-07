@@ -725,13 +725,13 @@ class ShotsMixin:
 
 
     def _check_and_deduplicate_prompts(self, pregenerated_prompts, final_tasks):
-        """检测并修正重复的提示词
+        """检测并修正重复的提示词 - 轻量级本地处理版
         
         策略：
-        1. 计算提示词的词汇重叠率（相邻+非相邻）
-        2. 重叠率超过50%的标记为重复
-        3. 检测高频视觉元素重复（同一元素在连续N个分镜中出现）
-        4. 对重复提示词追加差异化指令重新生成
+        1. 计算提示词的词汇重叠率（相邻）
+        2. 重叠率超过50%的标记为重复，使用本地规则替换
+        3. 检测高频视觉元素重复，使用预定义替代方案替换
+        4. 不调用LLM，纯本地处理，零额外延迟
         
         Returns:
             修正的重复提示词数量
@@ -758,10 +758,15 @@ class ShotsMixin:
             visual_keywords = {
                 'dna', 'helix', 'double helix', 'gene', 'genetic', 'chromosome',
                 'tree', 'branching', 'evolutionary tree', 'family tree', 'phylogenetic',
-                'fossil', 'skull', 'skeleton', 'bone', 'remains',
-                'forest', 'jungle', 'canopy', 'prehistoric',
-                'professor', 'scientist', 'researcher', 'student', 'paleontologist',
-                'laboratory', 'museum', 'dig site',
+                'fossil', 'fossilized', 'skull', 'skeleton', 'bone', 'remains',
+                'sediment', 'strata', 'stratified', 'geological', 'layered',
+                'paleontologist', 'excavation', 'dig site',
+                'forest', 'jungle', 'canopy', 'prehistoric', 'primordial',
+                'professor', 'scientist', 'researcher', 'student',
+                'laboratory', 'museum',
+                'ancient primate', 'hominid', 'early hominid', 'primitive hominid',
+                'cave painting', 'stone tool', 'timeline mural', 'comparative anatomy',
+                'cell division', 'protein folding',
             }
             prompt_lower = prompt.lower()
             found = set()
@@ -770,10 +775,45 @@ class ShotsMixin:
                     found.add(kw)
             return found
         
+        VISUAL_ALTERNATIVES = {
+            'dna': ['microscopic cell structure', 'chromosome diagram', 'RNA strand'],
+            'helix': ['protein folding', 'gene expression pattern', 'cellular machinery'],
+            'double helix': ['twisted ladder metaphor', 'genetic code visualization', 'molecular structure'],
+            'gene': ['allele comparison', 'genotype diagram', 'heredity chart'],
+            'genetic': ['molecular biology', 'hereditary trait', 'biochemical pathway'],
+            'chromosome': ['karyotype display', 'chromatid pair', 'cell nucleus detail'],
+            'tree': ['river delta', 'branching coral', 'neural network'],
+            'branching': ['diverging path', 'splitting stream', 'forked lightning'],
+            'evolutionary tree': ['phylogenetic chart', 'cladogram diagram', 'lineage map'],
+            'fossil': ['living habitat reconstruction', 'footprint trackway', 'ancient egg'],
+            'fossilized': ['petrified wood', 'amber specimen', 'mineralized imprint'],
+            'skull': ['brain cavity cast', 'jaw structure', 'cranial capacity diagram'],
+            'skeleton': ['muscular reconstruction', 'body silhouette', 'joint mechanism'],
+            'bone': ['cartilage model', 'tissue cross-section', 'growth ring'],
+            'sediment': ['erosion pattern', 'riverbed cross-section', 'depositional layer'],
+            'strata': ['geological column', 'rock formation', 'cliff face exposure'],
+            'stratified': ['banded iron formation', 'layered canyon wall', 'sedimentary fold'],
+            'geological': ['tectonic plate boundary', 'volcanic formation', 'mineral vein'],
+            'layered': ['laminated rock', 'sedimentary stack', 'depositional sequence'],
+            'paleontologist': ['field researcher', 'laboratory analyst', 'science student'],
+            'forest': ['open savanna', 'coastal wetland', 'mountain meadow'],
+            'prehistoric': ['ancient civilization', 'primordial landscape', 'dawn of time'],
+            'primordial': ['volcanic landscape', 'early earth', 'hazy dawn'],
+            'ancient primate': ['primate hand grasping tool', 'footprint in volcanic ash', 'nesting site'],
+            'hominid': ['bipedal trackway', 'stone tool workshop', 'fire-lit shelter'],
+            'cave painting': ['rock art close-up', 'ochre hand stencil', 'animal engraving'],
+            'timeline mural': ['chronological scroll', 'era comparison chart', 'epoch diagram'],
+            'comparative anatomy': ['hand skeleton comparison', 'skull side-by-side', 'limb bone overlay'],
+            'cell division': ['mitosis illustration', 'chromosome separation', 'spindle fiber'],
+            'protein folding': ['enzyme active site', 'molecular docking', 'amino acid chain'],
+            'museum': ['archive room', 'library study', 'display cabinet'],
+            'laboratory': ['field station', 'research vessel', 'outdoor experiment'],
+        }
+        
         duplicate_count = 0
         indices = sorted(pregenerated_prompts.keys())
         
-        # Pass 1: 相邻去重（阈值50%）
+        # Pass 1: 相邻去重（阈值50%）- 本地替换
         for i in range(1, len(indices)):
             curr_idx = indices[i]
             prev_idx = indices[i - 1]
@@ -786,48 +826,19 @@ class ShotsMixin:
             overlap = _token_overlap_ratio(curr_prompt, prev_prompt)
             if overlap > 0.5:
                 duplicate_count += 1
-                dubbing = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ""
-                prev_visual = _get_visual_elements(prev_prompt)
-                avoid_instruction = ""
-                if prev_visual:
-                    avoid_instruction = f"\n- AVOID these visual elements (already used in previous shot): {', '.join(sorted(prev_visual))}"
-                
-                if dubbing and is_llm_available():
-                    try:
-                        model = self._get_current_model()
-                        if not model:
-                            model = "gemma3:4b"
-                        diff_prompt = f"""The previous shot prompt was: {prev_prompt}
-
-This is TOO SIMILAR (overlap: {overlap:.0%}). Generate a COMPLETELY DIFFERENT scene for the same dubbing.
-Current dubbing: {dubbing}
-
-Requirements:
-- Use a COMPLETELY DIFFERENT location, angle, composition, and visual metaphor
-- Focus on a different aspect or detail of the same topic
-- Must be visually distinct from the previous scene
-- Think of a creative alternative: different camera angle, different time of day, different scale (macro vs wide), different focus (person vs object vs environment){avoid_instruction}
-- Output ONLY the new prompt, nothing else"""
-
-                        result_text, _ = call_ollama_single(
-                            model=model,
-                            system_prompt="You are an AI image prompt engineer. Generate a visually distinct alternative prompt.",
-                            user_prompt=diff_prompt,
-                            log_callback=self.log,
-                            num_predict=512,
-                            num_ctx=2048,
-                            llm_config=getattr(self, 'current_llm_config', None),
-                            timeout=Config.API_TIMEOUT_LLM_PROMPT
-                        )
-                        if result_text:
-                            cleaned = self._clean_prompt_output(result_text.strip())
-                            if cleaned and len(cleaned) > 20:
-                                pregenerated_prompts[curr_idx] = cleaned
-                                self._pregenerated_prompts_for_context[curr_idx] = cleaned
-                    except Exception:
-                        pass
+                prev_elements = _get_visual_elements(prev_prompt)
+                new_prompt = curr_prompt
+                for elem in prev_elements:
+                    if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
+                        alternatives = VISUAL_ALTERNATIVES[elem]
+                        import random
+                        replacement = random.choice(alternatives)
+                        new_prompt = re.sub(re.escape(elem), replacement, new_prompt, count=1, flags=re.IGNORECASE)
+                if new_prompt != curr_prompt:
+                    pregenerated_prompts[curr_idx] = new_prompt
+                    self._pregenerated_prompts_for_context[curr_idx] = new_prompt
         
-        # Pass 2: 高频视觉元素去重（同一视觉元素在连续3+个分镜中出现）
+        # Pass 2: 高频视觉元素去重（同一视觉元素在连续3+个分镜中出现）- 本地替换
         element_history = {}
         for i in range(len(indices)):
             idx = indices[i]
@@ -841,60 +852,31 @@ Requirements:
                 element_history[elem].append(i)
         
         for elem, occurrences in element_history.items():
-            if len(occurrences) >= 3:
-                consecutive_runs = []
-                run_start = 0
-                for j in range(1, len(occurrences)):
-                    if occurrences[j] - occurrences[j-1] <= 2:
-                        continue
-                    else:
-                        if j - run_start >= 3:
-                            consecutive_runs.append(occurrences[run_start:j])
-                        run_start = j
-                if len(occurrences) - run_start >= 3:
-                    consecutive_runs.append(occurrences[run_start:])
-                
-                for run in consecutive_runs:
-                    for k in range(2, len(run)):
-                        dup_idx = indices[run[k]]
-                        dup_prompt = pregenerated_prompts.get(dup_idx, "")
-                        dubbing = final_tasks[dup_idx].get('text', '') if dup_idx < len(final_tasks) else ""
-                        if dubbing and is_llm_available() and dup_prompt:
-                            try:
-                                model = self._get_current_model()
-                                if not model:
-                                    model = "gemma3:4b"
-                                diff_prompt = f"""The element "{elem}" has appeared in too many consecutive shots.
-Current prompt: {dup_prompt}
-Current dubbing: {dubbing}
-
-Replace "{elem}" with a DIFFERENT visual element that conveys the same meaning.
-For example, if "DNA helix" is overused, try: microscopic cell division, protein folding, genetic code on screen, chromosome diagram, etc.
-If "evolutionary tree" is overused, try: fossil layers, comparative anatomy, timeline mural, species comparison chart, etc.
-
-Requirements:
-- Remove "{elem}" and replace with a creative alternative
-- Keep the scene relevant to the dubbing
-- Output ONLY the new prompt, nothing else"""
-
-                                result_text, _ = call_ollama_single(
-                                    model=model,
-                                    system_prompt="You are an AI image prompt engineer. Replace an overused visual element with a creative alternative.",
-                                    user_prompt=diff_prompt,
-                                    log_callback=self.log,
-                                    num_predict=512,
-                                    num_ctx=2048,
-                                    llm_config=getattr(self, 'current_llm_config', None),
-                                    timeout=Config.API_TIMEOUT_LLM_PROMPT
-                                )
-                                if result_text:
-                                    cleaned = self._clean_prompt_output(result_text.strip())
-                                    if cleaned and len(cleaned) > 20:
-                                        pregenerated_prompts[dup_idx] = cleaned
-                                        self._pregenerated_prompts_for_context[dup_idx] = cleaned
-                                        duplicate_count += 1
-                            except Exception:
-                                pass
+            consecutive_runs = []
+            run_start = 0
+            for j in range(1, len(occurrences)):
+                if occurrences[j] - occurrences[j-1] <= 2:
+                    continue
+                else:
+                    if j - run_start >= 3:
+                        consecutive_runs.append(occurrences[run_start:j])
+                    run_start = j
+            if len(occurrences) - run_start >= 3:
+                consecutive_runs.append(occurrences[run_start:])
+            
+            for run in consecutive_runs:
+                for k in range(2, len(run)):
+                    dup_idx = indices[run[k]]
+                    dup_prompt = pregenerated_prompts.get(dup_idx, "")
+                    if dup_prompt and elem in VISUAL_ALTERNATIVES:
+                        alternatives = VISUAL_ALTERNATIVES[elem]
+                        import random
+                        replacement = random.choice(alternatives)
+                        new_prompt = re.sub(re.escape(elem), replacement, dup_prompt, count=1, flags=re.IGNORECASE)
+                        if new_prompt != dup_prompt:
+                            pregenerated_prompts[dup_idx] = new_prompt
+                            self._pregenerated_prompts_for_context[dup_idx] = new_prompt
+                            duplicate_count += 1
         
         return duplicate_count
 
@@ -1771,42 +1753,22 @@ Requirements:
             try:
                 idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
                 if idx >= 0:
-                    if full_text and len(full_text) > 50:
-                        content_summary = full_text[:300] + "..." if len(full_text) > 300 else full_text
-                        context_hint += f"Full content summary: {content_summary}\n"
-                    
-                    prev_texts = [shot_texts[j] for j in range(max(0, idx-5), idx)]
-                    if prev_texts:
-                        context_hint += f"Previous dubbing: {' | '.join(prev_texts)}\n"
-                    
-                    next_texts = [shot_texts[j] for j in range(idx+1, min(len(shot_texts), idx+6))]
-                    if next_texts:
-                        context_hint += f"Next dubbing: {' | '.join(next_texts)}\n"
-                    
                     if hasattr(self, '_pregenerated_prompts_for_context'):
-                        prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-3), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
+                        prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-2), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
                         if prev_prompts:
-                            context_hint += f"Previous prompts (DO NOT repeat these scenes): {' | '.join(prev_prompts[-3:])}\n"
+                            context_hint += f"AVOID repeating: {', '.join(prev_prompts[-2:])}\n"
                     
                     total_shots = len(shot_texts)
-                    position_info = f"Shot {idx+1} of {total_shots}"
                     if idx == 0:
-                        position_info += " (OPENING - establish the scene)"
+                        context_hint += "Position: OPENING\n"
                     elif idx == total_shots - 1:
-                        position_info += " (CLOSING - reinforce the theme)"
-                    elif idx < total_shots // 3:
-                        position_info += " (early section)"
-                    elif idx > (total_shots * 2) // 3:
-                        position_info += " (late section)"
-                    else:
-                        position_info += " (middle section)"
-                    context_hint += f"Position: {position_info}\n"
+                        context_hint += "Position: CLOSING\n"
             except Exception:
                 pass
         
         entity_hint = self._extract_entities_for_prompt(dubbing)
         if entity_hint:
-            context_hint += f"Key entities in this dubbing: {entity_hint}\n"
+            context_hint += f"Entities: {entity_hint}\n"
         
         if hasattr(self, '_visual_narrative_strategy') and self._visual_narrative_strategy:
             strategy = self._visual_narrative_strategy
@@ -1839,8 +1801,8 @@ Requirements:
                 system_prompt=template["system"],
                 user_prompt=template["user"],
                 log_callback=self.log,
-                num_predict=768,
-                num_ctx=4096,
+                num_predict=256,
+                num_ctx=2048,
                 llm_config=llm_config,
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
@@ -3428,6 +3390,12 @@ Requirements:
             for seg in original_shot_tasks:
                 text = seg.get('text', '').strip()
                 if text:
+                    if correction_dict:
+                        for old, new in correction_dict.items():
+                            text = text.replace(old, new)
+                    for wrong, correct in _COMMON_ASR_ERROR_DICT.items():
+                        if wrong in text:
+                            text = text.replace(wrong, correct)
                     seg_content_type = self.analyze_content_type(text)
                     final_tasks.append({
                         'text': text,
@@ -3435,7 +3403,7 @@ Requirements:
                         'end': seg.get('end', 0),
                         'content_type': seg_content_type
                     })
-            self.log(f"📝 共 {len(final_tasks)} 个语音片段分镜")
+            self.log(f"📝 共 {len(final_tasks)} 个语音片段分镜（已应用纠错）")
             
             # 预先为原始分镜生成提示词
             pregenerated_prompts = {}
@@ -3461,13 +3429,13 @@ Requirements:
                     _need_restart = True
                 
                 if _need_restart:
-                    from video_generator.ollama_client import is_ollama_available, check_ollama_available
-                    if not is_ollama_available() and not check_ollama_available():
+                    from video_generator.ollama_client import is_ollama_available
+                    if not is_ollama_available():
                         from video_generator.ollama_client import restart_ollama_service
                         self.log("⚠️ Ollama 服务不可用，尝试重启...")
                         restart_ollama_service(log_callback=self.log)
                     else:
-                        self.log("✅ Ollama 服务可用，无需重启")
+                        self.log("✅ Ollama 服务可用")
                 
                 self.log("🔥 预热模型中...")
                 try:
@@ -3478,8 +3446,6 @@ Requirements:
                     warmup_model(model, log_callback=self.log)
                     warmup_time = time.time() - warmup_start
                     self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
-                    time.sleep(2)
-                    self.log("   ⏳ 等待模型就绪...")
                 except Exception as e:
                     self._log_exception(f"⚠️ 模型预热失败", e)
             
@@ -3535,19 +3501,18 @@ Requirements:
                     full_error = str(e)
                     return (idx, "", full_error)
             
-            if hasattr(self, 'prompt_thread_count_var'):
-                prompt_max_workers = self.prompt_thread_count_var.get()
-            else:
-                prompt_max_workers = 4
-            
             try:
                 from video_generator.cloud_llm_client import is_cloud_llm_enabled
                 _cloud_llm = is_cloud_llm_enabled()
             except ImportError:
                 _cloud_llm = False
             
-            if not _cloud_llm and prompt_max_workers > 2:
-                self.log(f"   💡 本地Ollama最多2个并发请求，{prompt_max_workers}线程排队执行（云端模式可完全并行）")
+            if _cloud_llm:
+                prompt_max_workers = 4
+                self.log(f"   ☁️ 云端LLM模式，{prompt_max_workers}线程完全并行")
+            else:
+                prompt_max_workers = 1
+                self.log(f"   💡 本地Ollama使用单线程顺序执行（避免排队阻塞）")
             
             total_tasks = len(final_tasks)
             self.log(f"   开始生成 {total_tasks} 个提示词（{prompt_max_workers}线程并行）...")
@@ -3863,6 +3828,9 @@ Requirements:
                 for j in range(len(shots)):
                     shots[j]['id'] = j
                     shots[j]['image_file'] = f"shot_{j+1:02d}.png"
+                with open(shots_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
+                self.log(f"   ✅ 合并后分镜数据已重新保存: {shots_file}")
             
             # 确保首尾覆盖整个音频时长
             if shots and audio_total_duration > 0:
@@ -3882,6 +3850,10 @@ Requirements:
                 self.log(f"   ⚠️ 时长差异: 分镜{total_shots_duration:.2f}s vs 音频{audio_total_duration:.2f}s")
             else:
                 self.log(f"   ✅ 时间戳验证通过")
+            
+            with open(shots_file, 'w', encoding='utf-8') as f:
+                json.dump(shots, f, ensure_ascii=False, indent=2)
+            self.log(f"   ✅ 验证后分镜数据已保存: {shots_file}")
             
             gaps = []
             for i in range(1, len(shots)):

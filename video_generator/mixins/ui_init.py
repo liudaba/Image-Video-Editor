@@ -35,10 +35,9 @@ class UIInitMixin:
         self._start_system_services()
         
         # 显示优化状态（不立即检测硬件）
-        prompt_threads = self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS
         thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
         print(f"🚀 性能优化已启用:")
-        print(f"   - 并行提示词生成: {prompt_threads}线程（按需加载）")
+        print(f"   - 提示词生成: 本地单线程/云端4线程（自动切换）")
         print(f"   - 图像生成线程: {thread_count}")
         print(f"   - 批量图像生成: 就绪")
         print(f"   - 视频编码器: 延迟检测（首次使用时）")
@@ -327,7 +326,6 @@ class UIInitMixin:
         
         # 并发线程数设置 - 初始默认值，由高级设置面板和load_config覆盖
         self.thread_count_var = tk.IntVar(value=16)
-        self.prompt_thread_count_var = tk.IntVar(value=Config.DEFAULT_MAX_WORKERS)
         
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")

@@ -297,7 +297,6 @@ class UIHandlersMixin:
             animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
             transition = self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'
             thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
-            prompt_thread = self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS
             prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
             core_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ''
             visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ''
@@ -322,7 +321,6 @@ class UIHandlersMixin:
             print(f"  动画效果:     {animation}")
             print(f"  过渡效果:     {transition}")
             print(f"  图像生成线程: {thread_count}")
-            print(f"  提示词生成线程: {prompt_thread}")
             if core_theme:
                 print(f"  核心主题:     {core_theme}")
             if visual_tone:
@@ -524,7 +522,6 @@ class UIHandlersMixin:
         confirm_msg += f"动画效果: {self.animation_var.get() if hasattr(self, 'animation_var') else '无'}\n"
         confirm_msg += f"过渡效果: {self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'}\n"
         confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16}\n"
-        confirm_msg += f"提示词线程: {self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else 4}\n"
 
         # 显示确认对话框
         confirmed = messagebox.askyesno("确认设置", confirm_msg)
@@ -1438,8 +1435,6 @@ class UIHandlersMixin:
                 # 加载并发线程数设置
                 if 'thread_count' in config and hasattr(self, 'thread_count_var'):
                     self.thread_count_var.set(config['thread_count'])
-                if 'prompt_thread_count' in config and hasattr(self, 'prompt_thread_count_var'):
-                    self.prompt_thread_count_var.set(config['prompt_thread_count'])
                 
                 # 加载Whisper模型设置
                 if 'whisper_model' in config and hasattr(self, 'whisper_model_var'):
@@ -1484,7 +1479,6 @@ class UIHandlersMixin:
                 prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
                 animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
                 thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
-                prompt_thread_count = self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS
                 
                 self.log(f"✅ 已加载Ollama模型: {ollama_model}")
                 self.log(f"✅ 已加载音频模型: {whisper_model}")
@@ -1521,7 +1515,6 @@ class UIHandlersMixin:
                 'prompt_type': self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词',
                 'animation': self.animation_var.get() if hasattr(self, 'animation_var') else '无',
                 'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16,
-                'prompt_thread_count': self.prompt_thread_count_var.get() if hasattr(self, 'prompt_thread_count_var') else Config.DEFAULT_MAX_WORKERS,
                 'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
                 'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'DeepSeek 深度求索',
                 'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',
