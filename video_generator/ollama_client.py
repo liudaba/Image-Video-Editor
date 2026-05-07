@@ -246,7 +246,6 @@ class LLMConfig:
             "repeat_penalty": 1.1,
             "frequency_penalty": 0.0,
             "presence_penalty": 0.0,
-            "num_predict": 500,
             "description": "最快响应，适合简单任务"
         },
         "质量优先": {
@@ -256,8 +255,6 @@ class LLMConfig:
             "repeat_penalty": 1.18,
             "frequency_penalty": 0.25,
             "presence_penalty": 0.25,
-            "num_predict": 4000,
-            "num_ctx": 8192,
             "description": "最高输出质量，适合复杂任务"
         }
     }
