@@ -31,6 +31,20 @@ class PromptTemplates:
 3. 如果文本准确无误，【纠错说明】必须写"无"
 4. 绝对不要编造不存在的错误
 
+【重点纠错类型 - 必须逐一检查】
+A. 专有名词错误（最常见）：
+   - 学科术语被误识别：如"靈長類"被识别为"零長類/臨長類"、"進化論"被识别为"金花論"
+   - 人名/地名/书名被误识别：如"達爾文"被识别为其他同音词
+   - 科学概念被误识别：如"基因"被识别为"基恩"、"染色體"被识别为其他词
+B. 同音字/近音字错误：
+   - 语义不通的词可能是同音字误识别：如"分的差"应为"分了岔"、"秋前"应为"秋千"
+   - 根据上下文语义判断：如果某个词在语境中说不通，很可能是同音字错误
+C. 数字/量词错误：
+   - 数量级错误：如"千半年"应为"千萬年"、"987"应为"98%"
+   - 单位错误：如"98%以上"被识别为"987以上"
+D. 语句不通顺：
+   - 如果某句话读起来语义不通，很可能是语音识别错误，请根据上下文推断正确内容
+
 【内容类型】新闻播报/军事分析/科普教育/历史纪录/社会民生/财经商业/文化艺术/自然地理/体育竞技
 
 【输出要求】严格按此格式，不要输出其他内容：
@@ -41,18 +55,24 @@ class PromptTemplates:
 【视觉风格】：(中文推荐风格)
 【英文视觉风格】：(English visual style keywords, e.g. documentary photography, cinematic, news broadcast)
 【核心元素】：(5-8个关键词，用逗号分隔，不要用箭头格式)
+【视觉叙事策略】：(选择一种贯穿全片的视觉叙事方式：A.时间线叙事-按时间顺序从过去到现在 B.空间探索-从宏观到微观或反之 C.主题递进-从表象到本质逐步深入 D.对比叙事-通过对比展开 E.隐喻主线-用一个核心隐喻贯穿)
 【纠错说明】：(格式：错字1→正确1,错字2→正确2。如无纠正则写"无")
 
 重要：
 1. 核心元素必须是纯关键词，用逗号分隔，不要使用箭头(→)格式
 2. 仔细阅读文本，只纠正真正的语音识别错误
 3. 繁体字不是错误，不要在纠错说明中列出
-4. 直接输出格式内容，不要有开场白或解释""",
+4. 直接输出格式内容，不要有开场白或解释
+5. 纠错时必须逐一检查每个词是否为上述A/B/C/D类错误，不要遗漏""",
 
         "user_template": """语音文本：
 {text}
 
-请先仔细阅读整段文本，理解主题和语境，然后逐一检查每个词是否存在真正的语音识别错误（注意：繁体字不是错误），最后按格式输出："""
+请按以下步骤分析：
+1. 先通读全文，理解整体主题和语境
+2. 逐词检查是否存在A/B/C/D类语音识别错误（注意：繁体字不是错误）
+3. 特别注意：专有名词是否被同音字替换？数字/量词是否合理？语句是否通顺？
+4. 按格式输出结果"""
     }
 
     SHOT_PROMPT_SD = {
@@ -84,6 +104,13 @@ Example outputs:
 
 {style_instruction}
 {theme_instruction}
+
+【VISUAL DIVERSITY RULES - CRITICAL】
+- Each prompt MUST use a DIFFERENT primary visual element (NOT the same DNA helix, evolutionary tree, or fossil in every shot)
+- VARY your visual approach across shots: alternate between wide shots, close-ups, abstract diagrams, real-world scenes, and metaphorical imagery
+- FORBIDDEN: using the same visual element (DNA, tree, fossil, laboratory) in more than 2 consecutive shots
+- When the topic is scientific/educational, ALTERNATE between: real-world footage, diagrams/illustrations, close-up details, human elements, and environmental context
+- Use DIFFERENT camera angles and compositions: wide establishing shot → medium shot → close-up detail → abstract visualization → human reaction
 
 【CRITICAL RULES】
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
@@ -157,6 +184,13 @@ Example outputs:
 {style_instruction}
 {theme_instruction}
 
+【VISUAL DIVERSITY RULES - CRITICAL】
+- Each prompt MUST use a DIFFERENT primary visual element (NOT the same DNA helix, evolutionary tree, or fossil in every shot)
+- VARY your visual approach across shots: alternate between wide shots, close-ups, abstract diagrams, real-world scenes, and metaphorical imagery
+- FORBIDDEN: using the same visual element (DNA, tree, fossil, laboratory) in more than 2 consecutive shots
+- When the topic is scientific/educational, ALTERNATE between: real-world footage, diagrams/illustrations, close-up details, human elements, and environmental context
+- Use DIFFERENT camera angles and compositions: wide establishing shot → medium shot → close-up detail → abstract visualization → human reaction
+
 【CRITICAL RULES】
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
 - FORBIDDEN: repeating the same scene across shots
@@ -221,6 +255,13 @@ Example outputs:
 
 {style_instruction}
 {theme_instruction}
+
+【VISUAL DIVERSITY RULES - CRITICAL】
+- Each prompt MUST use a DIFFERENT primary visual element (NOT the same DNA helix, evolutionary tree, or fossil in every shot)
+- VARY your visual approach across shots: alternate between wide shots, close-ups, abstract diagrams, real-world scenes, and metaphorical imagery
+- FORBIDDEN: using the same visual element (DNA, tree, fossil, laboratory) in more than 2 consecutive shots
+- When the topic is scientific/educational, ALTERNATE between: real-world footage, diagrams/illustrations, close-up details, human elements, and environmental context
+- Use DIFFERENT camera angles and compositions: wide establishing shot → medium shot → close-up detail → abstract visualization → human reaction
 
 【CRITICAL RULES】
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant
@@ -288,6 +329,13 @@ Example outputs:
 
 {style_instruction}
 {theme_instruction}
+
+【VISUAL DIVERSITY RULES - CRITICAL】
+- Each prompt MUST use a DIFFERENT primary visual element (NOT the same DNA helix, evolutionary tree, or fossil in every shot)
+- VARY your visual approach across shots: alternate between wide shots, close-ups, abstract diagrams, real-world scenes, and metaphorical imagery
+- FORBIDDEN: using the same visual element (DNA, tree, fossil, laboratory) in more than 2 consecutive shots
+- When the topic is scientific/educational, ALTERNATE between: real-world footage, diagrams/illustrations, close-up details, human elements, and environmental context
+- Use DIFFERENT camera angles and compositions: wide establishing shot → medium shot → close-up detail → abstract visualization → human reaction
 
 【CRITICAL RULES】
 - FORBIDDEN: generic scenes (office, boardroom, cityscape) unless directly relevant

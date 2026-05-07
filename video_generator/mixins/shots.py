@@ -227,6 +227,22 @@ _TRANSLATION_MAPPING = {
     '談判': 'negotiation',
 }
 
+_COMMON_ASR_ERROR_DICT = {
+    '零長類': '靈長類', '臨長類': '靈長類', '零长类': '灵长类', '临长类': '灵长类',
+    '金花論': '進化論', '金花论': '进化论', '精化论': '进化论', '近化论': '进化论',
+    '秋前': '秋千', '秋钱': '秋千',
+    '千半年': '千萬年', '千半年': '千万年',
+    '分的差': '分了岔', '分的叉': '分了岔',
+    '達爾聞': '達爾文', '达尔闻': '达尔文',
+    '黑腥腥': '黑猩猩', '黑星星': '黑猩猩',
+    '染色提': '染色體', '染色蹄': '染色體',
+    '進話論': '進化論', '进话论': '进化论',
+    '原長類': '靈長類', '原长类': '灵长类',
+    '基恩': '基因',
+    '物理學裡': '生物學裡', '物理学里': '生物学里',
+    '父子關': '父子關係', '堂兄弟關': '堂兄弟關係',
+}
+
 class ShotsMixin:
     def _get_current_model(self):
         return (self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else None) or "gemma3:4b"
@@ -413,60 +429,65 @@ class ShotsMixin:
 
 
     def calculate_semantic_weight(self, sentence):
-        """计算语义权重"""
-        # 基于关键词、句子长度、内容类型等因素计算语义权重
+        """计算语义权重 - 增强版，提供更好的区分度
         
-        # 关键词权重
+        评分维度：
+        1. 关键词权重（核心论点/转折/强调）
+        2. 句子长度
+        3. 标点符号（疑问/感叹/转折）
+        4. 内容类型
+        5. 语义角色（开场/结论/转折/核心论据）
+        """
         keyword_weights = {
-            "重要": 3.0, "关键": 3.0, "核心": 3.0,
-            "新": 2.5, "创新": 2.5, "发现": 2.5,
-            "首先": 2.0, "首次": 2.0, "唯一": 2.0,
-            "因为": 1.5, "所以": 1.5, "但是": 1.5,
-            "如果": 1.2, "假设": 1.2, "可能": 1.2,
-            "必须": 2.0, "应该": 1.5, "需要": 1.5,
-            "建议": 1.2, "推荐": 1.2, "注意": 1.5
+            "重要": 1.5, "关键": 1.5, "核心": 1.5, "本质": 1.5,
+            "新": 1.0, "创新": 1.0, "发现": 1.0, "突破": 1.2,
+            "首先": 0.8, "首次": 1.0, "唯一": 1.0,
+            "因为": 0.8, "所以": 0.8, "但是": 1.0, "然而": 1.0,
+            "如果": 0.6, "假设": 0.6, "可能": 0.5,
+            "必须": 1.0, "应该": 0.6, "需要": 0.5,
+            "建议": 0.4, "推荐": 0.4, "注意": 0.6,
+            "共同": 1.2, "祖先": 1.2, "起源": 1.2, "根本": 1.2,
+            "为什么": 1.2, "为何": 1.2, "到底": 1.0,
+            "恰恰": 1.0, "偏偏": 1.0, "正是": 1.0,
+            "意味着": 1.0, "说明": 0.8, "表明": 0.8,
+            "最终": 0.8, "结果": 0.6, "其实": 0.8,
         }
         
-        weight = 1.0
+        weight = 0.7
         
-        # 基于关键词计算权重
         for keyword, keyword_weight in keyword_weights.items():
             if keyword in sentence:
                 weight += keyword_weight
         
-        # 基于句子长度调整权重
         sentence_length = len(sentence)
         if sentence_length > 50:
-            weight += 1.0
+            weight += 0.5
         elif sentence_length > 30:
-            weight += 0.5
+            weight += 0.3
         elif sentence_length < 10:
-            weight -= 0.5
+            weight -= 0.3
         
-        # 基于标点符号调整权重
-        if "。" in sentence or "！" in sentence or "？" in sentence:
-            weight += 0.5
-        if "，" in sentence:
+        if "？" in sentence or "?" in sentence:
+            weight += 0.8
+        if "！" in sentence or "!" in sentence:
+            weight += 0.6
+        if "。" in sentence:
             weight += 0.2
+        if "，" in sentence:
+            weight += 0.1
+        if "但是" in sentence or "然而" in sentence or "不过" in sentence:
+            weight += 0.5
         
-        # 基于内容类型调整权重
         content_type = self.analyze_content_type(sentence)
         content_weight = {
-            "space": 1.2,
-            "science": 1.1,
-            "technology": 1.1,
-            "history": 1.0,
-            "nature": 1.0,
-            "health": 1.0,
-            "business": 0.9,
-            "education": 0.9,
-            "art": 0.8,
-            "travel": 0.8,
-            "general": 0.7
+            "space": 1.1, "science": 1.05, "technology": 1.05,
+            "history": 1.0, "nature": 1.0, "health": 1.0,
+            "business": 0.95, "education": 0.95, "art": 0.9,
+            "travel": 0.9, "general": 0.85
         }
-        weight *= content_weight.get(content_type, 0.7)
+        weight *= content_weight.get(content_type, 0.85)
         
-        return min(weight, 5.0)  # 权重上限为5.0
+        return round(min(weight, 5.0), 2)
 
 
     # =======================================================================
@@ -508,9 +529,10 @@ class ShotsMixin:
 1. 先为整个文本添加正确的标点符号（逗号、句号、问号等）
 2. 然后按标点符号和语义完整性划分分镜
 3. 每个分镜必须是一句或几句话构成的完整语义段落
-4. 每个分镜时长建议3-10秒
+4. 每个分镜时长建议3-10秒，最短不少于2.5秒
 5. 只能合并相邻片段，不能拆分或重排
 6. 同时纠正明显的语音识别错误（如同音字、人名错字）
+7. 过短的片段（<2.5秒）必须与相邻片段合并，确保每个分镜都有足够的展示时间
 
 【输出格式】严格输出JSON数组，每个元素包含：
 - "range": [起始片段索引, 结束片段索引]（包含两端）
@@ -620,7 +642,7 @@ class ShotsMixin:
         """规则合并：大模型不可用时的回退方案
         
         策略：
-        1. 过短的片段（< 3秒）与相邻片段合并
+        1. 过短的片段（< 2.5秒）与相邻片段合并
         2. 语义不完整的片段（只有连词/过渡词）与下一个片段合并
         3. 二次合并：合并后仍过短的片段继续合并
         """
@@ -646,7 +668,7 @@ class ShotsMixin:
             
             should_merge = False
             
-            if duration < 3.0:
+            if duration < 2.5:
                 should_merge = True
             
             if text in incomplete_words:
@@ -706,9 +728,10 @@ class ShotsMixin:
         """检测并修正重复的提示词
         
         策略：
-        1. 计算相邻提示词的词汇重叠率
-        2. 重叠率超过70%的标记为重复
-        3. 对重复提示词追加差异化指令重新生成
+        1. 计算提示词的词汇重叠率（相邻+非相邻）
+        2. 重叠率超过50%的标记为重复
+        3. 检测高频视觉元素重复（同一元素在连续N个分镜中出现）
+        4. 对重复提示词追加差异化指令重新生成
         
         Returns:
             修正的重复提示词数量
@@ -729,9 +752,28 @@ class ShotsMixin:
             union = tokens1 | tokens2
             return len(intersection) / len(union) if union else 0.0
         
+        def _get_visual_elements(prompt):
+            if not prompt:
+                return set()
+            visual_keywords = {
+                'dna', 'helix', 'double helix', 'gene', 'genetic', 'chromosome',
+                'tree', 'branching', 'evolutionary tree', 'family tree', 'phylogenetic',
+                'fossil', 'skull', 'skeleton', 'bone', 'remains',
+                'forest', 'jungle', 'canopy', 'prehistoric',
+                'professor', 'scientist', 'researcher', 'student', 'paleontologist',
+                'laboratory', 'museum', 'dig site',
+            }
+            prompt_lower = prompt.lower()
+            found = set()
+            for kw in visual_keywords:
+                if kw in prompt_lower:
+                    found.add(kw)
+            return found
+        
         duplicate_count = 0
         indices = sorted(pregenerated_prompts.keys())
         
+        # Pass 1: 相邻去重（阈值50%）
         for i in range(1, len(indices)):
             curr_idx = indices[i]
             prev_idx = indices[i - 1]
@@ -742,9 +784,14 @@ class ShotsMixin:
                 continue
             
             overlap = _token_overlap_ratio(curr_prompt, prev_prompt)
-            if overlap > 0.7:
+            if overlap > 0.5:
                 duplicate_count += 1
                 dubbing = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ""
+                prev_visual = _get_visual_elements(prev_prompt)
+                avoid_instruction = ""
+                if prev_visual:
+                    avoid_instruction = f"\n- AVOID these visual elements (already used in previous shot): {', '.join(sorted(prev_visual))}"
+                
                 if dubbing and is_llm_available():
                     try:
                         model = self._get_current_model()
@@ -752,13 +799,14 @@ class ShotsMixin:
                             model = "gemma3:4b"
                         diff_prompt = f"""The previous shot prompt was: {prev_prompt}
 
-This is TOO SIMILAR. Generate a COMPLETELY DIFFERENT scene for the same dubbing.
+This is TOO SIMILAR (overlap: {overlap:.0%}). Generate a COMPLETELY DIFFERENT scene for the same dubbing.
 Current dubbing: {dubbing}
 
 Requirements:
-- Use a DIFFERENT location, angle, and composition
-- Focus on a different aspect of the same topic
+- Use a COMPLETELY DIFFERENT location, angle, composition, and visual metaphor
+- Focus on a different aspect or detail of the same topic
 - Must be visually distinct from the previous scene
+- Think of a creative alternative: different camera angle, different time of day, different scale (macro vs wide), different focus (person vs object vs environment){avoid_instruction}
 - Output ONLY the new prompt, nothing else"""
 
                         result_text, _ = call_ollama_single(
@@ -778,6 +826,75 @@ Requirements:
                                 self._pregenerated_prompts_for_context[curr_idx] = cleaned
                     except Exception:
                         pass
+        
+        # Pass 2: 高频视觉元素去重（同一视觉元素在连续3+个分镜中出现）
+        element_history = {}
+        for i in range(len(indices)):
+            idx = indices[i]
+            prompt = pregenerated_prompts.get(idx, "")
+            if not prompt:
+                continue
+            current_elements = _get_visual_elements(prompt)
+            for elem in current_elements:
+                if elem not in element_history:
+                    element_history[elem] = []
+                element_history[elem].append(i)
+        
+        for elem, occurrences in element_history.items():
+            if len(occurrences) >= 3:
+                consecutive_runs = []
+                run_start = 0
+                for j in range(1, len(occurrences)):
+                    if occurrences[j] - occurrences[j-1] <= 2:
+                        continue
+                    else:
+                        if j - run_start >= 3:
+                            consecutive_runs.append(occurrences[run_start:j])
+                        run_start = j
+                if len(occurrences) - run_start >= 3:
+                    consecutive_runs.append(occurrences[run_start:])
+                
+                for run in consecutive_runs:
+                    for k in range(2, len(run)):
+                        dup_idx = indices[run[k]]
+                        dup_prompt = pregenerated_prompts.get(dup_idx, "")
+                        dubbing = final_tasks[dup_idx].get('text', '') if dup_idx < len(final_tasks) else ""
+                        if dubbing and is_llm_available() and dup_prompt:
+                            try:
+                                model = self._get_current_model()
+                                if not model:
+                                    model = "gemma3:4b"
+                                diff_prompt = f"""The element "{elem}" has appeared in too many consecutive shots.
+Current prompt: {dup_prompt}
+Current dubbing: {dubbing}
+
+Replace "{elem}" with a DIFFERENT visual element that conveys the same meaning.
+For example, if "DNA helix" is overused, try: microscopic cell division, protein folding, genetic code on screen, chromosome diagram, etc.
+If "evolutionary tree" is overused, try: fossil layers, comparative anatomy, timeline mural, species comparison chart, etc.
+
+Requirements:
+- Remove "{elem}" and replace with a creative alternative
+- Keep the scene relevant to the dubbing
+- Output ONLY the new prompt, nothing else"""
+
+                                result_text, _ = call_ollama_single(
+                                    model=model,
+                                    system_prompt="You are an AI image prompt engineer. Replace an overused visual element with a creative alternative.",
+                                    user_prompt=diff_prompt,
+                                    log_callback=self.log,
+                                    num_predict=512,
+                                    num_ctx=2048,
+                                    llm_config=getattr(self, 'current_llm_config', None),
+                                    timeout=Config.API_TIMEOUT_LLM_PROMPT
+                                )
+                                if result_text:
+                                    cleaned = self._clean_prompt_output(result_text.strip())
+                                    if cleaned and len(cleaned) > 20:
+                                        pregenerated_prompts[dup_idx] = cleaned
+                                        self._pregenerated_prompts_for_context[dup_idx] = cleaned
+                                        duplicate_count += 1
+                            except Exception:
+                                pass
         
         return duplicate_count
 
@@ -832,13 +949,15 @@ Requirements:
         return ', '.join(unique[:8]) if unique else ""
 
     def _calculate_prompt_quality(self, prompt_en, dubbing_text):
-        """计算提示词质量评分（0.0-1.0）
+        """计算提示词质量评分（0.0-1.0）- 增强版，更细粒度
         
         评分维度：
-        1. 长度适当性（0.25分）：30-200字符为最佳
-        2. 关键词丰富度（0.25分）：逗号分隔的关键词数量
-        3. 无中文污染（0.25分）：不含中文字符
-        4. 语义相关性（0.25分）：提示词与配音文本的实体重叠
+        1. 长度适当性（0.20分）：30-200字符为最佳
+        2. 关键词丰富度（0.20分）：逗号分隔的关键词数量
+        3. 无中文污染（0.15分）：不含中文字符
+        4. 语义相关性（0.20分）：提示词与配音文本的实体重叠
+        5. 视觉具体性（0.15分）：包含具体视觉描述词
+        6. 构图多样性（0.10分）：包含镜头/构图关键词
         """
         if not prompt_en:
             return 0.0
@@ -846,28 +965,38 @@ Requirements:
         score = 0.0
         
         prompt_len = len(prompt_en)
-        if 30 <= prompt_len <= 200:
-            score += 0.25
-        elif 15 <= prompt_len < 30 or 200 < prompt_len <= 300:
+        if 50 <= prompt_len <= 180:
+            score += 0.20
+        elif 30 <= prompt_len < 50:
             score += 0.15
+        elif 180 < prompt_len <= 300:
+            score += 0.12
+        elif 15 <= prompt_len < 30:
+            score += 0.08
         elif prompt_len > 10:
-            score += 0.05
+            score += 0.03
         
         keywords = [k.strip() for k in prompt_en.split(',') if k.strip()]
-        if 8 <= len(keywords) <= 25:
-            score += 0.25
-        elif 5 <= len(keywords) < 8 or 25 < len(keywords) <= 35:
+        if 10 <= len(keywords) <= 22:
+            score += 0.20
+        elif 7 <= len(keywords) < 10:
             score += 0.15
+        elif 22 < len(keywords) <= 30:
+            score += 0.12
+        elif 4 <= len(keywords) < 7:
+            score += 0.08
         elif len(keywords) >= 3:
-            score += 0.05
+            score += 0.04
         
         has_chinese = bool(re.search(r'[\u4e00-\u9fff]', prompt_en))
         if not has_chinese:
-            score += 0.25
-        elif has_chinese:
+            score += 0.15
+        else:
             chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', prompt_en))
-            if chinese_chars <= 3:
-                score += 0.10
+            if chinese_chars <= 2:
+                score += 0.08
+            elif chinese_chars <= 5:
+                score += 0.03
         
         if dubbing_text and ENHANCED_RECOGNITION_AVAILABLE:
             try:
@@ -881,20 +1010,49 @@ Requirements:
                             if en_part and en_part in prompt_lower:
                                 entity_hits += 1
                                 break
-                if entity_hits > 0:
-                    score += min(0.25, 0.1 * entity_hits)
+                if entity_hits >= 2:
+                    score += 0.20
+                elif entity_hits == 1:
+                    score += 0.12
             except ImportError:
                 pass
+        
+        visual_specificity_words = [
+            'close-up', 'wide shot', 'medium shot', 'establishing shot', 'aerial',
+            'silhouette', 'reflection', 'shadow', 'backlit', 'golden hour',
+            'dramatic', 'vivid', 'intricate', 'detailed', 'textured',
+            'glowing', 'illuminated', 'weathered', 'ancient', 'modern',
+        ]
+        prompt_lower = prompt_en.lower()
+        visual_hits = sum(1 for w in visual_specificity_words if w in prompt_lower)
+        if visual_hits >= 3:
+            score += 0.15
+        elif visual_hits >= 2:
+            score += 0.10
+        elif visual_hits >= 1:
+            score += 0.05
+        
+        composition_words = [
+            'close-up', 'wide', 'medium', 'establishing', 'overhead',
+            'low angle', 'high angle', 'bird\'s eye', 'panoramic', 'portrait',
+            'landscape', 'split', 'symmetrical', 'depth of field',
+        ]
+        comp_hits = sum(1 for w in composition_words if w in prompt_lower)
+        if comp_hits >= 1:
+            score += 0.10
+        elif comp_hits == 0:
+            score += 0.02
         
         return round(min(1.0, score), 2)
 
     def _extract_shot_theme_elements(self, shot_text, global_elements):
-        """从分镜文案中提取相关的主题元素
+        """从分镜文案中提取相关的主题元素 - 增强版
         
         策略：
         1. 精确匹配：元素直接出现在分镜文案中
         2. 关键词关联匹配：通过语义关联词映射
-        3. 兜底：如果无匹配，返回空列表（不注入无关元素）
+        3. 动态提取：从分镜文本中提取关键名词/概念
+        4. 兜底：如果无匹配，返回空列表（不注入无关元素）
         """
         if not global_elements or not shot_text:
             return []
@@ -918,6 +1076,13 @@ Requirements:
             '基因编辑': ['基因', '编辑', 'DNA', 'CRISPR', '遗传', '基因组'],
             '城市': ['城市', '建筑', '街道', '巷弄', '社区', '胡同', '弄堂'],
             '生命': ['生命', '生存', '活着', '呼吸', '生活'],
+            '进化': ['进化', '演化', '進化', '演變', '自然選擇', '自然筛选', '适者生存', '达尔文', '達爾文'],
+            '灵长类': ['灵长', '靈長', '猿', '猴', '猩猩', '古人類', '古人猿'],
+            '共同祖先': ['祖先', '共同', '起源', '起源地', '根'],
+            '基因': ['基因', 'DNA', '遗传', '遺傳', '染色體', '染色体', '双螺旋'],
+            '气候变化': ['气候', '氣候', '森林', '环境', '環境', '变暖', '冰川'],
+            '文明': ['文明', '文化', '工具', '思考', '智慧', '哲学'],
+            '生存': ['生存', '活下去', '适应', '適應', '妥协', '妥協'],
         }
 
         matched_elements = []
@@ -928,6 +1093,22 @@ Requirements:
             keywords = semantic_map.get(elem, [])
             if any(kw in shot_text for kw in keywords):
                 matched_elements.append(elem)
+
+        if not matched_elements:
+            dynamic_keywords = []
+            concept_patterns = [
+                ('进化', ['进化', '演化', '進化', '演變']),
+                ('灵长类', ['灵长', '靈長', '猿', '猴', '猩猩']),
+                ('基因', ['基因', 'DNA', '遗传', '遺傳']),
+                ('共同祖先', ['祖先', '共同', '起源']),
+                ('气候变化', ['气候', '氣候', '森林减少']),
+                ('文明', ['文明', '工具', '思考']),
+                ('自然选择', ['自然選擇', '自然筛选', '适者生存']),
+            ]
+            for concept, patterns in concept_patterns:
+                if any(p in shot_text for p in patterns):
+                    dynamic_keywords.append(concept)
+            matched_elements = dynamic_keywords[:3]
 
         return matched_elements[:3]
 
@@ -1234,11 +1415,39 @@ Requirements:
         text = str(raw_output).strip()
         
         # 解析两阶段输出格式: [understanding] | [prompt]
-        pipe_match = re.search(r'\]\s*\|\s*', text)
-        if pipe_match:
-            after_pipe = text[pipe_match.end():].strip()
-            if after_pipe and len(after_pipe) > 10:
-                text = after_pipe
+        # 格式1: [some understanding text] | [some prompt text]
+        # 格式2: [Understanding]: some text | [Prompt]: some text
+        # 格式3: Understanding: some text | Prompt: some text
+        
+        # 优先尝试格式2/3: [Label]: text | [Label]: text
+        label_pipe_match = re.search(
+            r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*.*?\s*\|\s*\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*',
+            text, re.IGNORECASE | re.DOTALL
+        )
+        if label_pipe_match:
+            after_match = text[label_pipe_match.end():].strip()
+            if after_match and len(after_match) > 10:
+                text = after_match
+        else:
+            # 尝试无括号的标签格式: Understanding: text | Prompt: text
+            no_bracket_match = re.search(
+                r'(?:Understanding|understanding)\s*:\s*.*?\s*\|\s*(?:Prompt|prompt)\s*:\s*',
+                text, re.IGNORECASE | re.DOTALL
+            )
+            if no_bracket_match:
+                after_match = text[no_bracket_match.end():].strip()
+                if after_match and len(after_match) > 10:
+                    text = after_match
+            else:
+                # 格式1: [text] | [text] - 原始逻辑
+                pipe_match = re.search(r'\]\s*\|\s*', text)
+                if pipe_match:
+                    after_pipe = text[pipe_match.end():].strip()
+                    if after_pipe and len(after_pipe) > 10:
+                        text = after_pipe
+        
+        # 清除残留的 [Understanding]: 或 [Prompt]: 标签
+        text = re.sub(r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*', '', text, flags=re.IGNORECASE)
         
         # 【关键】处理 DeepSeek-R1 等推理模型的思考标签
         # 必须在最前面处理，否则会影响后续清洗逻辑
@@ -1401,6 +1610,44 @@ Requirements:
         # Fix SD syntax: [text | text] alternating syntax → just use first text
         text = re.sub(r'\[([^|\]]+?)\s*\|\s*([^\]]+?)\]', r'\1', text)
         
+        # Fix mismatched brackets: (4K] → (4K), [text) → [text]
+        # Fix closing ] without opening [
+        text = re.sub(r'\(([^)]*?)\]', r'(\1)', text)
+        # Fix closing ) without opening (
+        text = re.sub(r'\[([^\]]*?)\)', r'[\1]', text)
+        
+        # Fix unbalanced parentheses in SD weight syntax
+        # Remove orphaned opening parentheses: "(keyword" without closing ")"
+        # Strategy: find ( that has content but no matching )
+        def _fix_unbalanced_parens(t):
+            result = []
+            paren_stack = []
+            i = 0
+            while i < len(t):
+                if t[i] == '(':
+                    paren_stack.append(len(result))
+                    result.append('(')
+                elif t[i] == ')':
+                    if paren_stack:
+                        paren_stack.pop()
+                        result.append(')')
+                    else:
+                        pass
+                else:
+                    result.append(t[i])
+                i += 1
+            while paren_stack:
+                idx = paren_stack.pop()
+                result.insert(idx + 1, ')') if idx + 1 <= len(result) else result.append(')')
+            return ''.join(result)
+        
+        text = _fix_unbalanced_parens(text)
+        
+        # Remove empty parentheses: () or ( :1.2) or (,)
+        text = re.sub(r'\(\s*\)', '', text)
+        text = re.sub(r'\(\s*:[\d.]+\s*\)', '', text)
+        text = re.sub(r'\(\s*,\s*\)', '', text)
+        
         if len(text.strip()) < 10:
             return raw_output.strip()
         
@@ -1561,6 +1808,18 @@ Requirements:
         if entity_hint:
             context_hint += f"Key entities in this dubbing: {entity_hint}\n"
         
+        if hasattr(self, '_visual_narrative_strategy') and self._visual_narrative_strategy:
+            strategy = self._visual_narrative_strategy
+            strategy_instructions = {
+                '时间线叙事': 'Follow a TIMELINE visual narrative: early shots show ancient/historical scenes, gradually transitioning to modern/present day. Maintain chronological visual progression.',
+                '空间探索': 'Follow a SPATIAL visual narrative: start with wide/establishing shots, gradually zoom into details. Alternate between macro and micro perspectives.',
+                '主题递进': 'Follow a THEMATIC DEEPENING narrative: start with surface-level visuals, progressively reveal deeper/more abstract concepts. Each shot should add a new layer of understanding.',
+                '对比叙事': 'Follow a CONTRAST narrative: alternate between opposing visual elements (light/dark, old/new, nature/technology, individual/crowd). Use visual juxtaposition.',
+                '隐喻主线': 'Follow a METAPHOR narrative: use ONE consistent visual metaphor throughout (e.g., a growing tree, a flowing river, a building structure). Each shot shows a different aspect of the same metaphor.',
+            }
+            strategy_instruction = strategy_instructions.get(strategy, f'Follow this visual narrative strategy: {strategy}')
+            context_hint += f"Visual Narrative Strategy: {strategy_instruction}\n"
+        
         template_params["context_hint"] = context_hint
         
         if prompt_type == "ARV写实提示词":
@@ -1605,9 +1864,10 @@ Requirements:
     
 
     def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name=""):
-        """根据制图模型类型和内容生成定制化负面提示词
+        """根据制图模型类型和内容生成定制化负面提示词 - 增强版
         
-        使用 model_profiles 统一管理，不再手动判断模型类型
+        使用 model_profiles 统一管理基础负面提示词，
+        然后根据配音文本内容动态添加针对性的负面提示词
         """
         from video_generator.model_profiles import get_model_profile, detect_model_type
 
@@ -1644,6 +1904,37 @@ Requirements:
             additional_negative.extend(["star", "sun", "planet", "moon", "satellite", "human", "person", "face", "building", "tree"])
         if any(kw in dubbing for kw in ["政治", "历史", "古代", "战争"]):
             additional_negative.extend(["modern", "contemporary", "anachronism"])
+        
+        # 动态检测：含人物的分镜
+        person_keywords = ["人", "他", "她", "我", "你", "我们", "他们", "教授", "学生", "科学家",
+                          "学者", "研究", "教授", "老師", "博士", "人類", "人类"]
+        if any(kw in dubbing for kw in person_keywords):
+            additional_negative.extend(["(extra faces:1.2)", "(multiple people:1.1)", "(crowded:1.1)"])
+        
+        # 动态检测：含动物的分镜
+        animal_keywords = ["猴子", "猴", "猿", "猩猩", "黑猩猩", "动物", "動物", "灵长", "靈長",
+                          "恐龙", "恐龍", "鸟", "魚", "鱼", "虎", "狮", "象"]
+        if any(kw in dubbing for kw in animal_keywords):
+            additional_negative.extend(["(deformed animal:1.3)", "(wrong animal anatomy:1.2)", "(extra legs:1.2)"])
+        
+        # 动态检测：含抽象概念的分镜（避免生成不必要的人物）
+        abstract_keywords = ["进化", "進化", "演化", "自然选择", "自然選擇", "基因", "DNA",
+                            "文明", "文化", "历史", "歷史", "时间", "時間", "千萬年", "百万年",
+                            "链條", "鏈條", "接力", "转折", "轉折"]
+        has_abstract = any(kw in dubbing for kw in abstract_keywords)
+        has_person = any(kw in dubbing for kw in person_keywords)
+        if has_abstract and not has_person:
+            additional_negative.extend(["realistic person", "portrait", "face close-up", "selfie"])
+        
+        # 动态检测：含数字/数据的分镜（避免生成乱码文字）
+        data_keywords = ["98%", "百分比", "数据", "數據", "统计", "統計", "比例", "相似度"]
+        if any(kw in dubbing for kw in data_keywords):
+            additional_negative.extend(["(text:1.3)", "(numbers:1.2)", "(watermark with text:1.2)", "chart with text"])
+        
+        # 动态检测：含自然景观的分镜
+        nature_scene_keywords = ["森林", "树", "丛林", "草原", "山脉", "河流", "海洋", "沙漠"]
+        if any(kw in dubbing for kw in nature_scene_keywords):
+            additional_negative.extend(["indoor", "room", "wall", "ceiling", "furniture"])
 
         all_negative = base_negative.copy()
         content_type_lower = content_type.lower() if content_type else ""
@@ -2031,6 +2322,7 @@ Requirements:
             'visual_style_en': '',
             'theme_elements': [],
             'emotional_tone': '',
+            'visual_narrative_strategy': '',
             'correction_dict': {}
         }
 
@@ -2185,6 +2477,27 @@ Requirements:
                 elements_text = cleaned_result.split('Theme Elements:')[1].split('\n')[0].strip()
                 elements = re.split(r'[,;]', elements_text)
                 theme_info['theme_elements'] = [e.strip() for e in elements if e.strip()]
+
+            # 提取视觉叙事策略
+            if '视觉叙事策略' in cleaned_result:
+                try:
+                    strategy_match = cleaned_result.split('视觉叙事策略')[1].split('\n')[0]
+                    strategy_match = strategy_match.replace('：', '').replace(':', '').strip()
+                    if strategy_match and strategy_match != '无':
+                        strategy_map = {
+                            'A': '时间线叙事', 'B': '空间探索', 'C': '主题递进',
+                            'D': '对比叙事', 'E': '隐喻主线',
+                            '时间线': '时间线叙事', '空间': '空间探索',
+                            '主题': '主题递进', '对比': '对比叙事', '隐喻': '隐喻主线',
+                        }
+                        matched_strategy = None
+                        for key, value in strategy_map.items():
+                            if key in strategy_match:
+                                matched_strategy = value
+                                break
+                        theme_info['visual_narrative_strategy'] = matched_strategy or strategy_match
+                except Exception:
+                    pass
 
             # 提取纠错说明并应用纠正
             correction_dict = {}
@@ -3241,6 +3554,7 @@ Requirements:
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
             self._pregenerated_prompts_for_context = {}
+            self._visual_narrative_strategy = theme_info.get('visual_narrative_strategy', '')
 
             completed_count = 0
             with ThreadPoolExecutor(max_workers=prompt_max_workers) as executor:
@@ -3374,6 +3688,15 @@ Requirements:
                     if shot_text != original_text:
                         self.log(f"   🔄 分镜{idx+1}大模型纠错: {original_text[:20]}... → {shot_text[:20]}...")
                 
+                if shot_text:
+                    asr_fixed = False
+                    for wrong, correct in _COMMON_ASR_ERROR_DICT.items():
+                        if wrong in shot_text:
+                            shot_text = shot_text.replace(wrong, correct)
+                            asr_fixed = True
+                    if asr_fixed:
+                        self.log(f"   🔄 分镜{idx+1}内置ASR纠错: {shot_text[:30]}...")
+                
                 shot_theme_elements = self._extract_shot_theme_elements(
                     shot_text, theme_elements
                 )
@@ -3496,6 +3819,50 @@ Requirements:
                     gaps_filled += 1
             if gaps_filled > 0:
                 self.log(f"   🔧 已填充 {gaps_filled} 个时间间隔（延伸前一分镜end）")
+            
+            # 合并过短分镜（< 2.0秒）与相邻分镜
+            MIN_SHOT_DURATION = 2.0
+            short_merged = 0
+            i = 0
+            while i < len(shots):
+                if shots[i]['duration'] < MIN_SHOT_DURATION:
+                    if i > 0 and i < len(shots) - 1:
+                        prev_dur = shots[i-1]['duration']
+                        next_dur = shots[i+1]['duration']
+                        if prev_dur <= next_dur:
+                            shots[i-1]['description'] = shots[i-1]['description'] + shots[i]['description']
+                            shots[i-1]['end'] = shots[i]['end']
+                            shots[i-1]['duration'] = shots[i-1]['end'] - shots[i-1]['start']
+                            shots.pop(i)
+                            short_merged += 1
+                            continue
+                        else:
+                            shots[i+1]['description'] = shots[i]['description'] + shots[i+1]['description']
+                            shots[i+1]['start'] = shots[i]['start']
+                            shots[i+1]['duration'] = shots[i+1]['end'] - shots[i+1]['start']
+                            shots.pop(i)
+                            short_merged += 1
+                            continue
+                    elif i > 0:
+                        shots[i-1]['description'] = shots[i-1]['description'] + shots[i]['description']
+                        shots[i-1]['end'] = shots[i]['end']
+                        shots[i-1]['duration'] = shots[i-1]['end'] - shots[i-1]['start']
+                        shots.pop(i)
+                        short_merged += 1
+                        continue
+                    elif i < len(shots) - 1:
+                        shots[i+1]['description'] = shots[i]['description'] + shots[i+1]['description']
+                        shots[i+1]['start'] = shots[i]['start']
+                        shots[i+1]['duration'] = shots[i+1]['end'] - shots[i+1]['start']
+                        shots.pop(i)
+                        short_merged += 1
+                        continue
+                i += 1
+            if short_merged > 0:
+                self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {MIN_SHOT_DURATION}秒）")
+                for j in range(len(shots)):
+                    shots[j]['id'] = j
+                    shots[j]['image_file'] = f"shot_{j+1:02d}.png"
             
             # 确保首尾覆盖整个音频时长
             if shots and audio_total_duration > 0:
