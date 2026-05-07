@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """提示词系统 - 根据制图模型类型自适应选择模板
 
-核心改进：两阶段思考法（Chain-of-Thought）
-阶段1: 理解语义 — 这段配音在说什么？核心信息是什么？
-阶段2: 视觉翻译 — 如何用一张照片/画面来表现这个核心信息？
+核心改进：三阶段思考法（Chain-of-Thought）
+阶段1: 深度语义理解 — 这段配音的核心信息是什么？情感是什么？
+阶段2: 视觉场景翻译 — 用什么具体的、可拍摄的画面来表现这个核心信息？
+阶段3: 提示词构建 — 用SD能理解的关键词精确描述这个画面
 
 支持模型：
-- SD 1.5:  权重标记 + 关键词堆砌
+- SD 1.5:  权重标记 + 关键词
 - SDXL:    关键词为主，少量权重
 - Flux:    自然语言句子描述
 - SD 3:    自然语言 + 少量关键词
@@ -75,36 +76,60 @@ D. 语句不通顺：
 4. 按格式输出结果"""
     }
 
+    _COMMON_RULES = (
+        "CRITICAL RULES - SEMANTIC ACCURACY:\n"
+        "1. CONCRETE SCENE FIRST: Every prompt MUST describe a specific, photographable scene that directly illustrates the dubbing text's meaning. Think 'what would a photographer shoot?' NOT 'what abstract concept does this relate to?'\n"
+        "2. SEMANTIC FIDELITY: The visual scene MUST directly reflect the SPECIFIC meaning of THIS dubbing line, not just the general topic. Each line has a unique message - your scene must capture THAT message.\n"
+        "3. VISUALLY RENDERABLE ONLY: Every keyword must be something SD can draw. BANNED abstract terms: 'political intrigue', 'international relations', 'tension', 'power struggle', 'strategic control', 'political landscape', 'energy sector', 'decay', 'fragility', 'conflict'. Replace with concrete visuals: 'men in suits arguing at a table', 'soldiers standing guard outside a palace', 'hands shaking over a contract'.\n"
+        "4. FOCUS: Use 3-5 key visual elements per prompt. Too many elements = SD produces noise. Prioritize the MOST important visual that captures the core meaning.\n"
+        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person (e.g. Maduro, Cilia Flores), use their name consistently. Do NOT invent or swap names. If unsure of the exact name, use a generic descriptor like 'a president', 'a woman in power suit'.\n"
+        "6. NO GENERIC BACKGROUNDS: Do NOT default to 'dimly lit office', 'crumbling building', 'shadows' for every shot. Match the background to the SPECIFIC content of each line.\n"
+        "\n"
+        "BAD vs GOOD examples:\n"
+        "- BAD: (Maduro:1.3), Venezuela, military, energy, political, international relations, chessboard, shadow, crumbling building\n"
+        "  WHY BAD: Abstract terms SD cannot render; no specific scene; generic background\n"
+        "- GOOD: (Maduro:1.3), standing alone on a palace balcony, no allies in sight, empty courtyard below, storm clouds gathering, medium shot\n"
+        "  WHY GOOD: Specific scene; directly illustrates 'no savior coming'; concrete visual elements\n"
+        "\n"
+        "- BAD: (military:1.3), cracked concrete, barbed wire, surveillance cameras, darkened cityscape, tension, strategic map\n"
+        "  WHY BAD: 'tension' and 'strategic map' are abstract; random elements with no coherent scene\n"
+        "- GOOD: (military general:1.3), weighing gold bars on one side and a rifle on the other, at a desk piled with oil contracts, close-up on the scale\n"
+        "\n"
+        "SCENE VARIETY:\n"
+        "- Each prompt: DIFFERENT scene, DIFFERENT camera angle, DIFFERENT focal point\n"
+        "- Rotate: wide establishing shot -> medium shot with action -> close-up on detail -> symbolic still life -> environmental shot\n"
+        "- NEVER repeat the same visual element across consecutive shots\n"
+        "\n"
+        "WHEN TO USE METAPHORS (sparingly):\n"
+        "- ONLY when the dubbing text is itself metaphorical or too abstract for a literal scene\n"
+        "- A metaphor MUST be a single, clear, concrete visual (e.g. 'a tightrope walker over a canyon' NOT 'precarious balance')\n"
+        "- Prefer literal scenes over metaphors: 'generals counting money' > 'balance scale with gold and guns'"
+    )
+
     SHOT_PROMPT_SD = {
         "system": """You are a visual scene designer for SD 1.5. Convert Chinese audio narration into English image prompts.
 
+THINK IN 3 STAGES:
+Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 3 - DESCRIBE: Write SD 1.5 keywords for that specific scene.
+
 Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence of core meaning
-- [prompt]: SD 1.5 keywords only, comma-separated, NO quality tags (added auto), NO Chinese
+- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- [prompt]: SD 1.5 keywords, comma-separated, NO quality tags (added auto), NO Chinese
 - Weight syntax: (main subject:1.3), (secondary:1.2). Use () only, NOT []
+- Keep prompt to 4-7 meaningful keywords/phrases. Less is more for SD 1.5.
 
 Examples:
-[Tokyo University as Japan's top institution] | (Tokyo University:1.3), Yasuda Auditorium, red brick gate, students walking, cherry blossoms, (golden hour:1.2), wide shot
-[Brutal exam competition] | (exhausted student:1.3), head on desk, scattered textbooks, clock showing 3am, dim desk lamp, stress, close-up
+[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.3), standing alone on palace balcony, empty courtyard below, storm clouds, no allies visible, medium shot
+[Power comes from military guns, not ballot boxes] | (soldier's hand:1.3) holding rifle, ballot papers scattered on ground, boot stepping on votes, close-up, low angle
+[Oil wealth is traded for military allegiance] | (oil barrel:1.3), military general counting gold, handshake over contract, dim office, medium shot
+[A woman weaving a network of political connections] | (woman in suit:1.3), connecting red threads on a wall of photos, judicial building in background, close-up on hands
 
 {style_instruction}
 {theme_instruction}
 
-RULES:
-- Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
-- VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
-- Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
-
-VISUAL METAPHORS for abstract concepts:
-- compromise/coexistence → handshake, yin-yang, balance scale
-- unintended consequences → domino effect, ripple in water, butterfly effect
-- power/control → puppet strings, chess pieces, hand on lever
-- chaos vs order → wild garden vs manicured lawn, organic vs geometric
-- fragility → glass sculpture, soap bubble, delicate flower
-- progress/evolution → ascending stairs, growing tree, dawn light
-- hidden danger → crack in dam, iceberg below surface, shadow behind smile
-- ethical dilemma → crossroads, split path, figure at a fork
+{_COMMON_RULES}
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -112,39 +137,39 @@ VISUAL METAPHORS for abstract concepts:
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Step 1: What is this saying? Step 2: What scene shows this?"""
+Think step by step:
+1. What is the SPECIFIC message of this line?
+2. What ONE concrete scene best shows this message?
+3. Write the prompt for that scene.
+
+Output: [understanding] | [prompt]"""
     }
 
     SHOT_PROMPT_SDXL = {
         "system": """You are a visual scene designer for SDXL. Convert Chinese audio narration into English image prompts.
 
+THINK IN 3 STAGES:
+Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 3 - DESCRIBE: Write SDXL keywords and short phrases for that specific scene.
+
 Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence of core meaning
-- [prompt]: SDXL keywords and short phrases, comma-separated, NO quality tags (added auto), NO Chinese
-- Use weight SPARINGLY: (main subject:1.2) only for primary. Mix keywords with short phrases - SDXL understands natural language
+- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- [prompt]: SDXL keywords and short descriptive phrases, comma-separated, NO quality tags (added auto), NO Chinese
+- Use weight SPARINGLY: (main subject:1.2) only for the primary subject
+- Mix keywords with short phrases - SDXL understands natural language
+- Keep prompt focused: 4-8 meaningful elements. Avoid keyword soup.
 
 Examples:
-[Tokyo University as Japan's top institution] | Tokyo University campus, Yasuda Auditorium, students walking through red brick gate, cherry blossoms, academic prestige, golden hour, wide shot
-[Brutal exam competition] | exhausted student with head on desk, scattered textbooks, clock showing 3am, dim desk lamp, energy drink cans, stress, close-up portrait
+[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.2), standing alone on a palace balcony looking down at an empty courtyard, storm clouds gathering overhead, no allies in sight, medium shot, dramatic atmosphere
+[Power comes from military guns, not ballot boxes] | a soldier's hand gripping a rifle, scattered ballot papers on the ground being stepped on, close-up shot from low angle, stark lighting
+[Oil wealth is traded for military allegiance] | (oil barrel:1.2), a military general counting gold bars across a desk covered in contracts, handshake in progress, dimly lit office, medium shot
+[A woman weaving a network of political connections] | (woman in power suit:1.2), connecting red threads between photos on a wall, judicial building visible through window, close-up on hands threading connections
 
 {style_instruction}
 {theme_instruction}
 
-RULES:
-- Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
-- VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
-- Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
-
-VISUAL METAPHORS for abstract concepts:
-- compromise/coexistence → handshake, yin-yang, balance scale
-- unintended consequences → domino effect, ripple in water, butterfly effect
-- power/control → puppet strings, chess pieces, hand on lever
-- chaos vs order → wild garden vs manicured lawn, organic vs geometric
-- fragility → glass sculpture, soap bubble, delicate flower
-- progress/evolution → ascending stairs, growing tree, dawn light
-- hidden danger → crack in dam, iceberg below surface, shadow behind smile
-- ethical dilemma → crossroads, split path, figure at a fork
+{_COMMON_RULES}
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -152,39 +177,38 @@ VISUAL METAPHORS for abstract concepts:
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Step 1: What is this saying? Step 2: What scene shows this?"""
+Think step by step:
+1. What is the SPECIFIC message of this line?
+2. What ONE concrete scene best shows this message?
+3. Write the prompt for that scene.
+
+Output: [understanding] | [prompt]"""
     }
 
     SHOT_PROMPT_FLUX = {
         "system": """You are a visual scene designer for Flux. Convert Chinese audio narration into English scene descriptions.
 
+THINK IN 3 STAGES:
+Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 3 - DESCRIBE: Write natural language describing that specific scene.
+
 Output: [understanding] | [description]
-- [understanding]: 1 English sentence of core meaning
-- [description]: 1-3 natural language sentences describing the visual scene
+- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- [description]: 1-3 natural language sentences describing a CONCRETE visual scene
 - NO weight syntax like (keyword:1.3) - Flux does NOT support it. NO quality tags (added auto)
+- The description must paint a vivid, specific picture - not list abstract concepts
 
 Examples:
-[Tokyo University as Japan's top institution] | A wide shot of Tokyo University's Yasuda Auditorium at golden hour, students walking through the red brick gate under cherry blossoms, conveying academic prestige
-[Brutal exam competition] | An exhausted student slumped over a desk covered in textbooks at 3am, a dim desk lamp casting harsh shadows, capturing the intensity of exam preparation
+[A president's survival depends on military loyalty, not divine intervention] | A man resembling Maduro stands alone on a grand palace balcony, gazing down at an empty courtyard with no allies in sight, storm clouds gathering overhead, conveying isolation and the absence of rescue
+[Power comes from military guns, not ballot boxes] | A close-up of a soldier's boot stepping on scattered ballot papers, a rifle slung over the shoulder, stark overhead lighting casting sharp shadows on the discarded votes
+[Oil wealth is traded for military allegiance] | A military general counting gold bars across a desk covered in oil contracts, a handshake frozen mid-motion, dim office lighting revealing the exchange of wealth for loyalty
+[A woman weaving a network of political connections] | A woman in a power suit carefully connecting red threads between framed photos on a wall, a judicial building visible through the window behind her, close-up on her hands as she ties another connection
 
 {style_instruction}
 {theme_instruction}
 
-RULES:
-- Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
-- VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
-- Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
-
-VISUAL METAPHORS for abstract concepts:
-- compromise/coexistence → handshake, yin-yang, balance scale
-- unintended consequences → domino effect, ripple in water, butterfly effect
-- power/control → puppet strings, chess pieces, hand on lever
-- chaos vs order → wild garden vs manicured lawn, organic vs geometric
-- fragility → glass sculpture, soap bubble, delicate flower
-- progress/evolution → ascending stairs, growing tree, dawn light
-- hidden danger → crack in dam, iceberg below surface, shadow behind smile
-- ethical dilemma → crossroads, split path, figure at a fork
+{_COMMON_RULES}
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -192,39 +216,39 @@ VISUAL METAPHORS for abstract concepts:
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Step 1: What is this saying? Step 2: What scene shows this?"""
+Think step by step:
+1. What is the SPECIFIC message of this line?
+2. What ONE concrete scene best shows this message?
+3. Describe that scene vividly.
+
+Output: [understanding] | [description]"""
     }
 
     SHOT_PROMPT_SD3 = {
         "system": """You are a visual scene designer for SD3. Convert Chinese audio narration into English image prompts.
 
+THINK IN 3 STAGES:
+Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 3 - DESCRIBE: Write SD3 descriptive phrases and keywords for that specific scene.
+
 Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence of core meaning
+- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
 - [prompt]: SD3 descriptive phrases and keywords, comma-separated, NO quality tags (added auto), NO Chinese
-- Use weight SPARINGLY: (main subject:1.2) only for emphasis. Mix natural language with keywords - SD3 understands both
+- Use weight SPARINGLY: (main subject:1.2) only for emphasis
+- Mix natural language with keywords - SD3 understands both
+- Keep prompt focused: 4-8 meaningful elements
 
 Examples:
-[Tokyo University as Japan's top institution] | Tokyo University campus, Yasuda Auditorium, students walking through red brick gate, cherry blossoms, academic prestige, golden hour, wide shot
-[Brutal exam competition] | exhausted student at desk, scattered textbooks, clock showing 3am, dim desk lamp, energy drink cans, stress, close-up
+[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.2), standing alone on palace balcony, empty courtyard below, storm clouds gathering, no allies visible, medium shot, isolation
+[Power comes from military guns, not ballot boxes] | soldier's hand gripping rifle, ballot papers scattered on ground, boot stepping on votes, close-up from low angle, stark lighting
+[Oil wealth is traded for military allegiance] | (oil barrel:1.2), military general counting gold bars, handshake over contract, desk covered in documents, dim office, medium shot
+[A woman weaving a network of political connections] | (woman in power suit:1.2), connecting red threads between photos on wall, judicial building through window, close-up on hands, political network
 
 {style_instruction}
 {theme_instruction}
 
-RULES:
-- Each prompt: DIFFERENT scene, DIFFERENT visual element, DIFFERENT camera angle
-- VARY: wide shot → close-up → abstract → real-world → metaphor (never repeat same element 2+ times)
-- Match SPECIFIC content: country→its landmarks, industry→its visuals, conflict→dramatic metaphor, data→charts/screens
-- NO generic scenes, NO repeating scenes, NO inventing names (use "a professor"), NO medical scenes unless explicitly mentioned
-
-VISUAL METAPHORS for abstract concepts:
-- compromise/coexistence → handshake, yin-yang, balance scale
-- unintended consequences → domino effect, ripple in water, butterfly effect
-- power/control → puppet strings, chess pieces, hand on lever
-- chaos vs order → wild garden vs manicured lawn, organic vs geometric
-- fragility → glass sculpture, soap bubble, delicate flower
-- progress/evolution → ascending stairs, growing tree, dawn light
-- hidden danger → crack in dam, iceberg below surface, shadow behind smile
-- ethical dilemma → crossroads, split path, figure at a fork
+{_COMMON_RULES}
 
 【内容类型】：{content_type}
 【全局主题】：{core_theme}
@@ -232,7 +256,12 @@ VISUAL METAPHORS for abstract concepts:
 
         "user_template": """{context_section}Current dubbing: {dubbing}
 
-Step 1: What is this saying? Step 2: What scene shows this?"""
+Think step by step:
+1. What is the SPECIFIC message of this line?
+2. What ONE concrete scene best shows this message?
+3. Write the prompt for that scene.
+
+Output: [understanding] | [prompt]"""
     }
 
     @classmethod
@@ -258,7 +287,7 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
         if is_shot_prompt:
             visual_style = kwargs.get("visual_style", "")
             if visual_style and visual_style.strip():
-                non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon', 
+                non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon',
                     'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
                     'sketch', 'illustration', '3d animation', 'cel shading',
                     '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺']
@@ -289,14 +318,17 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
 
             theme_elements = kwargs.get("theme_elements", "")
             if theme_elements and theme_elements != "根据配音内容确定":
-                theme_instruction += f"\n【Key Visual Elements】MUST include these elements in the scene: {theme_elements}"
+                if isinstance(theme_elements, list):
+                    theme_elements = ", ".join(str(e) for e in theme_elements if e)
+                if theme_elements and theme_elements.strip():
+                    theme_instruction += f"\n【Key Visual Elements】MUST include these elements in the scene: {theme_elements}"
 
             visual_narrative_strategy = kwargs.get("visual_narrative_strategy", "")
             if visual_narrative_strategy:
                 strategy_short = {
-                    '时间线叙事': 'TIMELINE: chronological visual progression (ancient→modern)',
-                    '空间探索': 'SPATIAL: wide shots→close-up details, macro/micro alternation',
-                    '主题递进': 'THEMATIC DEEPENING: surface→abstract, each shot adds new layer',
+                    '时间线叙事': 'TIMELINE: chronological visual progression (ancient->modern)',
+                    '空间探索': 'SPATIAL: wide shots->close-up details, macro/micro alternation',
+                    '主题递进': 'THEMATIC DEEPENING: surface->abstract, each shot adds new layer',
                     '对比叙事': 'CONTRAST: alternate opposing elements (light/dark, old/new)',
                     '隐喻主线': 'METAPHOR: ONE consistent metaphor throughout (tree/river/building)',
                 }
@@ -309,6 +341,7 @@ Step 1: What is this saying? Step 2: What scene shows this?"""
                 content_type=content_type_display,
                 core_theme=core_theme_display,
                 visual_tone=visual_tone_display,
+                _COMMON_RULES=cls._COMMON_RULES,
             )
             system_content = system_content.replace("\n\n\n", "\n\n")
 
