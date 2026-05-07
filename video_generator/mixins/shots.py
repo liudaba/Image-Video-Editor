@@ -2495,16 +2495,15 @@ class ShotsMixin:
                 self.log(f"   🔍 找到纠错说明，正在解析...")
                 try:
                     after_correction = cleaned_result.split('纠错说明')[1]
-                    if '视觉叙事策略' in cleaned_result.split('纠错说明')[0]:
-                        correction_text = after_correction.strip()
-                    else:
-                        next_section_markers = ['内容类型', '核心主题', '情感基调', '视觉风格', '英文视觉', '核心元素', '主题元素', '视觉叙事策略']
-                        correction_text = after_correction
-                        for marker in next_section_markers:
-                            if marker in correction_text:
-                                correction_text = correction_text.split(marker)[0]
-                                break
+                    
+                    next_section_markers = ['解析', '总结', '备注', '说明', '内容类型', '核心主题', '情感基调', '视觉风格', '英文视觉', '核心元素', '主题元素', '视觉叙事策略']
+                    correction_text = after_correction
+                    for marker in next_section_markers:
+                        if marker in correction_text:
+                            correction_text = correction_text.split(marker)[0]
+                            break
                     correction_text = correction_text.replace('：', '').replace(':', '').strip()
+                    
                     if not correction_text:
                         lines = after_correction.split('\n')
                         for line in lines:
@@ -2513,9 +2512,10 @@ class ShotsMixin:
                                 correction_text = line.replace('：', '').replace(':', '').strip()
                                 if correction_text:
                                     break
+                    
                     self.log(f"   🔍 纠错内容原始: {correction_text}")
                     
-                    if correction_text and correction_text != '无' and correction_text != '无纠正':
+                    if correction_text and correction_text != '无' and correction_text != '无纠正' and not correction_text.startswith('无'):
                         # 支持多种分隔符：逗号、顿号、分号
                         separators = [',', '，', '、', ';', '；']
                         parts = [correction_text]
