@@ -2871,7 +2871,7 @@ class ShotsMixin:
             
             # 步骤1: 音频分析
             self.log("\n📍 步骤 1/4: 音频语音识别")
-            self.update_task_progress("正在分析音频...", 10)
+            self.update_task_progress("正在识别音频语音...", 10)
             
             # 生成音频文件的缓存键（添加文件大小防止冲突）
             try:
@@ -3145,7 +3145,7 @@ class ShotsMixin:
                     
                     if llm_ready:
                         try:
-                            self.update_task_progress("正在使用大模型分析文章内容...", 50)
+                            self.update_task_progress("正在等待模型分析...", 50)
                             
                             # 获取用户指定的模型
                             user_model = self._get_current_model()
@@ -3317,7 +3317,7 @@ class ShotsMixin:
                                 self.log("✅ 大模型分析结果已缓存")
                             
                             # 解析分析结果 - 只提取主题信息，不生成分镜
-                            self.update_task_progress("正在提取主题信息...", 55)
+                            self.update_task_progress("正在提取分析结果...", 55)
                             
                             self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
                             
@@ -3739,7 +3739,7 @@ class ShotsMixin:
             
             # 步骤4: 验证和完成
             self.log("\n📍 步骤 4/4: 验证分镜数据")
-            self.update_task_progress("正在验证时间戳...", 91)
+            self.update_task_progress("正在验证分镜数据...", 91)
             
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
             
