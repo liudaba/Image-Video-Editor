@@ -83,8 +83,6 @@ def build_executable():
         
         '--add-data=video_generator;video_generator',
         '--add-data=config.json;.',
-        '--add-data=启动.vbs;.',
-        '--add-data=start.bat;.',
         '--add-data=README.md;.',
         '--add-data=快速上手指南.md;.',
         '--add-data=LICENSE;.',
@@ -203,6 +201,7 @@ def build_executable():
         
         output_dir = os.path.join('dist', '短视频生成器')
         if os.path.exists(output_dir):
+            _post_build(output_dir)
             size = get_directory_size(output_dir)
             print(f"\n📁 输出目录: {output_dir}/")
             print(f"📊 总大小: {size:.2f} MB")
@@ -211,7 +210,7 @@ def build_executable():
             print(f"\n🔍 验证打包结果...")
             should_not_exist = [
                 '.git', '.idea', '.venv', 'backend', 'models',
-                'output_project', '垃圾桶', 'docs',
+                'output_project', '垃圾桶', 'docs', 'logs',
                 '02build_exe.py', 'release_helper.py', 'installer_setup.iss',
                 'requirements.txt', 'check_and_install_deps.bat',
                 'run.py', 'run.pyw', 'generate_placeholders.py',
@@ -219,7 +218,7 @@ def build_executable():
                 '01打包前清理.bat', '03验证打包结果.bat', '快速发布.bat',
                 '推送代码.bat', '检查环境.bat', '生成Demo素材.bat',
                 '.env', 'license.json', '.secret_key', '.license_sign_key',
-                '.license_verify_key', '.key_salt',
+                '.key_salt',
             ]
             
             has_error = False
@@ -253,6 +252,37 @@ def build_executable():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def _post_build(output_dir):
+    """打包后处理：生成启动脚本、复制密钥文件"""
+    print("\n📋 打包后处理...")
+
+    vbs_content = 'Set WshShell = CreateObject("WScript.Shell")\n'
+    vbs_content += 'WshShell.CurrentDirectory = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)\n'
+    vbs_content += 'WshShell.Run "短视频生成器.exe", 0, False\n'
+    vbs_path = os.path.join(output_dir, "启动.vbs")
+    with open(vbs_path, "w", encoding="utf-8") as f:
+        f.write(vbs_content)
+    print("  ✅ 生成 启动.vbs（启动exe，无黑框）")
+
+    bat_content = '@echo off\n'
+    bat_content += 'cd /d "%~dp0"\n'
+    bat_content += 'start "" "短视频生成器.exe"\n'
+    bat_path = os.path.join(output_dir, "start.bat")
+    with open(bat_path, "w", encoding="utf-8") as f:
+        f.write(bat_content)
+    print("  ✅ 生成 start.bat（启动exe，备选）")
+
+    verify_key_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".license_verify_key")
+    if os.path.exists(verify_key_src):
+        import shutil as _shutil
+        _shutil.copy2(verify_key_src, os.path.join(output_dir, ".license_verify_key"))
+        print("  ✅ 复制 .license_verify_key（授权验证密钥）")
+    else:
+        print("  ⚠️  .license_verify_key 缺失！部署后端后需复制此文件到打包目录")
+
+    print("  ✅ 后处理完成\n")
 
 
 def get_directory_size(path):
