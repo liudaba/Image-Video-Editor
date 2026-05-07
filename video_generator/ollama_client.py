@@ -383,6 +383,14 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             message = result_data.get("message", {})
             raw_content = message.get("content", "")
 
+            if log_callback and not hasattr(call_ollama_model, '_debug_logged'):
+                call_ollama_model._debug_logged = True
+                eval_count = result_data.get("eval_count", 0)
+                prompt_eval_count = result_data.get("prompt_eval_count", 0)
+                actual_num_predict = model_options.get("num_predict", "?")
+                actual_num_ctx = model_options.get("num_ctx", "?")
+                log_callback(f"   🔍 Ollama参数: num_predict={actual_num_predict}, num_ctx={actual_num_ctx} | 输入{prompt_eval_count}token, 输出{eval_count}token")
+
             content = _strip_think_tags(raw_content)
 
             if not content:
