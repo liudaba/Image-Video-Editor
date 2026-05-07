@@ -84,6 +84,7 @@ def build_executable():
         '--add-data=video_generator;video_generator',
         '--add-data=config.json;.',
         '--add-data=README.md;.',
+        '--add-data=USER_GUIDE.md;.',
         '--add-data=快速上手指南.md;.',
         '--add-data=LICENSE;.',
     ]
@@ -156,9 +157,10 @@ def build_executable():
     print("\n📦 打包内容清单:")
     print("  ✅ video_generator/     - 核心程序模块")
     print("  ✅ config.json          - 配置文件")
-    print("  ✅ README.md            - 用户使用手册")
+    print("  ✅ README.md            - 项目介绍")
+    print("  ✅ USER_GUIDE.md        - 使用说明书")
     print("  ✅ 快速上手指南.md       - 快速入门指南")
-    print("  ✅ LICENSE              - 开源许可证")
+    print("  ✅ LICENSE              - 商业软件许可证")
     print("  ✅ _internal/           - PyInstaller依赖库")
     print("  🔄 启动.vbs             - 打包后自动生成（指向exe）")
     print("  🔄 start.bat            - 打包后自动生成（指向exe）")
