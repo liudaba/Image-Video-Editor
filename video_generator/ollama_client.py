@@ -340,8 +340,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
         config_overrides = {}
         if num_ctx:
             config_overrides["num_ctx"] = num_ctx
-        if "num_predict" not in llm_config.config:
-            config_overrides["num_predict"] = num_predict
+        config_overrides["num_predict"] = num_predict
         options = llm_config.get_options(**config_overrides)
     else:
         options = LLMConfig().get_options(
