@@ -405,6 +405,15 @@ class UIHandlersMixin:
         if prompt_type != "SD提示词" and hasattr(self, 'style_dropdown_frame') and self.style_dropdown_visible:
             self.style_dropdown_frame.pack_forget()
             self.style_dropdown_visible = False
+
+    def _update_min_shot_label(self):
+        """更新最短分镜时长显示标签"""
+        try:
+            if hasattr(self, 'min_shot_duration_var') and hasattr(self, '_min_shot_label'):
+                val = self.min_shot_duration_var.get()
+                self._min_shot_label.config(text=f"{val:.1f}s")
+        except Exception:
+            pass
     
 
     _PROGRESS_THROTTLE_SEC = 0.3
@@ -530,6 +539,8 @@ class UIHandlersMixin:
         confirm_msg += f"动画效果: {self.animation_var.get() if hasattr(self, 'animation_var') else '无'}\n"
         confirm_msg += f"过渡效果: {self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'}\n"
         confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16}\n"
+        min_shot_dur = self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0
+        confirm_msg += f"最短分镜时长: {min_shot_dur:.1f}秒\n"
 
         # 显示确认对话框
         confirmed = messagebox.askyesno("确认设置", confirm_msg)
@@ -540,6 +551,9 @@ class UIHandlersMixin:
                 msg += f"\n核心主题: {custom_theme}"
             if custom_tone:
                 msg += f"\n视觉基调: {custom_tone}"
+            if hasattr(self, 'min_shot_duration_var'):
+                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
+                msg += f"\n最短分镜时长: {self.MIN_SHOT_DURATION:.1f}秒"
             self.log(msg)
             self.save_config()
             self._print_current_settings()

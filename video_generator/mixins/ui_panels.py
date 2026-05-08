@@ -347,6 +347,29 @@ class UIPanelsMixin:
         transition_combo = ttk.Combobox(transition_frame, textvariable=self.transition_var, values=transition_options, state="readonly", font=('Microsoft YaHei', large_font_size))
         transition_combo.pack(fill=tk.X, padx=2, pady=1)
 
+        min_shot_frame = ttk.Frame(video_section)
+        min_shot_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(min_shot_frame, text="最短分镜:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
+        if not hasattr(self, 'min_shot_duration_var'):
+            self.min_shot_duration_var = tk.DoubleVar(value=getattr(self, 'MIN_SHOT_DURATION', 4.0))
+
+        min_shot_inner = ttk.Frame(min_shot_frame)
+        min_shot_inner.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        min_shot_scale = tk.Scale(min_shot_inner, from_=1.5, to=10.0, resolution=0.5,
+            orient=tk.HORIZONTAL, variable=self.min_shot_duration_var,
+            showvalue=False, length=120, sliderlength=16,
+            bg="#2a2d35", fg="#e0e0e0", troughcolor="#404450",
+            highlightthickness=0, font=('Microsoft YaHei', 8))
+        min_shot_scale.pack(side=tk.LEFT, padx=2)
+
+        self._min_shot_label = ttk.Label(min_shot_inner, text=f"{self.min_shot_duration_var.get():.1f}s",
+            width=5, font=('Microsoft YaHei', large_font_size))
+        self._min_shot_label.pack(side=tk.LEFT, padx=2)
+
+        self.min_shot_duration_var.trace_add('write', lambda *_: self._update_min_shot_label())
+
         # ==================== 提示词设置 ====================
         prompt_section = ttk.LabelFrame(panels["prompt"], text="💬 提示词设置", padding=4, style="Adv.TLabelframe")
         prompt_section.pack(fill=tk.BOTH, expand=True)
