@@ -23,6 +23,7 @@ from video_generator.ollama_client import (
     is_llm_available,
     check_ollama_available,
     try_start_ollama_service,
+    check_model_gpu_status,
 )
 from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer
 from video_generator.templates import PromptTemplates
@@ -55,6 +56,131 @@ try:
     ARV_PROMPTS_AVAILABLE = True
 except ImportError:
     ARV_PROMPTS_AVAILABLE = False
+
+_SIMPLIFIED_TO_TRADITIONAL = {
+    '达': '達', '尔': '爾', '灵': '靈', '长': '長', '类': '類', '论': '論',
+    '进': '進', '劳': '勞', '动': '動', '职': '職', '场': '場', '数': '數',
+    '万': '萬', '亿': '億', '审': '審', '与': '與', '专': '專', '业': '業',
+    '丛': '叢', '东': '東', '丝': '絲', '两': '兩', '严': '嚴', '丧': '喪',
+    '争': '爭', '丰': '豐', '临': '臨', '为': '為', '丽': '麗', '举': '舉',
+    '么': '麼', '义': '義', '乌': '烏', '乐': '樂', '乔': '喬', '习': '習',
+    '乡': '鄉', '书': '書', '买': '買', '乱': '亂', '于': '於', '产': '產',
+    '亲': '親', '仅': '僅', '从': '從', '众': '眾', '仑': '侖', '仓': '倉',
+    '仪': '儀', '们': '們', '价': '價', '优': '優', '伙': '夥', '会': '會',
+    '伟': '偉', '传': '傳', '伤': '傷', '伦': '倫', '伪': '偽', '余': '餘',
+    '侠': '俠', '侦': '偵', '侧': '側', '侨': '僑', '俭': '儉', '侣': '侶',
+    '储': '儲', '党': '黨', '兰': '蘭', '关': '關', '兴': '興', '养': '養',
+    '兽': '獸', '内': '內', '册': '冊', '写': '寫', '军': '軍', '农': '農',
+    '决': '決', '况': '況', '冲': '衝', '净': '淨', '凉': '涼', '减': '減',
+    '几': '幾', '凭': '憑', '凯': '凱', '划': '劃', '刘': '劉', '则': '則',
+    '刚': '剛', '创': '創', '删': '刪', '别': '別', '剑': '劍', '剧': '劇',
+    '办': '辦', '务': '務', '劲': '勁', '势': '勢', '勋': '勳', '胜': '勝',
+    '励': '勵', '劝': '勸', '汇': '匯', '区': '區', '协': '協', '却': '卻',
+    '厅': '廳', '历': '歷', '厉': '厲', '压': '壓', '厌': '厭', '参': '參',
+    '变': '變', '叠': '疊', '号': '號', '国': '國', '图': '圖', '圆': '圓',
+    '圣': '聖', '坚': '堅', '坛': '壇', '墙': '牆', '奖': '獎', '妇': '婦',
+    '妈': '媽', '婴': '嬰', '孙': '孫', '学': '學', '宁': '寧', '宝': '寶',
+    '实': '實', '宽': '寬', '宾': '賓', '导': '導', '将': '將', '层': '層',
+    '属': '屬', '岛': '島', '岁': '歲', '师': '師', '带': '帶', '帮': '幫',
+    '广': '廣', '庆': '慶', '废': '廢', '库': '庫', '应': '應', '开': '開',
+    '异': '異', '弃': '棄', '张': '張', '弹': '彈', '强': '強', '归': '歸',
+    '当': '當', '忆': '憶', '态': '態', '愤': '憤', '戏': '戲', '战': '戰',
+    '户': '戶', '执': '執', '扩': '擴', '扫': '掃', '扬': '揚', '扰': '擾',
+    '担': '擔', '据': '據', '拥': '擁', '击': '擊', '挡': '擋', '挤': '擠',
+    '挥': '揮', '摄': '攝', '摆': '擺', '摇': '搖', '摊': '攤', '敌': '敵',
+    '斗': '鬥', '无': '無', '旧': '舊', '时': '時', '显': '顯', '暂': '暫',
+    '术': '術', '机': '機', '杀': '殺', '权': '權', '条': '條', '来': '來',
+    '杨': '楊', '极': '極', '枪': '槍', '柜': '櫃', '栋': '棟', '标': '標',
+    '检': '檢', '楼': '樓', '横': '橫', '桥': '橋', '欢': '歡', '残': '殘',
+    '气': '氣', '汉': '漢', '汤': '湯', '泽': '澤', '洁': '潔', '测': '測',
+    '浓': '濃', '涛': '濤', '润': '潤', '涨': '漲', '温': '溫', '滨': '濱',
+    '滩': '灘', '潜': '潛', '灭': '滅', '灯': '燈', '灾': '災', '炉': '爐',
+    '点': '點', '烂': '爛', '炼': '煉', '热': '熱', '烧': '燒', '营': '營',
+    '蓝': '藍', '质': '質', '赞': '贊', '跃': '躍', '践': '踐', '车': '車',
+    '轨': '軌', '转': '轉', '轮': '輪', '软': '軟', '轰': '轟', '载': '載',
+    '辅': '輔', '辆': '輛', '辉': '輝', '输': '輸', '辞': '辭', '边': '邊',
+    '迁': '遷', '过': '過', '迈': '邁', '运': '運', '还': '還', '这': '這',
+    '远': '遠', '违': '違', '连': '連', '迟': '遲', '选': '選', '递': '遞',
+    '遗': '遺', '遥': '遙', '酿': '釀', '释': '釋', '针': '針', '钟': '鐘',
+    '钢': '鋼', '铁': '鐵', '银': '銀', '链': '鏈', '销': '銷', '锁': '鎖',
+    '锋': '鋒', '错': '錯', '录': '錄', '锦': '錦', '键': '鍵', '镇': '鎮',
+    '门': '門', '闭': '閉', '间': '間', '闹': '鬧', '闻': '聞', '阔': '闊',
+    '阳': '陽', '阴': '陰', '阵': '陣', '阶': '階', '际': '際', '陆': '陸',
+    '陈': '陳', '险': '險', '隐': '隱', '难': '難', '双': '雙', '离': '離',
+    '云': '雲', '电': '電', '雾': '霧', '静': '靜', '韦': '韋', '韧': '韌',
+    '韩': '韓', '韵': '韻', '响': '響', '页': '頁', '顺': '順', '须': '須',
+    '预': '預', '领': '領', '头': '頭', '频': '頻', '题': '題', '颜': '顏',
+    '额': '額', '风': '風', '飘': '飄', '飞': '飛', '饭': '飯', '饮': '飲',
+    '饰': '飾', '饱': '飽', '马': '馬', '驱': '驅', '驴': '驢', '驶': '駛',
+    '驻': '駐', '驾': '駕', '骂': '罵', '骄': '驕', '验': '驗', '骑': '騎',
+    '骗': '騙', '腾': '騰', '鱼': '魚', '鲜': '鮮', '鲸': '鯨', '鸟': '鳥',
+    '鸡': '雞', '鸣': '鳴', '鸥': '鷗', '鸭': '鴨', '鹅': '鵝', '鹤': '鶴',
+    '齐': '齊', '齿': '齒', '龙': '龍', '龟': '龜',
+    '罗': '羅', '里': '裡', '纸': '紙', '杆': '桿', '稳': '穩', '矿': '礦',
+    '脑': '腦', '给': '給', '装': '裝', '亚': '亞', '个': '個', '织': '織',
+    '样': '樣', '觉': '覺', '维': '維', '现': '現', '状': '狀', '贵': '貴',
+    '线': '線', '轻': '輕', '说': '說', '卖': '賣', '顾': '顧', '简': '簡',
+    '华': '華', '顿': '頓', '债': '債', '邻': '鄰', '虽': '雖', '总': '總',
+    '让': '讓', '处': '處', '种': '種', '御': '禦', '后': '後', '经': '經',
+    '顶': '頂', '济': '濟', '盘': '盤', '许': '許', '赎': '贖', '赌': '賭',
+    '筹': '籌', '码': '碼', '纽': '紐', '彻': '徹', '损': '損', '衬': '襯',
+    '贴': '貼', '购': '購', '贷': '貸', '贸': '貿', '费': '費', '贺': '賀',
+    '贼': '賊', '赔': '賠', '赚': '賺', '赛': '賽', '赞': '贊', '走': '走',
+    '赶': '趕', '起': '起', '超': '超', '越': '越', '趋': '趨', '跌': '跌',
+    '跑': '跑', '跟': '跟', '跨': '跨', '跪': '跪', '路': '路', '踪': '蹤',
+    '身': '身', '车': '車', '轧': '軋', '轴': '軸', '较': '較', '辈': '輩',
+    '辊': '輥', '辍': '輟', '辑': '輯', '辔': '轡', '辕': '轅', '辖': '轄',
+    '邓': '鄧', '邮': '郵', '郑': '鄭', '钓': '釣', '铃': '鈴', '铅': '鉛',
+    '铢': '銖', '铭': '銘', '铺': '鋪', '锏': '鐧', '门': '門', '闲': '閒',
+    '闷': '悶', '闸': '閘', '阁': '閣', '阀': '閥', '阕': '闋', '阑': '闌',
+    '阒': '闃', '阖': '闔', '阙': '闕', '陕': '陝', '陪': '陪', '隶': '隸',
+    '雇': '僱', '雏': '雛', '麦': '麥', '麸': '麩', '麹': '麴', '麻': '麻',
+    '黄': '黃', '黔': '黔', '默': '默', '黛': '黛', '黜': '黜', '黝': '黝',
+    '点': '點', '齐': '齊', '龄': '齡', '龀': '齔', '龁': '齕', '龃': '齟',
+    '龅': '齙', '龆': '齠', '龇': '齜', '龈': '齦', '龉': '齬', '龊': '齪',
+    '龋': '齲', '龌': '齷', '龚': '龔', '龛': '龕',
+    '著': '著', '游': '遊', '干': '幹', '系': '係', '面': '面', '后': '後',
+    '里': '裡', '发': '發', '复': '復', '制': '製', '板': '闆', '表': '錶',
+    '困': '睏', '厂': '廠', '广': '廣', '范': '範', '汇': '匯', '台': '臺',
+    '准': '準', '确': '確', '朴': '樸', '筑': '築', '蜡': '蠟', '术': '術',
+    '松': '鬆', '舍': '捨', '咸': '鹹', '岩': '巖', '谷': '穀', '征': '徵',
+    '致': '緻', '制': '製', '钟': '鐘', '板': '闆', '出': '齣', '沈': '瀋',
+    '拓': '搨', '括': '括', '挽': '輓', '搓': '撚', '摸': '摸', '摆': '擺',
+    '据': '據', '拟': '擬', '撞': '撞', '操': '操', '支': '支', '收': '收',
+    '改': '改', '攻': '攻', '放': '放', '政': '政', '效': '效', '敏': '敏',
+    '救': '救', '教': '教', '敬': '敬', '整': '整', '斗': '鬥', '料': '料',
+    '斧': '斧', '斯': '斯', '新': '新', '方': '方', '施': '施', '旁': '旁',
+    '旅': '旅', '旋': '旋', '族': '族', '既': '既', '日': '日', '明': '明',
+    '易': '易', '映': '映', '昨': '昨', '是': '是', '晚': '晚', '晨': '晨',
+    '普': '普', '景': '景', '晴': '晴', '智': '智', '暗': '暗', '暴': '暴',
+    '更': '更', '替': '替', '最': '最', '月': '月', '有': '有', '朋': '朋',
+    '服': '服', '朝': '朝', '期': '期', '未': '未', '末': '末', '本': '本',
+    '林': '林', '果': '果', '枝': '枝', '棋': '棋', '森': '森', '植': '植',
+    '椅': '椅', '椒': '椒', '概': '概', '榜': '榜', '模': '模', '橙': '橙',
+    '橡': '橡', '檀': '檀', '次': '次', '欣': '欣', '正': '正', '此': '此',
+    '步': '步', '武': '武', '歧': '歧', '殃': '殃', '段': '段', '毁': '毀',
+    '每': '每', '毒': '毒', '比': '比', '民': '民', '水': '水', '永': '永',
+    '浦': '浦', '海': '海', '浸': '浸', '涂': '塗', '消': '消', '涉': '涉',
+    '深': '深', '混': '混', '添': '添', '清': '清', '渡': '渡', '源': '源',
+    '溢': '溢', '溯': '溯', '溶': '溶', '滴': '滴', '漂': '漂', '漏': '漏',
+    '演': '演', '漫': '漫', '澄': '澄', '激': '激', '灌': '灌', '泼': '潑',
+    '黑': '黑', '鼎': '鼎', '鼓': '鼓', '鼠': '鼠', '鼻': '鼻', '龄': '齡',
+}
+
+def _is_traditional_conversion(old, new):
+    if old == new:
+        return True
+    converted = ''.join(_SIMPLIFIED_TO_TRADITIONAL.get(c, c) for c in old)
+    if converted == new:
+        return True
+    return False
+
+_TRADITIONAL_TO_SIMPLIFIED = {v: k for k, v in _SIMPLIFIED_TO_TRADITIONAL.items() if k != v}
+
+def _ensure_simplified_chinese(text):
+    if not text:
+        return text
+    return ''.join(_TRADITIONAL_TO_SIMPLIFIED.get(c, c) for c in text)
 
 _ENTITY_COUNTRY_MAPPING = {
     '伊朗': 'Iran, Iranian', '美国': 'USA, American', '美國': 'USA, American', '中国': 'China, Chinese', '中國': 'China, Chinese',
@@ -1457,6 +1583,20 @@ class ShotsMixin:
         # 清除残留的 [Understanding]: 或 [Prompt]: 标签
         text = re.sub(r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*', '', text, flags=re.IGNORECASE)
         
+        # gemma3 推理文本剥离：找到第一个 SD 关键词模式，删除之前的所有推理文本
+        # SD 关键词模式: (keyword:1.x) 或 (keyword:1.x), 或纯关键词逗号列表
+        sd_pattern = re.search(r'\(\w[^)]*:\s*1\.\d+\)', text)
+        if sd_pattern:
+            start_pos = sd_pattern.start()
+            if start_pos > 0:
+                prefix = text[:start_pos]
+                if any(kw in prefix.lower() for kw in ['break down', 'craft', 'prompt', 'scene', 'translates',
+                    'narration', 'dubbing', 'phrase', 'implies', 'suggests', 'highlights',
+                    'describes', 'indicates', 'references', 'depict', 'represent', 'convey',
+                    'reasoning', 'step', 'okay', 'let\'s', 'here are', 'what scene',
+                    'the audio', 'the line', 'this chinese', 'given the']):
+                    text = text[start_pos:]
+        
         # 【关键】处理 DeepSeek-R1 等推理模型的思考标签
         # 必须在最前面处理，否则会影响后续清洗逻辑
         # DeepSeek-R1 会输出 <think>...</think> 包裹的思考过程
@@ -1475,7 +1615,6 @@ class ShotsMixin:
         
         # 定义需要移除的模式列表
         remove_patterns = [
-            # 英文开场白和解释性文字
             r'^Here[\'\'\']?s a prompt[^.]*\.\s*',
             r'^Here is a prompt[^.]*\.\s*',
             r'^Based on[^.]*[,，]\s*',
@@ -1485,52 +1624,57 @@ class ShotsMixin:
             r'^Sure[，,.]?\s*',
             r'^Of course[，,.]?\s*',
             r'^Certainly[，,.]?\s*',
+            r'^Okay[,.]?\s*',
+            r'^Step\s+\d+\s*[:：]\s*.*?(?=Step\s+\d+|---|\[prompt\]|\(Maduro|\(Silvia|\(Military|\(China|\(Russia|\(UN|\(Latin|\(Venezuela|\(Maduro|\()[\s]*',
+            r'Step\s+\d+\s*[:：]\s*[^,()\[\]]+?(?:\.\s*)',
+            r'Step\s+\d+\s*[:：]\s*',
+            r"Okay,? let'?s (?:break down|analyze|craft|generate)[^.]*\.\s*",
+            r"The (?:Chinese |English )?phrase [\"\"「」][^\"\"「」]+[\"\"「」][^.]*\.\s*",
+            r'It (?:implies|suggests|signifies|highlights|emphasizes|conveys|lends itself)[^.]*\.\s*',
+            r'This (?:dubbing|narration|line|phrase|scene|translates)[^.]*\.\s*',
+            r'The narration (?:describes|emphasizes|highlights|indicates|references|suggests)[^.]*\.\s*',
+            r'The scene (?:should |needs to |must )?(?:depict|represent|convey|show|visualize)[^.]*\.\s*',
+            r'(?:Consider|We need to show|Visual elements should|Here\'s a potential)[^.]*\.\s*',
+            r'---\s*\*{0,4}\s*',
+            r'\[prompt\]\s*[-–—]?\s*',
+            r'\[Prompt\]\s*[-–—]?\s*',
+            r'\[A [^]]*\]\s*',
             
-            # 中文开场白和解释性文字
             r'^以下[是为][^。！？]*[。！？]?\s*',
             r'^好的[，,。！？]?\s*[^。！？]*[。！？]?\s*',
             r'^请看[^。！？]*[。！？]?\s*',
             r'^根据[^。！？]*[。！？]?\s*',
             r'^基于[^。！？]*[。！？]?\s*',
             
-            # 提示词标记
             r'\*{0,2}提示词\*{0,2}[：:]\s*',
             r'【提示词】[：:]?\s*',
             r'提示词[：:]\s*',
             
-            # 补充说明
             r'\n?\*{0,2}补充说明\*{0,2}[：:].*',
             r'\n?【补充说明】[：:].*',
             r'\n?补充说明[：:].*',
             
-            # 解释说明
             r'\n?\*{0,2}解释说明\*{0,2}[：:].*',
             r'\n?【解释说明】[：:].*',
             r'\n?解释说明[：:].*',
             
-            # 更详细的补充
             r'\n?\*{0,2}更[详细进]*[^。！？]*[。！？]\*{0,2}[：:].*',
             
-            # 备选提示词
             r'\n?\*{0,2}备选提示词\*{0,2}[：:].*',
             
-            # 附加说明
             r'\n?\*{0,2}附加说明\*{0,2}[：:].*',
             r'\n?【附加说明】[：:].*',
             
-            # 结束语和问候
             r'\n?希望[^\n]*[！！。]',
             r'\n?以上[^\n]*[！！。]',
             r'\n?请[^\n]*[！！。]',
             r'\n?感谢[^\n]*[！！。]',
             r'\n?如果[您你][^\n]*[！！。]',
             
-            # Markdown格式
-            r'\*{2}([^*]+)\*{2}',  # 加粗
-            r'\*([^*]+)\*',        # 斜体
-            r'#{1,6}\s*',          # 标题
+            r'\*{2}([^*]+)\*{2}',
+            r'\*([^*]+)\*',
+            r'#{1,6}\s*',
             
-            # 场景/元素/风格标签（中文格式）
             r'\n?【?场景】?[：:][^。\n]*[。\n]?',
             r'\n?【?元素】?[：:][^。\n]*[。\n]?',
             r'\n?【?風格】?[：:][^。\n]*[。\n]?',
@@ -1538,10 +1682,82 @@ class ShotsMixin:
             r'\n?【?主体】?[：:][^。\n]*[。\n]?',
             r'\n?【?细节】?[：:][^。\n]*[。\n]?',
             
-            # 为什么选择这些提示词等解释
             r'\n?为什么[^\n]*',
             r'\n?進一步[^\n]*',
         ]
+        
+        # 拦截完整英文句子泄漏（最严重问题）
+        # SD提示词应为逗号分隔关键词，完整英文句子是LLM推理文本泄漏
+        # 策略：检测含主谓结构的完整句子并移除
+        full_sentence_patterns = [
+            r'[A-Z][a-z]+(?:,\s*(?:as|but|and|or|not)\s+[a-z]+)*\s+(?:is|are|was|were|has|have|had|will|would|can|could|should|must|does|did)\s+[^,]*\.\s*',
+            r'It\'?s about\s+[^,]*\.\s*',
+            r'This (?:is|means|shows|depicts|represents|conveys|illustrates)\s+[^,]*\.\s*',
+            r'(?:China|Russia|Beijing|Moscow|Venezuela|Maduro),?\s+as\s+a\s+[^,]*\.\s*',
+            r'(?:The|A|An)\s+(?:key|main|primary|important|central|core)\s+(?:message|point|idea|concept|theme|meaning)\s+[^,]*\.\s*',
+        ]
+        for pat in full_sentence_patterns:
+            text = re.sub(pat, '', text, flags=re.IGNORECASE)
+
+        # 移除抽象风格标签（LLM自作主张添加的非视觉关键词）
+        abstract_style_tags = [
+            'investigative journalism', 'geopolitical analysis', 'news broadcast style',
+            'news broadcast', 'political analysis', 'geopolitical tension',
+            'strategic importance', 'political commentary', 'documentary style',
+            'photojournalism', 'editorial photography',
+        ]
+        for tag in abstract_style_tags:
+            text = re.sub(r',?\s*\(' + re.escape(tag) + r'(?::[\d.]+)?\)\s*,?', ',', text, flags=re.IGNORECASE)
+            text = re.sub(r',?\s*\b' + re.escape(tag) + r'\b\s*,?', ',', text, flags=re.IGNORECASE)
+
+        # 修复SD语法错误
+        # 修复多余句号: "medium shot,." → "medium shot"
+        text = re.sub(r',\s*\.\s*', ', ', text)
+        # 修复连续句号: "photography." → 移除句号
+        text = re.sub(r'\.\s*(?=,|$)', '', text)
+        # 修复缺少括号的权重语法: "Cilia Flores:1.2" → "(Cilia Flores:1.2)"
+        text = re.sub(r'(?<!\()\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*:\s*(1\.[\d]+)\b(?!\))', r'(\1:\2)', text)
+        # 修复无效SD语法: "opposition figures (3):" → 移除
+        text = re.sub(r'\b\w+\s+\(\d+\)\s*:\s*', '', text)
+
+        # gemma3 推理文本后置剥离：删除残留的英文完整句子
+        # SD提示词是逗号分隔的关键词，不应包含完整英文句子
+        # 策略：匹配以大写字母开头、以句号结尾、且不包含SD权重语法的片段
+        sentence_pattern = re.compile(
+            r'(?:^|,\s*)([A-Z][a-z][^.]*?(?:translates|implies|suggests|highlights|describes|indicates|'
+            r'references|depicts|represents|conveys|signifies|emphasizes|discusses|mentions|'
+            r'refers to|lends itself|breaks down|craft|analyze|reasoning|step \d|'
+            r'what scene|the audio|the narration|the line|the phrase|this chinese|given the|'
+            r'here are|let\'s|okay|so the)[^.]*\.\s*)',
+            re.IGNORECASE
+        )
+        text = sentence_pattern.sub('', text)
+        
+        # 清除 "What scene shows this?" 等疑问句
+        text = re.sub(r'[^,]*[Ww]hat (?:scene|image|visual|shot) (?:shows|depicts|represents|conveys)[^,]*\?\s*', '', text)
+        # 清除 "Reasoning:" 标记后的内容直到下一个逗号
+        text = re.sub(r'Reasoning:\s*[^,]*', '', text, flags=re.IGNORECASE)
+        # 清除 "directly relates to" 等解释性短语
+        text = re.sub(r'[^,]*directly relates to[^,]*', '', text, flags=re.IGNORECASE)
+        # 清除 "This highlights" 等解释
+        text = re.sub(r'[^,]*This highlights[^,]*', '', text, flags=re.IGNORECASE)
+        # 清除 "He is distributing" 等描述性句子
+        text = re.sub(r'[^,]*(?:He|She|They|It|Maduro|The regime) is (?:distributing|holding|maintaining|attempting|controlling|using|trying)[^,]*\.\s*', '', text)
+        # 清除 "Once they lose power" 等叙述性句子
+        text = re.sub(r'[^,]*Once (?:they|he|she)[^,]*\.\s*', '', text)
+        # 清除 "China, as a creditor" 等解释
+        text = re.sub(r'[^,]*as a (?:creditor|leader|result|consequence)[^,]*\.\s*', '', text, flags=re.IGNORECASE)
+        # 清除 "A low-ranking soldier" 等描述
+        text = re.sub(r'A\s+(?:low-ranking|high-ranking|senior|junior)[^,]*\.\s*', '', text)
+        # 清除 "The narrator is questioning" 等
+        text = re.sub(r'The narrator is[^,]*\.\s*', '', text, flags=re.IGNORECASE)
+        # 清除 "It's describing" 等
+        text = re.sub(r'It\'?s (?:describing|saying|posing|referring)[^,]*\.\s*', '', text, flags=re.IGNORECASE)
+        # 清除残留的 ** 标记
+        text = re.sub(r'\*{2,}', '', text)
+        # 清除 " - " 分隔符
+        text = re.sub(r'\s*[-–—]\s*$', '', text)
+        text = re.sub(r'^\s*[-–—]\s*', '', text)
         
         # 应用所有移除模式
         for pattern in remove_patterns:
@@ -1665,6 +1881,29 @@ class ShotsMixin:
         text = self._build_final_prompt(text, sd_model_name)
 
         return text.strip()
+
+    def _extract_understanding(self, raw_output):
+        """从LLM原始输出中提取understanding部分，用于场景去重"""
+        if not raw_output:
+            return ""
+        text = str(raw_output).strip()
+        understanding = ""
+        pipe_match = re.search(r'\]\s*\|\s*', text)
+        if pipe_match:
+            before_pipe = text[:pipe_match.start()].strip()
+            label_match = re.search(r'\[(?:Understanding|understanding)\]\s*:\s*(.+)', before_pipe, re.DOTALL)
+            if label_match:
+                understanding = label_match.group(1).strip()
+            else:
+                no_bracket_match = re.search(r'(?:Understanding|understanding)\s*:\s*(.+)', before_pipe, re.IGNORECASE | re.DOTALL)
+                if no_bracket_match:
+                    understanding = no_bracket_match.group(1).strip()
+            if not understanding and before_pipe.startswith('[') and before_pipe.endswith(']'):
+                understanding = before_pipe[1:-1].strip()
+        if understanding:
+            understanding = re.sub(r'^(Understanding|understanding)\s*:\s*', '', understanding, flags=re.IGNORECASE).strip()
+            understanding = re.sub(r'\[|\]', '', understanding).strip()
+        return understanding[:200] if understanding else ""
     
 
     def _build_final_prompt(self, scene_description, sd_model_name=""):
@@ -1743,7 +1982,32 @@ class ShotsMixin:
         if suffix:
             parts.append(suffix)
 
-        return ', '.join(parts)
+        result = ', '.join(parts)
+        result = self._validate_sd_syntax(result)
+        return result
+
+    def _validate_sd_syntax(self, prompt):
+        """SD语法后处理验证：修复常见语法问题"""
+        if not prompt:
+            return prompt
+
+        text = prompt
+
+        text = re.sub(r',\s*\.\s*', ', ', text)
+        text = re.sub(r'\.\s*(?=,|$)', '', text)
+        text = re.sub(r',\s*,+', ',', text)
+        text = re.sub(r'^\s*,\s*', '', text)
+        text = re.sub(r'\s*,\s*$', '', text)
+
+        text = re.sub(r'(?<!\()\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s*:\s*(1\.[\d]+)\b(?!\))', r'(\1:\2)', text)
+
+        text = re.sub(r'\(\s*\)', '', text)
+        text = re.sub(r'\(\s*,\s*\)', '', text)
+        text = re.sub(r'\(\s*:\s*[\d.]+\s*\)', '', text)
+
+        text = re.sub(r'\s{2,}', ' ', text)
+
+        return text.strip(', ')
 
 
     def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text="", shot_index=-1):
@@ -1785,6 +2049,13 @@ class ShotsMixin:
                         if prev_prompts:
                             context_hint += f"AVOID: {', '.join(prev_prompts[-2:])}\n"
                     
+                    if hasattr(self, '_pregenerated_understandings_for_context'):
+                        prev_understandings = [self._pregenerated_understandings_for_context[j] for j in range(max(0, idx-3), idx) if j in self._pregenerated_understandings_for_context and self._pregenerated_understandings_for_context[j]]
+                        if prev_understandings:
+                            context_hint += f"PREVIOUS SCENES (do NOT repeat similar scenes):\n"
+                            for i, u in enumerate(prev_understandings[-3:]):
+                                context_hint += f"  - {u}\n"
+                    
                     total_shots = len(shot_texts)
                     if idx == 0:
                         context_hint += "Position: OPENING\n"
@@ -1816,7 +2087,7 @@ class ShotsMixin:
                 system_prompt=template["system"],
                 user_prompt=template["user"],
                 log_callback=self.log,
-                num_predict=256,
+                num_predict=384,
                 num_ctx=1532,
                 llm_config=llm_config,
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
@@ -1826,6 +2097,9 @@ class ShotsMixin:
                 raw_output = result_text.strip()
                 cleaned_prompt = self._clean_prompt_output(raw_output)
                 if cleaned_prompt:
+                    understanding = self._extract_understanding(raw_output)
+                    if understanding and hasattr(self, '_pregenerated_understandings_for_context') and shot_index >= 0:
+                        self._pregenerated_understandings_for_context[shot_index] = understanding
                     return cleaned_prompt
                 self.log(f"⚠️ 模型 {model} 输出被清洗后为空，原始输出: {raw_output[:100]}")
             
@@ -2519,7 +2793,6 @@ class ShotsMixin:
                             if not part or '→' not in part:
                                 continue
                             try:
-                                # 支持多种箭头格式：→ -> =>
                                 if '→' in part:
                                     old, new = part.split('→', 1)
                                 elif '->' in part:
@@ -2530,9 +2803,14 @@ class ShotsMixin:
                                     continue
                                 old = old.strip()
                                 new = new.strip()
-                                if old and new and old != new:
+                                if not old or not new:
+                                    continue
+                                if _is_traditional_conversion(old, new):
+                                    skipped_noop += 1
+                                    continue
+                                if old != new:
                                     correction_dict[old] = new
-                                elif old and new and old == new:
+                                else:
                                     skipped_noop += 1
                             except Exception as e:
                                 self.log(f"   ⚠️ 解析单项纠错失败: {part}, 错误: {e}")
@@ -3403,6 +3681,7 @@ class ShotsMixin:
                         if wrong in text:
                             text = text.replace(wrong, correct)
                     text = _fix_whisper_repeated_chars(text)
+                    text = _ensure_simplified_chinese(text)
                     seg_content_type = self.analyze_content_type(text)
                     final_tasks.append({
                         'text': text,
@@ -3520,6 +3799,9 @@ class ShotsMixin:
             else:
                 prompt_max_workers = 1
                 self.log(f"   💡 本地Ollama模式，串行生成（Ollama内部串行处理，多线程仅增加排队开销）")
+                current_model = self._get_current_model()
+                if current_model:
+                    check_model_gpu_status(current_model, self.log)
             
             total_tasks = len(final_tasks)
             mode_desc = "串行" if prompt_max_workers == 1 else f"{prompt_max_workers}线程并行"
@@ -3527,6 +3809,7 @@ class ShotsMixin:
             
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
             self._pregenerated_prompts_for_context = {}
+            self._pregenerated_understandings_for_context = {}
             self._visual_narrative_strategy = theme_info.get('visual_narrative_strategy', '')
 
             completed_count = 0

@@ -66,6 +66,14 @@ class UIHandlersMixin:
             if check_ollama_available():
                 set_ollama_available(True)
                 self.log("✅ Ollama服务已连接")
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        gpu_name = torch.cuda.get_device_name(0)
+                        gpu_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        self.log(f"🖥️ GPU: {gpu_name} ({gpu_total:.1f}GB VRAM)")
+                except Exception:
+                    pass
                 return
 
             if try_start_ollama_service():

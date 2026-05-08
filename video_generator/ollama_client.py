@@ -17,6 +17,8 @@ from .config import Config, get_http_session
 
 _RE_THINK_BLOCK = re.compile(r'<think>.*?</think>', re.DOTALL)
 _RE_THINK_TAG = re.compile(r'</?think>')
+_RE_THOUGHT_BLOCK = re.compile(r'<\|thought\|>.*?</\|thought\|>', re.DOTALL)
+_RE_THOUGHT_TAG = re.compile(r'</?\|thought\|>')
 
 
 def _strip_think_tags(text):
@@ -24,6 +26,8 @@ def _strip_think_tags(text):
         return text
     text = _RE_THINK_BLOCK.sub('', text)
     text = _RE_THINK_TAG.sub('', text)
+    text = _RE_THOUGHT_BLOCK.sub('', text)
+    text = _RE_THOUGHT_TAG.sub('', text)
     return text.strip()
 
 
@@ -357,6 +361,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
             model_options = dict(options)
 
+            call_start = time.time()
             with _ollama_call_semaphore:
                 response = get_http_session().post(
                     f"{Config.OLLAMA_BASE_URL}/api/chat",
@@ -373,6 +378,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                     },
                     timeout=(10, timeout)
                 )
+            call_elapsed = time.time() - call_start
 
             if response.status_code != 200:
                 if log_callback:
@@ -388,7 +394,15 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 prompt_eval_count = result_data.get("prompt_eval_count", 0)
                 actual_num_predict = model_options.get("num_predict", "?")
                 actual_num_ctx = model_options.get("num_ctx", "?")
-                log_callback(f"   🔍 num_predict={actual_num_predict}, num_ctx={actual_num_ctx} | 输入{prompt_eval_count}token, 输出{eval_count}token")
+                truncated = eval_count >= actual_num_predict if isinstance(actual_num_predict, int) else False
+                trunc_mark = " ⚠️截断!" if truncated else ""
+                gen_speed = f"{eval_count/call_elapsed:.1f}" if call_elapsed > 0 and eval_count > 0 else "?"
+                log_callback(f"   🔍 num_predict={actual_num_predict}, num_ctx={actual_num_ctx} | 输入{prompt_eval_count}token, 输出{eval_count}token{trunc_mark} | {call_elapsed:.1f}s ({gen_speed}tok/s)")
+
+            thinking_content = message.get("thinking", "")
+            if thinking_content and log_callback:
+                think_len = len(thinking_content)
+                log_callback(f"   ⚠️ 模型 {model} 返回了思考内容({think_len}字符)，think:False未生效！已自动剥离")
 
             content = _strip_think_tags(raw_content)
 
@@ -427,6 +441,10 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                         result_data = response.json()
                         message = result_data.get("message", {})
                         raw_content = message.get("content", "")
+                        thinking_content = message.get("thinking", "")
+                        if thinking_content and log_callback:
+                            think_len = len(thinking_content)
+                            log_callback(f"   ⚠️ 模型 {model} 返回了思考内容({think_len}字符)，think:False未生效！已自动剥离")
                         content = _strip_think_tags(raw_content)
                         if content:
                             if log_callback:
@@ -507,3 +525,47 @@ def warmup_model(model, log_callback=None):
         return response.status_code == 200
     except Exception:
         return False
+
+
+def check_model_gpu_status(model, log_callback=None):
+    if is_cloud_llm_active():
+        return True
+    try:
+        ps_resp = get_http_session().get(
+            f"{Config.OLLAMA_BASE_URL}/api/ps",
+            timeout=5
+        )
+        if ps_resp.status_code == 200:
+            models = ps_resp.json().get('models', [])
+            for m in models:
+                if model in m.get('name', ''):
+                    size_vram = m.get('size_vram', 0)
+                    size_total = m.get('size', 0)
+                    if size_vram > 0 and size_total > 0:
+                        vram_pct = size_vram / size_total * 100
+                        if log_callback:
+                            log_callback(f"   🖥️ 模型 {model}: GPU加载 {vram_pct:.0f}% (VRAM {size_vram/1024**3:.1f}GB / 总 {size_total/1024**3:.1f}GB)")
+                        if vram_pct < 50:
+                            _SMALL_MODELS = ["gemma3:1b", "qwen3:4b", "qwen2.5:3b", "llama3.2:3b"]
+                            available = get_available_models()
+                            smaller = [s for s in _SMALL_MODELS if s in available and s != model]
+                            suggest = smaller[0] if smaller else "更小的模型"
+                            if log_callback:
+                                log_callback(f"   ⚠️ GPU加载率仅{vram_pct:.0f}%，大量层在CPU上运行，速度极慢！")
+                                log_callback(f"   💡 建议: 换用更小的模型(如{suggest})，或关闭SD WebUI释放VRAM")
+                            return False
+                        elif vram_pct < 80:
+                            if log_callback:
+                                log_callback(f"   ℹ️ GPU加载率{vram_pct:.0f}%，部分层在CPU上（SD WebUI可能占用了VRAM）")
+                            return True
+                    elif size_total > 0 and size_vram == 0:
+                        if log_callback:
+                            log_callback(f"   ⚠️ 模型 {model} 完全运行在CPU上 (内存 {size_total/1024**3:.1f}GB)，速度极慢！")
+                            log_callback(f"   💡 建议: 检查GPU驱动或关闭SD WebUI释放VRAM")
+                        return False
+                    return True
+            if log_callback:
+                log_callback(f"   ⚠️ 模型 {model} 未在运行列表中找到，可能需要重新加载")
+        return True
+    except Exception:
+        return True

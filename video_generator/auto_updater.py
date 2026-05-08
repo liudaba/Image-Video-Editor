@@ -256,6 +256,9 @@ class UpdateDialog(tk.Toplevel):
         self.check_btn = ttk.Button(btn_frame, text="检查更新", command=self.check_updates)
         self.check_btn.pack(side=tk.LEFT, padx=(0, 5))
 
+        close_btn = ttk.Button(btn_frame, text="关闭", command=self.destroy)
+        close_btn.pack(side=tk.LEFT, padx=5)
+
         self.download_btn = ttk.Button(btn_frame, text="立即下载", command=self.start_download)
         self.download_btn.pack(side=tk.LEFT, padx=5)
         self.download_btn.pack_forget()
@@ -263,9 +266,6 @@ class UpdateDialog(tk.Toplevel):
         self.cancel_btn = ttk.Button(btn_frame, text="取消", command=self.cancel_download)
         self.cancel_btn.pack(side=tk.LEFT, padx=5)
         self.cancel_btn.pack_forget()
-
-        close_btn = ttk.Button(btn_frame, text="关闭", command=self.destroy)
-        close_btn.pack(side=tk.RIGHT)
 
     def check_updates(self):
         self.status_var.set("正在检查更新...")
