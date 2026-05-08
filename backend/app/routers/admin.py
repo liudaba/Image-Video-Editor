@@ -280,6 +280,70 @@ async def admin_generate_license_keys(
     return {"keys": keys, "count": len(keys)}
 
 
+@router.post("/generate_trial_codes")
+async def admin_generate_trial_codes(
+    count: int = 20,
+    request: Request = None,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    count = max(1, min(count, 100))
+    keys = []
+    for _ in range(count):
+        key_str = generate_license_key()
+        license_key = LicenseKey(
+            license_key=key_str,
+            plan_type=PlanType.TRIAL_15D,
+            status=LicenseKeyStatus.UNUSED,
+        )
+        db.add(license_key)
+        keys.append(key_str)
+
+    await db.flush()
+    await _log_audit(db, user, "generate_trial_codes", f"count={len(keys)}", request)
+    return {"keys": keys, "count": len(keys), "valid_days": 15}
+
+
+@router.get("/trial_codes")
+async def list_trial_codes(
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timedelta, timezone
+    
+    result = await db.execute(
+        select(LicenseKey)
+        .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
+        .order_by(desc(LicenseKey.created_at))
+    )
+    keys = result.scalars().all()
+    
+    now = datetime.now(timezone.utc)
+    response_keys = []
+    
+    for k in keys:
+        created_at = k.created_at.replace(tzinfo=timezone.utc)
+        age_days = (now - created_at).days
+        days_remaining = max(0, 15 - age_days)
+        is_expired = age_days >= 15
+        
+        response_keys.append({
+            "id": k.id,
+            "license_key": k.license_key,
+            "status": k.status.value,
+            "is_expired": is_expired,
+            "days_remaining": days_remaining,
+            "activated_by": k.activated_by,
+            "activated_by_username": (await db.scalar(select(User.username).where(User.id == k.activated_by))) if k.activated_by else None,
+            "activated_at": k.activated_at.isoformat() if k.activated_at else None,
+            "created_at": k.created_at.isoformat() if k.created_at else None,
+        })
+    
+    return {
+        "keys": response_keys
+    }
+
+
 @router.post("/users/{user_id}/toggle_active")
 async def toggle_user_active(
     user_id: int,

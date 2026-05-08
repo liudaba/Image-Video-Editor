@@ -138,6 +138,11 @@
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link" href="#trial_codes" data-section="trial_codes">
+                    <i class="fas fa-code"></i> 自动生成激活码
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" href="#versions" data-section="versions">
                     <i class="fas fa-cogs"></i> 版本管理
                 </a>
@@ -338,6 +343,18 @@
                 const response = await fetch(`/admin/content/${section}`);
                 if (response.ok) {
                     contentArea.innerHTML = await response.text();
+                    
+                    let initFunctionName;
+                    if (section === 'trial_codes') {
+                        initFunctionName = 'loadTrialCodesContent';
+                    } else {
+                        initFunctionName = `load${section.charAt(0).toUpperCase() + section.slice(1)}Content`;
+                    }
+                    if (typeof window[initFunctionName] === 'function') {
+                        setTimeout(() => {
+                            window[initFunctionName]();
+                        }, 10);
+                    }
                 } else {
                     contentArea.innerHTML = '<div class="alert alert-danger">加载内容失败</div>';
                 }

@@ -239,6 +239,7 @@ async def get_content(request: Request, section: str):
         "dashboard": "dashboard_content.html",
         "users": "users_content.html",
         "licenses": "licenses_content.html",
+        "trial_codes": "trial_codes_content.html",
         "versions": "versions_content.html",
         "orders": "orders_content.html",
         "analytics": "analytics_content.html"

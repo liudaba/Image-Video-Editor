@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 
 from ..config import settings  # 使用相对导入
 from ..database import get_db
-from ..models import License, LicenseKey, User, LicenseKeyStatus
+from ..models import License, LicenseKey, User, LicenseKeyStatus, PlanType
 from ..schemas import LicenseData
 
 
@@ -73,15 +73,21 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
 
 async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[License]:
     """激活许可证"""
-    # 查找许可证密钥
+    # 查找许可证密钥（包括已过期的，以便返回适当的错误信息）
     key_result = await db.execute(
         select(LicenseKey)
         .where(LicenseKey.license_key == license_key)
-        .where(LicenseKey.status == LicenseKeyStatus.UNUSED)
     )
     license_key_obj = key_result.scalar_one_or_none()
     
     if not license_key_obj:
+        return None
+    
+    # 检查激活码状态
+    if license_key_obj.status == LicenseKeyStatus.REVOKED:
+        return None
+    
+    if license_key_obj.status == LicenseKeyStatus.ACTIVATED:
         return None
     
     # 更新许可证密钥状态
@@ -89,9 +95,14 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     license_key_obj.activated_at = datetime.now(timezone.utc)
     license_key_obj.activated_by = user_id
     
-    # 创建用户许可证
+    # 根据计划类型计算过期日期
     if license_key_obj.plan_type == "lifetime":
         expiry_date = None
+        license_type = "pro"
+    elif license_key_obj.plan_type == "trial_15d":
+        expiry_delta = timedelta(days=15)
+        expiry_date = datetime.now(timezone.utc) + expiry_delta
+        license_type = "trial"
     else:
         # 根据计划类型计算过期日期
         if license_key_obj.plan_type == "monthly":
@@ -102,10 +113,11 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             expiry_delta = timedelta(days=30)  # 默认为月度计划
         
         expiry_date = datetime.now(timezone.utc) + expiry_delta
+        license_type = "pro"
     
     license_obj = License(
         user_id=user_id,
-        license_type="pro",
+        license_type=license_type,
         license_key=license_key,
         is_valid=True,
         expiry_date=expiry_date,
@@ -115,6 +127,60 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     await db.flush()
     
     return license_obj
+
+
+async def cleanup_expired_license_keys(db: AsyncSession) -> int:
+    """清理已过期的未使用试用激活码（生成超过15天仍未激活的）"""
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=15)
+    
+    result = await db.execute(
+        select(LicenseKey)
+        .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
+        .where(LicenseKey.status == LicenseKeyStatus.UNUSED)
+        .where(LicenseKey.created_at < cutoff_time)
+    )
+    expired_keys = result.scalars().all()
+    
+    count = 0
+    for key in expired_keys:
+        key.status = LicenseKeyStatus.REVOKED
+        count += 1
+    
+    if count > 0:
+        await db.flush()
+    
+    return count
+
+
+async def get_trial_key_status(db: AsyncSession, license_key: str) -> Optional[dict]:
+    """获取试用激活码的状态信息"""
+    result = await db.execute(
+        select(LicenseKey)
+        .where(LicenseKey.license_key == license_key)
+        .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
+    )
+    key = result.scalar_one_or_none()
+    
+    if not key:
+        return None
+    
+    now = datetime.now(timezone.utc)
+    created_at = key.created_at.replace(tzinfo=timezone.utc)
+    
+    # 计算剩余天数（从生成时间开始算15天有效期）
+    age_days = (now - created_at).days
+    days_remaining = max(0, 15 - age_days)
+    is_expired = age_days >= 15
+    
+    return {
+        "license_key": key.license_key,
+        "status": key.status.value,
+        "is_expired": is_expired,
+        "days_remaining": days_remaining,
+        "created_at": key.created_at.isoformat(),
+        "activated_at": key.activated_at.isoformat() if key.activated_at else None,
+        "activated_by": key.activated_by,
+    }
 
 
 def create_license_payload(username: str, license_type: str, expiry_date: Optional[datetime] = None) -> str:

@@ -21,6 +21,7 @@ class PlanType(str, enum.Enum):
     MONTHLY = "monthly"
     YEARLY = "yearly"
     LIFETIME = "lifetime"
+    TRIAL_15D = "trial_15d"
 
 
 class LicenseKeyStatus(str, enum.Enum):
@@ -71,6 +72,7 @@ class LicenseKey(Base):
     status = Column(Enum(LicenseKeyStatus), default=LicenseKeyStatus.UNUSED, nullable=False)
     activated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     activated_at = Column(DateTime(timezone=True), nullable=True)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
