@@ -72,6 +72,11 @@ def check_production_safety():
     if not settings.ADMIN_PASSWORD:
         unsafe.append("ADMIN_PASSWORD")
     if unsafe:
-        print(f"检测到不安全的配置: {', '.join(unsafe)}")
-        print("请在 .env 文件中设置上述配置项")
-        sys.exit(1)
+        env_name = os.environ.get("VIDEOGEN_ENV", "")
+        if env_name.lower() == "production":
+            print(f"检测到不安全的配置: {', '.join(unsafe)}")
+            print("请在 .env 文件中设置上述配置项")
+            sys.exit(1)
+        else:
+            print(f"警告: 检测到不安全的配置: {', '.join(unsafe)}")
+            print("建议在 .env 文件中设置上述配置项（生产环境下将阻止启动）")

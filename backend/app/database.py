@@ -1,42 +1,25 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.exc import SQLAlchemyError
-from app.config import settings
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from typing import AsyncGenerator
+import os
 
-is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+# 修复模块导入路径
+from .config import settings  # 使用相对导入
 
-engine_kwargs = {"echo": False}
-if not is_sqlite:
-    engine_kwargs.update({
-        "pool_size": 10,
-        "max_overflow": 5,
-        "pool_pre_ping": True,
-        "pool_recycle": 3600,
-    })
-else:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+# 创建异步引擎
+engine = create_async_engine(settings.DATABASE_URL)
 
-engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
-
+# 创建会话工厂
+AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+Base = declarative_base()
 
-class Base(DeclarativeBase):
-    pass
-
-
-async def get_db() -> AsyncSession:
-    async with async_session() as session:
-        try:
-            yield session
-            await session.commit()
-        except SQLAlchemyError:
-            await session.rollback()
-            raise
-        except Exception:
-            await session.rollback()
-            raise
-
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionFactory() as session:
+        yield session
 
 async def init_db():
     async with engine.begin() as conn:

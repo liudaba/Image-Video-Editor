@@ -1,72 +1,89 @@
-from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from typing import List
 
-from app.database import get_db, engine
-from app.models import User, License, LicenseKey, LicenseKeyStatus, LicenseType
-from app.schemas import LicenseActivate, ActivateResponse
-from app.auth import get_current_user
-from app.services.license_service import (
-    build_license_response,
-    is_license_expired,
-    _ensure_aware,
-    PLAN_PRICING,
-)
+from ..database import get_db
+from ..models import LicenseKey, License, User, LicenseKeyStatus, PlanType
+from ..auth import require_admin, get_current_user
+from ..services.license_service import generate_license_key, encode_license_data
+from ..schemas import LicenseStatusResponse
 
-router = APIRouter(prefix="/api/license", tags=["授权"])
+router = APIRouter(prefix="/license", tags=["license"])
 
 
-@router.post("/activate", response_model=ActivateResponse)
-async def activate_license(
-    body: LicenseActivate,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+@router.post("/generate-key", summary="生成许可证密钥（仅管理员）")
+async def generate_key(
+    plan_type: PlanType,
+    quantity: int,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
 ):
-    _sqlite = str(engine.url).startswith("sqlite")
-    q1 = select(License).where(License.user_id == user.id)
-    if not _sqlite:
-        q1 = q1.with_for_update()
-    result = await db.execute(q1)
+    if quantity <= 0 or quantity > 100:
+        raise HTTPException(status_code=400, detail="数量必须在1-100之间")
+
+    keys = []
+    for _ in range(quantity):
+        key = generate_license_key()
+        license_key = LicenseKey(
+            license_key=key,
+            plan_type=plan_type,
+            status=LicenseKeyStatus.UNUSED
+        )
+        db.add(license_key)
+        keys.append(key)
+
+    await db.flush()
+    await db.commit()
+
+    return {"keys": keys}
+
+
+@router.get("/status", response_model=LicenseStatusResponse, summary="获取许可证状态")
+async def get_license_status(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(License).filter(License.user_id == current_user.id)
+    )
     license_obj = result.scalar_one_or_none()
 
     if not license_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到授权记录")
+        return LicenseStatusResponse(license=None)
 
-    q2 = select(LicenseKey).where(
-            LicenseKey.license_key == body.license_key,
-            LicenseKey.status == LicenseKeyStatus.UNUSED,
-        )
-    if not _sqlite:
-        q2 = q2.with_for_update()
-    key_result = await db.execute(q2)
-    license_key_obj = key_result.scalar_one_or_none()
+    license_data = encode_license_data(license_obj, current_user.username)
+    return LicenseStatusResponse(license=license_data)
 
-    if not license_key_obj:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="许可证密钥无效或已被使用",
-        )
 
-    now = datetime.now(timezone.utc)
-    plan = PLAN_PRICING.get(license_key_obj.plan_type.value)
-    days = plan["days"] if plan else 365
+@router.get("/keys", summary="获取许可证密钥列表（仅管理员）")
+async def list_license_keys(
+    skip: int = 0,
+    limit: int = 100,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(LicenseKey)
+        .offset(skip)
+        .limit(limit)
+        .order_by(LicenseKey.created_at.desc())
+    )
+    keys = result.scalars().all()
 
-    license_obj.license_type = LicenseType.PRO
-    license_obj.license_key = body.license_key
-    license_obj.is_valid = True
-    expiry_date = _ensure_aware(license_obj.expiry_date)
-    if expiry_date and expiry_date > now:
-        license_obj.expiry_date = expiry_date + timedelta(days=days)
-    else:
-        license_obj.expiry_date = now + timedelta(days=days)
-
-    license_key_obj.status = LicenseKeyStatus.ACTIVATED
-    license_key_obj.activated_by = user.id
-    license_key_obj.activated_at = now
-
-    await db.flush()
-    await db.refresh(license_obj)
-
-    license_data = build_license_response(license_obj, user.username)
-    return ActivateResponse(license=license_data)
+    return {
+        "keys": [
+            {
+                "key": key.license_key,
+                "plan_type": key.plan_type,
+                "status": key.status,
+                "activated_by": key.activated_by,
+                "activated_at": key.activated_at,
+                "created_at": key.created_at
+            }
+            for key in keys
+        ]
+    }

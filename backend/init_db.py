@@ -12,10 +12,13 @@ import os
 import sys
 import secrets
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加当前目录到模块搜索路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
 
 async def init():
+    # 使用绝对路径导入
     from app.database import init_db, async_session
     from app.models import User, AppVersion
     from app.auth import hash_password

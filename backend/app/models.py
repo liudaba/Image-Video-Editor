@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text, Numeric, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.sql import func
-from app.database import Base
+from .database import Base  # 使用相对导入
 import enum
 
 

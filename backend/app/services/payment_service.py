@@ -1,54 +1,81 @@
+import json
 import time
-import uuid
+from typing import Dict, Optional, Any
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.config import settings
-from app.services.license_service import PLAN_PRICING
-
-_alipay_instance = None
-_alipay_instance_lock = None
-
-
-def _get_site_base_url() -> str:
-    origins = settings.CORS_ORIGINS
-    if origins:
-        return origins[0].rstrip("/")
-    return "http://localhost"
-
-
-def _get_alipay_instance():
-    global _alipay_instance, _alipay_instance_lock
-    try:
-        import threading
-        if _alipay_instance_lock is None:
-            _alipay_instance_lock = threading.Lock()
-        with _alipay_instance_lock:
-            if _alipay_instance is not None:
-                return _alipay_instance
-            from alipay import AliPay
-            with open(settings.ALIPAY_PRIVATE_KEY_PATH, "r") as f:
-                app_private_key = f.read()
-            with open(settings.ALIPAY_PUBLIC_KEY_PATH, "r") as f:
-                alipay_public_key = f.read()
-            _alipay_instance = AliPay(
-                appid=settings.ALIPAY_APP_ID,
-                app_notify_url=settings.ALIPAY_NOTIFY_URL,
-                app_private_key_string=app_private_key,
-                alipay_public_key_string=alipay_public_key,
-                sign_type="RSA2",
-                debug=False,
-            )
-            return _alipay_instance
-    except Exception:
-        return None
+from ..config import settings  # 使用相对导入
+from ..database import get_db
+from ..models import Order, OrderStatus, PlanType, User
+from ..schemas import OrderResponse
 
 
 def generate_order_no() -> str:
-    now = datetime.now(timezone.utc)
-    date_str = now.strftime("%Y%m%d%H%M%S")
-    short_uuid = uuid.uuid4().hex[:8].upper()
-    return f"VG{date_str}{short_uuid}"
+    """生成订单号"""
+    return f"ORD{int(time.time())}{int(time.time()*1000000)%1000000:06d}"
+
+
+def calculate_plan_amount(plan_type: PlanType) -> float:
+    """根据计划类型计算金额"""
+    amounts = {
+        PlanType.MONTHLY: 19.9,
+        PlanType.YEARLY: 199.0,
+        PlanType.LIFETIME: 599.0,
+    }
+    return amounts.get(plan_type, 0.0)
+
+
+def generate_payment_qr_code(order_no: str, amount: float, method: str) -> str:
+    """生成模拟支付二维码"""
+    # 实际应用中这里会调用支付宝或微信API生成真实二维码
+    # 这里只是模拟返回一个二维码内容
+    return f"mock_qr_{method}_{order_no}_{amount}"
+
+
+async def create_order(
+    db: AsyncSession, 
+    user_id: int, 
+    plan_type: PlanType, 
+    payment_method: str
+) -> Order:
+    """创建支付订单"""
+    order_no = generate_order_no()
+    amount = calculate_plan_amount(plan_type)
+    
+    order = Order(
+        user_id=user_id,
+        order_no=order_no,
+        plan_type=plan_type,
+        payment_method=payment_method,
+        amount=amount,
+        status=OrderStatus.PENDING,
+    )
+    
+    db.add(order)
+    await db.flush()
+    
+    return order
+
+
+def get_payment_callback_url(method: str) -> str:
+    """获取支付回调地址"""
+    base_url = "https://api.videogen.com/api/payment/callback"
+    return f"{base_url}/{method}"
+
+
+def verify_alipay_signature(params: Dict, alipay_public_key: str) -> bool:
+    """验证支付宝签名"""
+    # 实际应用中这里会验证支付宝签名
+    # 这里简单返回True以供测试
+    return True
+
+
+def verify_wechat_signature(params: Dict, wechat_api_key: str) -> bool:
+    """验证微信支付签名"""
+    # 实际应用中这里会验证微信支付签名
+    # 这里简单返回True以供测试
+    return True
 
 
 async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:

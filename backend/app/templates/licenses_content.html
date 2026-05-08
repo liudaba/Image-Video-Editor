@@ -1,0 +1,204 @@
+<div class="page-header">
+    <h2>许可证管理</h2>
+    <p class="text-muted">管理系统中的许可证密钥和用户许可证</p>
+</div>
+
+<ul class="nav nav-tabs" id="licenseTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="keys-tab" data-bs-toggle="tab" data-bs-target="#keys" type="button">许可证密钥</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="user-licenses-tab" data-bs-toggle="tab" data-bs-target="#user-licenses" type="button">用户许可证</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="licenseTabsContent">
+    <div class="tab-pane fade show active" id="keys" role="tabpanel">
+        <div class="card shadow mt-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">许可证密钥列表</h6>
+                <button class="btn btn-sm btn-primary" id="generate-keys-btn">
+                    <i class="fas fa-plus"></i> 生成密钥
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="license-keys-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>密钥</th>
+                                <th>套餐类型</th>
+                                <th>状态</th>
+                                <th>激活用户</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="license-keys-list">
+                            <!-- 动态加载 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tab-pane fade" id="user-licenses" role="tabpanel">
+        <div class="card shadow mt-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">用户许可证列表</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="user-licenses-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>用户ID</th>
+                                <th>用户名</th>
+                                <th>许可证类型</th>
+                                <th>状态</th>
+                                <th>到期时间</th>
+                                <th>创建时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="user-licenses-list">
+                            <!-- 动态加载 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadLicensesContent() {
+        await loadLicenseKeys();
+        await loadUserLicenses();
+        
+        document.getElementById('generate-keys-btn').addEventListener('click', () => {
+            showGenerateKeysModal();
+        });
+    }
+
+    async function loadLicenseKeys() {
+        try {
+            const response = await apiRequest('/api/admin/license_keys');
+            const keysList = document.getElementById('license-keys-list');
+            keysList.innerHTML = '';
+            
+            response.keys.forEach(key => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><code>${key.license_key}</code></td>
+                    <td>${key.plan_type === 'monthly' ? '月付' : key.plan_type === 'yearly' ? '年付' : '终身'}</td>
+                    <td>
+                        <span class="badge ${
+                            key.status === 'unused' ? 'bg-secondary' : 
+                            key.status === 'activated' ? 'bg-success' : 'bg-danger'
+                        }">${key.status === 'unused' ? '未使用' : key.status === 'activated' ? '已激活' : '已撤销'}</span>
+                    </td>
+                    <td>${key.activated_by_username || '-'}</td>
+                    <td>${formatDate(key.created_at)}</td>
+                    <td>
+                        ${key.status === 'unused' ? `
+                            <button class="btn btn-sm btn-danger" onclick="revokeKey('${key.license_key}')">
+                                <i class="fas fa-ban"></i> 撤销
+                            </button>
+                        ` : '-'}
+                    </td>
+                `;
+                keysList.appendChild(row);
+            });
+        } catch (error) {
+            console.error('加载许可证密钥失败:', error);
+            showError('加载许可证密钥失败: ' + error.message);
+        }
+    }
+
+    async function loadUserLicenses() {
+        try {
+            const response = await apiRequest('/api/admin/user_licenses');
+            const licensesList = document.getElementById('user-licenses-list');
+            licensesList.innerHTML = '';
+            
+            response.licenses.forEach(license => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${license.user_id}</td>
+                    <td>${license.username}</td>
+                    <td><span class="badge ${license.license_type === 'pro' ? 'bg-primary' : 'bg-info'}">${license.license_type === 'pro' ? '专业版' : '试用版'}</span></td>
+                    <td><span class="badge ${license.is_valid ? 'bg-success' : 'bg-danger'}">${license.is_valid ? '有效' : '无效'}</span></td>
+                    <td>${license.expiry_date ? formatDate(license.expiry_date) : '永久'}</td>
+                    <td>${formatDate(license.created_at)}</td>
+                `;
+                licensesList.appendChild(row);
+            });
+        } catch (error) {
+            console.error('加载用户许可证失败:', error);
+            showError('加载用户许可证失败: ' + error.message);
+        }
+    }
+
+    function showGenerateKeysModal() {
+        const modalBody = document.getElementById('commonModalBody');
+        modalBody.innerHTML = `
+            <form id="generate-keys-form">
+                <div class="mb-3">
+                    <label for="key-count" class="form-label">生成数量</label>
+                    <input type="number" class="form-control" id="key-count" value="1" min="1" max="50">
+                </div>
+                <div class="mb-3">
+                    <label for="key-plan" class="form-label">套餐类型</label>
+                    <select class="form-select" id="key-plan">
+                        <option value="monthly">月付</option>
+                        <option value="yearly" selected>年付</option>
+                        <option value="lifetime">终身</option>
+                    </select>
+                </div>
+            </form>
+        `;
+        
+        document.getElementById('commonModalLabel').textContent = '生成许可证密钥';
+        document.getElementById('confirmModalBtn').textContent = '生成';
+        
+        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        modal.show();
+        
+        document.getElementById('confirmModalBtn').onclick = async function() {
+            try {
+                const data = {
+                    count: parseInt(document.getElementById('key-count').value),
+                    plan_type: document.getElementById('key-plan').value
+                };
+                
+                await apiRequest('/api/admin/generate_license_keys', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                showSuccess(`成功生成 ${data.count} 个许可证密钥`);
+                modal.hide();
+                loadLicenseKeys();
+            } catch (error) {
+                console.error('生成许可证密钥失败:', error);
+                showError(`生成许可证密钥失败: ${error.message}`);
+            }
+        };
+    }
+
+    async function revokeKey(key) {
+        if (!confirm(`确定要撤销密钥 ${key} 吗？`)) return;
+        
+        try {
+            await apiRequest(`/api/admin/license_keys/${key}/revoke`, {
+                method: 'POST'
+            });
+            showSuccess('撤销成功');
+            loadLicenseKeys();
+        } catch (error) {
+            console.error('撤销密钥失败:', error);
+            showError(`撤销密钥失败: ${error.message}`);
+        }
+    }
+</script>

@@ -1,0 +1,273 @@
+<div class="page-header">
+    <h2>版本管理</h2>
+    <p class="text-muted">管理应用程序版本和更新</p>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+        <h6 class="m-0 font-weight-bold text-primary">版本列表</h6>
+        <button class="btn btn-sm btn-primary" id="add-version-btn">
+            <i class="fas fa-plus"></i> 添加版本
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="versions-table" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>版本号</th>
+                        <th>发布日期</th>
+                        <th>优先级</th>
+                        <th>强制更新</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="versions-list">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadVersionsContent() {
+        await loadVersions();
+        
+        document.getElementById('add-version-btn').addEventListener('click', () => {
+            showAddVersionModal();
+        });
+    }
+
+    async function loadVersions() {
+        try {
+            const response = await apiRequest('/api/admin/versions');
+            const versionsList = document.getElementById('versions-list');
+            versionsList.innerHTML = '';
+            
+            response.versions.forEach(version => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${version.version}</strong></td>
+                    <td>${formatDate(version.release_date)}</td>
+                    <td>
+                        <span class="badge ${
+                            version.priority === 'critical' ? 'bg-danger' : 
+                            version.priority === 'high' ? 'bg-warning' : 'bg-info'
+                        }">${version.priority === 'critical' ? '紧急' : version.priority === 'high' ? '高' : '普通'}</span>
+                    </td>
+                    <td>${version.force_update ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-danger"></i>'}</td>
+                    <td>
+                        <span class="badge ${version.is_active ? 'bg-success' : 'bg-secondary'}">${version.is_active ? '启用' : '禁用'}</span>
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn btn-sm ${version.is_active ? 'btn-warning' : 'btn-success'}" 
+                                onclick="toggleVersionActive(${version.id}, ${version.is_active})">
+                                <i class="fas ${version.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                            </button>
+                            <button class="btn btn-sm btn-info" onclick="showEditVersionModal(${version.id})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="showDeleteVersionModal(${version.id}, '${version.version}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                `;
+                versionsList.appendChild(row);
+            });
+        } catch (error) {
+            console.error('加载版本列表失败:', error);
+            showError('加载版本列表失败: ' + error.message);
+        }
+    }
+
+    function showAddVersionModal() {
+        const modalBody = document.getElementById('commonModalBody');
+        modalBody.innerHTML = `
+            <form id="add-version-form">
+                <div class="mb-3">
+                    <label for="version-number" class="form-label">版本号</label>
+                    <input type="text" class="form-control" id="version-number" placeholder="如: 2.1.0" required>
+                </div>
+                <div class="mb-3">
+                    <label for="download-url" class="form-label">下载地址</label>
+                    <input type="url" class="form-control" id="download-url" required>
+                </div>
+                <div class="mb-3">
+                    <label for="file-size" class="form-label">文件大小 (字节)</label>
+                    <input type="number" class="form-control" id="file-size" min="1" required>
+                </div>
+                <div class="mb-3">
+                    <label for="changelog" class="form-label">更新日志</label>
+                    <textarea class="form-control" id="changelog" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="priority" class="form-label">优先级</label>
+                    <select class="form-select" id="priority">
+                        <option value="normal">普通</option>
+                        <option value="high">高</option>
+                        <option value="critical">紧急</option>
+                    </select>
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="force-update">
+                    <label class="form-check-label" for="force-update">强制更新</label>
+                </div>
+            </form>
+        `;
+        
+        document.getElementById('commonModalLabel').textContent = '添加新版本';
+        document.getElementById('confirmModalBtn').textContent = '添加';
+        
+        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        modal.show();
+        
+        document.getElementById('confirmModalBtn').onclick = async function() {
+            try {
+                const data = {
+                    version: document.getElementById('version-number').value,
+                    download_url: document.getElementById('download-url').value,
+                    file_size: parseInt(document.getElementById('file-size').value),
+                    changelog: document.getElementById('changelog').value,
+                    priority: document.getElementById('priority').value,
+                    force_update: document.getElementById('force-update').checked
+                };
+                
+                await apiRequest('/api/admin/versions', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                
+                showSuccess('添加版本成功');
+                modal.hide();
+                loadVersions();
+            } catch (error) {
+                console.error('添加版本失败:', error);
+                showError(`添加版本失败: ${error.message}`);
+            }
+        };
+    }
+
+    async function showEditVersionModal(versionId) {
+        try {
+            const version = await apiRequest(`/api/admin/versions/${versionId}`);
+            
+            const modalBody = document.getElementById('commonModalBody');
+            modalBody.innerHTML = `
+                <form id="edit-version-form">
+                    <div class="mb-3">
+                        <label for="edit-version-number" class="form-label">版本号</label>
+                        <input type="text" class="form-control" id="edit-version-number" value="${version.version}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-download-url" class="form-label">下载地址</label>
+                        <input type="url" class="form-control" id="edit-download-url" value="${version.download_url}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-file-size" class="form-label">文件大小 (字节)</label>
+                        <input type="number" class="form-control" id="edit-file-size" value="${version.file_size}" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-changelog" class="form-label">更新日志</label>
+                        <textarea class="form-control" id="edit-changelog" rows="3">${version.changelog || ''}</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-priority" class="form-label">优先级</label>
+                        <select class="form-select" id="edit-priority">
+                            <option value="normal" ${version.priority === 'normal' ? 'selected' : ''}>普通</option>
+                            <option value="high" ${version.priority === 'high' ? 'selected' : ''}>高</option>
+                            <option value="critical" ${version.priority === 'critical' ? 'selected' : ''}>紧急</option>
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit-force-update" ${version.force_update ? 'checked' : ''}>
+                        <label class="form-check-label" for="edit-force-update">强制更新</label>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit-is-active" ${version.is_active ? 'checked' : ''}>
+                        <label class="form-check-label" for="edit-is-active">启用版本</label>
+                    </div>
+                </form>
+            `;
+            
+            document.getElementById('commonModalLabel').textContent = '编辑版本';
+            document.getElementById('confirmModalBtn').textContent = '保存';
+            
+            const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+            modal.show();
+            
+            document.getElementById('confirmModalBtn').onclick = async function() {
+                try {
+                    const data = {
+                        version: document.getElementById('edit-version-number').value,
+                        download_url: document.getElementById('edit-download-url').value,
+                        file_size: parseInt(document.getElementById('edit-file-size').value),
+                        changelog: document.getElementById('edit-changelog').value,
+                        priority: document.getElementById('edit-priority').value,
+                        force_update: document.getElementById('edit-force-update').checked,
+                        is_active: document.getElementById('edit-is-active').checked
+                    };
+                    
+                    await apiRequest(`/api/admin/versions/${versionId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                    
+                    showSuccess('更新版本成功');
+                    modal.hide();
+                    loadVersions();
+                } catch (error) {
+                    console.error('更新版本失败:', error);
+                    showError(`更新版本失败: ${error.message}`);
+                }
+            };
+        } catch (error) {
+            console.error('获取版本信息失败:', error);
+            showError(`获取版本信息失败: ${error.message}`);
+        }
+    }
+
+    async function toggleVersionActive(versionId, isActive) {
+        try {
+            await apiRequest(`/api/admin/versions/${versionId}/toggle_active`, {
+                method: 'POST'
+            });
+            showSuccess(`${isActive ? '禁用' : '启用'}版本成功`);
+            loadVersions();
+        } catch (error) {
+            console.error('切换版本状态失败:', error);
+            showError(`切换版本状态失败: ${error.message}`);
+        }
+    }
+
+    function showDeleteVersionModal(versionId, versionName) {
+        const modalBody = document.getElementById('commonModalBody');
+        modalBody.innerHTML = `
+            <p>您确定要删除版本 "<strong>${versionName}</strong>" 吗？此操作不可撤销。</p>
+        `;
+        
+        document.getElementById('commonModalLabel').textContent = '删除版本确认';
+        document.getElementById('confirmModalBtn').textContent = '删除';
+        
+        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        modal.show();
+        
+        document.getElementById('confirmModalBtn').onclick = async function() {
+            try {
+                await apiRequest(`/api/admin/versions/${versionId}`, {
+                    method: 'DELETE'
+                });
+                
+                showSuccess('删除版本成功');
+                modal.hide();
+                loadVersions();
+            } catch (error) {
+                console.error('删除版本失败:', error);
+                showError(`删除版本失败: ${error.message}`);
+            }
+        };
+    }
+</script>

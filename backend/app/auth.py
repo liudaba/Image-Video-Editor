@@ -7,11 +7,12 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import time
 
-from app.config import settings
-from app.database import get_db
-from app.models import User
-from app.schemas import TokenData
+from .config import settings  # 使用相对导入
+from .database import get_db  # 使用相对导入
+from .models import User
+from .schemas import TokenData
 
 logger = logging.getLogger("videogen")
 security = HTTPBearer()

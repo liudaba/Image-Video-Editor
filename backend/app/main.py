@@ -10,12 +10,16 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
 import sqlalchemy
+from fastapi.templating import Jinja2Templates
+from pathlib import Path
 
-from app.config import settings, check_production_safety
-from app.database import init_db, engine
-from app.routers import auth, license, payment, user, version, admin
+from .config import settings, check_production_safety
+from .database import init_db, engine
+from .routers import auth, license, payment, user, version, admin
 
 logger = logging.getLogger("videogen")
+
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
 class JSONFormatter(logging.Formatter):
@@ -212,3 +216,37 @@ async def health_check():
         pass
 
     return {"status": "ok" if db_ok else "degraded"}
+
+
+@app.get("/")
+async def root():
+    return {"message": "短视频生成器 API"}
+
+
+@app.get("/admin/login")
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/admin/dashboard")
+async def dashboard_page(request: Request):
+    return templates.TemplateResponse("admin_base.html", {"request": request})
+
+
+@app.get("/admin/content/{section}")
+async def get_content(request: Request, section: str):
+    template_files = {
+        "dashboard": "dashboard_content.html",
+        "users": "users_content.html",
+        "licenses": "licenses_content.html",
+        "versions": "versions_content.html",
+        "orders": "orders_content.html",
+        "analytics": "analytics_content.html"
+    }
+    
+    template_file = template_files.get(section)
+    if not template_file:
+        raise HTTPException(status_code=404, detail="内容不存在")
+    
+    return templates.TemplateResponse(template_file, {"request": request})
+

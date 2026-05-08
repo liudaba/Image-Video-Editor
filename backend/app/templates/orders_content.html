@@ -1,0 +1,135 @@
+<div class="page-header">
+    <h2>订单管理</h2>
+    <p class="text-muted">管理用户订单和支付记录</p>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+        <h6 class="m-0 font-weight-bold text-primary">订单列表</h6>
+        <div class="d-flex">
+            <select class="form-select form-select-sm me-2" id="order-status-filter" style="width: 150px;">
+                <option value="">所有状态</option>
+                <option value="pending">待支付</option>
+                <option value="paid">已支付</option>
+                <option value="expired">已过期</option>
+                <option value="refunded">已退款</option>
+                <option value="cancelled">已取消</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" id="refresh-orders">
+                <i class="fas fa-refresh"></i> 刷新
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="orders-table" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>订单号</th>
+                        <th>用户ID</th>
+                        <th>套餐类型</th>
+                        <th>支付方式</th>
+                        <th>金额</th>
+                        <th>状态</th>
+                        <th>支付时间</th>
+                        <th>创建时间</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-list">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+        </div>
+        
+        <nav aria-label="订单列表分页" class="mt-3">
+            <ul class="pagination justify-content-center" id="orders-pagination">
+                <!-- 分页按钮 -->
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<script>
+    let ordersCurrentPage = 1;
+    let ordersPageSize = 10;
+
+    async function loadOrdersContent() {
+        await loadOrders(ordersCurrentPage);
+        
+        document.getElementById('refresh-orders').addEventListener('click', () => {
+            loadOrders(ordersCurrentPage);
+        });
+        
+        document.getElementById('order-status-filter').addEventListener('change', () => {
+            ordersCurrentPage = 1;
+            loadOrders(ordersCurrentPage);
+        });
+    }
+
+    async function loadOrders(page = 1) {
+        try {
+            const status = document.getElementById('order-status-filter').value;
+            let queryParams = `?page=${page}&page_size=${ordersPageSize}`;
+            if (status) queryParams += `&status=${status}`;
+            
+            const response = await apiRequest(`/api/admin/orders${queryParams}`);
+            const ordersList = document.getElementById('orders-list');
+            ordersList.innerHTML = '';
+            
+            response.orders.forEach(order => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><code>${order.order_no}</code></td>
+                    <td>${order.user_id}</td>
+                    <td>${order.plan_type === 'monthly' ? '月付' : order.plan_type === 'yearly' ? '年付' : '终身'}</td>
+                    <td>${order.payment_method === 'alipay' ? '支付宝' : '微信支付'}</td>
+                    <td>¥${order.amount}</td>
+                    <td>
+                        <span class="badge ${
+                            order.status === 'paid' ? 'bg-success' : 
+                            order.status === 'pending' ? 'bg-warning' : 
+                            order.status === 'cancelled' ? 'bg-secondary' : 
+                            order.status === 'refunded' ? 'bg-info' : 'bg-danger'
+                        }">${order.status_text}</span>
+                    </td>
+                    <td>${order.paid_at ? formatDate(order.paid_at) : '-'}</td>
+                    <td>${formatDate(order.created_at)}</td>
+                `;
+                ordersList.appendChild(row);
+            });
+            
+            renderOrdersPagination(response.total, page, ordersPageSize);
+        } catch (error) {
+            console.error('加载订单列表失败:', error);
+            showError('加载订单列表失败: ' + error.message);
+        }
+    }
+
+    function renderOrdersPagination(total, currentPage, pageSize) {
+        const totalPages = Math.ceil(total / pageSize);
+        const pagination = document.getElementById('orders-pagination');
+        pagination.innerHTML = '';
+        
+        const prevItem = document.createElement('li');
+        prevItem.className = `page-item ${currentPage <= 1 ? 'disabled' : ''}`;
+        prevItem.innerHTML = `<a class="page-link" href="#" onclick="switchOrdersPage(${Math.max(1, currentPage - 1)})">上一页</a>`;
+        pagination.appendChild(prevItem);
+        
+        for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
+            const pageItem = document.createElement('li');
+            pageItem.className = `page-item ${i === currentPage ? 'active' : ''}`;
+            pageItem.innerHTML = `<a class="page-link" href="#" onclick="switchOrdersPage(${i})">${i}</a>`;
+            pagination.appendChild(pageItem);
+        }
+        
+        const nextItem = document.createElement('li');
+        nextItem.className = `page-item ${currentPage >= totalPages ? 'disabled' : ''}`;
+        nextItem.innerHTML = `<a class="page-link" href="#" onclick="switchOrdersPage(${Math.min(totalPages, currentPage + 1)})">下一页</a>`;
+        pagination.appendChild(nextItem);
+    }
+
+    function switchOrdersPage(page) {
+        ordersCurrentPage = page;
+        loadOrders(page);
+    }
+</script>

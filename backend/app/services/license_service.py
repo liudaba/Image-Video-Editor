@@ -1,156 +1,163 @@
-import hmac
+import secrets
+import string
 import hashlib
-import json
+import hmac
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
-from app.config import settings
-from app.models import License, LicenseType
-from app.schemas import LicenseData
-
-
-def _compute_signature(data: Dict[str, Any]) -> str:
-    sign_data = {k: v for k, v in data.items() if k != "_sig" and v is not None}
-    sorted_json = json.dumps(sign_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return hmac.new(
-        settings.HMAC_SIGN_KEY.encode("utf-8"),
-        sorted_json.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+from ..config import settings  # 使用相对导入
+from ..database import get_db
+from ..models import License, LicenseKey, User, LicenseKeyStatus
+from ..schemas import LicenseData
 
 
-def sign_license_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    data["_sig"] = _compute_signature(data)
-    return data
-
-
-def verify_signature(data: Dict[str, Any]) -> bool:
-    if "_sig" not in data:
-        return False
-    expected = _compute_signature(data)
-    return hmac.compare_digest(expected, data["_sig"])
-
-
-def _ensure_aware(dt):
-    if dt and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
-
-def build_license_response(license_obj: License, username: str) -> LicenseData:
-    now = datetime.now(timezone.utc)
-    days_left = 0
-
-    if license_obj.license_type == LicenseType.TRIAL:
-        trial_end = _ensure_aware(license_obj.trial_end)
-        if trial_end:
-            remaining = trial_end - now
-            days_left = max(0, remaining.days)
-    elif license_obj.license_type == LicenseType.PRO:
-        expiry_date = _ensure_aware(license_obj.expiry_date)
-        if expiry_date:
-            remaining = expiry_date - now
-            days_left = max(0, remaining.days)
-
-    raw_data = {
-        "username": username,
-        "license_type": license_obj.license_type.value,
-        "is_valid": license_obj.is_valid,
-        "days_left": days_left,
-    }
-
-    if license_obj.trial_start:
-        raw_data["trial_start"] = license_obj.trial_start.isoformat()
-    if license_obj.trial_end:
-        raw_data["trial_end"] = license_obj.trial_end.isoformat()
-    if license_obj.expiry_date:
-        raw_data["expiry_date"] = license_obj.expiry_date.isoformat()
-    if license_obj.license_key:
-        raw_data["license_key"] = license_obj.license_key
-
-    signed = sign_license_data(raw_data)
-
-    return LicenseData(
-        _sig=signed.get("_sig"),
-        username=signed["username"],
-        license_type=signed["license_type"],
-        is_valid=signed["is_valid"],
-        days_left=signed["days_left"],
-        trial_start=signed.get("trial_start"),
-        trial_end=signed.get("trial_end"),
-        expiry_date=signed.get("expiry_date"),
-        license_key=signed.get("license_key"),
+def generate_license_key(length: int = 32) -> str:
+    """生成指定长度的许可证密钥"""
+    alphabet = string.ascii_uppercase + string.digits
+    key = "-".join(
+        "".join(secrets.choice(alphabet) for _ in range(4)) 
+        for _ in range(length // 4)
     )
+    return key
 
 
-def create_trial_license(user_id: int) -> License:
-    now = datetime.now(timezone.utc)
-    trial_end = now + timedelta(days=settings.TRIAL_DAYS)
-    return License(
+def calculate_signature(payload: str) -> str:
+    """使用HMAC计算签名"""
+    key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
+    try:
+        with open(key_path, "rb") as f:
+            signing_key = f.read().strip()
+    except FileNotFoundError:
+        signing_key = settings.HMAC_SIGN_KEY.encode("utf-8")
+    
+    signature = hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return signature
+
+
+def verify_signature(payload: str, signature: str) -> bool:
+    """验证签名是否匹配"""
+    key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
+    try:
+        with open(key_path, "rb") as f:
+            signing_key = f.read().strip()
+    except FileNotFoundError:
+        signing_key = settings.HMAC_SIGN_KEY.encode("utf-8")
+    
+    expected_sig = hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected_sig, signature)
+
+
+async def create_trial_license(db: AsyncSession, user_id: int) -> License:
+    """为用户创建试用许可证"""
+    trial_days = settings.TRIAL_DAYS
+    trial_start = datetime.now(timezone.utc)
+    trial_end = trial_start + timedelta(days=trial_days)
+    
+    license_obj = License(
         user_id=user_id,
-        license_type=LicenseType.TRIAL,
+        license_type="trial",
         is_valid=True,
-        trial_start=now,
+        trial_start=trial_start,
         trial_end=trial_end,
+        expiry_date=trial_end,
     )
-
-
-def generate_license_key() -> str:
-    import secrets
-    import string
-    chars = string.ascii_uppercase + string.digits
-    parts = ["".join(secrets.choice(chars) for _ in range(4)) for _ in range(4)]
-    return f"VG-{'-'.join(parts)}"
-
-
-def is_license_expired(license_obj: License) -> bool:
-    now = datetime.now(timezone.utc)
-    if license_obj.license_type == LicenseType.TRIAL:
-        trial_end = _ensure_aware(license_obj.trial_end)
-        if trial_end:
-            grace_end = trial_end + timedelta(hours=settings.GRACE_HOURS)
-            return now > grace_end
-        return True
-    elif license_obj.license_type == LicenseType.PRO:
-        expiry_date = _ensure_aware(license_obj.expiry_date)
-        if expiry_date:
-            return now > expiry_date
-        return True
-    return True
-
-
-PLAN_PRICING = {
-    "monthly": {"price": 29.9, "days": 30},
-    "yearly": {"price": 299.0, "days": 365},
-    "lifetime": {"price": 999.0, "days": 36500},
-}
-
-
-async def extend_license(db, user_id: int, days: int) -> License:
-    from sqlalchemy import select
-    from app.database import engine
-    q = select(License).where(License.user_id == user_id)
-    if not str(engine.url).startswith("sqlite"):
-        q = q.with_for_update()
-    result = await db.execute(q)
-    license_obj = result.scalar_one_or_none()
-
-    if not license_obj:
-        return None
-
-    now = datetime.now(timezone.utc)
-    license_obj.license_type = LicenseType.PRO
-    license_obj.is_valid = True
-
-    expiry_date = _ensure_aware(license_obj.expiry_date)
-    if expiry_date and expiry_date > now:
-        license_obj.expiry_date = expiry_date + timedelta(days=days)
-    else:
-        license_obj.expiry_date = now + timedelta(days=days)
-
-    if not license_obj.license_key:
-        license_obj.license_key = generate_license_key()
-
+    
+    db.add(license_obj)
     await db.flush()
-    await db.refresh(license_obj)
+    
     return license_obj
+
+
+async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[License]:
+    """激活许可证"""
+    # 查找许可证密钥
+    key_result = await db.execute(
+        select(LicenseKey)
+        .where(LicenseKey.license_key == license_key)
+        .where(LicenseKey.status == LicenseKeyStatus.UNUSED)
+    )
+    license_key_obj = key_result.scalar_one_or_none()
+    
+    if not license_key_obj:
+        return None
+    
+    # 更新许可证密钥状态
+    license_key_obj.status = LicenseKeyStatus.ACTIVATED
+    license_key_obj.activated_at = datetime.now(timezone.utc)
+    license_key_obj.activated_by = user_id
+    
+    # 创建用户许可证
+    if license_key_obj.plan_type == "lifetime":
+        expiry_date = None
+    else:
+        # 根据计划类型计算过期日期
+        if license_key_obj.plan_type == "monthly":
+            expiry_delta = timedelta(days=30)
+        elif license_key_obj.plan_type == "yearly":
+            expiry_delta = timedelta(days=365)
+        else:
+            expiry_delta = timedelta(days=30)  # 默认为月度计划
+        
+        expiry_date = datetime.now(timezone.utc) + expiry_delta
+    
+    license_obj = License(
+        user_id=user_id,
+        license_type="pro",
+        license_key=license_key,
+        is_valid=True,
+        expiry_date=expiry_date,
+    )
+    
+    db.add(license_obj)
+    await db.flush()
+    
+    return license_obj
+
+
+def create_license_payload(username: str, license_type: str, expiry_date: Optional[datetime] = None) -> str:
+    """创建许可证载荷"""
+    if expiry_date:
+        exp_str = expiry_date.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        exp_str = ""
+    
+    payload = f"{username}|{license_type}|{exp_str}"
+    return payload
+
+
+def encode_license_data(license: License, username: str) -> LicenseData:
+    """将许可证对象编码为LicenseData"""
+    # 创建载荷并计算签名
+    payload = create_license_payload(
+        username, 
+        license.license_type, 
+        license.expiry_date
+    )
+    
+    sig = calculate_signature(payload)
+    
+    # 计算剩余天数
+    days_left = -1  # 默认值，对于永久许可证
+    if license.expiry_date:
+        now = datetime.now(timezone.utc)
+        days_left = max(0, (license.expiry_date - now).days)
+    
+    # 格式化日期
+    expiry_str = license.expiry_date.strftime("%Y-%m-%d %H:%M:%S") if license.expiry_date else None
+    trial_start_str = license.trial_start.strftime("%Y-%m-%d %H:%M:%S") if license.trial_start else None
+    trial_end_str = license.trial_end.strftime("%Y-%m-%d %H:%M:%S") if license.trial_end else None
+    
+    return LicenseData(
+        sig=sig,
+        username=username,
+        license_type=license.license_type,
+        is_valid=license.is_valid,
+        days_left=days_left,
+        trial_start=trial_start_str,
+        trial_end=trial_end_str,
+        expiry_date=expiry_str,
+        license_key=license.license_key,
+    )

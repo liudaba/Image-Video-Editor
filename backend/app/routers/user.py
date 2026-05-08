@@ -1,142 +1,177 @@
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from typing import List
 
-from app.database import get_db
-from app.models import User, License, MachineBinding, HeartbeatLog, AuditLog
-from app.schemas import LicenseStatusResponse, HeartbeatRequest, HeartbeatResponse
-from app.auth import get_current_user
-from app.services.license_service import build_license_response, is_license_expired
-from app.services.heartbeat_service import record_heartbeat, validate_heartbeat, check_and_bind_machine
+from ..database import get_db  # 修复导入路径
+from ..models import User, License, AuditLog
+from ..auth import require_admin, get_current_user
+from ..schemas import UserRegister
 
-router = APIRouter(prefix="/api/user", tags=["用户"])
+router = APIRouter(prefix="/user", tags=["user"])
 
 
-async def _log_audit(db: AsyncSession, user: User, action: str, detail: str = None, request: Request = None):
-    log = AuditLog(
-        operator_id=user.id,
-        operator_name=user.username,
-        action=action,
+@router.get("/", summary="获取用户列表（仅管理员）")
+async def list_users(
+    skip: int = 0,
+    limit: int = 100,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(User)
+        .offset(skip)
+        .limit(limit)
+        .order_by(User.created_at.desc())
+    )
+    users = result.scalars().all()
+
+    return {
+        "users": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_active": user.is_active,
+                "is_admin": user.is_admin,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at
+            }
+            for user in users
+        ]
+    }
+
+
+@router.get("/me", summary="获取当前用户信息")
+async def get_current_user_info(current_user=Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "is_active": current_user.is_active,
+        "is_admin": current_user.is_admin,
+        "created_at": current_user.created_at,
+        "updated_at": current_user.updated_at
+    }
+
+
+@router.put("/{user_id}", summary="更新用户信息（仅管理员）")
+async def update_user(
+    user_id: int,
+    username: str = None,
+    email: str = None,
+    is_active: bool = None,
+    is_admin: bool = None,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    # 更新字段
+    if username is not None:
+        user.username = username
+    if email is not None:
+        user.email = email
+    if is_active is not None:
+        user.is_active = is_active
+    if is_admin is not None:
+        user.is_admin = is_admin
+    
+    await db.flush()
+    await db.commit()
+    
+    # 记录审计日志
+    audit_log = AuditLog(
+        operator_id=current_user.id,
+        operator_name=current_user.username,
+        action="update_user",
         target_type="user",
         target_id=user.id,
-        detail=detail,
-        ip_address=request.client.host if request and request.client else None,
+        detail=f"Updated user {user.username}",
+        ip_address=None  # 从request获取IP
     )
-    db.add(log)
+    db.add(audit_log)
+    await db.commit()
+    
+    return {"message": "用户更新成功"}
+
+
+@router.delete("/{user_id}", summary="删除用户（仅管理员）")
+async def delete_user(
+    user_id: int,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select, delete
+    
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    await db.execute(delete(User).where(User.id == user_id))
+    await db.commit()
+    
+    # 记录审计日志
+    audit_log = AuditLog(
+        operator_id=current_user.id,
+        operator_name=current_user.username,
+        action="delete_user",
+        target_type="user",
+        target_id=user_id,
+        detail=f"Deleted user {user.username}",
+        ip_address=None  # 从request获取IP
+    )
+    db.add(audit_log)
+    await db.commit()
+    
+    return {"message": "用户删除成功"}
+
+
+@router.post("/reset-password/{user_id}", summary="重置用户密码（仅管理员）")
+async def reset_user_password(
+    user_id: int,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    from ..auth import hash_password
+    import secrets
+    import string
+    
+    # 生成随机密码
+    alphabet = string.ascii_letters + string.digits
+    random_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+    
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    user.hashed_password = hash_password(random_password)
     await db.flush()
-
-
-@router.get("/license_status", response_model=LicenseStatusResponse)
-async def get_license_status(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(License).where(License.user_id == user.id))
-    license_obj = result.scalar_one_or_none()
-
-    if not license_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到授权记录")
-
-    if is_license_expired(license_obj):
-        license_obj.is_valid = False
-        await db.flush()
-        await db.refresh(license_obj)
-
-    license_data = build_license_response(license_obj, user.username)
-    return LicenseStatusResponse(license=license_data)
-
-
-@router.post("/heartbeat", response_model=HeartbeatResponse)
-async def heartbeat(
-    body: HeartbeatRequest,
-    user: User = Depends(get_current_user),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    license_data = await validate_heartbeat(db, user.id, body.fingerprint)
-
-    ip_address = request.client.host if request and request.client else None
-
-    await record_heartbeat(
-        db,
-        user_id=user.id,
-        fingerprint=body.fingerprint,
-        ip_address=ip_address,
-        app_version=body.app_version,
-        license_type=license_data.license_type if license_data else None,
+    await db.commit()
+    
+    # 记录审计日志
+    audit_log = AuditLog(
+        operator_id=current_user.id,
+        operator_name=current_user.username,
+        action="reset_password",
+        target_type="user",
+        target_id=user_id,
+        detail=f"Reset password for user {user.username}",
+        ip_address=None  # 从request获取IP
     )
-
-    if license_data is None:
-        return {"is_valid": False, "reason": "授权无效或已过期", "timestamp": datetime.now(timezone.utc).timestamp()}
-
-    return {"is_valid": True, "license": license_data, "timestamp": datetime.now(timezone.utc).timestamp()}
-
-
-@router.post("/bind_machine")
-async def bind_machine(
-    body: HeartbeatRequest,
-    user: User = Depends(get_current_user),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    if not body.fingerprint:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="机器指纹不能为空")
-
-    can_bind = await check_and_bind_machine(db, user.id, body.fingerprint)
-    if not can_bind:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="已达到最大设备绑定数量(3台)，请在设置中解绑旧设备",
-        )
-
-    await _log_audit(db, user, "bind_machine", f"fingerprint={body.fingerprint[:16]}...", request)
-    return {"success": True, "message": "设备绑定成功"}
-
-
-@router.post("/unbind_machine")
-async def unbind_machine(
-    body: HeartbeatRequest,
-    user: User = Depends(get_current_user),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    if not body.fingerprint:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="机器指纹不能为空")
-
-    result = await db.execute(
-        delete(MachineBinding).where(
-            MachineBinding.user_id == user.id,
-            MachineBinding.fingerprint == body.fingerprint,
-        )
-    )
-    await db.flush()
-
-    if result.rowcount == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该设备绑定记录")
-
-    await _log_audit(db, user, "unbind_machine", f"fingerprint={body.fingerprint[:16]}...", request)
-    return {"success": True, "message": "设备解绑成功"}
-
-
-@router.get("/machines")
-async def list_machines(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(MachineBinding).where(MachineBinding.user_id == user.id)
-    )
-    machines = result.scalars().all()
-    return {
-        "max_devices": 3,
-        "devices": [
-            {
-                "fingerprint": m.fingerprint[:16] + "...",
-                "machine_name": m.machine_name,
-                "bound_at": m.bound_at.isoformat() if m.bound_at else None,
-                "last_seen": m.last_seen.isoformat() if m.last_seen else None,
-            }
-            for m in machines
-        ],
-    }
+    db.add(audit_log)
+    await db.commit()
+    
+    return {"message": "密码重置成功", "new_password": random_password}
