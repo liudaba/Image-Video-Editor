@@ -18,6 +18,10 @@ class ResourceMixin:
         """将新翻译加入动态缓存"""
         if not hasattr(self, '_translation_cache'):
             self._translation_cache = {}
+        if len(self._translation_cache) >= 500:
+            keys = list(self._translation_cache.keys())
+            for k in keys[:100]:
+                del self._translation_cache[k]
         self._translation_cache[chinese] = english
     
 
@@ -241,6 +245,10 @@ class ResourceMixin:
                 self._log_exception(f"❌ 任务失败: {task['type']}", e)
             finally:
                 self.thread_pool_stats['active_threads'] -= 1
+                try:
+                    self.thread_pool['tasks'].pop(task_id, None)
+                except Exception:
+                    pass
                 with self.task_lock:
                     self.task_running = False
                     self.current_task = None
@@ -267,6 +275,18 @@ class ResourceMixin:
         try:
             if hasattr(self, '_shot_texts_for_context'):
                 delattr(self, '_shot_texts_for_context')
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, '_pregenerated_understandings_for_context'):
+                delattr(self, '_pregenerated_understandings_for_context')
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, '_pregenerated_prompts_for_context'):
+                delattr(self, '_pregenerated_prompts_for_context')
         except Exception:
             pass
 
@@ -490,6 +510,20 @@ class ResourceMixin:
                 except TypeError:
                     self.executor.shutdown(wait=False)
                 self.executor = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'parallel_prompt_generator') and self.parallel_prompt_generator is not None:
+                self.parallel_prompt_generator.shutdown()
+                self.parallel_prompt_generator = None
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'thread_pool') and isinstance(self.thread_pool, dict):
+                self.thread_pool['tasks'].clear()
+                self.thread_pool['task_counter'] = 0
         except Exception:
             pass
 

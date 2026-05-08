@@ -1547,6 +1547,21 @@ class ShotsMixin:
             return ""
         
         text = str(raw_output).strip()
+
+        # 方向A: Unicode/Tokenizer腐败清洗（最高优先级）
+        # 移除 <unusedXXXX> tokenizer artifact
+        text = re.sub(r'<unused\d+>', '', text)
+        # 移除非拉丁Unicode腐败字符（印地文、孟加拉文、奥里亚文、泰米尔文等）
+        # 保留: 拉丁字母、中文、日文假名、韩文、基本标点、SD权重语法字符
+        text = re.sub(r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u0E00-\u0E7F\u0E80-\u0EFF\u1000-\u109F\u10A0-\u10FF\u1100-\u11FF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]', '', text)
+        # 移除Emoji和特殊符号（保留基本标点和SD语法）
+        text = re.sub(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0000FE00-\U0000FE0F\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF]', '', text)
+        # 移除数学符号 ⎤⎦ 等
+        text = re.sub(r'[\u2300-\u23FF\u27C0-\u27EF\u2980-\u29FF]', '', text)
+        # 移除希腊字母混入（如 ϱ️）
+        text = re.sub(r'[\u0370-\u03FF\u1F00-\u1FFF][\uFE00-\uFE0F]?', '', text)
+        # 移除损坏的方括号组合如 [prompt xxx
+        text = re.sub(r'\[prompt\s+', '[', text, flags=re.IGNORECASE)
         
         # 解析两阶段输出格式: [understanding] | [prompt]
         # 格式1: [some understanding text] | [some prompt text]
@@ -1695,6 +1710,12 @@ class ShotsMixin:
             r'This (?:is|means|shows|depicts|represents|conveys|illustrates)\s+[^,]*\.\s*',
             r'(?:China|Russia|Beijing|Moscow|Venezuela|Maduro),?\s+as\s+a\s+[^,]*\.\s*',
             r'(?:The|A|An)\s+(?:key|main|primary|important|central|core)\s+(?:message|point|idea|concept|theme|meaning)\s+[^,]*\.\s*',
+            r'The line (?:means|suggests|implies|indicates|highlights|emphasizes|conveys)\s+[^,]*\.\s*',
+            r'A visual representation of this would be[^,]*\.\s*',
+            r'(?:Maduro|Cilia|He|She|They|It) is (?:actively |currently )?(?:building|engaging|offering|standing|examining|distributing|holding|maintaining|attempting|controlling|using|trying|engaging|offering|sitting|negotiating|reinforcing)[^,]*\.\s*',
+            r'(?:This |The )?(?:line |phrase |idiom )?(?:means|suggests|implies|indicates|highlights|conveys|signifies|emphasizes) that\s+[^,]*\.\s*',
+            r'Maduro\'?s?\s+(?:defenses|control|power|survival|approach|strategy)\s+[^,]*\.\s*',
+            r'(?:External |The )?(?:sanctions|pressure|situation|problem|issue)\s+(?:are|is)\s+(?:a\s+)?(?:Liabilities?|chronic|slow|persistent)[^,]*\.\s*',
         ]
         for pat in full_sentence_patterns:
             text = re.sub(pat, '', text, flags=re.IGNORECASE)
@@ -1873,6 +1894,9 @@ class ShotsMixin:
         text = re.sub(r'\(\s*,\s*\)', '', text)
         
         if len(text.strip()) < 10:
+            fallback = self._generate_fallback_prompt(raw_output)
+            if fallback:
+                return fallback
             return raw_output.strip()
         
         sd_model_name = ""
@@ -1904,6 +1928,26 @@ class ShotsMixin:
             understanding = re.sub(r'^(Understanding|understanding)\s*:\s*', '', understanding, flags=re.IGNORECASE).strip()
             understanding = re.sub(r'\[|\]', '', understanding).strip()
         return understanding[:200] if understanding else ""
+
+    def _generate_fallback_prompt(self, raw_output):
+        """当清洗后提示词为空时，从原始输出中提取最小可用提示词"""
+        if not raw_output:
+            return ""
+        text = str(raw_output).strip()
+        pipe_match = re.search(r'\]\s*\|\s*', text)
+        if pipe_match:
+            after_pipe = text[pipe_match.end():].strip()
+        else:
+            after_pipe = text
+        after_pipe = re.sub(r'<unused\d+>', '', after_pipe)
+        after_pipe = re.sub(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF]', '', after_pipe)
+        after_pipe = re.sub(r'^[^,()]*?\.\s*', '', after_pipe)
+        sd_keywords = re.findall(r'\([^)]+(?::\s*1\.\d+)\)', after_pipe)
+        comma_phrases = [p.strip() for p in after_pipe.split(',') if p.strip() and len(p.strip()) > 2 and not p.strip().startswith(('[', 'The ', 'This ', 'A ', 'An ', 'It '))]
+        if sd_keywords or comma_phrases:
+            parts = sd_keywords[:3] + comma_phrases[:5]
+            return ', '.join(dict.fromkeys(parts))
+        return ""
     
 
     def _build_final_prompt(self, scene_description, sd_model_name=""):

@@ -796,6 +796,15 @@ class VideoMixin:
                 return clip
 
             animated_clip = VideoClip(make_frame, duration=original_duration)
+            _cached_ref = [cached_source]
+            def _on_clip_close():
+                try:
+                    if _cached_ref[0] is not None:
+                        _cached_ref[0].close()
+                        _cached_ref[0] = None
+                except Exception:
+                    pass
+            animated_clip.on_close = _on_clip_close
             return animated_clip
         except Exception as e:
             self._log_exception("⚠️ 预渲染动画效果失败", e)
@@ -819,6 +828,7 @@ class VideoMixin:
         paste_x = (target_width - new_width) // 2
         paste_y = (target_height - new_height) // 2
         new_img.paste(resized, (paste_x, paste_y))
+        resized.close()
         return new_img
 
 
