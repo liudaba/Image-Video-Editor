@@ -4091,12 +4091,14 @@ class ShotsMixin:
             if gaps_filled > 0:
                 self.log(f"   🔧 已填充 {gaps_filled} 个时间间隔（延伸前一分镜end）")
             
-            # 合并过短分镜（< 2.0秒）与相邻分镜
-            MIN_SHOT_DURATION = 2.0
+            # 合并过短分镜与相邻分镜
+            min_shot_dur = getattr(self, 'MIN_SHOT_DURATION', 2.0)
+            if min_shot_dur < 1.5:
+                min_shot_dur = 1.5
             short_merged = 0
             i = 0
             while i < len(shots):
-                if shots[i]['duration'] < MIN_SHOT_DURATION:
+                if shots[i]['duration'] < min_shot_dur:
                     if i > 0 and i < len(shots) - 1:
                         prev_dur = shots[i-1]['duration']
                         next_dur = shots[i+1]['duration']
@@ -4130,7 +4132,7 @@ class ShotsMixin:
                         continue
                 i += 1
             if short_merged > 0:
-                self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {MIN_SHOT_DURATION}秒）")
+                self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {min_shot_dur}秒）")
                 self.update_task_progress("正在合并过短分镜...", 93)
                 for j in range(len(shots)):
                     shots[j]['id'] = j
