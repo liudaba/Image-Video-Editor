@@ -60,6 +60,7 @@ settings = Settings.from_env()
 _INSECURE_DEFAULTS = {
     "JWT_SECRET_KEY": "",
     "HMAC_SIGN_KEY": "",
+    "DATABASE_URL": "sqlite+aiosqlite:///./videogen.db",
 }
 
 
@@ -67,7 +68,7 @@ def check_production_safety():
     unsafe = []
     for key, default in _INSECURE_DEFAULTS.items():
         val = getattr(settings, key)
-        if val == default or not val.strip():
+        if val == default or (isinstance(val, str) and not val.strip()):
             unsafe.append(key)
     if not settings.ADMIN_PASSWORD:
         unsafe.append("ADMIN_PASSWORD")

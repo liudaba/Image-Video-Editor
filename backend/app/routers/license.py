@@ -5,10 +5,34 @@ from typing import List
 from ..database import get_db
 from ..models import LicenseKey, License, User, LicenseKeyStatus, PlanType
 from ..auth import require_admin, get_current_user
-from ..services.license_service import generate_license_key, encode_license_data
-from ..schemas import LicenseStatusResponse
+from ..services.license_service import generate_license_key, encode_license_data, activate_license
+from ..schemas import LicenseStatusResponse, LicenseActivate, ActivateResponse
 
-router = APIRouter(prefix="/license", tags=["license"])
+router = APIRouter(prefix="/api/license", tags=["license"])
+
+
+@router.post("/activate", response_model=ActivateResponse, summary="激活许可证")
+async def activate_license_endpoint(
+    license_data: LicenseActivate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+
+    activated = await activate_license(db, current_user.id, license_data.license_key)
+    if not activated:
+        raise HTTPException(status_code=400, detail="许可证激活失败，可能密钥无效或已被使用")
+
+    license_result = await db.execute(
+        select(License).filter(License.user_id == current_user.id)
+    )
+    license_obj = license_result.scalar_one_or_none()
+
+    license_resp_data = None
+    if license_obj:
+        license_resp_data = encode_license_data(license_obj, current_user.username)
+
+    return ActivateResponse(license=license_resp_data)
 
 
 @router.post("/generate-key", summary="生成许可证密钥（仅管理员）")
@@ -38,25 +62,6 @@ async def generate_key(
     return {"keys": keys}
 
 
-@router.get("/status", response_model=LicenseStatusResponse, summary="获取许可证状态")
-async def get_license_status(
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from sqlalchemy import select
-
-    result = await db.execute(
-        select(License).filter(License.user_id == current_user.id)
-    )
-    license_obj = result.scalar_one_or_none()
-
-    if not license_obj:
-        return LicenseStatusResponse(license=None)
-
-    license_data = encode_license_data(license_obj, current_user.username)
-    return LicenseStatusResponse(license=license_data)
-
-
 @router.get("/keys", summary="获取许可证密钥列表（仅管理员）")
 async def list_license_keys(
     skip: int = 0,
@@ -65,7 +70,7 @@ async def list_license_keys(
     db: AsyncSession = Depends(get_db)
 ):
     from sqlalchemy import select
-    
+
     result = await db.execute(
         select(LicenseKey)
         .offset(skip)

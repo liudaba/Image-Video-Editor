@@ -9,27 +9,24 @@ from typing import Optional
 
 from ..database import get_db  # 修复导入路径
 from ..models import User
-from ..schemas import UserRegister, UserLogin, LoginResponse, LicenseActivate, ActivateResponse, HeartbeatRequest, HeartbeatResponse
+from ..schemas import UserRegister, UserLogin, LoginResponse
 from ..auth import (
     get_current_user,
     hash_password,
     verify_password,
     create_access_token,
-    decode_access_token,
     check_login_rate_limit,
     record_login_failure,
     clear_login_failures,
-    require_admin
 )
 from ..services.license_service import (
     create_trial_license,
-    activate_license,
     encode_license_data
 )
 from ..config import settings
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 security = HTTPBearer()
 
@@ -105,83 +102,6 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     clear_login_failures(user_data.username)
 
     return LoginResponse(access_token=access_token, license=license_data)
-
-
-@router.post("/activate-license", response_model=ActivateResponse, summary="激活许可证")
-async def activate_license_endpoint(
-    license_data: LicenseActivate, 
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from ..models import License
-    from sqlalchemy import select
-    
-    # 尝试激活许可证
-    activated_license = await activate_license(db, current_user.id, license_data.license_key)
-    if not activated_license:
-        raise HTTPException(status_code=400, detail="许可证激活失败，可能密钥无效或已被使用")
-    
-    # 获取最新的许可证信息
-    license_result = await db.execute(
-        select(License).filter(License.user_id == current_user.id)
-    )
-    license_obj = license_result.scalar_one_or_none()
-    
-    license_resp_data = None
-    if license_obj:
-        license_resp_data = encode_license_data(license_obj, current_user.username)
-    
-    return ActivateResponse(license=license_resp_data)
-
-
-@router.post("/heartbeat", response_model=HeartbeatResponse, summary="心跳检测")
-async def heartbeat(
-    req: HeartbeatRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from ..models import License, HeartbeatLog
-    from sqlalchemy import select
-    import secrets
-    
-    # 获取用户许可证
-    license_result = await db.execute(
-        select(License).filter(License.user_id == current_user.id)
-    )
-    license_obj = license_result.scalar_one_or_none()
-    
-    if not license_obj:
-        return HeartbeatResponse(is_valid=False, reason="未找到许可证")
-    
-    # 检查许可证是否有效
-    is_valid = license_obj.is_valid
-    if license_obj.expiry_date:
-        import datetime
-        now = datetime.datetime.now(datetime.timezone.utc)
-        is_valid = is_valid and license_obj.expiry_date >= now
-    
-    # 创建心跳日志
-    heartbeat_log = HeartbeatLog(
-        user_id=current_user.id,
-        fingerprint=req.fingerprint,
-        app_version=req.app_version,
-        license_type=license_obj.license_type.value,
-        ip_address=None  # 可以从request获取IP
-    )
-    db.add(heartbeat_log)
-    await db.flush()
-    await db.commit()
-    
-    # 更新许可证最后心跳时间
-    license_obj.last_heartbeat = datetime.datetime.now(datetime.timezone.utc)
-    if req.fingerprint:
-        license_obj.heartbeat_fingerprint = req.fingerprint
-    await db.flush()
-    await db.commit()
-    
-    license_data = encode_license_data(license_obj, current_user.username) if is_valid else None
-    
-    return HeartbeatResponse(is_valid=is_valid, license=license_data)
 
 
 @router.get("/profile", summary="获取用户资料")

@@ -4,7 +4,7 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -230,11 +230,28 @@ async def login_page(request: Request):
 
 @app.get("/admin/dashboard")
 async def dashboard_page(request: Request):
+    session_token = request.cookies.get("admin_session")
+    if not session_token:
+        return templates.TemplateResponse("login.html", {"request": request})
+    try:
+        from .auth import decode_access_token
+        decode_access_token(session_token)
+    except Exception:
+        return templates.TemplateResponse("login.html", {"request": request})
     return templates.TemplateResponse("admin_base.html", {"request": request})
 
 
 @app.get("/admin/content/{section}")
 async def get_content(request: Request, section: str):
+    session_token = request.cookies.get("admin_session")
+    if not session_token:
+        raise HTTPException(status_code=401, detail="未登录")
+    try:
+        from .auth import decode_access_token
+        decode_access_token(session_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="登录已过期")
+
     template_files = {
         "dashboard": "dashboard_content.html",
         "users": "users_content.html",
@@ -244,10 +261,10 @@ async def get_content(request: Request, section: str):
         "orders": "orders_content.html",
         "analytics": "analytics_content.html"
     }
-    
+
     template_file = template_files.get(section)
     if not template_file:
         raise HTTPException(status_code=404, detail="内容不存在")
-    
+
     return templates.TemplateResponse(template_file, {"request": request})
 

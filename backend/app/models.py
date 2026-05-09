@@ -88,6 +88,8 @@ class Order(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     status = Column(Enum(OrderStatus), default=OrderStatus.PENDING, nullable=False)
     transaction_id = Column(String(128), nullable=True)
+    payment_url = Column(String(500), nullable=True)
+    qr_code = Column(String(500), nullable=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

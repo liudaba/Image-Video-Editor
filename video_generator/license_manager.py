@@ -61,8 +61,6 @@ def _verify_signature(data: dict) -> bool:
     secret = _get_verify_secret()
     if not secret:
         return False
-    if globals().get("_verify_signature") is not _orig_verify_ref:
-        return False
     expected = data[_HMAC_KEY]
     check = {k: v for k, v in data.items() if k != _HMAC_KEY and v is not None}
     payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -176,7 +174,7 @@ class LicenseManager:
     def _do_heartbeat(self):
         if not self.license_data:
             return
-        token = self.license_data.get("token", "") if self.license_data else ""
+        token = self._get_token()
         if not token:
             return
         try:
@@ -425,7 +423,7 @@ class LicenseManager:
 
     def activate_pro_license(self, license_key):
         try:
-            token = self.license_data.get("token", "") if self.license_data else ""
+            token = self._get_token()
             response = get_http_session().post(
                 f"{self.API_BASE}/api/license/activate",
                 json={"license_key": license_key},
@@ -448,9 +446,9 @@ class LicenseManager:
 
     def purchase_subscription(self, plan_type, payment_method):
         try:
-            token = self.license_data.get("token", "") if self.license_data else ""
+            token = self._get_token()
             response = get_http_session().post(
-                f"{self.API_BASE}/api/payment/create_order",
+                f"{self.API_BASE}/api/payment/create-order",
                 json={"plan_type": plan_type, "payment_method": payment_method},
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10,
@@ -465,7 +463,7 @@ class LicenseManager:
 
     def refresh_license(self):
         try:
-            token = self.license_data.get("token", "") if self.license_data else ""
+            token = self._get_token()
             if not token:
                 return False
             response = get_http_session().get(
@@ -605,8 +603,17 @@ class LoginDialog(tk.Toplevel):
             if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
                 messagebox.showwarning("提示", "请输入有效的邮箱地址", parent=self)
                 return
-            if len(password) < 6:
-                messagebox.showwarning("提示", "密码至少6位", parent=self)
+            if len(password) < 8:
+                messagebox.showwarning("提示", "密码至少8位", parent=self)
+                return
+            if not re.search(r'[A-Z]', password):
+                messagebox.showwarning("提示", "密码必须包含至少一个大写字母", parent=self)
+                return
+            if not re.search(r'[a-z]', password):
+                messagebox.showwarning("提示", "密码必须包含至少一个小写字母", parent=self)
+                return
+            if not re.search(r'\d', password):
+                messagebox.showwarning("提示", "密码必须包含至少一个数字", parent=self)
                 return
             confirm = self.confirm_var.get().strip()
             if password != confirm:

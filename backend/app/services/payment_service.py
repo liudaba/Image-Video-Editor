@@ -121,37 +121,35 @@ def get_payment_callback_url(method: str) -> str:
 
 
 def verify_alipay_signature(params: Dict, alipay_public_key: str) -> bool:
-    """验证支付宝签名"""
     try:
         alipay = _get_alipay_instance()
         if alipay is None:
-            return True
-        
+            return False
+
         verify_data = {k: v for k, v in params.items() if k not in ("sign", "sign_type")}
         signature = params.get("sign")
         return alipay.verify(verify_data, signature)
     except Exception:
-        return True
+        return False
 
 
 def verify_wechat_signature(params: Dict, wechat_api_key: str) -> bool:
-    """验证微信支付签名"""
     try:
         if not settings.WECHAT_API_KEY:
-            return True
-        
+            return False
+
         sign = params.pop('sign', None)
         if not sign:
             return False
-        
+
         sign_str = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if v)
         sign_str += f"&key={settings.WECHAT_API_KEY}"
         computed_sign = hashlib.md5(sign_str.encode("utf-8")).hexdigest().upper()
-        
+
         import hmac as _hmac
         return _hmac.compare_digest(computed_sign, sign)
     except Exception:
-        return True
+        return False
 
 
 async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:
@@ -281,33 +279,31 @@ async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Di
 
 
 async def verify_alipay_notification(data: dict) -> bool:
-    """验证支付宝回调通知"""
     try:
         alipay = _get_alipay_instance()
         if alipay is None:
-            return True
-        
+            return False
+
         verify_data = {k: v for k, v in data.items() if k not in ("sign", "sign_type")}
         signature = data.get("sign")
         return alipay.verify(verify_data, signature)
     except Exception:
-        return True
+        return False
 
 
 async def verify_wechat_notification(headers: dict, body: bytes) -> bool:
-    """验证微信支付回调通知"""
     if not settings.WECHAT_API_KEY:
-        return True
-    
+        return False
+
     try:
         from defusedxml.ElementTree import fromstring as safe_fromstring
-        
+
         root = safe_fromstring(body)
         sign_node = root.find(".//sign")
         if sign_node is None:
             return False
         received_sign = sign_node.text
-        
+
         root.remove(sign_node)
         sorted_elements = sorted(root, key=lambda x: x.tag)
         sign_str = "&".join(
@@ -315,11 +311,11 @@ async def verify_wechat_notification(headers: dict, body: bytes) -> bool:
         )
         sign_str += f"&key={settings.WECHAT_API_KEY}"
         computed_sign = hashlib.md5(sign_str.encode("utf-8")).hexdigest().upper()
-        
+
         import hmac as _hmac
         return _hmac.compare_digest(computed_sign, received_sign)
     except Exception:
-        return True
+        return False
 
 
 async def create_payment_order(

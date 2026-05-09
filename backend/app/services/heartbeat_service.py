@@ -3,10 +3,10 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
-from app.models import License, MachineBinding, HeartbeatLog, LicenseType, User
-from app.services.license_service import is_license_expired, build_license_response
-from app.schemas import LicenseData
-from app.database import engine
+from ..models import License, MachineBinding, HeartbeatLog, LicenseType, User
+from ..services.license_service import is_license_expired, build_license_response
+from ..schemas import LicenseData
+from ..database import engine
 
 MAX_MACHINE_BINDINGS = 3
 

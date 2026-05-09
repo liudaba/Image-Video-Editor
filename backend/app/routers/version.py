@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import get_db  # 修复导入路径
+from ..database import get_db
 from ..models import AppVersion
 from ..auth import require_admin, get_current_user
 from ..schemas import VersionInfo
 
-router = APIRouter(prefix="/version", tags=["version"])
+router = APIRouter(prefix="/api/version", tags=["version"])
 
 
 @router.post("/", summary="创建或更新版本信息（仅管理员）")
@@ -54,24 +54,31 @@ async def create_version(
 
 @router.get("/latest", response_model=VersionInfo, summary="获取最新版本信息")
 async def get_latest_version(
+    current_version: str = Query(None, max_length=20),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)  # 可选依赖，允许未登录用户获取版本信息
+    current_user=Depends(get_current_user)
 ):
     from sqlalchemy import select
-    
+
     result = await db.execute(
         select(AppVersion)
         .filter(AppVersion.is_active == True)
         .order_by(AppVersion.release_date.desc())
     )
     latest_version = result.scalar_one_or_none()
-    
+
     if not latest_version:
         return VersionInfo(has_update=False)
-    
-    # 检查是否有更新
-    has_update = False  # 在实际实现中，这里应该比较客户端版本与服务器版本
-    
+
+    has_update = False
+    if current_version:
+        try:
+            client_parts = tuple(int(x) for x in current_version.split("."))
+            server_parts = tuple(int(x) for x in latest_version.version.split("."))
+            has_update = server_parts > client_parts
+        except (ValueError, AttributeError):
+            has_update = True
+
     return VersionInfo(
         has_update=has_update,
         version=latest_version.version,

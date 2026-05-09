@@ -50,9 +50,18 @@ class UpdateManager:
     def check_for_updates(self, callback=None):
         def check_thread():
             try:
+                headers = {}
+                try:
+                    from .license_manager import LicenseManager
+                    token = LicenseManager()._get_token()
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                except Exception:
+                    pass
                 response = get_http_session().get(
                     self.UPDATE_API_URL,
                     params={"current_version": self.CURRENT_VERSION},
+                    headers=headers,
                     timeout=10
                 )
 

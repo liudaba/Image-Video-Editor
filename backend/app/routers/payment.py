@@ -8,7 +8,7 @@ from typing import Dict, Any
 import json
 
 from ..database import get_db
-from ..models import Order, User, OrderStatus, PlanType
+from ..models import Order, User, License, LicenseKey, OrderStatus, PlanType, LicenseKeyStatus
 from ..auth import require_admin, get_current_user
 from ..schemas import PaymentCreateOrder, OrderResponse
 from ..services.payment_service import (
@@ -18,9 +18,10 @@ from ..services.payment_service import (
     verify_alipay_notification,
     verify_wechat_notification,
 )
+from ..services.license_service import activate_license
 
 logger = logging.getLogger("videogen")
-router = APIRouter(prefix="/payment", tags=["payment"])
+router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 
 @router.post("/create-order", response_model=OrderResponse, summary="创建支付订单")
@@ -124,6 +125,23 @@ async def alipay_callback(
             order.transaction_id = params.get('trade_no')
             order.paid_at = datetime.now(timezone.utc)
             await db.flush()
+
+            license_result = await db.execute(
+                select(License).filter(License.user_id == order.user_id)
+            )
+            existing_license = license_result.scalar_one_or_none()
+            if existing_license:
+                existing_license.license_type = "pro"
+                existing_license.is_valid = True
+                from datetime import timedelta
+                if order.plan_type == PlanType.MONTHLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
+                elif order.plan_type == PlanType.YEARLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
+                elif order.plan_type == PlanType.LIFETIME:
+                    existing_license.expiry_date = None
+                await db.flush()
+
             await db.commit()
     
     return {"code": "SUCCESS", "msg": "OK"}
@@ -163,6 +181,23 @@ async def wechat_callback(
             order.transaction_id = data.get('transaction_id')
             order.paid_at = datetime.now(timezone.utc)
             await db.flush()
+
+            license_result = await db.execute(
+                select(License).filter(License.user_id == order.user_id)
+            )
+            existing_license = license_result.scalar_one_or_none()
+            if existing_license:
+                existing_license.license_type = "pro"
+                existing_license.is_valid = True
+                from datetime import timedelta
+                if order.plan_type == PlanType.MONTHLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
+                elif order.plan_type == PlanType.YEARLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
+                elif order.plan_type == PlanType.LIFETIME:
+                    existing_license.expiry_date = None
+                await db.flush()
+
             await db.commit()
     
     return {"code": "SUCCESS", "msg": "OK"}
