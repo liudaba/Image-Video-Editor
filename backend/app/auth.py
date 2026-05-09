@@ -119,6 +119,7 @@ def record_login_failure(identifier: str):
 def clear_login_failures(identifier: str):
     r = _get_redis()
     if r is None:
+        _memory_rate_limit.pop(identifier, None)
         return
     try:
         r.delete(f"login_fail:{identifier}")
@@ -143,6 +144,25 @@ async def get_current_user(
         if token_issued < user.password_changed_at.timestamp():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="密码已修改,请重新登录")
     return user
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    try:
+        token = auth_header.split(" ", 1)[1]
+        token_data = decode_access_token(token)
+        result = await db.execute(select(User).where(User.id == token_data.user_id))
+        user = result.scalar_one_or_none()
+        if user and user.is_active:
+            return user
+    except Exception:
+        pass
+    return None
 
 
 async def require_admin(

@@ -9,7 +9,13 @@ import os
 from .config import settings  # 使用相对导入
 
 # 创建异步引擎
-engine = create_async_engine(settings.DATABASE_URL)
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,
+    pool_pre_ping=True,
+)
 
 # 创建会话工厂
 AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

@@ -4,7 +4,7 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -151,8 +151,7 @@ async def db_error_handler(request: Request, exc: sqlalchemy.exc.DBAPIError):
 
 @app.exception_handler(Exception)
 async def generic_error_handler(request: Request, exc: Exception):
-    import logging
-    logging.getLogger(__name__).error(f"Unhandled exception: {exc}", exc_info=True)
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "服务器内部错误"})
 
 
@@ -208,6 +207,7 @@ app.include_router(admin.router)
 @app.get("/health")
 async def health_check():
     db_ok = False
+    redis_ok = False
     try:
         async with engine.connect() as conn:
             await conn.execute(sqlalchemy.text("SELECT 1"))
@@ -215,7 +215,24 @@ async def health_check():
     except Exception:
         pass
 
-    return {"status": "ok" if db_ok else "degraded"}
+    try:
+        import redis as _redis
+        r = _redis.from_url(settings.REDIS_URL, socket_timeout=2)
+        r.ping()
+        redis_ok = True
+    except Exception:
+        pass
+
+    status_code = 200 if db_ok else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ok" if db_ok else "degraded",
+            "database": "ok" if db_ok else "error",
+            "redis": "ok" if redis_ok else "unavailable",
+            "version": "1.0.0",
+        }
+    )
 
 
 @app.get("/")
@@ -229,27 +246,37 @@ async def login_page(request: Request):
 
 
 @app.get("/admin/dashboard")
-async def dashboard_page(request: Request):
+async def dashboard_page(request: Request, db=Depends(get_db)):
     session_token = request.cookies.get("admin_session")
     if not session_token:
         return templates.TemplateResponse("login.html", {"request": request})
     try:
         from .auth import decode_access_token
-        decode_access_token(session_token)
-    except Exception:
+        token_data = decode_access_token(session_token)
+        from sqlalchemy import select
+        from .models import User
+        user = (await db.execute(select(User).where(User.id == token_data.user_id))).scalar_one_or_none()
+        if not user or not user.is_admin:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+    except HTTPException:
         return templates.TemplateResponse("login.html", {"request": request})
     return templates.TemplateResponse("admin_base.html", {"request": request})
 
 
 @app.get("/admin/content/{section}")
-async def get_content(request: Request, section: str):
+async def get_content(request: Request, section: str, db=Depends(get_db)):
     session_token = request.cookies.get("admin_session")
     if not session_token:
         raise HTTPException(status_code=401, detail="未登录")
     try:
         from .auth import decode_access_token
-        decode_access_token(session_token)
-    except Exception:
+        token_data = decode_access_token(session_token)
+        from sqlalchemy import select
+        from .models import User
+        user = (await db.execute(select(User).where(User.id == token_data.user_id))).scalar_one_or_none()
+        if not user or not user.is_admin:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+    except HTTPException:
         raise HTTPException(status_code=401, detail="登录已过期")
 
     template_files = {

@@ -79,6 +79,8 @@ class OrderResponse(BaseModel):
     order_id: str
     payment_url: Optional[str] = None
     qr_code: Optional[str] = None
+    method: Optional[str] = None
+    message: Optional[str] = None
 
 
 class VersionInfo(BaseModel):

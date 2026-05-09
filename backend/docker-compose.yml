@@ -90,7 +90,7 @@ services:
     volumes:
       - ./backups:/backups
     entrypoint: >
-      bash -c "while true; do
+      sh -c "while true; do
         pg_dump -h db -U videogen videogen | gzip > /backups/videogen_$$(date +%%Y%%m%%d_%%H%%M%%S).sql.gz;
         find /backups -name '*.sql.gz' -mtime +7 -delete;
         sleep 86400;

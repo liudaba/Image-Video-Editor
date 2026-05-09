@@ -134,7 +134,7 @@ async def change_password(
     
     # 更新密码
     current_user.hashed_password = hash_password(new_password)
-    current_user.password_changed_at = datetime.datetime.now(datetime.timezone.utc)
+    current_user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
     await db.commit()
     

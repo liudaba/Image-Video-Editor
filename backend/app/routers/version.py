@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import AppVersion
-from ..auth import require_admin, get_current_user
+from ..auth import require_admin, get_current_user_optional
 from ..schemas import VersionInfo
 
 router = APIRouter(prefix="/api/version", tags=["version"])
@@ -56,7 +56,7 @@ async def create_version(
 async def get_latest_version(
     current_version: str = Query(None, max_length=20),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user_optional)
 ):
     from sqlalchemy import select
 

@@ -167,13 +167,13 @@ async def update_user(
     
     await db.flush()
     
-    # 记录审计日志
     await _log_audit(
         db, user, "update_user", 
         f"user_id={user_id}, username={username}, is_active={is_active}, is_admin={is_admin}", 
         request
     )
     
+    await db.commit()
     return {"success": True}
 
 
@@ -196,6 +196,7 @@ async def delete_user(
     await db.delete(target)
     await db.flush()
     await _log_audit(db, user, "delete_user", f"user_id={user_id}", request)
+    await db.commit()
     return {"success": True}
 
 
@@ -277,6 +278,7 @@ async def admin_generate_license_keys(
 
     await db.flush()
     await _log_audit(db, user, "generate_license_keys", f"count={len(keys)}, plan={body.plan_type}", request)
+    await db.commit()
     return {"keys": keys, "count": len(keys)}
 
 
@@ -301,6 +303,7 @@ async def admin_generate_trial_codes(
 
     await db.flush()
     await _log_audit(db, user, "generate_trial_codes", f"count={len(keys)}", request)
+    await db.commit()
     return {"keys": keys, "count": len(keys), "valid_days": 15}
 
 
@@ -359,6 +362,7 @@ async def toggle_user_active(
     target.is_active = not target.is_active
     await db.flush()
     await _log_audit(db, user, "toggle_user_active", f"user_id={user_id}, is_active={target.is_active}", request)
+    await db.commit()
     return {"success": True, "is_active": target.is_active}
 
 
@@ -380,6 +384,7 @@ async def create_version(
     db.add(new_version)
     await db.flush()
     await _log_audit(db, user, "create_version", f"version={body.version}", request)
+    await db.commit()
     return {"success": True, "version": body.version}
 
 
@@ -407,6 +412,7 @@ async def create_user(
     db.add(new_user)
     await db.flush()
     await _log_audit(db, user, "create_user", f"username={body.username}, is_admin={body.is_admin}", request)
+    await db.commit()
     return {"success": True}
 
 
@@ -453,6 +459,7 @@ async def revoke_license_key(
     key.status = LicenseKeyStatus.REVOKED
     await db.flush()
     await _log_audit(db, user, "revoke_license_key", f"license_key={license_key}", request)
+    await db.commit()
     return {"success": True}
 
 
@@ -569,6 +576,7 @@ async def update_version(
     
     await db.flush()
     await _log_audit(db, user, "update_version", f"version_id={version_id}, version={version}", request)
+    await db.commit()
     return {"success": True}
 
 
@@ -587,6 +595,7 @@ async def delete_version(
     await db.delete(target)
     await db.flush()
     await _log_audit(db, user, "delete_version", f"version_id={version_id}, version={target.version}", request)
+    await db.commit()
     return {"success": True}
 
 
@@ -605,6 +614,7 @@ async def toggle_version_active(
     target.is_active = not target.is_active
     await db.flush()
     await _log_audit(db, user, "toggle_version_active", f"version_id={version_id}, is_active={target.is_active}", request)
+    await db.commit()
     return {"success": True, "is_active": target.is_active}
 
 

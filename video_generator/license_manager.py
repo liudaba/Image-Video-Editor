@@ -68,9 +68,6 @@ def _verify_signature(data: dict) -> bool:
     return hmac.compare_digest(expected, computed)
 
 
-_orig_verify_ref = _verify_signature
-
-
 def _check_clock_rollback():
     global _last_known_time
     now = time.time()
@@ -312,8 +309,9 @@ class LicenseManager:
 
     def register_user(self, username, email, password):
         try:
+            api_url = self.API_BASE
             response = get_http_session().post(
-                f"{self.API_BASE}/api/auth/register",
+                f"{api_url}/api/auth/register",
                 json={"username": username, "email": email, "password": password},
                 timeout=10,
             )
@@ -322,8 +320,8 @@ class LicenseManager:
             else:
                 error_msg = response.json().get("detail", "注册失败")
                 return False, error_msg
-        except Exception:
-            return False, "无法连接到服务器,请检查网络连接"
+        except Exception as e:
+            return False, f"无法连接服务器({type(e).__name__}: {e}), API:{self.API_BASE}"
 
     def login_user(self, username, password):
         try:
@@ -344,8 +342,8 @@ class LicenseManager:
             else:
                 error_msg = response.json().get("detail", "登录失败")
                 return False, error_msg
-        except Exception:
-            return False, "无法连接到服务器,请检查网络连接"
+        except Exception as e:
+            return False, f"无法连接服务器({type(e).__name__}: {e}), API:{self.API_BASE}"
 
     def check_license(self):
         if not self.license_data:
@@ -499,7 +497,7 @@ class LoginDialog(tk.Toplevel):
         self.mode = "login"
         self.result = None
         self.title("用户登录")
-        self.geometry("420x400")
+        self.geometry("630x600")
         self.resizable(False, False)
         self.configure(bg="#f5f5f5")
         self.transient(parent)
@@ -507,73 +505,63 @@ class LoginDialog(tk.Toplevel):
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
         self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - (420 // 2)
-        y = (self.winfo_screenheight() // 2) - (400 // 2)
+        x = (self.winfo_screenwidth() // 2) - (630 // 2)
+        y = (self.winfo_screenheight() // 2) - (600 // 2)
         self.geometry(f"+{x}+{y}")
 
     def _build_ui(self):
-        main = ttk.Frame(self, padding=25)
+        main = ttk.Frame(self, padding=30)
         main.pack(fill=tk.BOTH, expand=True)
 
-        title_lbl = ttk.Label(main, text="🎬 短视频生成器", font=("Microsoft YaHei", 18, "bold"), foreground="#2196F3")
+        title_lbl = ttk.Label(main, text="🎬 短视频生成器", font=("Microsoft YaHei", 20, "bold"), foreground="#2196F3")
         title_lbl.pack(pady=(0, 5))
-        sub_lbl = ttk.Label(main, text="AI驱动的音频转视频工具", font=("Microsoft YaHei", 10), foreground="#666")
-        sub_lbl.pack(pady=(0, 15))
+        sub_lbl = ttk.Label(main, text="AI驱动的音频转视频工具", font=("Microsoft YaHei", 11), foreground="#666")
+        sub_lbl.pack(pady=(0, 20))
 
         self.username_var = tk.StringVar()
-        ttk.Label(main, text="用户名", font=("Microsoft YaHei", 10)).pack(anchor=tk.W)
-        self.username_entry = ttk.Entry(main, textvariable=self.username_var, font=("Microsoft YaHei", 11))
-        self.username_entry.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(main, text="用户名", font=("Microsoft YaHei", 11)).pack(anchor=tk.W)
+        self.username_entry = ttk.Entry(main, textvariable=self.username_var, font=("Microsoft YaHei", 12))
+        self.username_entry.pack(fill=tk.X, pady=(0, 10), ipady=4)
 
         self.email_var = tk.StringVar()
-        ttk.Label(main, text="邮箱地址", font=("Microsoft YaHei", 10)).pack(anchor=tk.W)
-        self.email_entry = ttk.Entry(main, textvariable=self.email_var, font=("Microsoft YaHei", 11))
-        self.email_entry.pack(fill=tk.X, pady=(0, 8))
-        self.email_entry.pack_forget()
-        self._email_label = main.winfo_children()[-2]
-        self._email_label.pack_forget()
+        self._email_label = ttk.Label(main, text="邮箱地址", font=("Microsoft YaHei", 11))
+        self.email_entry = ttk.Entry(main, textvariable=self.email_var, font=("Microsoft YaHei", 12))
 
         self.password_var = tk.StringVar()
-        ttk.Label(main, text="密码", font=("Microsoft YaHei", 10)).pack(anchor=tk.W)
-        self.password_entry = ttk.Entry(main, textvariable=self.password_var, font=("Microsoft YaHei", 11), show="*")
-        self.password_entry.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(main, text="密码", font=("Microsoft YaHei", 11)).pack(anchor=tk.W)
+        self.password_entry = ttk.Entry(main, textvariable=self.password_var, font=("Microsoft YaHei", 12), show="*")
+        self.password_entry.pack(fill=tk.X, pady=(0, 10), ipady=4)
 
         self.confirm_var = tk.StringVar()
-        ttk.Label(main, text="确认密码", font=("Microsoft YaHei", 10)).pack(anchor=tk.W)
-        self.confirm_entry = ttk.Entry(main, textvariable=self.confirm_var, font=("Microsoft YaHei", 11), show="*")
-        self.confirm_entry.pack(fill=tk.X, pady=(0, 8))
-        self.confirm_entry.pack_forget()
-        self._confirm_label = main.winfo_children()[-2]
-        self._confirm_label.pack_forget()
+        self._confirm_label = ttk.Label(main, text="确认密码", font=("Microsoft YaHei", 11))
+        self.confirm_entry = ttk.Entry(main, textvariable=self.confirm_var, font=("Microsoft YaHei", 12), show="*")
 
         self.action_btn = ttk.Button(main, text="登录", command=self._handle_action)
-        self.action_btn.pack(fill=tk.X, pady=(5, 5))
+        self.action_btn.pack(fill=tk.X, pady=(10, 5), ipady=6)
 
         self.switch_btn = ttk.Button(main, text="还没有账号?立即注册", command=self._toggle_mode)
-        self.switch_btn.pack(fill=tk.X, pady=(0, 5))
+        self.switch_btn.pack(fill=tk.X, pady=(0, 5), ipady=4)
 
         self._agree_var = tk.BooleanVar(value=False)
         self._agree_check = ttk.Checkbutton(
             main, text="我同意《隐私政策》和《服务条款》",
             variable=self._agree_var,
         )
-        self._agree_check.pack(pady=(5, 0))
-        self._agree_check.pack_forget()
 
-        trial_lbl = ttk.Label(main, text="✨ 注册即享7天免费试用!", font=("Microsoft YaHei", 9), foreground="#FF5722")
-        trial_lbl.pack(pady=(5, 0))
+        trial_lbl = ttk.Label(main, text="✨ 注册即享7天免费试用!", font=("Microsoft YaHei", 10), foreground="#FF5722")
+        trial_lbl.pack(pady=(10, 0))
 
     def _toggle_mode(self):
         self.mode = "register" if self.mode == "login" else "login"
         if self.mode == "register":
             self._email_label.pack(after=self.username_entry, anchor=tk.W)
-            self.email_entry.pack(after=self._email_label, fill=tk.X, pady=(0, 8))
+            self.email_entry.pack(after=self._email_label, fill=tk.X, pady=(0, 10), ipady=4)
             self._confirm_label.pack(after=self.password_entry, anchor=tk.W)
-            self.confirm_entry.pack(after=self._confirm_label, fill=tk.X, pady=(0, 8))
+            self.confirm_entry.pack(after=self._confirm_label, fill=tk.X, pady=(0, 10), ipady=4)
             self.action_btn.config(text="注册")
             self.switch_btn.config(text="已有账号?立即登录")
             self.title("用户注册")
-            self._agree_check.pack(pady=(5, 0))
+            self._agree_check.pack(after=self.switch_btn, pady=(8, 0))
         else:
             self.email_entry.pack_forget()
             self._email_label.pack_forget()
@@ -635,16 +623,20 @@ class LoginDialog(tk.Toplevel):
         self.destroy()
 
 
-def check_and_show_login():
+def check_and_show_login(parent=None):
     license_mgr = LicenseManager()
     license_status = license_mgr.check_license()
     if not license_status["valid"]:
-        dialog = LoginDialog()
+        dialog = LoginDialog(parent)
         dialog.wait_window()
         if dialog.result:
             license_status = license_mgr.check_license()
             if license_status["valid"]:
                 license_mgr.start_heartbeat()
+            else:
+                verify_secret = _get_verify_secret()
+                if not verify_secret:
+                    return {"valid": False, "message": "授权验证组件缺失(.license_verify_key)，请联系客服"}
             return license_status
         else:
             return {"valid": False, "message": "用户取消登录"}

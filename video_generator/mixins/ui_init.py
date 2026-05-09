@@ -341,6 +341,12 @@ class UIInitMixin:
         self.cloud_asr_enabled_var = tk.BooleanVar(value=False)
         self.cloud_asr_api_key_var = tk.StringVar(value="")
         
+        self.cloud_image_enabled_var = tk.BooleanVar(value=False)
+        self.cloud_image_provider_var = tk.StringVar(value="硅基流动 SiliconFlow")
+        self.cloud_image_api_key_var = tk.StringVar(value="")
+        self.cloud_image_model_var = tk.StringVar(value="")
+        self.cloud_image_custom_url_var = tk.StringVar(value="")
+        
         # 风格预设 - 预创建变量，确保load_config能恢复风格设置
         style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
         self.dlr_vars = [(opt, tk.BooleanVar()) for opt in style_options]
@@ -457,6 +463,48 @@ class UIInitMixin:
             time.sleep(1)  # 等待Ollama模块加载完成
             
             try:
+                from video_generator.license_manager import LicenseManager
+                license_mgr = LicenseManager()
+                license_status = license_mgr.check_license()
+                if not license_status.get("valid", False):
+                    import tkinter as _tk
+                    from video_generator.license_manager import LoginDialog
+                    
+                    result_holder = {"result": None}
+                    def show_login():
+                        dialog = LoginDialog(self.root)
+                        dialog.wait_window()
+                        result_holder["result"] = dialog.result
+                    
+                    self.root.after(0, show_login)
+                    
+                    while result_holder["result"] is None:
+                        time.sleep(0.1)
+                    
+                    if result_holder["result"]:
+                        license_status = license_mgr.check_license()
+                        if not license_status.get("valid", False):
+                            verify_secret = None
+                            try:
+                                from video_generator.license_manager import _get_verify_secret
+                                verify_secret = _get_verify_secret()
+                            except Exception:
+                                pass
+                            if not verify_secret:
+                                self.root.after(0, lambda: messagebox.showerror("错误", "授权验证组件缺失(.license_verify_key)，请检查安装"))
+                                return
+                            self.root.after(0, lambda: messagebox.showerror("错误", license_status.get("message", "登录后授权仍无效")))
+                            return
+                        license_mgr.start_heartbeat()
+                    else:
+                        self.root.after(0, self.on_close)
+                        return
+                else:
+                    license_mgr.start_heartbeat()
+            except Exception as e:
+                self.log(f"⚠️ 授权检查异常: {e}")
+            
+            try:
                 self._cleanup_residual_files()
             except Exception:
                 pass
@@ -472,7 +520,6 @@ class UIInitMixin:
             if not cloud_img:
                 self.check_sd_api_connection(silent=True)
             
-            # 【修改】启动时自动检测并连接Ollama服务
             self.auto_connect_ollama()
         threading.Thread(target=delayed_system_check, daemon=True).start()
         

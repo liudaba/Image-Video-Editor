@@ -86,6 +86,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     key_result = await db.execute(
         select(LicenseKey)
         .where(LicenseKey.license_key == license_key)
+        .with_for_update()
     )
     license_key_obj = key_result.scalar_one_or_none()
 
@@ -120,18 +121,34 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         expiry_date = datetime.now(timezone.utc) + expiry_delta
         license_type = "pro"
 
-    license_obj = License(
-        user_id=user_id,
-        license_type=license_type,
-        license_key=license_key,
-        is_valid=True,
-        expiry_date=expiry_date,
+    existing_result = await db.execute(
+        select(License).where(License.user_id == user_id)
     )
+    existing_license = existing_result.scalar_one_or_none()
 
-    db.add(license_obj)
-    await db.flush()
-
-    return license_obj
+    if existing_license:
+        existing_license.license_type = license_type
+        existing_license.license_key = license_key
+        existing_license.is_valid = True
+        existing_license.expiry_date = expiry_date
+        if license_type == "trial" and not existing_license.trial_start:
+            existing_license.trial_start = datetime.now(timezone.utc)
+            existing_license.trial_end = expiry_date
+        await db.flush()
+        await db.commit()
+        return existing_license
+    else:
+        license_obj = License(
+            user_id=user_id,
+            license_type=license_type,
+            license_key=license_key,
+            is_valid=True,
+            expiry_date=expiry_date,
+        )
+        db.add(license_obj)
+        await db.flush()
+        await db.commit()
+        return license_obj
 
 
 async def cleanup_expired_license_keys(db: AsyncSession) -> int:

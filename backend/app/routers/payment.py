@@ -116,11 +116,16 @@ async def alipay_callback(
     
     if trade_status in ['TRADE_SUCCESS', 'TRADE_FINISHED']:
         result = await db.execute(
-            select(Order).filter(Order.order_no == order_no)
+            select(Order).filter(Order.order_no == order_no).with_for_update()
         )
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
+            paid_amount = Decimal(str(params.get('total_amount', '0')))
+            if paid_amount != order.amount:
+                logger.warning(f"Payment amount mismatch for order {order_no}: expected {order.amount}, got {paid_amount}")
+                return {"code": "FAIL", "msg": "金额不匹配"}
+
             order.status = OrderStatus.PAID
             order.transaction_id = params.get('trade_no')
             order.paid_at = datetime.now(timezone.utc)
@@ -172,11 +177,24 @@ async def wechat_callback(
     
     if trade_state == 'SUCCESS':
         result = await db.execute(
-            select(Order).filter(Order.order_no == order_no)
+            select(Order).filter(Order.order_no == order_no).with_for_update()
         )
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
+            paid_amount_cents = 0
+            amount_data = data.get('amount')
+            if isinstance(amount_data, dict):
+                paid_amount_cents = amount_data.get('total', 0)
+            elif data.get('total_fee'):
+                try:
+                    paid_amount_cents = int(data.get('total_fee', 0))
+                except (ValueError, TypeError):
+                    pass
+            if paid_amount_cents and abs(Decimal(str(paid_amount_cents)) / 100 - order.amount) > Decimal('0.01'):
+                logger.warning(f"WeChat payment amount mismatch for order {order_no}: expected {order.amount}, got {paid_amount_cents}")
+                return {"code": "FAIL", "msg": "金额不匹配"}
+
             order.status = OrderStatus.PAID
             order.transaction_id = data.get('transaction_id')
             order.paid_at = datetime.now(timezone.utc)

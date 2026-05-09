@@ -20,7 +20,7 @@ async def heartbeat(
     db: AsyncSession = Depends(get_db)
 ):
     from sqlalchemy import select
-    from datetime import datetime, timezone
+    from ..services.heartbeat_service import check_and_bind_machine
 
     license_result = await db.execute(
         select(License).filter(License.user_id == current_user.id)
@@ -34,6 +34,15 @@ async def heartbeat(
     if license_obj.expiry_date:
         now = datetime.now(timezone.utc)
         is_valid = is_valid and license_obj.expiry_date >= now
+
+    if is_valid and req.fingerprint:
+        can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)
+        if not can_bind:
+            return HeartbeatResponse(
+                is_valid=False,
+                reason="设备绑定数量已达上限(最多3台)",
+                timestamp=time.time()
+            )
 
     heartbeat_log = HeartbeatLog(
         user_id=current_user.id,
@@ -149,7 +158,6 @@ async def update_user(
         user.is_admin = is_admin
 
     await db.flush()
-    await db.commit()
 
     audit_log = AuditLog(
         operator_id=current_user.id,
@@ -181,7 +189,6 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     await db.execute(delete(User).where(User.id == user_id))
-    await db.commit()
 
     audit_log = AuditLog(
         operator_id=current_user.id,
@@ -221,7 +228,6 @@ async def reset_user_password(
     user.hashed_password = hash_password(new_password)
     user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
-    await db.commit()
 
     audit_log = AuditLog(
         operator_id=current_user.id,
@@ -235,4 +241,4 @@ async def reset_user_password(
     db.add(audit_log)
     await db.commit()
 
-    return {"message": "密码重置成功", "reset_token": reset_token}
+    return {"message": "密码重置成功", "new_password": new_password}
