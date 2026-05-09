@@ -9,53 +9,75 @@ echo ===============================================
 echo.
 
 set "PORT_FOUND=0"
+set "KILLED_PIDS="
 
 echo [1/3] 尝试通过端口停止服务...
 
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8001 "') do (
-    echo       找到进程ID %%a 占用端口 8001
-    echo       正在终止进程...
-    taskkill /f /pid %%a >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo       ✅ 进程已终止
-        set "PORT_FOUND=1"
-    ) else (
-        echo       ❌ 无法终止进程
+    set "ALREADY_KILLED=0"
+    for %%k in (!KILLED_PIDS!) do (
+        if "%%a"=="%%k" set "ALREADY_KILLED=1"
+    )
+    if !ALREADY_KILLED! equ 0 (
+        echo       找到进程ID %%a 占用端口 8001
+        echo       正在终止进程...
+        taskkill /f /pid %%a >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo       ✅ 进程已终止
+            set "PORT_FOUND=1"
+            set "KILLED_PIDS=!KILLED_PIDS! %%a"
+        ) else (
+            echo       ❌ 无法终止进程
+        )
     )
 )
 
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8002 "') do (
-    echo       找到进程ID %%a 占用端口 8002
-    echo       正在终止进程...
-    taskkill /f /pid %%a >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo       ✅ 进程已终止
-        set "PORT_FOUND=1"
-    ) else (
-        echo       ❌ 无法终止进程
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 "') do (
+    set "ALREADY_KILLED=0"
+    for %%k in (!KILLED_PIDS!) do (
+        if "%%a"=="%%k" set "ALREADY_KILLED=1"
+    )
+    if !ALREADY_KILLED! equ 0 (
+        echo       找到进程ID %%a 占用端口 8000
+        echo       正在终止进程...
+        taskkill /f /pid %%a >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo       ✅ 进程已终止
+            set "PORT_FOUND=1"
+            set "KILLED_PIDS=!KILLED_PIDS! %%a"
+        ) else (
+            echo       ❌ 无法终止进程
+        )
     )
 )
 
 if !PORT_FOUND! equ 0 (
-    echo       未找到占用端口 8001 或 8002 的进程
+    echo       未找到占用端口 8000 或 8001 的进程
 )
 
 echo.
 echo [2/3] 尝试终止 Python uvicorn 进程...
 
 set "UVICORN_FOUND=0"
-for /f "tokens=2" %%a in ('tasklist /FI "IMAGENAME eq python.exe" /FO CSV ^| findstr python.exe') do (
+for /f "tokens=2" %%a in ('tasklist /FI "IMAGENAME eq python.exe" /FO CSV 2^>nul ^| findstr /i python.exe') do (
     set "PID=%%a"
     set "PID=!PID:"=!"
-    for /f "tokens=*" %%c in ('wmic process where "ProcessID=!PID!" get Commandline ^| findstr /C:"uvicorn" 2^>nul') do (
-        echo       找到 uvicorn 进程ID: !PID!
-        echo       正在终止进程...
-        taskkill /f /pid !PID! >nul 2>&1
-        if !errorlevel! equ 0 (
-            echo       ✅ uvicorn 进程已终止
-            set "UVICORN_FOUND=1"
-        ) else (
-            echo       ❌ 无法终止进程
+    set "ALREADY_KILLED=0"
+    for %%k in (!KILLED_PIDS!) do (
+        if "!PID!"=="%%k" set "ALREADY_KILLED=1"
+    )
+    if !ALREADY_KILLED! equ 0 (
+        powershell -Command "Get-Process -Id !PID! -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path" >nul 2>&1
+        for /f "tokens=*" %%c in ('wmic process where "ProcessID=!PID!" get Commandline 2^>nul ^| findstr /C:"uvicorn"') do (
+            echo       找到 uvicorn 进程ID: !PID!
+            echo       正在终止进程...
+            taskkill /f /pid !PID! >nul 2>&1
+            if !errorlevel! equ 0 (
+                echo       ✅ uvicorn 进程已终止
+                set "UVICORN_FOUND=1"
+            ) else (
+                echo       ❌ 无法终止进程
+            )
         )
     )
 )
@@ -67,18 +89,18 @@ if !UVICORN_FOUND! equ 0 (
 echo.
 echo [3/3] 验证服务是否已停止...
 
-timeout /t 1 /nobreak >nul
+timeout /t 2 /nobreak >nul
 
 set "STOPPED=1"
-netstat -an | findstr ":8001 " >nul
+netstat -an | findstr ":8001 " >nul 2>&1
 if !errorlevel! equ 0 (
     echo       ⚠️  端口 8001 仍被占用
     set "STOPPED=0"
 )
 
-netstat -an | findstr ":8002 " >nul
+netstat -an | findstr ":8000 " >nul 2>&1
 if !errorlevel! equ 0 (
-    echo       ⚠️  端口 8002 仍被占用
+    echo       ⚠️  端口 8000 仍被占用
     set "STOPPED=0"
 )
 

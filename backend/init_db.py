@@ -58,12 +58,20 @@ async def init():
     if os.path.exists(verify_key_path):
         with open(verify_key_path, "r") as f:
             sign_key = f.read().strip()
-        print("   ⏭️ 签名密钥已存在，跳过生成")
+        if sign_key:
+            print("   ⏭️ 签名密钥已存在，跳过生成")
+        else:
+            sign_key = secrets.token_hex(32)
+            with open(verify_key_path, "w") as f:
+                f.write(sign_key)
+            print(f"   ✅ 签名密钥已重新生成（原文件为空）")
     else:
         sign_key = secrets.token_hex(32)
         with open(verify_key_path, "w") as f:
             f.write(sign_key)
         print(f"   ✅ 签名密钥已生成: {verify_key_path}")
+
+    jwt_secret = secrets.token_hex(32)
 
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if os.path.exists(env_path):
@@ -80,17 +88,26 @@ async def init():
                     updated = True
                 else:
                     new_lines.append(line)
+            elif line.strip().startswith("JWT_SECRET_KEY="):
+                current_val = line.strip().split("=", 1)[1]
+                if current_val in ("change-this-to-a-random-string", "dev-jwt-key-change-in-production", ""):
+                    new_lines.append(f"JWT_SECRET_KEY={jwt_secret}\n")
+                    updated = True
+                else:
+                    new_lines.append(line)
             else:
                 new_lines.append(line)
 
         if updated:
             with open(env_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
-            print(f"   ✅ 已自动更新 .env 中的 HMAC_SIGN_KEY")
+            print(f"   ✅ 已自动更新 .env 中的密钥配置")
         else:
-            print(f"   ⏭️ .env 中 HMAC_SIGN_KEY 已配置，跳过更新")
+            print(f"   ⏭️ .env 中密钥已配置，跳过更新")
     else:
-        print(f"   ⚠️  未找到 .env 文件，请手动设置 HMAC_SIGN_KEY（密钥已保存至 {verify_key_path}）")
+        print(f"   ⚠️  未找到 .env 文件，请手动设置 HMAC_SIGN_KEY 和 JWT_SECRET_KEY")
+        print(f"   HMAC_SIGN_KEY={sign_key}")
+        print(f"   JWT_SECRET_KEY={jwt_secret}")
 
     print(f"   📋 请将签名密钥复制到客户端项目的 .license_verify_key 文件中")
 

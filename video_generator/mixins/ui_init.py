@@ -43,9 +43,22 @@ class UIInitMixin:
         print(f"   - 视频编码器: 延迟检测（首次使用时）")
     
 
+    def _update_membership_title(self):
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            display = mgr.get_membership_display()
+            base_title = f"短视频生成器 v{get_version()} | 智能分镜工作流"
+            if display:
+                self.root.title(f"{base_title} | {display}")
+            else:
+                self.root.title(base_title)
+        except Exception:
+            self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
+
     def _initialize_ui(self):
         """初始化用户界面"""
-        self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
+        self._update_membership_title()
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         
@@ -501,6 +514,7 @@ class UIInitMixin:
                         return
                 else:
                     license_mgr.start_heartbeat()
+                self.root.after(0, self._update_membership_title)
             except Exception as e:
                 self.log(f"⚠️ 授权检查异常: {e}")
             
@@ -547,6 +561,7 @@ class UIInitMixin:
                 if not self._api_heartbeat_running:
                     break
                 self._check_api_heartbeat()
+                self.root.after(0, self._update_membership_title)
         threading.Thread(target=api_heartbeat, daemon=True).start()
     
 

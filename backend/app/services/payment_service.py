@@ -1,6 +1,7 @@
 import json
 import time
 import hashlib
+import logging
 from typing import Dict, Optional, Any
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,23 +12,29 @@ from ..database import get_db
 from ..models import Order, OrderStatus, PlanType, User
 from ..schemas import OrderResponse
 
+logger = logging.getLogger("videogen")
+
 
 PLAN_PRICING = {
     "monthly": {"price": 19.9, "name": "月度会员"},
+    "quarterly": {"price": 49.9, "name": "季度会员"},
     "yearly": {"price": 199.0, "name": "年度会员"},
     "lifetime": {"price": 599.0, "name": "终身会员"},
 }
 
 
 def generate_order_no() -> str:
-    """生成订单号"""
-    return f"ORD{int(time.time())}{int(time.time()*1000000)%1000000:06d}"
+    import secrets
+    timestamp = int(time.time())
+    random_part = secrets.token_hex(4)
+    return f"ORD{timestamp}{random_part}"
 
 
 def calculate_plan_amount(plan_type: PlanType) -> float:
     """根据计划类型计算金额"""
     amounts = {
         PlanType.MONTHLY: 19.9,
+        PlanType.QUARTERLY: 49.9,
         PlanType.YEARLY: 199.0,
         PlanType.LIFETIME: 599.0,
     }
@@ -205,12 +212,13 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
             "message": "支付宝SDK未安装，使用模拟二维码",
         }
     except Exception as e:
+        logger.error(f"Alipay order creation failed: {e}", exc_info=True)
         return {
             "order_id": order_no,
             "payment_url": None,
             "qr_code": f"mock_alipay_qr_{order_no}_{amount}",
             "method": "alipay",
-            "message": f"支付宝订单创建失败: {str(e)}",
+            "message": "支付订单创建失败，请稍后重试",
         }
 
 
@@ -269,12 +277,13 @@ async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Di
             "message": "微信支付SDK未安装，使用模拟二维码",
         }
     except Exception as e:
+        logger.error(f"WeChat order creation failed: {e}", exc_info=True)
         return {
             "order_id": order_no,
             "payment_url": None,
             "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
             "method": "wechat",
-            "message": f"微信支付订单创建失败: {str(e)}",
+            "message": "支付订单创建失败，请稍后重试",
         }
 
 

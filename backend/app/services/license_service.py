@@ -113,6 +113,8 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     else:
         if license_key_obj.plan_type == PlanType.MONTHLY:
             expiry_delta = timedelta(days=30)
+        elif license_key_obj.plan_type == PlanType.QUARTERLY:
+            expiry_delta = timedelta(days=90)
         elif license_key_obj.plan_type == PlanType.YEARLY:
             expiry_delta = timedelta(days=365)
         else:

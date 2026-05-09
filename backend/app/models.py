@@ -17,8 +17,22 @@ class OrderStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+VALID_ORDER_TRANSITIONS = {
+    OrderStatus.PENDING: {OrderStatus.PAID, OrderStatus.EXPIRED, OrderStatus.CANCELLED},
+    OrderStatus.PAID: {OrderStatus.REFUNDED},
+    OrderStatus.EXPIRED: set(),
+    OrderStatus.REFUNDED: set(),
+    OrderStatus.CANCELLED: set(),
+}
+
+
+def validate_order_status_transition(current: OrderStatus, target: OrderStatus) -> bool:
+    return target in VALID_ORDER_TRANSITIONS.get(current, set())
+
+
 class PlanType(str, enum.Enum):
     MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
     YEARLY = "yearly"
     LIFETIME = "lifetime"
     TRIAL_15D = "trial_15d"
@@ -138,6 +152,7 @@ class AppVersion(Base):
 
 class HeartbeatLog(Base):
     __tablename__ = "heartbeat_logs"
+    __table_args__ = (Index("ix_heartbeat_logs_created_at", "created_at"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

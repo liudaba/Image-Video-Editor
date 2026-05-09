@@ -8,7 +8,7 @@ from typing import Dict, Any
 import json
 
 from ..database import get_db
-from ..models import Order, User, License, LicenseKey, OrderStatus, PlanType, LicenseKeyStatus
+from ..models import Order, User, License, LicenseKey, OrderStatus, PlanType, LicenseKeyStatus, PaymentNotifyLog, validate_order_status_transition
 from ..auth import require_admin, get_current_user
 from ..schemas import PaymentCreateOrder, OrderResponse
 from ..services.payment_service import (
@@ -115,12 +115,31 @@ async def alipay_callback(
     trade_status = params.get('trade_status')
     
     if trade_status in ['TRADE_SUCCESS', 'TRADE_FINISHED']:
+        notify_id = params.get('notify_id', params.get('trade_no', ''))
+        existing_notify = await db.execute(
+            select(PaymentNotifyLog).where(PaymentNotifyLog.notify_id == notify_id)
+        )
+        if existing_notify.scalar_one_or_none():
+            return {"code": "SUCCESS", "msg": "OK"}
+
+        notify_log = PaymentNotifyLog(
+            notify_id=notify_id,
+            order_no=order_no or "",
+            payment_method="alipay",
+            raw_data=json.dumps(params, ensure_ascii=False),
+        )
+        db.add(notify_log)
+        await db.flush()
+
         result = await db.execute(
             select(Order).filter(Order.order_no == order_no).with_for_update()
         )
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
+            if not validate_order_status_transition(order.status, OrderStatus.PAID):
+                logger.warning(f"Invalid order status transition for order {order_no}: {order.status} -> PAID")
+                return {"code": "FAIL", "msg": "订单状态异常"}
             paid_amount = Decimal(str(params.get('total_amount', '0')))
             if paid_amount != order.amount:
                 logger.warning(f"Payment amount mismatch for order {order_no}: expected {order.amount}, got {paid_amount}")
@@ -141,6 +160,8 @@ async def alipay_callback(
                 from datetime import timedelta
                 if order.plan_type == PlanType.MONTHLY:
                     existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
+                elif order.plan_type == PlanType.QUARTERLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=90)
                 elif order.plan_type == PlanType.YEARLY:
                     existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
                 elif order.plan_type == PlanType.LIFETIME:
@@ -176,12 +197,31 @@ async def wechat_callback(
     trade_state = data.get('trade_state')
     
     if trade_state == 'SUCCESS':
+        wx_notify_id = data.get('transaction_id', data.get('id', ''))
+        existing_notify = await db.execute(
+            select(PaymentNotifyLog).where(PaymentNotifyLog.notify_id == wx_notify_id)
+        )
+        if existing_notify.scalar_one_or_none():
+            return {"code": "SUCCESS", "msg": "OK"}
+
+        notify_log = PaymentNotifyLog(
+            notify_id=wx_notify_id,
+            order_no=order_no or "",
+            payment_method="wechat",
+            raw_data=body.decode('utf-8')[:65535],
+        )
+        db.add(notify_log)
+        await db.flush()
+
         result = await db.execute(
             select(Order).filter(Order.order_no == order_no).with_for_update()
         )
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
+            if not validate_order_status_transition(order.status, OrderStatus.PAID):
+                logger.warning(f"Invalid order status transition for order {order_no}: {order.status} -> PAID")
+                return {"code": "FAIL", "msg": "订单状态异常"}
             paid_amount_cents = 0
             amount_data = data.get('amount')
             if isinstance(amount_data, dict):
@@ -210,6 +250,8 @@ async def wechat_callback(
                 from datetime import timedelta
                 if order.plan_type == PlanType.MONTHLY:
                     existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
+                elif order.plan_type == PlanType.QUARTERLY:
+                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=90)
                 elif order.plan_type == PlanType.YEARLY:
                     existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
                 elif order.plan_type == PlanType.LIFETIME:

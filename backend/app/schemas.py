@@ -31,7 +31,7 @@ class LicenseActivate(BaseModel):
 
 
 class PaymentCreateOrder(BaseModel):
-    plan_type: str = Field(..., pattern=r"^(monthly|yearly|lifetime)$")
+    plan_type: str = Field(..., pattern=r"^(monthly|quarterly|yearly|lifetime)$")
     payment_method: str = Field(..., pattern=r"^(alipay|wechat)$")
 
 
@@ -99,3 +99,24 @@ class TokenData(BaseModel):
     user_id: int
     username: str
     exp: float = 0
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    email: EmailStr
+    code: str = Field(..., pattern=r"^\d{6}$")
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v):
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("密码必须包含至少一个大写字母")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("密码必须包含至少一个小写字母")
+        if not re.search(r"\d", v):
+            raise ValueError("密码必须包含至少一个数字")
+        return v

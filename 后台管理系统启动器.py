@@ -7,10 +7,8 @@ import sys
 import subprocess
 import threading
 import time
-import signal
 import argparse
 import webbrowser
-from pathlib import Path
 
 VENV_DIR = ".venv"
 
@@ -26,8 +24,13 @@ def restart_with_venv():
     if venv_python and sys.executable != venv_python:
         print(f"🚀 正在使用虚拟环境启动...")
         print(f"   虚拟环境: {venv_python}")
-        args = [venv_python] + sys.argv
-        os.execv(venv_python, args)
+        try:
+            args = [venv_python] + sys.argv
+            subprocess.Popen(args)
+            sys.exit(0)
+        except Exception as e:
+            print(f"⚠️  虚拟环境启动失败: {e}")
+            print("   将使用当前Python环境继续")
 
 def check_python_version():
     if sys.version_info < (3, 10):
@@ -52,6 +55,19 @@ def check_virtual_env():
     
     print("⚠️  未检测到虚拟环境，建议在虚拟环境中运行")
     return False
+
+def check_dependencies_in_venv(python_executable):
+    try:
+        result = subprocess.run(
+            [python_executable, "-c",
+             "import fastapi, uvicorn, jinja2, sqlalchemy, jose, bcrypt; print('OK')"],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 and "OK" in result.stdout:
+            return True
+        return False
+    except Exception:
+        return False
 
 def check_dependencies():
     try:
@@ -95,24 +111,34 @@ def start_backend_admin(host="127.0.0.1", port=8001, reload=False, auto_open_bro
     
     original_cwd = os.getcwd()
     backend_dir = os.path.join(original_cwd, 'backend')
+    
+    if not os.path.isdir(backend_dir):
+        print(f"❌ 错误: 未找到backend目录: {backend_dir}")
+        return
+    
     os.chdir(backend_dir)
     
+    process = None
     try:
         process = subprocess.Popen(cmd)
         
         print(f"✅ 后台管理系统已在 http://{host}:{port}/admin/login 启动")
-        print("💡 提示: 使用 Ctrl+C 停止服务，或运行 'stop_backend.bat'")
+        print("💡 提示: 使用 Ctrl+C 停止服务，或运行 '停止后台管理系统.bat'")
         
         process.wait()
         
     except KeyboardInterrupt:
         print("\n🛑 正在停止后台管理系统...")
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-        print("✅ 后台管理系统已停止")
+        if process:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            print("✅ 后台管理系统已停止")
+    except FileNotFoundError:
+        print(f"❌ 错误: 找不到Python解释器: {python}")
+        print("   请确保Python已正确安装或虚拟环境路径正确")
     except Exception as e:
         print(f"❌ 启动失败: {e}")
     finally:
@@ -136,6 +162,7 @@ def main():
     
     venv_python = find_virtual_env_python()
     use_venv = False
+    python_to_use = sys.executable
     
     if not args.skip_checks:
         print("🔍 检查运行环境...")
@@ -146,38 +173,40 @@ def main():
         in_venv = check_virtual_env()
         
         if not in_venv and venv_python:
-            print("💡 自动切换到虚拟环境运行")
-            use_venv = True
-            sys.executable = venv_python
-            print(f"✅ 已使用虚拟环境: {sys.executable}")
-        
-        if not check_dependencies():
-            if venv_python and not use_venv:
-                print("💡 提示: 依赖可能已安装在虚拟环境中")
-                print("🔄 正在切换到虚拟环境...")
+            print("💡 检测到虚拟环境，正在验证虚拟环境中的依赖...")
+            if check_dependencies_in_venv(venv_python):
+                print("✅ 虚拟环境中依赖完整")
                 use_venv = True
-                sys.executable = venv_python
-                print("✅ 已切换到虚拟环境")
-                if check_dependencies():
-                    pass
-                else:
-                    print("❌ 虚拟环境中也没有安装依赖")
+                python_to_use = venv_python
+            else:
+                print("⚠️  虚拟环境中依赖不完整")
+        
+        if not use_venv and not check_dependencies():
+            if venv_python:
+                print("💡 提示: 依赖可能已安装在虚拟环境中")
+                print("🔄 正在尝试安装依赖到虚拟环境...")
+                try:
+                    subprocess.check_call([
+                        venv_python, "-m", "pip", "install", 
+                        "-r", "backend/requirements.txt"
+                    ])
+                    print("✅ 依赖安装完成")
+                    use_venv = True
+                    python_to_use = venv_python
+                except subprocess.CalledProcessError:
+                    print("❌ 依赖安装失败")
                     return 1
             else:
                 print("❓ 是否尝试安装依赖？(y/N): ", end="")
                 response = input().strip().lower()
                 if response in ['y', 'yes']:
                     print("📦 正在安装依赖...")
-                    python_to_use = venv_python if venv_python else sys.executable
                     try:
                         subprocess.check_call([
-                            python_to_use, "-m", "pip", "install", 
+                            sys.executable, "-m", "pip", "install", 
                             "-r", "backend/requirements.txt"
                         ])
                         print("✅ 依赖安装完成")
-                        if venv_python:
-                            use_venv = True
-                            sys.executable = venv_python
                     except subprocess.CalledProcessError:
                         print("❌ 依赖安装失败")
                         return 1
@@ -189,11 +218,11 @@ def main():
     if args.reload:
         print("🔄 热重载模式: 已启用")
     if use_venv:
-        print(f"🐍 使用虚拟环境: {sys.executable}")
+        print(f"🐍 使用虚拟环境: {python_to_use}")
     
     print("-"*60)
     
-    start_backend_admin(args.host, args.port, args.reload, not args.skip_browser, sys.executable if use_venv else None)
+    start_backend_admin(args.host, args.port, args.reload, not args.skip_browser, python_to_use if use_venv else None)
     
     return 0
 
