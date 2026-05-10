@@ -9,12 +9,18 @@ import os
 from .config import settings  # 使用相对导入
 
 # 创建异步引擎
+_engine_kwargs = {
+    "pool_recycle": 3600,
+    "pool_pre_ping": True,
+}
+
+if not settings.DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["pool_size"] = 10
+    _engine_kwargs["max_overflow"] = 20
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
-    pool_pre_ping=True,
+    **_engine_kwargs,
 )
 
 # 创建会话工厂
