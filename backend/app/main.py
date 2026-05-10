@@ -349,7 +349,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
     response.set_cookie(
         key="admin_session",
         value=access_token,
-        httponly=True,
+        httponly=False,
         samesite="lax",
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
