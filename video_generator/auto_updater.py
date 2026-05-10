@@ -16,9 +16,10 @@ from tkinter import ttk, messagebox
 from .config import get_http_session, get_api_base_url
 
 _ALLOWED_DOWNLOAD_HOSTS = {
-    "api.videogen.com",
-    "cdn.videogen.com",
-    "releases.videogen.com",
+    "8.141.101.155",
+    "api.wangzha178.com",
+    "cdn.wangzha178.com",
+    "releases.wangzha178.com",
 }
 
 

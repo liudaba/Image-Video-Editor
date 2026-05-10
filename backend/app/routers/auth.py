@@ -90,7 +90,7 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
 async def register(user_data: UserRegister, request: Request, db: AsyncSession = Depends(get_db)):
     from ..main import _get_real_ip
     client_ip = _get_real_ip(request)
-    if not check_login_rate_limit(f"reg:{client_ip}", client_ip):
+    if not check_login_rate_limit(f"reg:{client_ip}"):
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
     # 检查用户名和邮箱是否已存在
@@ -118,7 +118,7 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
     await db.commit()
 
     # 清除登录失败记录
-    clear_login_failures(user_data.username, client_ip)
+    clear_login_failures(user_data.username)
 
     return {"message": "注册成功"}
 
@@ -127,7 +127,7 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
 async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
     from ..main import _get_real_ip
     client_ip = _get_real_ip(request)
-    if not check_login_rate_limit(user_data.username, client_ip):
+    if not check_login_rate_limit(user_data.username):
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
     # 检查用户是否存在
@@ -135,7 +135,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     result = await db.execute(select(User).filter(User.username == user_data.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(user_data.password, user.hashed_password):
-        record_login_failure(user_data.username, client_ip)
+        record_login_failure(user_data.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if not user.is_active:
@@ -158,7 +158,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
         license_data = encode_license_data(license_obj, user.username)
 
     # 清除登录失败记录
-    clear_login_failures(user_data.username, client_ip)
+    clear_login_failures(user_data.username)
 
     return LoginResponse(access_token=access_token, license=license_data)
 

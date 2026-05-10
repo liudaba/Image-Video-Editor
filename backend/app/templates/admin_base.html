@@ -157,6 +157,11 @@
                     <i class="fas fa-chart-line"></i> 数据分析
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#audit_logs" data-section="audit_logs">
+                    <i class="fas fa-clipboard-list"></i> 审计日志
+                </a>
+            </li>
         </ul>
         <div class="px-3 py-4 mt-4 border-top border-secondary">
             <small class="text-muted">当前版本: <span id="app-version">2.0.0</span></small>
@@ -244,11 +249,6 @@
         let currentSection = '';
 
         document.addEventListener('DOMContentLoaded', function() {
-            if (!localStorage.getItem('access_token')) {
-                window.location.href = '/admin/login';
-                return;
-            }
-            
             setupNavigation();
             setupLogout();
             setupChangePassword();
@@ -279,8 +279,10 @@
                 modal.show();
             });
             
-            document.getElementById('confirmLogoutBtn').addEventListener('click', function() {
-                localStorage.removeItem('access_token');
+            document.getElementById('confirmLogoutBtn').addEventListener('click', async function() {
+                try {
+                    await fetch('/auth/logout', { method: 'POST' });
+                } catch(e) {}
                 window.location.href = '/admin/login';
             });
         }
@@ -303,18 +305,19 @@
                 }
                 
                 try {
-                    const response = await fetch('/api/auth/change-password', {
+                    const token = getAdminToken();
+                    const response = await fetch('/api/auth/admin/change-password', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded',
-                            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                            'Authorization': 'Bearer ' + token
                         },
                         body: `old_password=${encodeURIComponent(oldPassword)}&new_password=${encodeURIComponent(newPassword)}`
                     });
                     
                     if (response.ok) {
                         showSuccess('密码修改成功，请重新登录');
-                        localStorage.removeItem('access_token');
+                        await fetch('/auth/logout', { method: 'POST' });
                         setTimeout(() => {
                             window.location.href = '/admin/login';
                         }, 1500);
@@ -341,6 +344,10 @@
             
             try {
                 const response = await fetch(`/admin/content/${section}`);
+                if (response.status === 401) {
+                    window.location.href = '/admin/login';
+                    return;
+                }
                 if (response.ok) {
                     contentArea.innerHTML = await response.text();
                     
@@ -365,9 +372,10 @@
 
         async function getCurrentUserInfo() {
             try {
+                const token = getAdminToken();
                 const response = await fetch('/api/auth/profile', {
                     headers: {
-                        'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                        'Authorization': 'Bearer ' + token
                     }
                 });
                 
@@ -375,10 +383,24 @@
                     const data = await response.json();
                     currentUser = data;
                     document.getElementById('current-user').textContent = data.username;
+                } else if (response.status === 401) {
+                    window.location.href = '/admin/login';
                 }
             } catch (error) {
                 console.error('获取用户信息失败:', error);
             }
+        }
+
+        function getAdminToken() {
+            const match = document.cookie.match(/(?:^|;\s*)admin_session=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(String(str)));
+            return div.innerHTML;
         }
 
         function showError(message) {
@@ -389,18 +411,35 @@
             alert('成功: ' + message);
         }
 
+        function getCsrfToken() {
+            const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
         async function apiRequest(url, options = {}) {
+            const token = getAdminToken();
+            const csrfToken = getCsrfToken();
             const headers = {
                 'Content-Type': 'application/json',
-                ...options.headers,
-                'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                ...options.headers
             };
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            if (csrfToken && options.method && options.method !== 'GET') {
+                headers['X-CSRF-Token'] = csrfToken;
+            }
 
             try {
                 const response = await fetch(url, {
                     ...options,
                     headers
                 });
+
+                if (response.status === 401) {
+                    window.location.href = '/admin/login';
+                    throw new Error('登录已过期，请重新登录');
+                }
 
                 if (!response.ok) {
                     const error = await response.json();

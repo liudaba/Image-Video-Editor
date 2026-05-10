@@ -472,48 +472,12 @@ class UIInitMixin:
         
         # 启动时运行系统检查（延迟执行，让UI先加载）
         def delayed_system_check():
-            # 等待延迟导入完成
-            time.sleep(1)  # 等待Ollama模块加载完成
+            time.sleep(1)
             
             try:
                 from video_generator.license_manager import LicenseManager
                 license_mgr = LicenseManager()
-                license_status = license_mgr.check_license()
-                if not license_status.get("valid", False):
-                    import tkinter as _tk
-                    from video_generator.license_manager import LoginDialog
-                    
-                    result_holder = {"result": None}
-                    def show_login():
-                        dialog = LoginDialog(self.root)
-                        dialog.wait_window()
-                        result_holder["result"] = dialog.result
-                    
-                    self.root.after(0, show_login)
-                    
-                    while result_holder["result"] is None:
-                        time.sleep(0.1)
-                    
-                    if result_holder["result"]:
-                        license_status = license_mgr.check_license()
-                        if not license_status.get("valid", False):
-                            verify_secret = None
-                            try:
-                                from video_generator.license_manager import _get_verify_secret
-                                verify_secret = _get_verify_secret()
-                            except Exception:
-                                pass
-                            if not verify_secret:
-                                self.root.after(0, lambda: messagebox.showerror("错误", "授权验证组件缺失(.license_verify_key)，请检查安装"))
-                                return
-                            self.root.after(0, lambda: messagebox.showerror("错误", license_status.get("message", "登录后授权仍无效")))
-                            return
-                        license_mgr.start_heartbeat()
-                    else:
-                        self.root.after(0, self.on_close)
-                        return
-                else:
-                    license_mgr.start_heartbeat()
+                license_mgr.start_heartbeat()
                 self.root.after(0, self._update_membership_title)
             except Exception as e:
                 self.log(f"⚠️ 授权检查异常: {e}")

@@ -123,8 +123,8 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${user.id}</td>
-                    <td>${user.username}</td>
-                    <td>${user.email}</td>
+                    <td>${escapeHtml(user.username)}</td>
+                    <td>${escapeHtml(user.email)}</td>
                     <td>
                         <span class="badge ${user.is_active ? 'bg-success' : 'bg-danger'}">
                             ${user.is_active ? '活跃' : '非活跃'}
@@ -278,11 +278,11 @@
                 <form id="edit-user-form">
                     <div class="mb-3">
                         <label for="edit-username" class="form-label">用户名</label>
-                        <input type="text" class="form-control" id="edit-username" value="${user.username}" required>
+                        <input type="text" class="form-control" id="edit-username" value="${escapeHtml(user.username)}" required>
                     </div>
                     <div class="mb-3">
                         <label for="edit-email" class="form-label">邮箱</label>
-                        <input type="email" class="form-control" id="edit-email" value="${user.email}" required>
+                        <input type="email" class="form-control" id="edit-email" value="${escapeHtml(user.email)}" required>
                     </div>
                     <div class="mb-3">
                         <label for="edit-password" class="form-label">新密码（留空则不修改）</label>
@@ -345,7 +345,7 @@
     function showDeleteUserModal(userId, username) {
         const modalBody = document.getElementById('commonModalBody');
         modalBody.innerHTML = `
-            <p>您确定要删除用户 "<strong>${username}</strong>" 吗？此操作不可撤销。</p>
+            <p>您确定要删除用户 "<strong>${escapeHtml(username)}</strong>" 吗？此操作不可撤销。</p>
         `;
         
         document.getElementById('commonModalLabel').textContent = '删除用户确认';

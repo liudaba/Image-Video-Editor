@@ -139,8 +139,8 @@
             usersRes.users.forEach(user => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td>${user.username}</td>
-                    <td>${user.email}</td>
+                    <td>${escapeHtml(user.username)}</td>
+                    <td>${escapeHtml(user.email)}</td>
                     <td>${formatDate(user.created_at)}</td>
                 `;
                 usersList.appendChild(row);
@@ -155,7 +155,7 @@
                 ordersRes.orders.forEach(order => {
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                        <td>${order.order_no}</td>
+                        <td>${escapeHtml(order.order_no)}</td>
                         <td>¥${order.amount}</td>
                         <td>
                             <span class="badge ${

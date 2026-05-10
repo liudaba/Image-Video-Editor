@@ -86,7 +86,6 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     key_result = await db.execute(
         select(LicenseKey)
         .where(LicenseKey.license_key == license_key)
-        .with_for_update()
     )
     license_key_obj = key_result.scalar_one_or_none()
 

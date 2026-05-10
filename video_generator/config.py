@@ -10,7 +10,7 @@ import threading
 class Config:
     OLLAMA_BASE_URL = "http://localhost:11434"
     SD_API_BASE_URL = "http://127.0.0.1:8080"
-    API_BASE_URL = "https://api.videogen.com"
+    API_BASE_URL = "http://8.141.101.155"
     API_TIMEOUT_SHORT = 3
     API_TIMEOUT_MEDIUM = 5
     API_TIMEOUT_LONG = 180

@@ -6,11 +6,20 @@
 """
 import sys
 import os
+import traceback
 
-sys.stdout = open(os.devnull, 'w', encoding='utf-8', errors='replace')
-sys.stderr = open(os.devnull, 'w', encoding='utf-8', errors='replace')
+_err_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pythonw_error.log")
 
-from video_generator.app import main
+try:
+    from video_generator.app import main
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
+except SystemExit:
+    pass
+except BaseException:
+    try:
+        with open(_err_log, "w", encoding="utf-8") as f:
+            traceback.print_exc(file=f)
+    except Exception:
+        pass

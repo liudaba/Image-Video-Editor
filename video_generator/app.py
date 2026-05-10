@@ -118,8 +118,45 @@ class VideoGenApp(
 def main():
     _print_console_banner()
     root = tk.Tk()
-    app = VideoGenApp(root)
+    root.title("短视频生成器")
+    root.geometry("400x200")
+    root.resizable(False, False)
+    root.configure(bg="#1e1e1e")
+    _sw = root.winfo_screenwidth()
+    _sh = root.winfo_screenheight()
+    _x = (_sw - 400) // 2
+    _y = (_sh - 200) // 2
+    root.geometry(f"400x200+{_x}+{_y}")
+    _loading_label = tk.Label(root, text="正在验证授权，请稍候...", font=("Microsoft YaHei", 13), bg="#1e1e1e", fg="#d4d4d4")
+    _loading_label.pack(expand=True)
+
+    _login_ok = [False]
+
+    def _do_login_check():
+        from video_generator.license_manager import check_and_show_login
+        license_status = check_and_show_login(root)
+
+        if not license_status.get("valid", False):
+            root.quit()
+            return
+
+        try:
+            _loading_label.destroy()
+        except Exception:
+            pass
+
+        _login_ok[0] = True
+        app = VideoGenApp(root)
+
+    root.after(100, _do_login_check)
     root.mainloop()
+
+    if not _login_ok[0]:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+        sys.exit(0)
 
 
 if __name__ == "__main__":

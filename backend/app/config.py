@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "logs/videogen.log"
+    LOG_FILE_MAX_BYTES: int = 50 * 1024 * 1024
+    LOG_FILE_BACKUP_COUNT: int = 5
+
+    CLEANUP_INTERVAL_HOURS: int = 6
+    AUDIT_LOG_RETENTION_DAYS: int = 90
+    PAYMENT_NOTIFY_RETENTION_DAYS: int = 90
+    EXPIRED_ORDER_RETENTION_DAYS: int = 30
+    HEARTBEAT_RETENTION_DAYS: int = 30
 
     class Config:
         env_file = ".env"

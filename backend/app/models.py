@@ -92,7 +92,10 @@ class LicenseKey(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    __table_args__ = (Index("ix_orders_status", "status"),)
+    __table_args__ = (
+        Index("ix_orders_status", "status"),
+        Index("ix_orders_status_created_at", "status", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -111,6 +114,9 @@ class Order(Base):
 
 class PaymentNotifyLog(Base):
     __tablename__ = "payment_notify_logs"
+    __table_args__ = (
+        Index("ix_payment_notify_logs_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     notify_id = Column(String(128), unique=True, nullable=False, index=True)

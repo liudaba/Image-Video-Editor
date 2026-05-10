@@ -16,10 +16,10 @@ logger = logging.getLogger("videogen")
 
 
 PLAN_PRICING = {
-    "monthly": {"price": 19.9, "name": "月度会员"},
-    "quarterly": {"price": 49.9, "name": "季度会员"},
-    "yearly": {"price": 199.0, "name": "年度会员"},
-    "lifetime": {"price": 599.0, "name": "终身会员"},
+    "monthly": {"price": 14.9, "name": "月度会员"},
+    "quarterly": {"price": 39.9, "name": "季度会员"},
+    "yearly": {"price": 129.9, "name": "年度会员"},
+    "lifetime": {"price": 219.9, "name": "终身会员"},
 }
 
 
@@ -33,10 +33,10 @@ def generate_order_no() -> str:
 def calculate_plan_amount(plan_type: PlanType) -> float:
     """根据计划类型计算金额"""
     amounts = {
-        PlanType.MONTHLY: 19.9,
-        PlanType.QUARTERLY: 49.9,
-        PlanType.YEARLY: 199.0,
-        PlanType.LIFETIME: 599.0,
+        PlanType.MONTHLY: 14.9,
+        PlanType.QUARTERLY: 39.9,
+        PlanType.YEARLY: 129.9,
+        PlanType.LIFETIME: 219.9,
     }
     return amounts.get(plan_type, 0.0)
 

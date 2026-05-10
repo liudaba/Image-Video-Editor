@@ -49,7 +49,7 @@
             response.versions.forEach(version => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td><strong>${version.version}</strong></td>
+                    <td><strong>${escapeHtml(version.version)}</strong></td>
                     <td>${formatDate(version.release_date)}</td>
                     <td>
                         <span class="badge ${
@@ -70,7 +70,7 @@
                             <button class="btn btn-sm btn-info" onclick="showEditVersionModal(${version.id})">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger" onclick="showDeleteVersionModal(${version.id}, '${version.version}')">
+                            <button class="btn btn-sm btn-danger" onclick="showDeleteVersionModal(${version.id}, '${escapeHtml(version.version)}')">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -160,11 +160,11 @@
                 <form id="edit-version-form">
                     <div class="mb-3">
                         <label for="edit-version-number" class="form-label">版本号</label>
-                        <input type="text" class="form-control" id="edit-version-number" value="${version.version}" required>
+                        <input type="text" class="form-control" id="edit-version-number" value="${escapeHtml(version.version)}" required>
                     </div>
                     <div class="mb-3">
                         <label for="edit-download-url" class="form-label">下载地址</label>
-                        <input type="url" class="form-control" id="edit-download-url" value="${version.download_url}" required>
+                        <input type="url" class="form-control" id="edit-download-url" value="${escapeHtml(version.download_url)}" required>
                     </div>
                     <div class="mb-3">
                         <label for="edit-file-size" class="form-label">文件大小 (字节)</label>
@@ -172,7 +172,7 @@
                     </div>
                     <div class="mb-3">
                         <label for="edit-changelog" class="form-label">更新日志</label>
-                        <textarea class="form-control" id="edit-changelog" rows="3">${version.changelog || ''}</textarea>
+                        <textarea class="form-control" id="edit-changelog" rows="3">${escapeHtml(version.changelog || '')}</textarea>
                     </div>
                     <div class="mb-3">
                         <label for="edit-priority" class="form-label">优先级</label>
@@ -246,7 +246,7 @@
     function showDeleteVersionModal(versionId, versionName) {
         const modalBody = document.getElementById('commonModalBody');
         modalBody.innerHTML = `
-            <p>您确定要删除版本 "<strong>${versionName}</strong>" 吗？此操作不可撤销。</p>
+            <p>您确定要删除版本 "<strong>${escapeHtml(versionName)}</strong>" 吗？此操作不可撤销。</p>
         `;
         
         document.getElementById('commonModalLabel').textContent = '删除版本确认';

@@ -175,7 +175,6 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    localStorage.setItem('access_token', data.access_token);
                     window.location.href = '/admin/dashboard';
                 } else {
                     document.getElementById('errorMessage').textContent = data.detail || '登录失败';

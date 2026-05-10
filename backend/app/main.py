@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import uuid
+import secrets
+from logging.handlers import RotatingFileHandler
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request, HTTPException, Depends
@@ -14,8 +16,9 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 from .config import settings, check_production_safety
-from .database import init_db, engine
+from .database import init_db, engine, get_db
 from .routers import auth, license, payment, user, version, admin
+from .services.cleanup_service import cleanup_loop
 
 logger = logging.getLogger("videogen")
 
@@ -40,12 +43,41 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data, ensure_ascii=False)
 
 
+def _get_real_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
+
 def setup_logging():
-    handler = logging.StreamHandler()
-    handler.setFormatter(JSONFormatter())
+    log_level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
+    formatter = JSONFormatter()
+
     root_logger = logging.getLogger()
-    root_logger.handlers = [handler]
-    root_logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
+    root_logger.handlers = []
+    root_logger.setLevel(log_level)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    try:
+        log_path = Path(settings.LOG_FILE)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            str(log_path),
+            maxBytes=settings.LOG_FILE_MAX_BYTES,
+            backupCount=settings.LOG_FILE_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+    except Exception:
+        pass
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -117,13 +149,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
 
 
+_cleanup_task = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _cleanup_task
     setup_logging()
     check_production_safety()
     await init_db()
-    logger.info("Application started")
+    _cleanup_task = asyncio.create_task(cleanup_loop())
+    logger.info("Application started (cleanup task running every %d hours)", settings.CLEANUP_INTERVAL_HOURS)
     yield
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
     logger.info("Application shutting down, draining connections...")
     await asyncio.sleep(2)
     await engine.dispose()
@@ -146,6 +189,7 @@ async def integrity_error_handler(request: Request, exc: sqlalchemy.exc.Integrit
 
 @app.exception_handler(sqlalchemy.exc.DBAPIError)
 async def db_error_handler(request: Request, exc: sqlalchemy.exc.DBAPIError):
+    logger.error(f"DBAPIError: {exc}", exc_info=True)
     return JSONResponse(status_code=503, content={"detail": "数据库暂时不可用,请稍后重试"})
 
 
@@ -185,6 +229,24 @@ async def add_security_headers(request: Request, call_next):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.middleware("http")
+async def verify_csrf(request: Request, call_next):
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return await call_next(request)
+    if request.url.path.startswith("/api/auth/"):
+        return await call_next(request)
+    if request.url.path == "/auth/login":
+        return await call_next(request)
+    admin_session = request.cookies.get("admin_session")
+    if not admin_session:
+        return await call_next(request)
+    csrf_cookie = request.cookies.get("csrf_token")
+    csrf_header = request.headers.get("X-CSRF-Token")
+    if not csrf_cookie or not csrf_header or csrf_header != csrf_cookie:
+        return JSONResponse(status_code=403, content={"detail": "CSRF验证失败"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -245,6 +307,60 @@ async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 
+@app.post("/auth/login")
+async def admin_login(request: Request, db=Depends(get_db)):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="无效的请求体")
+    username = body.get("username", "")
+    password = body.get("password", "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    from .auth import verify_password, create_access_token, check_login_rate_limit, record_login_failure, clear_login_failures
+    from sqlalchemy import select
+    from .models import User
+    if not check_login_rate_limit(f"admin:{username}"):
+        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
+    user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    if not user or not verify_password(password, user.hashed_password):
+        record_login_failure(f"admin:{username}")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账户已被禁用")
+    clear_login_failures(f"admin:{username}")
+    access_token = create_access_token(data={"user_id": user.id, "username": user.username})
+    csrf_token = secrets.token_hex(32)
+    response = JSONResponse(content={"success": True, "access_token": access_token, "csrf_token": csrf_token})
+    response.set_cookie(
+        key="admin_session",
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,
+        samesite="lax",
+        max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    return response
+
+
+@app.post("/auth/logout")
+async def admin_logout():
+    response = JSONResponse(content={"success": True})
+    response.delete_cookie(key="admin_session", path="/")
+    response.delete_cookie(key="csrf_token", path="/")
+    return response
+
+
 @app.get("/admin/dashboard")
 async def dashboard_page(request: Request, db=Depends(get_db)):
     session_token = request.cookies.get("admin_session")
@@ -286,7 +402,8 @@ async def get_content(request: Request, section: str, db=Depends(get_db)):
         "trial_codes": "trial_codes_content.html",
         "versions": "versions_content.html",
         "orders": "orders_content.html",
-        "analytics": "analytics_content.html"
+        "analytics": "analytics_content.html",
+        "audit_logs": "audit_logs_content.html"
     }
 
     template_file = template_files.get(section)

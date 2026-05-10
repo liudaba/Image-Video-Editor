@@ -58,7 +58,7 @@
                                        key.days_remaining <= 3 ? 'text-warning' : 'text-info';
                 
                 row.innerHTML = `
-                    <td><code>${key.license_key}</code></td>
+                    <td><code>${escapeHtml(key.license_key)}</code></td>
                     <td>
                         <span class="badge ${
                             isExpired ? 'bg-danger' :
@@ -67,12 +67,12 @@
                         }">${isExpired ? '已过期' : key.status === 'unused' ? '未使用' : key.status === 'activated' ? '已激活' : '已撤销'}</span>
                     </td>
                     <td><span class="${remainingClass}">${remainingText}</span></td>
-                    <td>${key.activated_by_username || '-'}</td>
+                    <td>${escapeHtml(key.activated_by_username) || '-'}</td>
                     <td>${key.activated_at ? formatDate(key.activated_at) : '-'}</td>
                     <td>${formatDate(key.created_at)}</td>
                     <td>
                         ${key.status === 'unused' && !key.is_expired ? `
-                            <button class="btn btn-sm btn-danger" onclick="revokeTrialCode('${key.license_key}')">
+                            <button class="btn btn-sm btn-danger" onclick="revokeTrialCode('${escapeHtml(key.license_key)}')">
                                 <i class="fas fa-ban"></i> 撤销
                             </button>
                         ` : '-'}

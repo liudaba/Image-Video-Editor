@@ -132,7 +132,7 @@ async def alipay_callback(
         await db.flush()
 
         result = await db.execute(
-            select(Order).filter(Order.order_no == order_no).with_for_update()
+            select(Order).filter(Order.order_no == order_no)
         )
         order = result.scalar_one_or_none()
         
@@ -214,7 +214,7 @@ async def wechat_callback(
         await db.flush()
 
         result = await db.execute(
-            select(Order).filter(Order.order_no == order_no).with_for_update()
+            select(Order).filter(Order.order_no == order_no)
         )
         order = result.scalar_one_or_none()
         

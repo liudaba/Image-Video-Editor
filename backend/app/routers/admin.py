@@ -38,7 +38,7 @@ class VersionCreate(BaseModel):
 
 
 class LicenseKeyGenerate(BaseModel):
-    plan_type: str = Field("yearly", pattern=r"^(monthly|yearly|lifetime)$")
+    plan_type: str = Field("yearly", pattern=r"^(monthly|quarterly|yearly|lifetime)$")
     count: int = Field(1, ge=1, le=50)
 
 
@@ -256,6 +256,46 @@ async def list_orders(
             for o in orders
         ],
     }
+
+
+@router.post("/orders/{order_id}/refund")
+async def refund_order(
+    order_id: int,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status != OrderStatus.PAID:
+        raise HTTPException(status_code=400, detail="只能退款已支付的订单")
+    order.status = OrderStatus.REFUNDED
+    await db.flush()
+    await _log_audit(db, user, "refund_order", f"order_id={order_id}, amount={order.amount}", request)
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order(
+    order_id: int,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in (OrderStatus.PENDING, OrderStatus.PAID):
+        raise HTTPException(status_code=400, detail="只能取消待支付或已支付的订单")
+    order.status = OrderStatus.CANCELLED
+    await db.flush()
+    await _log_audit(db, user, "cancel_order", f"order_id={order_id}", request)
+    await db.commit()
+    return {"success": True}
 
 
 @router.post("/generate_license_keys")
@@ -700,4 +740,42 @@ async def get_analytics(
         "wechat_orders": wechat_orders or 0,
         "daily_users": daily_users,
         "daily_revenue": daily_revenue,
+    }
+
+
+@router.get("/audit_logs")
+async def list_audit_logs(
+    page: int = 1,
+    page_size: int = 20,
+    action: str = None,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    offset = (page - 1) * page_size
+
+    query = select(AuditLog).order_by(desc(AuditLog.created_at))
+    if action:
+        query = query.where(AuditLog.action == action)
+
+    total = await db.scalar(select(func.count(AuditLog.id)))
+    result = await db.execute(query.offset(offset).limit(page_size))
+    logs = result.scalars().all()
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "logs": [
+            {
+                "id": l.id,
+                "operator_name": l.operator_name,
+                "action": l.action,
+                "detail": l.detail,
+                "ip_address": l.ip_address,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
     }
