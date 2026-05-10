@@ -17,6 +17,8 @@ _SIG_KEY = "_sig"
 
 
 def _get_signing_key() -> bytes:
+    if settings.HMAC_SIGN_KEY and settings.HMAC_SIGN_KEY.strip():
+        return settings.HMAC_SIGN_KEY.encode("utf-8")
     key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
     try:
         with open(key_path, "rb") as f:
@@ -25,8 +27,6 @@ def _get_signing_key() -> bytes:
                 return key
     except FileNotFoundError:
         pass
-    if settings.HMAC_SIGN_KEY and settings.HMAC_SIGN_KEY.strip():
-        return settings.HMAC_SIGN_KEY.encode("utf-8")
     raise RuntimeError("HMAC_SIGN_KEY is not configured. Set HMAC_SIGN_KEY in .env or create keys/.license_verify_key file")
 
 
