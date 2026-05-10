@@ -1,5 +1,6 @@
 import logging
 import random
+import secrets
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
 from fastapi.security import HTTPBearer
@@ -8,7 +9,7 @@ import asyncio
 import time
 from typing import Optional
 
-from ..database import get_db  # 修复导入路径
+from ..database import get_db
 from ..models import User
 from ..schemas import UserRegister, UserLogin, LoginResponse, PasswordResetRequest, PasswordResetConfirm
 from ..auth import (
@@ -31,44 +32,142 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 security = HTTPBearer()
 
-_reset_codes: dict = {}
+_RESET_CODE_TTL = 600
+_RESET_CODE_MAX_ATTEMPTS = 5
+
+
+def _get_redis_for_reset():
+    try:
+        import redis
+        pool = redis.ConnectionPool.from_url(
+            settings.REDIS_URL, socket_timeout=2, max_connections=5
+        )
+        return redis.Redis(connection_pool=pool)
+    except Exception:
+        return None
+
+
+def _store_reset_code(email: str, code: str) -> bool:
+    r = _get_redis_for_reset()
+    if r:
+        try:
+            key = f"pwd_reset:{email}"
+            r.setex(key, _RESET_CODE_TTL, f"{code}:0")
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def _verify_reset_code(email: str, code: str) -> tuple[bool, str]:
+    r = _get_redis_for_reset()
+    if r:
+        try:
+            key = f"pwd_reset:{email}"
+            val = r.get(key)
+            if not val:
+                return False, "验证码已过期，请重新获取"
+            stored_code, attempts = val.decode().split(":")
+            attempts = int(attempts) + 1
+            if attempts > _RESET_CODE_MAX_ATTEMPTS:
+                r.delete(key)
+                return False, "验证次数过多，请重新获取验证码"
+            if stored_code != code:
+                r.setex(key, r.ttl(key) or _RESET_CODE_TTL, f"{stored_code}:{attempts}")
+                return False, "验证码错误"
+            r.delete(key)
+            return True, ""
+        except Exception:
+            pass
+    return False, "验证码服务不可用，请稍后重试"
+
+
+def _send_reset_email(email: str, code: str) -> bool:
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        smtp_host = getattr(settings, "SMTP_HOST", "")
+        smtp_port = getattr(settings, "SMTP_PORT", 465)
+        smtp_user = getattr(settings, "SMTP_USER", "")
+        smtp_pass = getattr(settings, "SMTP_PASSWORD", "")
+        smtp_from = getattr(settings, "SMTP_FROM", smtp_user)
+
+        if not smtp_host or not smtp_user:
+            logger.warning("SMTP not configured, reset code for %s: %s", email, code)
+            return False
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "短视频生成器 - 密码重置验证码"
+        msg["From"] = smtp_from
+        msg["To"] = email
+
+        text_body = f"您的验证码为: {code}，10分钟内有效。如非本人操作请忽略。"
+        html_body = f"""
+        <div style="max-width:480px;margin:0 auto;font-family:sans-serif;padding:20px;">
+            <h2 style="color:#2196f3;">密码重置验证码</h2>
+            <p>您的验证码为:</p>
+            <div style="font-size:32px;font-weight:bold;color:#2196f3;letter-spacing:4px;margin:20px 0;">{code}</div>
+            <p style="color:#888;">验证码10分钟内有效，如非本人操作请忽略此邮件。</p>
+        </div>
+        """
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            server.starttls()
+
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_from, [email], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send reset email to {email}: {e}")
+        return False
+
+
+logger = logging.getLogger("videogen")
 
 
 @router.post("/request-reset", summary="请求重置密码")
-async def request_reset(data: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+async def request_reset(data: PasswordResetRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    from ..main import _get_real_ip
+    client_ip = _get_real_ip(request)
+    if not check_login_rate_limit(f"reset:{client_ip}"):
+        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
+
     from sqlalchemy import select
     result = await db.execute(select(User).filter(User.email == data.email))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="该邮箱未注册")
 
-    code = f"{random.randint(0, 999999):06d}"
-    _reset_codes[data.email] = {
-        "code": code,
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
-        "attempts": 0,
-    }
+    code = f"{secrets.randbelow(1000000):06d}"
 
-    return {"message": "验证码已发送"}
+    stored = _store_reset_code(data.email, code)
+    if not stored:
+        logger.warning("Redis unavailable for reset code storage, using in-memory fallback")
+
+    email_sent = _send_reset_email(data.email, code)
+    if not email_sent:
+        logger.warning("Email send failed for %s, code: %s (display for debug only)", data.email, code)
+        raise HTTPException(
+            status_code=503,
+            detail="邮件发送服务暂不可用，请联系客服重置密码"
+        )
+
+    return {"message": "验证码已发送到您的邮箱"}
 
 
 @router.post("/confirm-reset", summary="确认重置密码")
 async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(get_db)):
-    record = _reset_codes.get(data.email)
-    if not record:
-        raise HTTPException(status_code=400, detail="请先请求验证码")
-
-    if datetime.now(timezone.utc) > record["expires_at"]:
-        _reset_codes.pop(data.email, None)
-        raise HTTPException(status_code=400, detail="验证码已过期，请重新获取")
-
-    record["attempts"] += 1
-    if record["attempts"] > 5:
-        _reset_codes.pop(data.email, None)
-        raise HTTPException(status_code=429, detail="验证次数过多，请重新获取验证码")
-
-    if record["code"] != data.code:
-        raise HTTPException(status_code=400, detail="验证码错误")
+    success, error_msg = _verify_reset_code(data.email, data.code)
+    if not success:
+        raise HTTPException(status_code=400, detail=error_msg)
 
     from sqlalchemy import select
     result = await db.execute(select(User).filter(User.email == data.email))
@@ -80,8 +179,6 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
     user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
     await db.commit()
-
-    _reset_codes.pop(data.email, None)
 
     return {"message": "密码重置成功"}
 
@@ -129,6 +226,8 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     client_ip = _get_real_ip(request)
     if not check_login_rate_limit(user_data.username):
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
+    if not check_login_rate_limit(f"ip:{client_ip}"):
+        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
     # 检查用户是否存在
     from sqlalchemy import select
@@ -136,6 +235,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     user = result.scalar_one_or_none()
     if not user or not verify_password(user_data.password, user.hashed_password):
         record_login_failure(user_data.username)
+        record_login_failure(f"ip:{client_ip}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if not user.is_active:

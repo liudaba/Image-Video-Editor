@@ -273,7 +273,21 @@ async def refund_order(
         raise HTTPException(status_code=400, detail="只能退款已支付的订单")
     order.status = OrderStatus.REFUNDED
     await db.flush()
-    await _log_audit(db, user, "refund_order", f"order_id={order_id}, amount={order.amount}", request)
+
+    license_result = await db.execute(
+        select(License).where(License.user_id == order.user_id)
+    )
+    user_license = license_result.scalar_one_or_none()
+    if user_license and user_license.license_key == order.order_no:
+        user_license.is_valid = False
+        user_license.license_type = LicenseType.TRIAL
+        await db.flush()
+    elif user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
+        user_license.is_valid = False
+        user_license.license_type = LicenseType.TRIAL
+        await db.flush()
+
+    await _log_audit(db, user, "refund_order", f"order_id={order_id}, amount={order.amount}, license_revoked=True", request)
     await db.commit()
     return {"success": True}
 

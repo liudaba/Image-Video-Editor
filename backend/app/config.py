@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
     HMAC_SIGN_KEY: str = ""
     TRIAL_DAYS: int = 7
@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     WECHAT_CERT_PATH: str = ""
     WECHAT_KEY_PATH: str = ""
     WECHAT_NOTIFY_URL: str = ""
+
+    SITE_BASE_URL: str = ""
+
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
 
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
@@ -82,11 +90,16 @@ def check_production_safety():
     if not settings.ADMIN_PASSWORD:
         unsafe.append("ADMIN_PASSWORD")
     if unsafe:
-        env_name = os.environ.get("VIDEOGEN_ENV", "")
-        if env_name.lower() == "production":
-            print(f"检测到不安全的配置: {', '.join(unsafe)}")
-            print("请在 .env 文件中设置上述配置项")
+        env_name = os.environ.get("VIDEOGEN_ENV", "").lower()
+        if env_name == "production":
+            print(f"CRITICAL: 不安全的配置: {', '.join(unsafe)}")
+            print("生产环境必须在 .env 文件中设置上述配置项")
             sys.exit(1)
         else:
+            critical_keys = [k for k in unsafe if k in ("JWT_SECRET_KEY", "HMAC_SIGN_KEY")]
+            if critical_keys:
+                print(f"CRITICAL: 必须配置: {', '.join(critical_keys)}")
+                print("请在 .env 文件中设置上述配置项（系统无法在没有这些配置的情况下安全运行）")
+                sys.exit(1)
             print(f"警告: 检测到不安全的配置: {', '.join(unsafe)}")
             print("建议在 .env 文件中设置上述配置项（生产环境下将阻止启动）")

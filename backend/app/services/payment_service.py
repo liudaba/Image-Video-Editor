@@ -42,7 +42,9 @@ def calculate_plan_amount(plan_type: PlanType) -> float:
 
 
 def _get_site_base_url() -> str:
-    """获取站点基础URL"""
+    base = getattr(settings, "SITE_BASE_URL", "")
+    if base:
+        return base.rstrip("/")
     return "https://api.videogen.com"
 
 
@@ -173,13 +175,8 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
     try:
         alipay = _get_alipay_instance()
         if alipay is None:
-            return {
-                "order_id": order_no,
-                "payment_url": None,
-                "qr_code": f"mock_alipay_qr_{order_no}_{amount}",
-                "method": "alipay",
-                "message": "支付宝SDK未配置，使用模拟二维码",
-            }
+            logger.error("Alipay SDK not configured - cannot create real payment order")
+            return {"error": "支付宝支付暂未开通，请联系客服"}
 
         result = alipay.api_alipay_trade_precreate(
             out_trade_no=order_no,
@@ -196,30 +193,14 @@ async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Di
                 "method": "alipay",
             }
         else:
-            return {
-                "order_id": order_no,
-                "payment_url": None,
-                "qr_code": f"mock_alipay_qr_{order_no}_{amount}",
-                "method": "alipay",
-                "message": f"支付宝接口调用失败: {result.get('msg')}",
-            }
+            logger.error(f"Alipay API error: {result.get('msg')}, sub_msg: {result.get('sub_msg')}")
+            return {"error": f"支付宝接口调用失败: {result.get('sub_msg') or result.get('msg')}"}
     except ImportError:
-        return {
-            "order_id": order_no,
-            "payment_url": None,
-            "qr_code": f"mock_alipay_qr_{order_no}_{amount}",
-            "method": "alipay",
-            "message": "支付宝SDK未安装，使用模拟二维码",
-        }
+        logger.error("Alipay SDK not installed")
+        return {"error": "支付宝支付暂未开通，请联系客服"}
     except Exception as e:
         logger.error(f"Alipay order creation failed: {e}", exc_info=True)
-        return {
-            "order_id": order_no,
-            "payment_url": None,
-            "qr_code": f"mock_alipay_qr_{order_no}_{amount}",
-            "method": "alipay",
-            "message": "支付订单创建失败，请稍后重试",
-        }
+        return {"error": "支付订单创建失败，请稍后重试"}
 
 
 async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:
@@ -235,13 +216,8 @@ async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Di
     try:
         wechat = _get_wechat_client()
         if wechat is None:
-            return {
-                "order_id": order_no,
-                "payment_url": None,
-                "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
-                "method": "wechat",
-                "message": "微信支付SDK未配置，使用模拟二维码",
-            }
+            logger.error("WeChat Pay SDK not configured - cannot create real payment order")
+            return {"error": "微信支付暂未开通，请联系客服"}
 
         result = wechat.pay.transactions.native(
             out_trade_no=order_no,
@@ -261,30 +237,14 @@ async def create_wechat_order(order_no: str, plan_type: str, user_id: int) -> Di
                 "method": "wechat",
             }
         else:
-            return {
-                "order_id": order_no,
-                "payment_url": None,
-                "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
-                "method": "wechat",
-                "message": "微信支付接口调用失败，使用模拟二维码",
-            }
+            logger.error(f"WeChat Pay API error: {result}")
+            return {"error": "微信支付接口调用失败，请稍后重试"}
     except ImportError:
-        return {
-            "order_id": order_no,
-            "payment_url": None,
-            "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
-            "method": "wechat",
-            "message": "微信支付SDK未安装，使用模拟二维码",
-        }
+        logger.error("WeChat Pay SDK not installed")
+        return {"error": "微信支付暂未开通，请联系客服"}
     except Exception as e:
         logger.error(f"WeChat order creation failed: {e}", exc_info=True)
-        return {
-            "order_id": order_no,
-            "payment_url": None,
-            "qr_code": f"weixin://wxpay/bizpayurl?pr={order_no}",
-            "method": "wechat",
-            "message": "支付订单创建失败，请稍后重试",
-        }
+        return {"error": "支付订单创建失败，请稍后重试"}
 
 
 async def verify_alipay_notification(data: dict) -> bool:

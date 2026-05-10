@@ -158,14 +158,22 @@ async def alipay_callback(
                 existing_license.license_type = "pro"
                 existing_license.is_valid = True
                 from datetime import timedelta
-                if order.plan_type == PlanType.MONTHLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
-                elif order.plan_type == PlanType.QUARTERLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=90)
-                elif order.plan_type == PlanType.YEARLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
-                elif order.plan_type == PlanType.LIFETIME:
+                plan_deltas = {
+                    PlanType.MONTHLY: timedelta(days=30),
+                    PlanType.QUARTERLY: timedelta(days=90),
+                    PlanType.YEARLY: timedelta(days=365),
+                }
+                if order.plan_type == PlanType.LIFETIME:
                     existing_license.expiry_date = None
+                elif order.plan_type in plan_deltas:
+                    now = datetime.now(timezone.utc)
+                    remaining = timedelta(0)
+                    if existing_license.expiry_date:
+                        cur = existing_license.expiry_date
+                        if cur.tzinfo is None:
+                            cur = cur.replace(tzinfo=timezone.utc)
+                        remaining = max(cur - now, timedelta(0))
+                    existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
                 await db.flush()
 
             await db.commit()
@@ -248,14 +256,22 @@ async def wechat_callback(
                 existing_license.license_type = "pro"
                 existing_license.is_valid = True
                 from datetime import timedelta
-                if order.plan_type == PlanType.MONTHLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=30)
-                elif order.plan_type == PlanType.QUARTERLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=90)
-                elif order.plan_type == PlanType.YEARLY:
-                    existing_license.expiry_date = datetime.now(timezone.utc) + timedelta(days=365)
-                elif order.plan_type == PlanType.LIFETIME:
+                plan_deltas = {
+                    PlanType.MONTHLY: timedelta(days=30),
+                    PlanType.QUARTERLY: timedelta(days=90),
+                    PlanType.YEARLY: timedelta(days=365),
+                }
+                if order.plan_type == PlanType.LIFETIME:
                     existing_license.expiry_date = None
+                elif order.plan_type in plan_deltas:
+                    now = datetime.now(timezone.utc)
+                    remaining = timedelta(0)
+                    if existing_license.expiry_date:
+                        cur = existing_license.expiry_date
+                        if cur.tzinfo is None:
+                            cur = cur.replace(tzinfo=timezone.utc)
+                        remaining = max(cur - now, timedelta(0))
+                    existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
                 await db.flush()
 
             await db.commit()

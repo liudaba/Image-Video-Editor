@@ -20,9 +20,14 @@ def _get_signing_key() -> bytes:
     key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
     try:
         with open(key_path, "rb") as f:
-            return f.read().strip()
+            key = f.read().strip()
+            if key:
+                return key
     except FileNotFoundError:
+        pass
+    if settings.HMAC_SIGN_KEY and settings.HMAC_SIGN_KEY.strip():
         return settings.HMAC_SIGN_KEY.encode("utf-8")
+    raise RuntimeError("HMAC_SIGN_KEY is not configured. Set HMAC_SIGN_KEY in .env or create keys/.license_verify_key file")
 
 
 def sign_license_data(data: dict) -> str:
@@ -83,10 +88,14 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
 
 
 async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[License]:
-    key_result = await db.execute(
-        select(LicenseKey)
-        .where(LicenseKey.license_key == license_key)
-    )
+    from ..database import engine
+
+    use_for_update = not str(engine.url).startswith("sqlite")
+
+    q = select(LicenseKey).where(LicenseKey.license_key == license_key)
+    if use_for_update:
+        q = q.with_for_update()
+    key_result = await db.execute(q)
     license_key_obj = key_result.scalar_one_or_none()
 
     if not license_key_obj:
@@ -107,7 +116,6 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         license_type = "pro"
     elif license_key_obj.plan_type == PlanType.TRIAL_15D:
         expiry_delta = timedelta(days=15)
-        expiry_date = datetime.now(timezone.utc) + expiry_delta
         license_type = "trial"
     else:
         if license_key_obj.plan_type == PlanType.MONTHLY:
@@ -128,17 +136,41 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     existing_license = existing_result.scalar_one_or_none()
 
     if existing_license:
+        if license_key_obj.plan_type == PlanType.TRIAL_15D:
+            if existing_license.expiry_date:
+                current_expiry = existing_license.expiry_date
+                if current_expiry.tzinfo is None:
+                    current_expiry = current_expiry.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                remaining = max(current_expiry - now, timedelta(0))
+                expiry_date = now + remaining + expiry_delta
+            else:
+                expiry_date = datetime.now(timezone.utc) + expiry_delta
+            existing_license.trial_end = expiry_date
+            if not existing_license.trial_start:
+                existing_license.trial_start = datetime.now(timezone.utc)
+        elif license_type == "pro":
+            if existing_license.expiry_date:
+                current_expiry = existing_license.expiry_date
+                if current_expiry.tzinfo is None:
+                    current_expiry = current_expiry.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                remaining = max(current_expiry - now, timedelta(0))
+                expiry_date = now + remaining + expiry_delta
+            else:
+                expiry_date = datetime.now(timezone.utc) + expiry_delta
+
         existing_license.license_type = license_type
         existing_license.license_key = license_key
         existing_license.is_valid = True
         existing_license.expiry_date = expiry_date
-        if license_type == "trial" and not existing_license.trial_start:
-            existing_license.trial_start = datetime.now(timezone.utc)
-            existing_license.trial_end = expiry_date
         await db.flush()
         await db.commit()
         return existing_license
     else:
+        if license_key_obj.plan_type == PlanType.TRIAL_15D:
+            expiry_date = datetime.now(timezone.utc) + expiry_delta
+
         license_obj = License(
             user_id=user_id,
             license_type=license_type,

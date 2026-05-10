@@ -1,6 +1,6 @@
 import time
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -16,11 +16,15 @@ router = APIRouter(prefix="/api/user", tags=["user"])
 @router.post("/heartbeat", response_model=HeartbeatResponse, summary="心跳检测")
 async def heartbeat(
     req: HeartbeatRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     from sqlalchemy import select
     from ..services.heartbeat_service import check_and_bind_machine
+    from ..main import _get_real_ip
+
+    client_ip = _get_real_ip(request)
 
     license_result = await db.execute(
         select(License).filter(License.user_id == current_user.id)
@@ -32,8 +36,11 @@ async def heartbeat(
 
     is_valid = license_obj.is_valid
     if license_obj.expiry_date:
+        expiry = license_obj.expiry_date
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        is_valid = is_valid and license_obj.expiry_date >= now
+        is_valid = is_valid and expiry >= now
 
     if is_valid and req.fingerprint:
         can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)
@@ -49,7 +56,7 @@ async def heartbeat(
         fingerprint=req.fingerprint,
         app_version=req.app_version,
         license_type=license_obj.license_type.value,
-        ip_address=None
+        ip_address=client_ip
     )
     db.add(heartbeat_log)
 
@@ -241,4 +248,4 @@ async def reset_user_password(
     db.add(audit_log)
     await db.commit()
 
-    return {"message": "密码重置成功", "new_password": new_password}
+    return {"message": "密码重置成功", "reset_token": reset_token}

@@ -43,10 +43,16 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data, ensure_ascii=False)
 
 
+_TRUSTED_PROXY_COUNT = 1
+
+
 def _get_real_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        parts = [p.strip() for p in forwarded.split(",")]
+        if len(parts) > _TRUSTED_PROXY_COUNT:
+            return parts[-(_TRUSTED_PROXY_COUNT + 1)]
+        return parts[0]
     real_ip = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip.strip()
@@ -235,10 +241,16 @@ async def add_security_headers(request: Request, call_next):
 async def verify_csrf(request: Request, call_next):
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return await call_next(request)
-    if request.url.path.startswith("/api/auth/"):
-        return await call_next(request)
-    if request.url.path == "/auth/login":
-        return await call_next(request)
+    csrf_skip_paths = (
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/auth/request-reset",
+        "/api/auth/confirm-reset",
+        "/api/payment/callback/",
+    )
+    for skip_path in csrf_skip_paths:
+        if request.url.path.startswith(skip_path):
+            return await call_next(request)
     admin_session = request.cookies.get("admin_session")
     if not admin_session:
         return await call_next(request)

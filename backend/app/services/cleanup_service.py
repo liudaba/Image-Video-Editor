@@ -21,6 +21,7 @@ AUDIT_LOG_RETENTION_DAYS = 90
 PAYMENT_NOTIFY_RETENTION_DAYS = 90
 EXPIRED_ORDER_RETENTION_DAYS = 30
 HEARTBEAT_RETENTION_DAYS = 30
+PENDING_ORDER_EXPIRE_HOURS = 2
 CLEANUP_INTERVAL_HOURS = 6
 
 
@@ -55,6 +56,15 @@ async def run_database_cleanup():
                 delete(HeartbeatLog).where(HeartbeatLog.created_at < cutoff_heartbeat)
             )
             results["heartbeat_logs"] = result.rowcount
+
+            pending_cutoff = datetime.now(timezone.utc) - timedelta(hours=PENDING_ORDER_EXPIRE_HOURS)
+            result = await db.execute(
+                Order.__table__.update()
+                .where(Order.status == OrderStatus.PENDING)
+                .where(Order.created_at < pending_cutoff)
+                .values(status=OrderStatus.EXPIRED)
+            )
+            results["pending_orders_expired"] = result.rowcount
 
             expired_keys_count = await cleanup_expired_license_keys(db)
             results["expired_license_keys"] = expired_keys_count

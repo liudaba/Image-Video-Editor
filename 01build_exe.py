@@ -250,7 +250,7 @@ def _clean_output(output_dir):
 
     unwanted_files = [
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.license_verify_key', '.key_salt',
+        '.key_salt',
         'run.py', 'run.pyw',
         '01build_exe.py', '02build_exe.py', 'obfuscate_build.py',
         'release_helper.py', 'installer_setup.iss',
