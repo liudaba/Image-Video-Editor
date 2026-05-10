@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul
 echo.
 echo ========================================
@@ -8,7 +9,6 @@ echo.
 
 set OUTPUT_DIR=dist\短视频生成器
 
-REM 检查输出目录是否存在
 if not exist "%OUTPUT_DIR%" (
     echo ❌ 错误: 输出目录不存在
     echo 请先运行: python 01build_exe.py
@@ -19,108 +19,123 @@ if not exist "%OUTPUT_DIR%" (
 echo 📁 检查目录: %OUTPUT_DIR%
 echo.
 
+set ERROR_COUNT=0
+set WARNING_COUNT=0
+
 REM ========== 检查文件大小 ==========
 echo 📊 检查文件大小...
-for /f "tokens=*" %%i in ('powershell -command "(Get-ChildItem '%OUTPUT_DIR%' -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB"') do set SIZE=%%i
+for /f "tokens=*" %%i in ('powershell -NoProfile -command "[math]::Round((Get-ChildItem '%OUTPUT_DIR%' -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)"') do set SIZE=%%i
 echo   当前大小: %SIZE% MB
 
-if %SIZE% GTR 2000 (
-    echo   ❌ 警告: 文件过大(超过2GB),可能包含了不必要的文件
+powershell -NoProfile -command "$s=%SIZE%; if ($s -gt 2000) { exit 1 } elseif ($s -lt 500) { exit 2 } else { exit 0 }"
+if !errorlevel! equ 1 (
+    echo   ❌ 警告: 文件过大(超过2GB^),可能包含了不必要的文件
     echo   请检查是否包含了:
-    echo   - .venv/ (虚拟环境,2-5GB)
-    echo   - models/ (AI模型,2-5GB)
-    echo   - backend/ (后端服务器)
-) else if %SIZE% LSS 500 (
-    echo   ❌ 警告: 文件过小(小于500MB),可能缺少依赖
+    echo   - .venv/ (虚拟环境,2-5GB^)
+    echo   - models/ (AI模型,2-5GB^)
+    echo   - backend/ (后端服务器^)
+    set /a ERROR_COUNT+=1
+) else if !errorlevel! equ 2 (
+    echo   ❌ 警告: 文件过小(小于500MB^),可能缺少依赖
+    set /a ERROR_COUNT+=1
 ) else (
-    echo   ✅ 文件大小正常(800MB-1.5GB)
+    echo   ✅ 文件大小正常(800MB-1.5GB^)
 )
 echo.
 
 REM ========== 检查不应该存在的文件夹 ==========
 echo 🔍 检查不应该存在的文件夹...
-
+set DIR_ERROR=0
 for %%F in (.git .idea .vscode .venv __pycache__ backend models model_aware_patch output_project 垃圾桶 build dist docs logs) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F/
-        set HAS_ERROR=1
+        set DIR_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
-
-if not defined HAS_ERROR (
+if !DIR_ERROR! equ 0 (
     echo   ✅ 验证通过: 没有发现不该存在的文件夹
 )
 echo.
 
 REM ========== 检查不应该存在的文件 ==========
 echo 🔍 检查不应该存在的文件...
+set FILE_ERROR=0
 
-for %%F in (01build_exe.py 02build_exe.py release_helper.py installer_setup.iss requirements.txt check_and_install_deps.bat generate_placeholders.py run.py run.pyw obfuscate_build.py) do (
+for %%F in (01build_exe.py 02build_exe.py obfuscate_build.py release_helper.py installer_setup.iss requirements.txt check_and_install_deps.bat generate_placeholders.py run.py run.pyw) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
-        set HAS_ERROR=1
+        set FILE_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
 
-REM 检查其他.bat文件(除了start.bat)
-for %%F in (01打包前清理.bat 02验证打包结果.bat 快速发布.bat 推送代码.bat 检查环境.bat 生成Demo素材.bat check_and_install_deps.bat) do (
+for %%F in (02验证打包结果.bat 推送代码.bat 快速发布.bat 检查环境.bat 生成Demo素材.bat check_and_install_deps.bat 停止后台管理系统.bat) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
-        set HAS_ERROR=1
+        set FILE_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
 
-REM 检查其他.md文件(除了README.md和快速上手指南.md)
 for %%F in (GITHUB_IMPROVEMENT_GUIDE.md IMPROVEMENT_SUMMARY.md FINAL_REPORT.md) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
-        set HAS_ERROR=1
+        set FILE_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
 
-REM 检查敏感文件(绝对不能出现在分发包中)
 for %%F in (.env license.json .secret_key .license_sign_key .key_salt) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 严重: 发现敏感文件 %%F - 绝不能分发!
-        set HAS_ERROR=1
+        set FILE_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
 
-if not defined HAS_ERROR (
+if exist "%OUTPUT_DIR%\后台管理系统启动器.py" (
+    echo   ❌ 错误: 发现了不应该存在的 后台管理系统启动器.py
+    set FILE_ERROR=1
+    set /a ERROR_COUNT+=1
+)
+
+if !FILE_ERROR! equ 0 (
     echo   ✅ 验证通过: 没有发现不该存在的文件
 )
 echo.
 
 REM ========== 检查应该存在的文件 ==========
 echo 🔍 检查应该存在的文件...
+set MISSING_ERROR=0
 
-for %%F in (短视频生成器.exe 启动.vbs start.bat README.md 快速上手指南.md LICENSE config.json video_generator) do (
+for %%F in (短视频生成器.exe 启动.vbs start.bat README.md 快速上手指南.md LICENSE config.json) do (
     if not exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 缺少必要文件 %%F
-        set HAS_ERROR=1
+        set MISSING_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
 
-REM 检查_internal目录(PyInstaller依赖)
 if not exist "%OUTPUT_DIR%\_internal" (
-    echo   ❌ 错误: 缺少 _internal/ 目录(PyInstaller依赖库)
-    set HAS_ERROR=1
+    echo   ❌ 错误: 缺少 _internal/ 目录(PyInstaller依赖库^)
+    set MISSING_ERROR=1
+    set /a ERROR_COUNT+=1
 )
 
-REM 检查授权验证密钥(打包时自动复制)
 if exist ".license_verify_key" (
     if not exist "%OUTPUT_DIR%\.license_verify_key" (
         echo   ⚠️  缺少 .license_verify_key（源目录有但未复制到打包目录）
-        set HAS_WARNING=1
+        set /a WARNING_COUNT+=1
     ) else (
         echo   ✅ .license_verify_key 已包含
     )
 ) else (
     echo   ⚠️  .license_verify_key 不存在（部署后端后需手动复制）
-    set HAS_WARNING=1
+    set /a WARNING_COUNT+=1
 )
 
-if not defined HAS_ERROR (
+if !MISSING_ERROR! equ 0 (
     echo   ✅ 验证通过: 所有必要文件都存在
 )
 echo.
@@ -131,7 +146,7 @@ echo 🔍 检查启动脚本内容...
 findstr /C:"pythonw" "%OUTPUT_DIR%\启动.vbs" >nul 2>&1
 if not errorlevel 1 (
     echo   ❌ 错误: 启动.vbs 仍引用 pythonw（打包版应启动exe）
-    set HAS_ERROR=1
+    set /a ERROR_COUNT+=1
 ) else (
     echo   ✅ 启动.vbs 内容正确（启动exe）
 )
@@ -139,30 +154,37 @@ if not errorlevel 1 (
 findstr /C:"pythonw" "%OUTPUT_DIR%\start.bat" >nul 2>&1
 if not errorlevel 1 (
     echo   ❌ 错误: start.bat 仍引用 pythonw（打包版应启动exe）
-    set HAS_ERROR=1
+    set /a ERROR_COUNT+=1
 ) else (
     echo   ✅ start.bat 内容正确（启动exe）
 )
 echo.
 
 REM ========== 检查临时文件 ==========
-echo 🔍 检查临时文件...
-
-for %%F in (*.bak *.tmp *.log *TEMP*.mp4) do (
-    if exist "%OUTPUT_DIR%\%%F" (
+echo 🔍 检查打包目录中的临时文件...
+set TEMP_ERROR=0
+for %%E in (bak tmp log) do (
+    for /f "delims=" %%F in ('dir /b /s "%OUTPUT_DIR%\*.%%E" 2^>nul') do (
         echo   ⚠️  发现临时文件: %%F
-        set HAS_ERROR=1
+        set TEMP_ERROR=1
+        set /a ERROR_COUNT+=1
     )
 )
-
-if not defined HAS_ERROR (
+for /f "delims=" %%F in ('dir /b /s "%OUTPUT_DIR%\*TEMP*.mp4" 2^>nul') do (
+    echo   ⚠️  发现临时文件: %%F
+    set TEMP_ERROR=1
+    set /a ERROR_COUNT+=1
+)
+if !TEMP_ERROR! equ 0 (
     echo   ✅ 没有发现临时文件
 )
 echo.
 
 REM ========== 最终结论 ==========
 echo ========================================
-if defined HAS_ERROR (
+echo   错误数: !ERROR_COUNT!   警告数: !WARNING_COUNT!
+echo ----------------------------------------
+if !ERROR_COUNT! gtr 0 (
     echo   ❌❌❌ 打包验证失败!
     echo.
     echo   请修复上述问题后重新打包
@@ -170,7 +192,7 @@ if defined HAS_ERROR (
     echo   💡 解决步骤:
     echo   1. 运行 python 01build_exe.py 重新打包
     echo   2. 再次运行本验证脚本
-) else if defined HAS_WARNING (
+) else if !WARNING_COUNT! gtr 0 (
     echo   ⚠️⚠️⚠️ 打包验证基本通过，但有警告!
     echo.
     echo   部分功能可能需要额外配置才能正常使用
