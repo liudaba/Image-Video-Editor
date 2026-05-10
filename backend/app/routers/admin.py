@@ -12,6 +12,7 @@ from ..models import (
 )
 from ..auth import get_current_user, require_admin, hash_password
 from ..services.license_service import generate_license_key
+from ..services.cleanup_service import run_database_cleanup, run_docker_cleanup
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
 
@@ -778,4 +779,79 @@ async def list_audit_logs(
             }
             for l in logs
         ],
+    }
+
+
+@router.post("/cleanup")
+async def manual_cleanup(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    db_results = await run_database_cleanup()
+    docker_results = await run_docker_cleanup()
+
+    await _log_audit(
+        db, user, "manual_cleanup",
+        f"db={db_results}, docker_keys={list(docker_results.keys())}",
+        request,
+    )
+    await db.commit()
+
+    return {
+        "success": True,
+        "database": db_results,
+        "docker": docker_results,
+    }
+
+
+@router.get("/cleanup/preview")
+async def cleanup_preview(
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from datetime import datetime, timedelta, timezone as _tz
+
+    now = datetime.now(_tz.utc)
+    cutoff_90 = now - timedelta(days=90)
+    cutoff_30 = now - timedelta(days=30)
+
+    audit_count = await db.scalar(
+        select(func.count(AuditLog.id)).where(AuditLog.created_at < cutoff_90)
+    )
+    payment_count = await db.scalar(
+        select(func.count(PaymentNotifyLog.id)).where(PaymentNotifyLog.created_at < cutoff_90)
+    )
+    expired_order_count = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.status.in_([OrderStatus.EXPIRED, OrderStatus.CANCELLED]),
+            Order.created_at < cutoff_30,
+        )
+    )
+    heartbeat_count = await db.scalar(
+        select(func.count(HeartbeatLog.id)).where(HeartbeatLog.created_at < cutoff_30)
+    )
+
+    docker_available = False
+    docker_disk = None
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["docker", "system", "df"], capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            docker_available = True
+            docker_disk = result.stdout.strip()
+    except Exception:
+        pass
+
+    return {
+        "database": {
+            "audit_logs_older_than_90d": audit_count,
+            "payment_logs_older_than_90d": payment_count,
+            "expired_orders_older_than_30d": expired_order_count,
+            "heartbeat_logs_older_than_30d": heartbeat_count,
+        },
+        "docker_available": docker_available,
+        "docker_disk_usage": docker_disk,
     }
