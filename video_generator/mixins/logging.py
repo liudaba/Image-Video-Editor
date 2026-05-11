@@ -186,23 +186,21 @@ class LoggingMixin:
             yview = self.txt_log.yview()
             at_bottom = yview[1] >= 0.998
 
-            if event.delta:
-                if event.delta > 0:
-                    if not at_bottom:
-                        self._user_scrolling = True
-                        if hasattr(self, '_auto_scroll_var'):
-                            self._auto_scroll_var.set(False)
-            elif event.num == 4:
-                self._user_scrolling = True
-                if hasattr(self, '_auto_scroll_var'):
-                    self._auto_scroll_var.set(False)
-            elif event.num == 5:
-                pass
-
             if at_bottom:
                 self._user_scrolling = False
                 if hasattr(self, '_auto_scroll_var'):
                     self._auto_scroll_var.set(True)
+            else:
+                scrolling_up = False
+                if event.delta:
+                    scrolling_up = event.delta > 0
+                elif event.num == 4:
+                    scrolling_up = True
+
+                if scrolling_up:
+                    self._user_scrolling = True
+                    if hasattr(self, '_auto_scroll_var'):
+                        self._auto_scroll_var.set(False)
         except Exception:
             pass
 
@@ -217,7 +215,7 @@ class LoggingMixin:
                 self._user_scrolling = False
                 if hasattr(self, '_auto_scroll_var'):
                     self._auto_scroll_var.set(True)
-            elif len(args) >= 2 and args[0] == 'moveto':
+            elif len(args) >= 2 and args[0] in ('moveto', 'scroll'):
                 self._user_scrolling = True
                 if hasattr(self, '_auto_scroll_var'):
                     self._auto_scroll_var.set(False)

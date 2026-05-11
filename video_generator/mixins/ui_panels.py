@@ -588,7 +588,7 @@ class UIPanelsMixin:
         self._whisper_label = ttk.Label(whisper_frame, text="语音模型:", width=10, font=('Microsoft YaHei', large_font_size))
         self._whisper_label.pack(side=tk.LEFT, padx=2)
 
-        whisper_options = ["tiny", "base", "small", "medium", "large"]
+        whisper_options = ["small", "medium", "large"]
         self._whisper_combo = ttk.Combobox(whisper_frame, textvariable=self.whisper_model_var, values=whisper_options, state="readonly", font=('Microsoft YaHei', large_font_size))
         self._whisper_combo.pack(fill=tk.X, padx=2, pady=1)
 
@@ -653,9 +653,9 @@ class UIPanelsMixin:
         ttk.Label(thread_frame, text="分镜线程:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
 
         if not hasattr(self, 'thread_count_var'):
-            self.thread_count_var = tk.IntVar(value=16)
+            self.thread_count_var = tk.IntVar(value=8)
 
-        thread_options = [4, 8, 12, 16, 24, 32]
+        thread_options = [2, 4, 6, 8, 12, 16]
         thread_combo = ttk.Combobox(
             thread_frame,
             textvariable=self.thread_count_var,

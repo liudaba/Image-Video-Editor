@@ -8,6 +8,7 @@ class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_\u4e00-\u9fa5]+$")
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
+    fingerprint: Optional[str] = Field(None, max_length=255, pattern=r"^[a-zA-Z0-9:_\-\.]*$")
 
     @field_validator("password")
     @classmethod

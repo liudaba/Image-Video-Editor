@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from video_generator.config import Config, get_http_session
 from video_generator.cache import prompt_cache, image_cache, SmartCache
-from video_generator.ollama_client import is_ollama_available
+from video_generator.ollama_client import is_ollama_available, stop_ollama_serve
 
 class ResourceMixin:
     def _add_to_translation_cache(self, chinese, english):
@@ -98,29 +98,30 @@ class ResourceMixin:
         return self._general_cache.get_stats()
     
 
+    _last_unload_time = 0
+    _UNLOAD_COOLDOWN = 5
+
     def _unload_ollama_models(self, log_prefix="", exit_mode=False):
         """卸载所有Ollama模型释放GPU显存（统一方法，替代4处重复代码）
 
         注意：此方法包含网络请求和等待，不应在主线程中调用。
-        修复：轮询等待GPU显存真正释放，而非固定sleep。
+        通过Ollama API确认模型已卸载，而非依赖PyTorch显存检测
+        （Ollama是独立进程，PyTorch无法看到其显存占用）。
         
         Args:
             exit_mode: 退出模式，使用极短超时避免阻塞UI关闭
         """
+        if not exit_mode:
+            now = time.time()
+            if now - self._last_unload_time < self._UNLOAD_COOLDOWN:
+                return
+            self._last_unload_time = now
         api_timeout = 1 if exit_mode else 5
         unload_timeout = 2 if exit_mode else 15
-        poll_max = 2 if exit_mode else 15
+        poll_max = 2 if exit_mode else 10
 
         try:
             if is_ollama_available():
-                vram_before = 0
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        vram_before = torch.cuda.memory_allocated() / 1024**3
-                except Exception:
-                    pass
-
                 status_resp = get_http_session().get(
                     f"{Config.OLLAMA_BASE_URL}/api/ps",
                     timeout=api_timeout
@@ -143,16 +144,23 @@ class ResourceMixin:
                         for attempt in range(poll_max):
                             time.sleep(1)
                             try:
-                                import torch
-                                if torch.cuda.is_available():
-                                    torch.cuda.empty_cache()
-                                    vram_now = torch.cuda.memory_allocated() / 1024**3
-                                    # 显存下降超过80%或低于1GB视为释放完成
-                                    if vram_now < 1.0 or (vram_before > 0 and vram_now < vram_before * 0.2):
+                                check_resp = get_http_session().get(
+                                    f"{Config.OLLAMA_BASE_URL}/api/ps",
+                                    timeout=api_timeout
+                                )
+                                if check_resp.status_code == 200:
+                                    remaining = check_resp.json().get('models', [])
+                                    if not remaining:
                                         released = True
                                         break
                             except Exception:
                                 break
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except Exception:
+                            pass
                         if released:
                             self.log(f"{log_prefix}🧹 Ollama 模型已卸载，GPU 显存已释放")
                         else:
@@ -391,10 +399,13 @@ class ResourceMixin:
             if not os.path.exists(file_path):
                 return False
             
-            trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
+            if getattr(sys, 'frozen', False):
+                trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
+            else:
+                trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
-            
+
             if trash_session_dir is None:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
@@ -425,7 +436,10 @@ class ResourceMixin:
         """
         moved_count = 0
         try:
-            trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
+            if getattr(sys, 'frozen', False):
+                trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
+            else:
+                trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
             
@@ -565,6 +579,11 @@ class ResourceMixin:
 
         try:
             self._unload_ollama_models(log_prefix="🔄 退出清理: ", exit_mode=True)
+        except Exception:
+            pass
+
+        try:
+            stop_ollama_serve()
         except Exception:
             pass
 

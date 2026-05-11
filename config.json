@@ -1,6 +1,5 @@
 {
-  "api_base_url": "http://8.141.101.155",
-  "model": "absoluteRealisticVision_v51",
+  "model": "[SD1.5] absoluteRealisticVision_v20 [d9d99cdc39]",
   "width": 768,
   "height": 512,
   "api_type": "SD WebUI API",
@@ -9,14 +8,12 @@
   "llm_config_preset": "质量优先",
   "whisper_model": "medium",
   "transition": "交叉淡化",
-  "selected_styles": [
-    "电影感"
-  ],
+  "selected_styles": [],
   "custom_theme": "",
   "custom_visual_tone": "",
-  "prompt_type": "SD提示词",
+  "prompt_type": "ARV写实提示词",
   "animation": "缩放",
-  "thread_count": 12,
+  "thread_count": 4,
   "cloud_llm_enabled": false,
   "cloud_llm_provider": "DeepSeek 深度求索",
   "cloud_llm_api_key": "",

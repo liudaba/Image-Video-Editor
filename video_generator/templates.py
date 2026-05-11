@@ -26,11 +26,23 @@ class PromptTemplates:
    - 同音字替换：人名"东京大守"应为"东京大学"
    - 专有名词错误：英文品牌名被错误音译
    - 语境推断：根据上下文语义判断明显不通顺的词
-2. 以下情况不是错误，不要纠正：
-   - 繁体字（如"勞動力"、"職場"、"數字化"）不是错误，不要列出
+2. 以下情况绝对不是错误，绝不要列出：
+   - 繁体字（如"勞動力"、"職場"、"數字化"、"達爾文"、"靈長類"）不是错误
+   - 繁体→繁体的映射完全无效（如"達爾文→達爾文"是废话，不要列出）
    - 正确使用的词语，即使不常见也不是错误
 3. 如果文本准确无误，【纠错说明】必须写"无"
 4. 绝对不要编造不存在的错误
+
+❌ 纠错说明的反面示例（绝对不要这样写）：
+   達爾文→達爾文  （繁体→同繁体，不是纠错）
+   靈長類→靈長類  （繁体→同繁体，不是纠错）
+   數字化→數字化  （繁体→同繁体，不是纠错）
+   政治→政治      （前后相同，不是纠错）
+
+✅ 纠错说明的正确示例：
+   金花論→進化論  （同音字误识别，是真正的纠错）
+   千半年→千萬年  （数量级识别错误，是真正的纠错）
+   987→98%        （数字/符号识别错误，是真正的纠错）
 
 【重点纠错类型 - 必须逐一检查】
 A. 专有名词错误（最常见）：
@@ -76,43 +88,44 @@ D. 语句不通顺：
 4. 按格式输出结果"""
     }
 
-    _COMMON_RULES = (
+    _CORE_RULES = (
         "CRITICAL RULES - SEMANTIC ACCURACY:\n"
         "1. CONCRETE SCENE FIRST: Every prompt MUST describe a specific, photographable scene that directly illustrates the dubbing text's meaning. Think 'what would a photographer shoot?' NOT 'what abstract concept does this relate to?'\n"
         "2. SEMANTIC FIDELITY: The visual scene MUST directly reflect the SPECIFIC meaning of THIS dubbing line, not just the general topic. Each line has a unique message - your scene must capture THAT message.\n"
         "3. VISUALLY RENDERABLE ONLY: Every keyword must be something SD can draw. BANNED abstract terms: 'political intrigue', 'international relations', 'tension', 'power struggle', 'strategic control', 'political landscape', 'energy sector', 'decay', 'fragility', 'conflict'. Replace with concrete visuals: 'men in suits arguing at a table', 'soldiers standing guard outside a palace', 'hands shaking over a contract'.\n"
         "4. FOCUS: Use 3-5 key visual elements per prompt. Too many elements = SD produces noise. Prioritize the MOST important visual that captures the core meaning.\n"
-        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person (e.g. Maduro, Cilia Flores), use their name consistently. Do NOT invent or swap names. If unsure of the exact name, use a generic descriptor like 'a president', 'a woman in power suit'.\n"
-        "6. NO GENERIC BACKGROUNDS: Do NOT default to 'dimly lit office', 'crumbling building', 'shadows' for every shot. Match the background to the SPECIFIC content of each line.\n"
+        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, use their name consistently. If unsure, use a generic descriptor like 'a president', 'a woman in power suit'.\n"
+        "6. NO GENERIC BACKGROUNDS: Match the background to the SPECIFIC content of each line.\n"
         "\n"
-        "CHINESE IDIOM AND METAPHOR HANDLING - CRITICAL:\n"
-        "Chinese idioms/metaphors must be translated by MEANING, NOT word-for-word. Depict the REAL-WORLD CONSEQUENCE or SITUATION the idiom describes:\n"
-        "- \"天降神兵\" = unexpected rescue/savior -> show 'no help arriving, standing alone', NOT 'ancient cannon' or 'soldiers falling from sky'\n"
-        "- \"捆在战车上\" = interests tied together -> show 'generals surrounded by wealth tied to leader', NOT 'ropes and restraints on people' or 'chariot'\n"
-        "- \"压舱石\" = stabilizing force/foundation -> show 'military as unshakable foundation of power', NOT 'a person holding a stone' or 'ship ballast'\n"
-        "- \"走钢丝\" = precarious balance -> show 'diplomat carefully navigating between opposing forces', NOT 'tightrope walker' or 'hand balancing globe on rope'\n"
-        "- \"慢性病\" = slowly worsening problem -> show 'gradually deteriorating situation, cracks widening over time', NOT 'medical examination or stethoscope or syringe'\n"
+        "OUTPUT FORMAT:\n"
+        "- Output ONLY: 中文语义骨架 || English understanding || SD prompt\n"
+        "- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调\n"
+        "- English understanding: 1 English sentence capturing the SPECIFIC meaning\n"
+        "- SD prompt: ONLY comma-separated keywords/phrases, NO Chinese, NO quality tags\n"
+        "- NO explanatory sentences, NO reasoning text, NO style labels"
+    )
+
+    _METAPHOR_RULES = (
+        "\nCHINESE IDIOM AND METAPHOR HANDLING - CRITICAL:\n"
+        "Chinese idioms/metaphors must be translated by MEANING, NOT word-for-word. Depict the REAL-WORLD CONSEQUENCE or SITUATION:\n"
+        "- \"天降神兵\" = unexpected rescue -> show 'no help arriving, standing alone', NOT 'soldiers falling from sky'\n"
+        "- \"捆在战车上\" = interests tied together -> show 'generals surrounded by wealth tied to leader', NOT 'ropes on people'\n"
+        "- \"压舱石\" = stabilizing force -> show 'military as unshakable foundation of power', NOT 'a person holding a stone'\n"
+        "- \"走钢丝\" = precarious balance -> show 'diplomat navigating between opposing forces', NOT 'tightrope walker'\n"
+        "- \"慢性病\" = slowly worsening problem -> show 'gradually deteriorating situation', NOT 'medical examination'\n"
         "- \"铁桶\" = airtight protection -> show 'impenetrable wall of guards around power center', NOT 'a metal barrel'\n"
-        "- \"后路被堵死\" = no way out -> show 'all exits sealed, trapped with no escape route', NOT 'broken telegraph machine'\n"
-        "- \"筹码\" / \"牌\" = leverage/bargaining power -> show 'using resources as leverage in negotiation', NOT 'a bronze key in stone chamber' or 'playing cards'\n"
-        "- \"大棋局\" = geopolitical competition -> show 'diplomats negotiating in formal setting', NOT 'chessboard with miniature figures'\n"
-        "- \"钉子\" (strategic nail) = strategic foothold -> show 'military base in foreign territory', NOT 'a literal nail on a map'\n"
+        "- \"后路被堵死\" = no way out -> show 'all exits sealed, trapped', NOT 'broken telegraph machine'\n"
+        "- \"筹码\"/\"牌\" = leverage -> show 'using resources as leverage in negotiation', NOT 'playing cards'\n"
+        "- \"大棋局\" = geopolitical competition -> show 'diplomats negotiating in formal setting', NOT 'chessboard'\n"
+        "- \"钉子\" = strategic foothold -> show 'military base in foreign territory', NOT 'a literal nail'\n"
         "- \"金山银山\" = vast wealth -> show 'generals surrounded by oil contracts and gold', NOT 'mountain of coins'\n"
-        "- \"高枕无忧\" = carefree security -> show 'false sense of security, hidden threats', NOT 'pillow or sleeping'\n"
-        "- \"垃圾站\" = miserable situation -> show 'deteriorating living conditions', NOT 'actual garbage dump'\n"
-        "- RULE: When you encounter ANY Chinese metaphor in the dubbing, ask yourself: 'What REAL SCENE does this metaphor describe in the political/social context?' Then depict THAT real-world scene. NEVER depict the literal imagery of the metaphor.\n"
-        "\n"
-        "BAD vs GOOD examples:\n"
-        "- BAD: (Maduro:1.3), Venezuela, military, energy, political, international relations, chessboard, shadow, crumbling building\n"
-        "  WHY BAD: Abstract terms SD cannot render; no specific scene; generic background\n"
-        "- GOOD: (Maduro:1.3), standing alone on a palace balcony, no allies in sight, empty courtyard below, storm clouds gathering, medium shot\n"
-        "  WHY GOOD: Specific scene; directly illustrates 'no savior coming'; concrete visual elements\n"
-        "\n"
-        "- BAD: (military:1.3), cracked concrete, barbed wire, surveillance cameras, darkened cityscape, tension, strategic map\n"
-        "  WHY BAD: 'tension' and 'strategic map' are abstract; random elements with no coherent scene\n"
-        "- GOOD: (military general:1.3), weighing gold bars on one side and a rifle on the other, at a desk piled with oil contracts, close-up on the scale\n"
-        "\n"
-        "SCENE VARIETY:\n"
+        "- \"高枕无忧\" = carefree security -> show 'false sense of security, hidden threats', NOT 'pillow'\n"
+        "- \"垃圾站\" = miserable situation -> show 'deteriorating living conditions', NOT 'garbage dump'\n"
+        "- RULE: When you encounter ANY Chinese metaphor, ask: 'What REAL SCENE does this describe in context?' Depict THAT scene. NEVER depict literal imagery.\n"
+    )
+
+    _SCENE_VARIETY_RULES = (
+        "\nSCENE VARIETY:\n"
         "- Each prompt: DIFFERENT scene, DIFFERENT camera angle, DIFFERENT focal point\n"
         "- Rotate: wide establishing shot -> medium shot with action -> close-up on detail -> symbolic still life -> environmental shot\n"
         "- NEVER repeat the same visual element across consecutive shots\n"
@@ -124,34 +137,73 @@ D. 语句不通顺：
         "\n"
         "WHEN TO USE METAPHORS (sparingly):\n"
         "- ONLY when the dubbing text is itself metaphorical or too abstract for a literal scene\n"
-        "- A metaphor MUST be a single, clear, concrete visual (e.g. 'a tightrope walker over a canyon' NOT 'precarious balance')\n"
+        "- A metaphor MUST be a single, clear, concrete visual\n"
         "- Prefer literal scenes over metaphors: 'generals counting money' > 'balance scale with gold and guns'\n"
-        "\n"
-        "OUTPUT FORMAT:\n"
-        "- Output ONLY: [understanding] | [prompt]\n"
-        "- NO explanatory sentences, NO reasoning text, NO style labels like 'news broadcast style' or 'investigative journalism'\n"
-        "- The [prompt] section must contain ONLY comma-separated SD keywords/phrases"
     )
+
+    _EXAMPLE_RULES = (
+        "\nBAD vs GOOD examples:\n"
+        "- BAD: (Maduro:1.3), Venezuela, military, energy, political, international relations, chessboard, shadow, crumbling building\n"
+        "  WHY BAD: Abstract terms SD cannot render; no specific scene; generic background\n"
+        "- GOOD: (Maduro:1.3), standing alone on a palace balcony, no allies in sight, empty courtyard below, storm clouds gathering, medium shot\n"
+        "  WHY GOOD: Specific scene; directly illustrates 'no savior coming'; concrete visual elements\n"
+        "\n"
+        "- BAD: (military:1.3), cracked concrete, barbed wire, surveillance cameras, darkened cityscape, tension, strategic map\n"
+        "  WHY BAD: 'tension' and 'strategic map' are abstract; random elements with no coherent scene\n"
+        "- GOOD: (military general:1.3), weighing gold bars on one side and a rifle on the other, at a desk piled with oil contracts, close-up on the scale\n"
+    )
+
+    _COMMON_RULES = _CORE_RULES + _METAPHOR_RULES + _SCENE_VARIETY_RULES + _EXAMPLE_RULES
+
+    _CONTENT_TYPE_RULE_MAP = {
+        "military": ["metaphor", "variety", "examples"],
+        "news": ["metaphor", "variety", "examples"],
+        "politics": ["metaphor", "variety", "examples"],
+        "social": ["metaphor", "variety"],
+        "economy": ["metaphor", "variety"],
+        "general": ["variety"],
+        "science": ["variety"],
+        "nature": ["variety"],
+        "history": ["variety", "examples"],
+        "culture": ["variety"],
+        "sports": ["variety"],
+    }
+
+    @classmethod
+    def get_rules_for_content_type(cls, content_type):
+        """根据内容类型动态组合规则，减少不必要的token消耗"""
+        content_lower = (content_type or "general").lower()
+        active_extensions = cls._CONTENT_TYPE_RULE_MAP.get(content_lower, ["variety"])
+        rules = cls._CORE_RULES
+        if "metaphor" in active_extensions:
+            rules += cls._METAPHOR_RULES
+        if "variety" in active_extensions:
+            rules += cls._SCENE_VARIETY_RULES
+        if "examples" in active_extensions:
+            rules += cls._EXAMPLE_RULES
+        return rules
 
     SHOT_PROMPT_SD = {
         "system": """You are a visual scene designer for SD 1.5. Convert Chinese audio narration into English image prompts.
 
-THINK IN 3 STAGES:
-Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
-Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
-Stage 3 - DESCRIBE: Write SD 1.5 keywords for that specific scene.
+THINK IN 4 STAGES:
+Stage 1 - EXTRACT (Chinese): 用中文提取这段配音的核心语义——核心含义是什么？关键视觉元素是什么？情感基调是什么？
+Stage 2 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 3 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 4 - DESCRIBE: Write SD 1.5 keywords for that specific scene.
 
-Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
-- [prompt]: SD 1.5 keywords, comma-separated, NO quality tags (added auto), NO Chinese
+Output: 中文语义骨架 || English understanding || SD prompt
+- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调
+- English understanding: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- SD prompt: SD 1.5 keywords, comma-separated, NO quality tags (added auto), NO Chinese
 - Weight syntax: (main subject:1.3), (secondary:1.2). Use () only, NOT []
 - Keep prompt to 4-7 meaningful keywords/phrases. Less is more for SD 1.5.
 
 Examples:
-[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.3), standing alone on palace balcony, empty courtyard below, storm clouds, no allies visible, medium shot
-[Power comes from military guns, not ballot boxes] | (soldier's hand:1.3) holding rifle, ballot papers scattered on ground, boot stepping on votes, close-up, low angle
-[Oil wealth is traded for military allegiance] | (oil barrel:1.3), military general counting gold, handshake over contract, dim office, medium shot
-[A woman weaving a network of political connections] | (woman in suit:1.3), connecting red threads on a wall of photos, judicial building in background, close-up on hands
+总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.3), standing alone on palace balcony, empty courtyard below, storm clouds, no allies visible, medium shot
+军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || (soldier's hand:1.3) holding rifle, ballot papers scattered on ground, boot stepping on votes, close-up, low angle
+石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.3), military general counting gold, handshake over contract, dim office, medium shot
+女性编织政治关系网 || A woman weaving a network of political connections || (woman in suit:1.3), connecting red threads on a wall of photos, judicial building in background, close-up on hands
 
 {style_instruction}
 {theme_instruction}
@@ -165,33 +217,36 @@ Examples:
         "user_template": """{context_section}Current dubbing: {dubbing}
 
 Think step by step:
-1. What is the SPECIFIC message of this line?
-2. What ONE concrete scene best shows this message?
-3. Write the prompt for that scene.
+1. 用中文提取核心语义（核心含义+关键视觉+情感）
+2. What is the SPECIFIC message of this line?
+3. What ONE concrete scene best shows this message?
+4. Write the prompt for that scene.
 
-Output: [understanding] | [prompt]"""
+Output: 中文语义骨架 || English understanding || SD prompt"""
     }
 
     SHOT_PROMPT_SDXL = {
         "system": """You are a visual scene designer for SDXL. Convert Chinese audio narration into English image prompts.
 
-THINK IN 3 STAGES:
-Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
-Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
-Stage 3 - DESCRIBE: Write SDXL keywords and short phrases for that specific scene.
+THINK IN 4 STAGES:
+Stage 1 - EXTRACT (Chinese): 用中文提取这段配音的核心语义——核心含义是什么？关键视觉元素是什么？情感基调是什么？
+Stage 2 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 3 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 4 - DESCRIBE: Write SDXL keywords and short phrases for that specific scene.
 
-Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
-- [prompt]: SDXL keywords and short descriptive phrases, comma-separated, NO quality tags (added auto), NO Chinese
+Output: 中文语义骨架 || English understanding || SD prompt
+- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调
+- English understanding: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- SD prompt: SDXL keywords and short descriptive phrases, comma-separated, NO quality tags (added auto), NO Chinese
 - Use weight SPARINGLY: (main subject:1.2) only for the primary subject
 - Mix keywords with short phrases - SDXL understands natural language
 - Keep prompt focused: 4-8 meaningful elements. Avoid keyword soup.
 
 Examples:
-[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.2), standing alone on a palace balcony looking down at an empty courtyard, storm clouds gathering overhead, no allies in sight, medium shot, dramatic atmosphere
-[Power comes from military guns, not ballot boxes] | a soldier's hand gripping a rifle, scattered ballot papers on the ground being stepped on, close-up shot from low angle, stark lighting
-[Oil wealth is traded for military allegiance] | (oil barrel:1.2), a military general counting gold bars across a desk covered in contracts, handshake in progress, dimly lit office, medium shot
-[A woman weaving a network of political connections] | (woman in power suit:1.2), connecting red threads between photos on a wall, judicial building visible through window, close-up on hands threading connections
+总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.2), standing alone on a palace balcony looking down at an empty courtyard, storm clouds gathering overhead, no allies in sight, medium shot, dramatic atmosphere
+军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || a soldier's hand gripping a rifle, scattered ballot papers on the ground being stepped on, close-up shot from low angle, stark lighting
+石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.2), a military general counting gold bars across a desk covered in contracts, handshake in progress, dimly lit office, medium shot
+女性编织政治关系网 || A woman weaving a network of political connections || (woman in power suit:1.2), connecting red threads between photos on a wall, judicial building visible through window, close-up on hands threading connections
 
 {style_instruction}
 {theme_instruction}
@@ -205,32 +260,35 @@ Examples:
         "user_template": """{context_section}Current dubbing: {dubbing}
 
 Think step by step:
-1. What is the SPECIFIC message of this line?
-2. What ONE concrete scene best shows this message?
-3. Write the prompt for that scene.
+1. 用中文提取核心语义（核心含义+关键视觉+情感）
+2. What is the SPECIFIC message of this line?
+3. What ONE concrete scene best shows this message?
+4. Write the prompt for that scene.
 
-Output: [understanding] | [prompt]"""
+Output: 中文语义骨架 || English understanding || SD prompt"""
     }
 
     SHOT_PROMPT_FLUX = {
         "system": """You are a visual scene designer for Flux. Convert Chinese audio narration into English scene descriptions.
 
-THINK IN 3 STAGES:
-Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
-Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
-Stage 3 - DESCRIBE: Write natural language describing that specific scene.
+THINK IN 4 STAGES:
+Stage 1 - EXTRACT (Chinese): 用中文提取这段配音的核心语义——核心含义是什么？关键视觉元素是什么？情感基调是什么？
+Stage 2 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 3 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 4 - DESCRIBE: Write natural language describing that specific scene.
 
-Output: [understanding] | [description]
-- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
-- [description]: 1-3 natural language sentences describing a CONCRETE visual scene
+Output: 中文语义骨架 || English understanding || Scene description
+- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调
+- English understanding: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- Scene description: 1-3 natural language sentences describing a CONCRETE visual scene
 - NO weight syntax like (keyword:1.3) - Flux does NOT support it. NO quality tags (added auto)
 - The description must paint a vivid, specific picture - not list abstract concepts
 
 Examples:
-[A president's survival depends on military loyalty, not divine intervention] | A man resembling Maduro stands alone on a grand palace balcony, gazing down at an empty courtyard with no allies in sight, storm clouds gathering overhead, conveying isolation and the absence of rescue
-[Power comes from military guns, not ballot boxes] | A close-up of a soldier's boot stepping on scattered ballot papers, a rifle slung over the shoulder, stark overhead lighting casting sharp shadows on the discarded votes
-[Oil wealth is traded for military allegiance] | A military general counting gold bars across a desk covered in oil contracts, a handshake frozen mid-motion, dim office lighting revealing the exchange of wealth for loyalty
-[A woman weaving a network of political connections] | A woman in a power suit carefully connecting red threads between framed photos on a wall, a judicial building visible through the window behind her, close-up on her hands as she ties another connection
+总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || A man resembling Maduro stands alone on a grand palace balcony, gazing down at an empty courtyard with no allies in sight, storm clouds gathering overhead, conveying isolation and the absence of rescue
+军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || A close-up of a soldier's boot stepping on scattered ballot papers, a rifle slung over the shoulder, stark overhead lighting casting sharp shadows on the discarded votes
+石油财富换取军方效忠 || Oil wealth is traded for military allegiance || A military general counting gold bars across a desk covered in oil contracts, a handshake frozen mid-motion, dim office lighting revealing the exchange of wealth for loyalty
+女性编织政治关系网 || A woman weaving a network of political connections || A woman in a power suit carefully connecting red threads between framed photos on a wall, a judicial building visible through the window behind her, close-up on her hands as she ties another connection
 
 {style_instruction}
 {theme_instruction}
@@ -244,33 +302,36 @@ Examples:
         "user_template": """{context_section}Current dubbing: {dubbing}
 
 Think step by step:
-1. What is the SPECIFIC message of this line?
-2. What ONE concrete scene best shows this message?
-3. Describe that scene vividly.
+1. 用中文提取核心语义（核心含义+关键视觉+情感）
+2. What is the SPECIFIC message of this line?
+3. What ONE concrete scene best shows this message?
+4. Describe that scene vividly.
 
-Output: [understanding] | [description]"""
+Output: 中文语义骨架 || English understanding || Scene description"""
     }
 
     SHOT_PROMPT_SD3 = {
         "system": """You are a visual scene designer for SD3. Convert Chinese audio narration into English image prompts.
 
-THINK IN 3 STAGES:
-Stage 1 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
-Stage 2 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
-Stage 3 - DESCRIBE: Write SD3 descriptive phrases and keywords for that specific scene.
+THINK IN 4 STAGES:
+Stage 1 - EXTRACT (Chinese): 用中文提取这段配音的核心语义——核心含义是什么？关键视觉元素是什么？情感基调是什么？
+Stage 2 - UNDERSTAND: What is this specific dubbing line saying? What is its unique message?
+Stage 3 - VISUALIZE: What concrete, photographable scene would best show this message? What would a photographer capture?
+Stage 4 - DESCRIBE: Write SD3 descriptive phrases and keywords for that specific scene.
 
-Output: [understanding] | [prompt]
-- [understanding]: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
-- [prompt]: SD3 descriptive phrases and keywords, comma-separated, NO quality tags (added auto), NO Chinese
+Output: 中文语义骨架 || English understanding || SD prompt
+- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调
+- English understanding: 1 English sentence capturing the SPECIFIC meaning of THIS line (not the general topic)
+- SD prompt: SD3 descriptive phrases and keywords, comma-separated, NO quality tags (added auto), NO Chinese
 - Use weight SPARINGLY: (main subject:1.2) only for emphasis
 - Mix natural language with keywords - SD3 understands both
 - Keep prompt focused: 4-8 meaningful elements
 
 Examples:
-[A president's survival depends on military loyalty, not divine intervention] | (Maduro:1.2), standing alone on palace balcony, empty courtyard below, storm clouds gathering, no allies visible, medium shot, isolation
-[Power comes from military guns, not ballot boxes] | soldier's hand gripping rifle, ballot papers scattered on ground, boot stepping on votes, close-up from low angle, stark lighting
-[Oil wealth is traded for military allegiance] | (oil barrel:1.2), military general counting gold bars, handshake over contract, desk covered in documents, dim office, medium shot
-[A woman weaving a network of political connections] | (woman in power suit:1.2), connecting red threads between photos on wall, judicial building through window, close-up on hands, political network
+总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.2), standing alone on palace balcony, empty courtyard below, storm clouds gathering, no allies visible, medium shot, isolation
+军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || soldier's hand gripping rifle, ballot papers scattered on ground, boot stepping on votes, close-up from low angle, stark lighting
+石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.2), military general counting gold bars, handshake over contract, desk covered in documents, dim office, medium shot
+女性编织政治关系网 || A woman weaving a network of political connections || (woman in power suit:1.2), connecting red threads between photos on wall, judicial building through window, close-up on hands, political network
 
 {style_instruction}
 {theme_instruction}
@@ -284,11 +345,12 @@ Examples:
         "user_template": """{context_section}Current dubbing: {dubbing}
 
 Think step by step:
-1. What is the SPECIFIC message of this line?
-2. What ONE concrete scene best shows this message?
-3. Write the prompt for that scene.
+1. 用中文提取核心语义（核心含义+关键视觉+情感）
+2. What is the SPECIFIC message of this line?
+3. What ONE concrete scene best shows this message?
+4. Write the prompt for that scene.
 
-Output: [understanding] | [prompt]"""
+Output: 中文语义骨架 || English understanding || SD prompt"""
     }
 
     @classmethod
@@ -362,13 +424,16 @@ Output: [understanding] | [prompt]"""
                 strategy_text = strategy_short.get(visual_narrative_strategy, visual_narrative_strategy)
                 theme_instruction += f"\n【Narrative Strategy】{strategy_text}"
 
+            content_type_for_rules = kwargs.get("content_type", "") or "general"
+            effective_rules = cls.get_rules_for_content_type(content_type_for_rules)
+
             system_content = template["system"].format(
                 style_instruction=style_instruction,
                 theme_instruction=theme_instruction,
                 content_type=content_type_display,
                 core_theme=core_theme_display,
                 visual_tone=visual_tone_display,
-                _COMMON_RULES=cls._COMMON_RULES,
+                _COMMON_RULES=effective_rules,
             )
             system_content = system_content.replace("\n\n\n", "\n\n")
 
@@ -404,3 +469,41 @@ Output: [understanding] | [prompt]"""
             return "shot_prompt_sd3"
         else:
             return "shot_prompt_sd"
+
+    @classmethod
+    def get_batch_template(cls, template_type, dubbings, **kwargs):
+        """生成批处理提示词模板
+
+        Args:
+            template_type: 模板类型 (同 get_template)
+            dubbings: 列表，每个元素为 dict {"idx": int, "text": str, "context_hint": str}
+            **kwargs: 同 get_template 的参数
+        Returns:
+            {"system": str, "user": str}
+        """
+        single = cls.get_template(template_type, **kwargs)
+        system_content = single["system"]
+
+        lines = []
+        for item in dubbings:
+            idx = item["idx"]
+            text = item["text"]
+            hint = item.get("context_hint", "")
+            line = f"[{idx}] {text}"
+            if hint:
+                line += f"\n  Context: {hint.strip()}"
+            lines.append(line)
+
+        dubbings_block = "\n".join(lines)
+        count = len(dubbings)
+
+        user_content = (
+            f"Generate prompts for ALL {count} dubbing lines below.\n"
+            f"Output EXACTLY {count} lines, one per dubbing, in this format:\n"
+            f"[N] 中文语义骨架 || English understanding || SD prompt\n"
+            f"where N matches the input number.\n\n"
+            f"Dubbing lines:\n{dubbings_block}\n\n"
+            f"Output {count} lines:"
+        )
+
+        return {"system": system_content, "user": user_content}

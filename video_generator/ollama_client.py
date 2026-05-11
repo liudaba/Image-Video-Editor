@@ -36,6 +36,8 @@ _ollama_available = False
 _ollama_models_cache = None
 _ollama_models_cache_time = 0
 _OLLAMA_MODELS_CACHE_TTL = 30
+_ollama_version_cache = None
+_ollama_think_supported = None
 
 
 def is_cloud_llm_active():
@@ -74,11 +76,38 @@ def set_ollama_available(value):
         _ollama_available = value
 
 
+def _detect_ollama_think_support():
+    """检测Ollama是否支持think参数（0.5+版本支持）"""
+    global _ollama_think_supported, _ollama_version_cache
+    if _ollama_think_supported is not None:
+        return _ollama_think_supported
+    try:
+        resp = get_http_session().get(
+            f"{Config.OLLAMA_BASE_URL}/api/version",
+            timeout=3
+        )
+        if resp.status_code == 200:
+            version_str = resp.json().get("version", "")
+            _ollama_version_cache = version_str
+            parts = version_str.split(".")
+            if len(parts) >= 2:
+                major = int(parts[0])
+                minor = int(parts[1].split("-")[0])
+                _ollama_think_supported = (major > 0 or (major == 0 and minor >= 5))
+            else:
+                _ollama_think_supported = False
+        else:
+            _ollama_think_supported = False
+    except Exception:
+        _ollama_think_supported = False
+    return _ollama_think_supported
+
+
 def check_ollama_available():
     try:
         response = get_http_session().get(
             f"{Config.OLLAMA_BASE_URL}/api/tags",
-            timeout=Config.API_TIMEOUT_SHORT
+            timeout=2
         )
         available = response.status_code == 200
         set_ollama_available(available)
@@ -97,18 +126,35 @@ def get_ollama_process():
 
 
 def stop_ollama_serve():
-    """终止由本程序启动的 Ollama 服务进程"""
+    """终止 Ollama 服务进程（包括由本程序启动的和已存在的）"""
     global _ollama_serve_process
+    import os
+
     if _ollama_serve_process is not None:
         try:
             _ollama_serve_process.terminate()
-            _ollama_serve_process.wait(timeout=5)
+            _ollama_serve_process.wait(timeout=3)
         except Exception:
             try:
                 _ollama_serve_process.kill()
             except Exception:
                 pass
         _ollama_serve_process = None
+
+    try:
+        if os.name == 'nt':
+            subprocess.run(
+                ["taskkill", "/f", "/im", "ollama.exe"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+        else:
+            subprocess.run(["pkill", "-f", "ollama"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    set_ollama_available(False)
 
 
 _ollama_models_lock = threading.Lock()
@@ -198,16 +244,27 @@ def try_start_ollama_service():
     if ollama_path:
         try:
             global _ollama_serve_process
+            env = os.environ.copy()
+            env["OLLAMA_NUM_PARALLEL"] = "4"
             _ollama_serve_process = subprocess.Popen(
                 [ollama_path, "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-            for _ in range(6):
-                time.sleep(1)
-                if check_ollama_available():
-                    return True
+            for _ in range(20):
+                time.sleep(0.5)
+                try:
+                    response = get_http_session().get(
+                        f"{Config.OLLAMA_BASE_URL}/api/tags",
+                        timeout=1
+                    )
+                    if response.status_code == 200:
+                        set_ollama_available(True)
+                        return True
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -290,7 +347,51 @@ class LLMConfig:
         return False
 
 
-_ollama_call_semaphore = threading.Semaphore(2)
+_ollama_call_semaphore = threading.Semaphore(4)
+
+
+def _build_chat_payload(model, system_prompt, user_prompt, model_options, think_supported):
+    """构建Ollama聊天请求payload"""
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "stream": False,
+        "keep_alive": 300,
+        "options": model_options,
+    }
+    if think_supported:
+        payload["think"] = False
+    return payload
+
+
+def _parse_chat_response(response, model, log_callback=None):
+    """解析Ollama聊天响应，返回content或None"""
+    try:
+        result_data = response.json()
+    except Exception:
+        if log_callback:
+            log_callback(f"   ⚠️ 模型 {model} 响应解析失败")
+        return None
+
+    message = result_data.get("message", {})
+    raw_content = message.get("content", "")
+
+    thinking_content = message.get("thinking", "")
+    if thinking_content and log_callback:
+        think_len = len(thinking_content)
+        log_callback(f"   ⚠️ 模型 {model} 返回了思考内容({think_len}字符)，think:False未生效！已自动剥离")
+
+    content = _strip_think_tags(raw_content)
+
+    if not content:
+        if log_callback:
+            log_callback(f"   ⚠️ 模型 {model} 返回空结果")
+        return None
+
+    return content
 
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
@@ -336,6 +437,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
             log_callback(f"⚠️ 模型列表 {model_list} 中没有可用的模型")
         return None, None
 
+    think_supported = _detect_ollama_think_support()
+
     options = {}
     if llm_config:
         config_overrides = {}
@@ -354,6 +457,8 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
     options["num_gpu"] = -1
 
+    gpu_failed_models = set()
+
     for model in candidate_models:
         try:
             if log_callback and len(candidate_models) > 1:
@@ -361,55 +466,82 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
             model_options = dict(options)
 
+            if model in gpu_failed_models:
+                model_options["num_gpu"] = 0
+
             call_start = time.time()
+            payload = _build_chat_payload(model, system_prompt, user_prompt, model_options, think_supported)
             with _ollama_call_semaphore:
                 response = get_http_session().post(
                     f"{Config.OLLAMA_BASE_URL}/api/chat",
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        "stream": False,
-                        "keep_alive": 300,
-                        "options": model_options,
-                        "think": False
-                    },
+                    json=payload,
                     timeout=(10, timeout)
                 )
             call_elapsed = time.time() - call_start
 
             if response.status_code != 200:
+                error_body = ""
+                try:
+                    error_body = response.text[:200]
+                except Exception:
+                    pass
                 if log_callback:
                     log_callback(f"   ⚠️ 模型 {model} HTTP错误: {response.status_code}")
+                    if error_body:
+                        log_callback(f"      错误详情: {error_body[:120]}")
+
+                is_gpu_error = False
+                error_lower = error_body.lower()
+                for kw in ['cuda', 'gpu', 'vram', 'out of memory', 'memory', 'oom', 'vrsm', 'alloc']:
+                    if kw in error_lower:
+                        is_gpu_error = True
+                        break
+
+                if is_gpu_error and model not in gpu_failed_models:
+                    gpu_failed_models.add(model)
+                    if log_callback:
+                        log_callback(f"      💡 检测到GPU错误，将尝试CPU模式重试")
+                    model_options_cpu = dict(options)
+                    model_options_cpu["num_gpu"] = 0
+                    try:
+                        payload_cpu = _build_chat_payload(model, system_prompt, user_prompt, model_options_cpu, think_supported)
+                        with _ollama_call_semaphore:
+                            response_cpu = get_http_session().post(
+                                f"{Config.OLLAMA_BASE_URL}/api/chat",
+                                json=payload_cpu,
+                                timeout=(10, timeout)
+                            )
+                        if response_cpu.status_code == 200:
+                            content = _parse_chat_response(response_cpu, model, log_callback)
+                            if content:
+                                if log_callback:
+                                    log_callback(f"   ✅ CPU模式成功: {model}")
+                                return content, model
+                        else:
+                            if log_callback:
+                                log_callback(f"   ⚠️ CPU模式也失败: {response_cpu.status_code}")
+                    except Exception as e2:
+                        if log_callback:
+                            log_callback(f"   ⚠️ CPU模式异常: {str(e2)[:60]}")
                 continue
 
-            result_data = response.json()
-            message = result_data.get("message", {})
-            raw_content = message.get("content", "")
+            content = _parse_chat_response(response, model, log_callback)
+            if not content:
+                continue
 
             if log_callback:
-                eval_count = result_data.get("eval_count", 0)
-                prompt_eval_count = result_data.get("prompt_eval_count", 0)
-                actual_num_predict = model_options.get("num_predict", "?")
-                actual_num_ctx = model_options.get("num_ctx", "?")
-                truncated = eval_count >= actual_num_predict if isinstance(actual_num_predict, int) else False
-                trunc_mark = " ⚠️截断!" if truncated else ""
-                gen_speed = f"{eval_count/call_elapsed:.1f}" if call_elapsed > 0 and eval_count > 0 else "?"
-                log_callback(f"   🔍 num_predict={actual_num_predict}, num_ctx={actual_num_ctx} | 输入{prompt_eval_count}token, 输出{eval_count}token{trunc_mark} | {call_elapsed:.1f}s ({gen_speed}tok/s)")
-
-            thinking_content = message.get("thinking", "")
-            if thinking_content and log_callback:
-                think_len = len(thinking_content)
-                log_callback(f"   ⚠️ 模型 {model} 返回了思考内容({think_len}字符)，think:False未生效！已自动剥离")
-
-            content = _strip_think_tags(raw_content)
-
-            if not content:
-                if log_callback:
-                    log_callback(f"   ⚠️ 模型 {model} 返回空结果")
-                continue
+                try:
+                    result_data = response.json()
+                    eval_count = result_data.get("eval_count", 0)
+                    prompt_eval_count = result_data.get("prompt_eval_count", 0)
+                    actual_num_predict = model_options.get("num_predict", "?")
+                    actual_num_ctx = model_options.get("num_ctx", "?")
+                    truncated = eval_count >= actual_num_predict if isinstance(actual_num_predict, int) else False
+                    trunc_mark = " ⚠️截断!" if truncated else ""
+                    gen_speed = f"{eval_count/call_elapsed:.1f}" if call_elapsed > 0 and eval_count > 0 else "?"
+                    log_callback(f"   🔍 num_predict={actual_num_predict}, num_ctx={actual_num_ctx} | 输入{prompt_eval_count}token, 输出{eval_count}token{trunc_mark} | {call_elapsed:.1f}s ({gen_speed}tok/s)")
+                except Exception:
+                    pass
 
             if log_callback and len(candidate_models) > 1:
                 log_callback(f"   ✅ 使用模型: {model}")
@@ -421,31 +553,18 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 log_callback(f"   ⚠️ 无法连接 Ollama 服务，尝试自动重连...")
             if try_start_ollama_service():
                 try:
+                    model_options_retry = dict(options)
+                    if model in gpu_failed_models:
+                        model_options_retry["num_gpu"] = 0
+                    payload_retry = _build_chat_payload(model, system_prompt, user_prompt, model_options_retry, think_supported)
                     with _ollama_call_semaphore:
-                        response = get_http_session().post(
+                        response_retry = get_http_session().post(
                             f"{Config.OLLAMA_BASE_URL}/api/chat",
-                            json={
-                                "model": model,
-                                "messages": [
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": user_prompt}
-                                ],
-                                "stream": False,
-                                "keep_alive": 300,
-                                "options": model_options,
-                                "think": False
-                            },
+                            json=payload_retry,
                             timeout=(10, timeout)
                         )
-                    if response.status_code == 200:
-                        result_data = response.json()
-                        message = result_data.get("message", {})
-                        raw_content = message.get("content", "")
-                        thinking_content = message.get("thinking", "")
-                        if thinking_content and log_callback:
-                            think_len = len(thinking_content)
-                            log_callback(f"   ⚠️ 模型 {model} 返回了思考内容({think_len}字符)，think:False未生效！已自动剥离")
-                        content = _strip_think_tags(raw_content)
+                    if response_retry.status_code == 200:
+                        content = _parse_chat_response(response_retry, model, log_callback)
                         if content:
                             if log_callback:
                                 log_callback(f"   ✅ 重连成功，使用模型: {model}")
@@ -482,26 +601,69 @@ def warmup_model(model, log_callback=None):
         if log_callback:
             log_callback("☁️ 云端模式已启用，跳过本地模型预热")
         return True
+    think_supported = _detect_ollama_think_support()
     try:
+        warmup_options = {
+            "num_predict": 1,
+            "temperature": 0.1,
+            "num_gpu": -1
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": "ok"}
+            ],
+            "stream": False,
+            "keep_alive": 300,
+            "options": warmup_options,
+        }
+        if think_supported:
+            payload["think"] = False
         with _ollama_call_semaphore:
             response = get_http_session().post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
-                json={
+                json=payload,
+                timeout=(10, 60)
+            )
+        if response.status_code != 200:
+            error_body = ""
+            try:
+                error_body = response.text[:200]
+            except Exception:
+                pass
+            is_gpu_error = False
+            if error_body:
+                error_lower = error_body.lower()
+                for kw in ['cuda', 'gpu', 'vram', 'out of memory', 'memory', 'oom', 'vrsm', 'alloc']:
+                    if kw in error_lower:
+                        is_gpu_error = True
+                        break
+            if is_gpu_error:
+                if log_callback:
+                    log_callback(f"   ⚠️ GPU预热失败，尝试CPU模式")
+                warmup_options["num_gpu"] = 0
+                payload_cpu = {
                     "model": model,
                     "messages": [
                         {"role": "user", "content": "ok"}
                     ],
                     "stream": False,
                     "keep_alive": 300,
-                    "options": {
-                        "num_predict": 1,
-                        "temperature": 0.1,
-                        "num_gpu": -1
-                    },
-                    "think": False
-                },
-                timeout=(10, 60)
-            )
+                    "options": warmup_options,
+                }
+                if think_supported:
+                    payload_cpu["think"] = False
+                try:
+                    with _ollama_call_semaphore:
+                        response_cpu = get_http_session().post(
+                            f"{Config.OLLAMA_BASE_URL}/api/chat",
+                            json=payload_cpu,
+                            timeout=(10, 120)
+                        )
+                    if response_cpu.status_code == 200:
+                        response = response_cpu
+                except Exception:
+                    pass
         if response.status_code == 200:
             try:
                 ps_resp = get_http_session().get(

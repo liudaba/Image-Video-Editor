@@ -48,38 +48,28 @@ class ResourceManager:
     def check_gpu_memory(self) -> Dict:
         try:
             import torch
-            if not torch.cuda.is_available():
+            if torch.cuda.is_available():
+                total = torch.cuda.get_device_properties(0).total_memory / 1024**2
+                reserved = torch.cuda.memory_reserved(0) / 1024**2
+                pct = reserved / total if total > 0 else 0
                 return {
-                    'available': False,
-                    'used_percent': 0.0,
-                    'total_mb': 0.0,
-                    'used_mb': 0.0,
-                    'free_mb': 0.0,
-                    'message': 'CUDA不可用'
+                    'available': True,
+                    'used_percent': pct,
+                    'total_mb': total,
+                    'reserved_mb': reserved,
+                    'free_mb': total - reserved,
+                    'message': f"GPU显存: {reserved:.0f}MB / {total:.0f}MB ({pct*100:.1f}%)"
                 }
-            total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**2)
-            allocated_memory = torch.cuda.memory_allocated(0) / (1024**2)
-            reserved_memory = torch.cuda.memory_reserved(0) / (1024**2)
-            used_percent = reserved_memory / total_memory if total_memory > 0 else 0
-            free_mb = total_memory - reserved_memory
-            return {
-                'available': True,
-                'used_percent': used_percent,
-                'total_mb': total_memory,
-                'used_mb': allocated_memory,
-                'reserved_mb': reserved_memory,
-                'free_mb': free_mb,
-                'message': f'GPU显存: {reserved_memory:.0f}MB / {total_memory:.0f}MB ({used_percent*100:.1f}%)'
-            }
         except Exception as e:
-            return {
-                'available': False,
-                'used_percent': 0.0,
-                'total_mb': 0.0,
-                'used_mb': 0.0,
-                'free_mb': 0.0,
-                'message': f'检测失败: {str(e)}'
-            }
+            pass
+        return {
+            'available': False,
+            'used_percent': 0.0,
+            'total_mb': 0.0,
+            'used_mb': 0.0,
+            'free_mb': 0.0,
+            'message': 'CUDA不可用'
+        }
 
     def check_system_memory(self) -> Dict:
         """检查系统内存使用情况"""
@@ -117,33 +107,29 @@ class ResourceManager:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-                    gc.collect()
-                    if log_callback:
-                        gpu_info = self.check_gpu_memory()
-                        log_callback(f"🧹 GPU显存已清理: {gpu_info['message']}")
+                gc.collect()
+                if log_callback:
+                    gpu_info = self.check_gpu_memory()
+                    log_callback(f"🧹 GPU显存已清理: {gpu_info['message']}")
             except Exception as e:
                 if log_callback:
                     log_callback(f"⚠️ GPU显存清理失败: {e}")
 
     def unload_whisper_model(self, whisper_model_ref, log_callback=None, full_unload=False):
-        """卸载Whisper模型释放GPU
-
-        Args:
-            whisper_model_ref: Whisper模型引用
-            log_callback: 日志回调
-            full_unload: True=完全卸载(删除模型), False=仅移回CPU
-
-        Returns:
-            更新后的模型引用(full_unload=True时返回None)
-        """
         try:
             import torch
             if whisper_model_ref is not None:
                 if torch.cuda.is_available():
-                    whisper_model_ref = whisper_model_ref.to("cpu")
-                    torch.cuda.empty_cache()
-                    if log_callback:
-                        log_callback("   🧹 Whisper GPU显存已释放")
+                    try:
+                        device_type = next(whisper_model_ref.parameters()).device.type
+                    except (StopIteration, Exception):
+                        device_type = "cpu"
+                    if device_type == "cuda":
+                        whisper_model_ref = whisper_model_ref.to("cpu")
+                        torch.cuda.synchronize()
+                        torch.cuda.empty_cache()
+                        if log_callback:
+                            log_callback("   🧹 Whisper GPU显存已释放")
 
                 if full_unload:
                     del whisper_model_ref
@@ -180,7 +166,6 @@ class ResourceManager:
                 log_callback(f"⚠️ 终止Ollama失败: {e}")
 
     def full_cleanup(self, log_callback=None):
-        """全面清理：GC + GPU显存 + 系统内存"""
         with self._cleanup_lock:
             gc.collect()
             try:

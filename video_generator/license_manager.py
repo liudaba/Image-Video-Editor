@@ -208,7 +208,7 @@ class LicenseManager:
                     self._save_signed_license(
                         self.license_data["signed"],
                         token=self._get_token(),
-                        last_heartbeat=datetime.now().isoformat(),
+                        last_heartbeat=datetime.now(timezone.utc).isoformat(),
                     )
                 else:
                     remote_license = data.get("license")
@@ -217,7 +217,7 @@ class LicenseManager:
                             self._save_signed_license(
                                 remote_license,
                                 token=self._get_token(),
-                                last_heartbeat=datetime.now().isoformat(),
+                                last_heartbeat=datetime.now(timezone.utc).isoformat(),
                             )
                         else:
                             self._consecutive_failures += 1
@@ -225,17 +225,19 @@ class LicenseManager:
                         self._save_signed_license(
                             self.license_data.get("signed", self.license_data),
                             token=self._get_token(),
-                            last_heartbeat=datetime.now().isoformat(),
+                            last_heartbeat=datetime.now(timezone.utc).isoformat(),
                         )
             elif response.status_code == 401:
-                self._consecutive_failures += 1
-                if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
-                    signed_data = self.license_data.get("signed", self.license_data)
-                    signed_data["is_valid"] = False
-                    self._save_signed_license(
-                        signed_data,
-                        token=self._get_token(),
-                    )
+                refreshed = self._try_silent_relogin()
+                if not refreshed:
+                    self._consecutive_failures += 1
+                    if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+                        signed_data = self.license_data.get("signed", self.license_data)
+                        signed_data["is_valid"] = False
+                        self._save_signed_license(
+                            signed_data,
+                            token=self._get_token(),
+                        )
         except (ConnectionError, TimeoutError, OSError):
             self._consecutive_failures += 1
             if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
@@ -247,6 +249,33 @@ class LicenseManager:
                 )
         except Exception:
             self._consecutive_failures += 1
+
+    def _try_silent_relogin(self):
+        """Token过期时，使用保存的凭据静默重新登录获取新Token
+        
+        返回True表示续期成功，False表示无法续期。
+        条件：用户勾选了"保存密码"才有凭据可用。
+        """
+        try:
+            username, password, save_user, save_pass = self.load_login_credentials()
+            if not save_pass or not username or not password:
+                return False
+            response = get_http_session().post(
+                f"{self.API_BASE}/api/auth/login",
+                json={"username": username, "password": password},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                signed_license = data.get("license", {})
+                new_token = data.get("access_token", "")
+                if signed_license and _verify_signature(signed_license) and new_token:
+                    self._save_signed_license(signed_license, token=new_token, last_heartbeat=datetime.now(timezone.utc).isoformat())
+                    self._consecutive_failures = 0
+                    return True
+            return False
+        except Exception:
+            return False
 
     @staticmethod
     def _get_app_version():
@@ -298,9 +327,9 @@ class LicenseManager:
         return raw
 
     def _save_signed_license(self, signed_license, token=None, last_heartbeat=None):
-        if last_heartbeat:
-            signed_license["last_heartbeat"] = last_heartbeat
         save_data = {"signed": signed_license}
+        if last_heartbeat:
+            save_data["last_heartbeat"] = last_heartbeat
         if token:
             try:
                 from .crypto_utils import encrypt_value
@@ -361,9 +390,13 @@ class LicenseManager:
     def register_user(self, username, email, password):
         try:
             api_url = self.API_BASE
+            fingerprint = self.get_machine_fingerprint()
+            payload = {"username": username, "email": email, "password": password}
+            if fingerprint:
+                payload["fingerprint"] = fingerprint
             response = get_http_session().post(
                 f"{api_url}/api/auth/register",
-                json={"username": username, "email": email, "password": password},
+                json=payload,
                 timeout=10,
             )
             if response.status_code == 200:
@@ -389,7 +422,22 @@ class LicenseManager:
                 else:
                     return False, "服务器返回的授权数据无效,请联系客服"
                 self.start_heartbeat()
-                return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
+                license_type = signed_license.get("license_type", "trial")
+                days_left = signed_license.get("days_left", 0)
+                if license_type == "trial":
+                    if days_left <= 0:
+                        return True, "登录成功!试用期已结束,请购买专业版继续使用"
+                    elif days_left >= _TRIAL_DAYS:
+                        return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
+                    else:
+                        return True, f"登录成功!试用期剩余{days_left}天"
+                elif license_type == "pro":
+                    if days_left < 0 or days_left >= 9999:
+                        return True, "登录成功!专业版终身会员"
+                    else:
+                        return True, f"登录成功!专业版剩余{days_left}天"
+                else:
+                    return True, "登录成功!"
             else:
                 error_msg = response.json().get("detail", "登录失败")
                 return False, error_msg
@@ -414,14 +462,18 @@ class LicenseManager:
             if not self._heartbeat_stop.is_set():
                 self.start_heartbeat()
 
-        last_heartbeat_str = signed_data.get("last_heartbeat")
+        last_heartbeat_str = self.license_data.get("last_heartbeat") if self.license_data else None
         if last_heartbeat_str:
             try:
                 last_hb = _parse_iso_to_naive(last_heartbeat_str)
                 if last_hb:
                     from datetime import timezone as _tz
                     now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
-                    offline_hours = (now_utc - last_hb).total_seconds() / 3600
+                    if last_hb.tzinfo is None and "+" not in last_heartbeat_str and last_heartbeat_str.endswith("Z") is False:
+                        now_for_compare = datetime.now().replace(tzinfo=None)
+                    else:
+                        now_for_compare = now_utc
+                    offline_hours = (now_for_compare - last_hb).total_seconds() / 3600
                     if offline_hours > _OFFLINE_TOLERANCE_HOURS:
                         return {"valid": False, "message": f"已离线超过{_OFFLINE_TOLERANCE_HOURS}小时,请连接网络验证授权"}
             except (ValueError, TypeError):
@@ -565,10 +617,30 @@ class LicenseManager:
             return ""
         signed_data = self.license_data.get("signed", self.license_data)
         license_type = signed_data.get("license_type", "")
-        days_left = signed_data.get("days_left", 0)
-        expiry_str = signed_data.get("expiry_date")
-        if license_type == "pro" and not expiry_str:
+        if license_type == "pro" and not signed_data.get("expiry_date"):
             return "终身会员"
+        from datetime import timezone as _tz
+        now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+        if license_type == "trial":
+            trial_end_str = signed_data.get("trial_end")
+            if trial_end_str:
+                trial_end = _parse_iso_to_naive(trial_end_str)
+                if trial_end:
+                    days_left = max(0, (trial_end - now_utc).days)
+                    if days_left > 0:
+                        return f"试用剩余{days_left}天"
+                    return "试用已到期"
+        expiry_str = signed_data.get("expiry_date")
+        if expiry_str:
+            expiry_date = _parse_iso_to_naive(expiry_str)
+            if expiry_date:
+                days_left = max(0, (expiry_date - now_utc).days)
+                if license_type == "pro" and days_left > 3650:
+                    return "终身会员"
+                if days_left > 0:
+                    return f"会员还剩{days_left}天到期"
+                return "会员已到期"
+        days_left = signed_data.get("days_left", 0)
         if license_type == "pro" and days_left > 3650:
             return "终身会员"
         if days_left > 0:
@@ -1231,6 +1303,11 @@ def check_and_show_login(parent=None):
     license_mgr = LicenseManager()
     license_status = license_mgr.check_license()
     if not license_status["valid"]:
+        if license_mgr._try_silent_relogin():
+            license_status = license_mgr.check_license()
+            if license_status["valid"]:
+                license_mgr.start_heartbeat()
+                return license_status
         dialog = LoginDialog(parent)
         dialog.wait_window()
         if dialog.result:

@@ -10,6 +10,7 @@ import threading
 from video_generator.mixins.logging import safe_print_exc
 from video_generator.config import validate_image_size, Config
 from video_generator.config import get_http_session
+from video_generator.cache import prompt_cache, image_cache
 import subprocess
 import tempfile
 import shutil
@@ -1156,6 +1157,38 @@ class VideoMixin:
                 safe_print_exc()
             finally:
                 self._waiting_for_sd = False
+                try:
+                    self._unload_ollama_models(log_prefix="🔄 任务结束: ")
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, 'whisper_model') and self.whisper_model:
+                        self._safe_release_whisper_gpu()
+                        del self.whisper_model
+                        self.whisper_model = None
+                        self._whisper_on_gpu = False
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, 'shots_data') and self.shots_data:
+                        self.shots_data = []
+                except Exception:
+                    pass
+                try:
+                    prompt_cache.clear()
+                    image_cache.clear()
+                except Exception:
+                    pass
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    gc.collect()
+                except Exception:
+                    pass
                 with self.task_lock:
                     self.task_running = False
                 if hasattr(self, '_pregenerated_prompts'):

@@ -119,8 +119,6 @@ def get_api_base_url():
             url = data.get("api_base_url", "").strip()
             if url:
                 url = url.rstrip("/")
-                if url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
-                    url = url.replace("http://", "https://", 1)
                 return url
     except Exception:
         pass

@@ -70,19 +70,23 @@ class UIHandlersMixin:
                     import torch
                     if torch.cuda.is_available():
                         gpu_name = torch.cuda.get_device_name(0)
-                        gpu_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                        self.log(f"🖥️ GPU: {gpu_name} ({gpu_total:.1f}GB VRAM)")
+                        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        self.log(f"🖥️ GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)")
                 except Exception:
                     pass
+                self.update_model_list()
                 return
 
+            self.log("⚠️ Ollama服务未运行，正在自动启动...")
             if try_start_ollama_service():
                 set_ollama_available(True)
-                self.log("✅ Ollama服务已启动并连接")
+                self.log("✅ Ollama服务已自动启动并连接")
+                self.update_model_list()
                 return
 
             set_ollama_available(False)
-            self.log("❌ Ollama服务连接失败")
+            self.log("❌ Ollama服务自动启动失败")
+            self.update_model_list()
             self.root.after(0, lambda: messagebox.showwarning(
                 "Ollama服务未连接",
                 "Ollama大模型服务未运行，且自动启动失败！\n\n"
@@ -92,6 +96,7 @@ class UIHandlersMixin:
         except Exception as e:
             set_ollama_available(False)
             self.log(f"❌ Ollama连接失败: {e}")
+            self.update_model_list()
             self.root.after(0, lambda: messagebox.showwarning(
                 "Ollama服务异常",
                 f"Ollama服务连接异常：{e}\n\n"
@@ -103,12 +108,15 @@ class UIHandlersMixin:
         """更新模型列表，自动检测本地已安装的Ollama模型"""
         
         _FALLBACK_MODEL_SIZES = {
-            "qwen3.5:4b": "2.5GB",
-            "qwen3:8b": "5.2GB",
-            "qwen3:4b": "2.5GB",
-            "qwen2.5:7b": "4.7GB",
+            "qwen3.5:4b": "3.2GB",
+            "qwen3:8b": "4.9GB",
+            "qwen3:4b": "2.3GB",
+            "qwen2.5:7b": "4.4GB",
             "qwen2.5:3b": "2.0GB",
-            "gemma3:4b": "3.3GB",
+            "gemma4:latest": "8.9GB",
+            "gemma4:e4b": "8.9GB",
+            "gemma4:e2b": "6.7GB",
+            "gemma3:4b": "3.1GB",
             "deepseek-r1:8b": "5.2GB",
             "llama3.2:3b": "2.0GB",
             "mistral": "4.1GB",
@@ -142,7 +150,9 @@ class UIHandlersMixin:
             return model_name
         
         ollama_connected = False
-        if check_ollama_available():
+        if is_ollama_available():
+            ollama_connected = True
+        elif check_ollama_available():
             set_ollama_available(True)
             ollama_connected = True
         else:
@@ -154,7 +164,7 @@ class UIHandlersMixin:
         model_ids = []
         try:
             if is_ollama_available() or ollama_connected:
-                available_models = get_available_models()
+                available_models = get_available_models(force_refresh=True)
                 if available_models:
                     for model in available_models:
                         model_labels.append(get_model_label(model))
@@ -195,10 +205,8 @@ class UIHandlersMixin:
             self._ollama_listbox_frame.pack_forget()
             self._ollama_listbox_visible = False
         else:
+            self.update_model_list()
             count = self._ollama_listbox.size()
-            if count == 0:
-                self.update_model_list()
-                count = self._ollama_listbox.size()
             self._ollama_listbox.config(height=min(count, 15))
             self._ollama_listbox_frame.pack(fill=tk.X, after=self._ollama_btn, pady=1)
             self._ollama_listbox_visible = True
@@ -304,7 +312,7 @@ class UIHandlersMixin:
             whisper_model = 'medium'
             animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
             transition = self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'
-            thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
+            thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
             prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
             core_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ''
             visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ''
@@ -328,7 +336,7 @@ class UIHandlersMixin:
             print(f"  提示词类型:   {prompt_type}")
             print(f"  动画效果:     {animation}")
             print(f"  过渡效果:     {transition}")
-            print(f"  图像生成线程: {thread_count}")
+            print(f"  分镜创建线程: {thread_count}")
             if core_theme:
                 print(f"  核心主题:     {core_theme}")
             if visual_tone:
@@ -538,7 +546,7 @@ class UIHandlersMixin:
         confirm_msg += f"配置模式: {self.llm_config_preset_var.get() if hasattr(self, 'llm_config_preset_var') else '质量优先'}\n"
         confirm_msg += f"动画效果: {self.animation_var.get() if hasattr(self, 'animation_var') else '无'}\n"
         confirm_msg += f"过渡效果: {self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'}\n"
-        confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16}\n"
+        confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8}\n"
         min_shot_dur = self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0
         confirm_msg += f"最短分镜时长: {min_shot_dur:.1f}秒\n"
 
@@ -594,11 +602,17 @@ class UIHandlersMixin:
         def _fetch_and_update():
             try:
                 sd_models = self._get_sd_models_from_api()
-                if sd_models and hasattr(self, 'model_combo'):
+                if hasattr(self, 'model_combo'):
                     def update_ui():
                         try:
-                            labeled_models = self._add_model_type_labels(sd_models)
-                            models = ["使用当前模型"] + labeled_models
+                            if sd_models:
+                                labeled_models = self._add_model_type_labels(sd_models)
+                                models = ["使用当前模型"] + labeled_models
+                            else:
+                                models = list(self._default_models)
+                                current = self.model_var.get()
+                                if current and current not in models:
+                                    models.append(current)
                             self.model_combo['values'] = models
                         except Exception:
                             pass
@@ -628,6 +642,11 @@ class UIHandlersMixin:
                             self.model_combo['values'] = models
                             self.log(f"✅ 模型列表已刷新，共 {len(sd_models)} 个模型")
                         else:
+                            models = list(self._default_models)
+                            current = self.model_var.get()
+                            if current and current not in models:
+                                models.append(current)
+                            self.model_combo['values'] = models
                             self.log("⚠️ 未获取到模型列表，请检查SD API连接")
                     except Exception as e:
                         self.log(f"⚠️ 刷新模型列表失败: {str(e)[:60]}")
@@ -671,6 +690,12 @@ class UIHandlersMixin:
             self.model_combo['values'] = models
             if self.model_var.get() in ["Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]:
                 self.model_var.set("使用当前模型")
+        else:
+            models = list(self._default_models)
+            current = self.model_var.get()
+            if current and current not in models:
+                models.append(current)
+            self.model_combo['values'] = models
     
 
     def close_sd_api_connection(self):
@@ -946,23 +971,18 @@ class UIHandlersMixin:
     
 
     def clear_log(self):
-        """清除日志"""
-        self.log("🗑️ 清除日志")
         try:
-            # 清空日志文本框
             if hasattr(self, 'txt_log') and self.txt_log:
                 def update_ui():
                     try:
                         self.txt_log.delete(1.0, tk.END)
-                        self.txt_log.insert(tk.END, "📋 日志区域初始化完成\n")
-                    except Exception as e:
+                        if hasattr(self, '_log_line_count'):
+                            self._log_line_count = 0
+                    except Exception:
                         pass
                 if hasattr(self, 'root') and self.root:
                     self.root.after(0, update_ui)
-            
-            self.log("✅ 日志清除完成")
-        except Exception as e:
-            self.log(f"❌ 日志清除失败: {e}")
+        except Exception:
             safe_print_exc()
 
 
@@ -1500,12 +1520,18 @@ class UIHandlersMixin:
                 visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ''
                 prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
                 animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
-                thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
+                thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
                 
                 self.log(f"✅ 已加载Ollama模型: {ollama_model}")
                 self.log(f"✅ 已加载音频模型: {whisper_model}")
-                self.log(f"✅ 已加载核心主题: {core_theme}")
-                self.log(f"✅ 已加载视觉基调: {visual_tone}")
+                if core_theme:
+                    self.log(f"✅ 已加载核心主题: {core_theme}")
+                else:
+                    self.log(f"ℹ️ 未设置核心主题（将在生成分镜时自动分析）")
+                if visual_tone:
+                    self.log(f"✅ 已加载视觉基调: {visual_tone}")
+                else:
+                    self.log(f"ℹ️ 未设置视觉基调（将在生成分镜时自动分析）")
                 self.log(f"✅ 已加载提示词类型: {prompt_type}")
                 self.log(f"✅ 配置加载完成")
                 self._print_current_settings()
@@ -1536,7 +1562,7 @@ class UIHandlersMixin:
                 'custom_visual_tone': self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else '',
                 'prompt_type': self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词',
                 'animation': self.animation_var.get() if hasattr(self, 'animation_var') else '无',
-                'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16,
+                'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8,
                 'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
                 'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'DeepSeek 深度求索',
                 'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',

@@ -127,8 +127,10 @@ class ImagesMixin:
 
         api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
 
+        check_timeout = Config.API_TIMEOUT_SHORT if silent else Config.API_TIMEOUT_MEDIUM
+
         try:
-            response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=Config.API_TIMEOUT_MEDIUM)
+            response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=check_timeout)
             if response.status_code == 200:
                 self.log("✅ SD API 连接成功！")
                 self._sd_api_connected = True
@@ -167,7 +169,10 @@ class ImagesMixin:
                         self.root.after(0, update_ui)
                 return False
         except Exception as e:
-            self._log_exception("❌ SD API 连接异常", e)
+            if silent:
+                self.log("ℹ️ SD API 未连接（生图时将自动重试）")
+            else:
+                self._log_exception("❌ SD API 连接异常", e)
             self._sd_api_connected = False
             
             # 更新状态变量
@@ -326,6 +331,10 @@ class ImagesMixin:
         if skipped_count > 0:
             self.log(f"   已存在跳过: {skipped_count} 个")
         self.log(f"   需要生成: {len(tasks)} 个")
+
+        _kf_count = sum(1 for s in sorted_shots if s.get('semantic_weight', 0.5) >= 2.0 or s.get('id', 0) == 0 or s.get('id', 0) == len(sorted_shots) - 1)
+        if _kf_count > 0:
+            self.log(f"   关键帧分镜: {_kf_count} 个")
 
         if not tasks:
             self.log("✅ 所有图片已存在，无需生成")
@@ -595,6 +604,17 @@ class ImagesMixin:
             self.log(f"   已存在跳过: {skipped_count} 个")
         self.log(f"   需要生成: {len(tasks)} 个")
             
+        _keyframe_count = 0
+        for shot in sorted_shots:
+            sw = shot.get('semantic_weight', 0.5)
+            total = len(sorted_shots)
+            sid = shot.get('id', 0)
+            is_key = sw >= 2.0 or sid == 0 or sid == total - 1
+            if is_key:
+                _keyframe_count += 1
+        if _keyframe_count > 0:
+            self.log(f"   关键帧分镜: {_keyframe_count} 个（将使用增强采样参数）")
+            
         # ========== 步骤3: 模型切换（如需要）==========
         if selected_model and selected_model != "使用当前模型":
             self.log("")
@@ -695,17 +715,17 @@ class ImagesMixin:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                    vram = torch.cuda.memory_allocated() / 1024**3
+                    vram = torch.cuda.memory_allocated(0) / 1024**3
                     self.log(f"   📊 GPU 显存占用: {vram:.1f} GB")
                     if vram > 2.0:
                         self.log(f"   ⚠️ GPU 显存仍较高，等待释放...")
                         for _ in range(10):
                             time.sleep(1)
                             torch.cuda.empty_cache()
-                            vram = torch.cuda.memory_allocated() / 1024**3
+                            vram = torch.cuda.memory_allocated(0) / 1024**3
                             if vram < 1.5:
                                 break
-                        self.log(f"   📊 GPU 显存: {vram:.1f} GB")
+                    self.log(f"   📊 GPU 显存: {vram:.1f} GB")
             except Exception:
                 pass
             self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
@@ -782,6 +802,19 @@ class ImagesMixin:
                                 "scheduler": gen_params["scheduler"],
                                 "seed": -1, "batch_size": 1,
                             }
+                            _shot_data = None
+                            for s in sorted_shots:
+                                if s.get('id') == idx:
+                                    _shot_data = s
+                                    break
+                            if _shot_data:
+                                _sw = _shot_data.get('semantic_weight', 0.5)
+                                _total_shots = len(sorted_shots)
+                                _sid = _shot_data.get('id', 0)
+                                _is_keyframe = _sw >= 2.0 or _sid == 0 or _sid == _total_shots - 1
+                                if _is_keyframe:
+                                    request_payload["steps"] = min(gen_params["steps"] + 8, 50)
+                                    request_payload["cfg_scale"] = min(gen_params["cfg_scale"] + 0.5, 12.0)
                             override_settings = {}
                             if use_vae and vae_name:
                                 override_settings["sd_vae"] = vae_name

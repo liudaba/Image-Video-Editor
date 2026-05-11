@@ -175,6 +175,18 @@ def _is_traditional_conversion(old, new):
         return True
     return False
 
+# 补充 _SIMPLIFIED_TO_TRADITIONAL 中遗漏的常见繁简映射
+_SIMPLIFIED_TO_TRADITIONAL.update({
+    '对': '對', '单': '單', '忧': '憂', '舱': '艙', '钉': '釘',
+    '冲': '沖', '择': '擇', '问': '問',
+    '适': '適', '续': '續',
+    '绕': '繞', '纲': '綱', '网': '網',
+    '罚': '罰', '罢': '罷',
+    '趋': '趨', '赶': '趕',
+    '辩': '辯',
+    '凑': '湊',
+})
+
 _TRADITIONAL_TO_SIMPLIFIED = {v: k for k, v in _SIMPLIFIED_TO_TRADITIONAL.items() if k != v}
 
 def _ensure_simplified_chinese(text):
@@ -354,19 +366,29 @@ _TRANSLATION_MAPPING = {
 }
 
 _COMMON_ASR_ERROR_DICT = {
-    '零長類': '靈長類', '臨長類': '靈長類', '零长类': '灵长类', '临长类': '灵长类',
-    '金花論': '進化論', '金花论': '进化论', '精化论': '进化论', '近化论': '进化论',
+    '零长类': '灵长类', '临长类': '灵长类',
+    '金花论': '进化论', '精化论': '进化论', '近化论': '进化论',
     '秋前': '秋千', '秋钱': '秋千',
-    '千半年': '千萬年', '千半年': '千万年',
+    '千半年': '千万年',
     '分的差': '分了岔', '分的叉': '分了岔',
-    '達爾聞': '達爾文', '达尔闻': '达尔文',
+    '达尔闻': '达尔文',
     '黑腥腥': '黑猩猩', '黑星星': '黑猩猩',
-    '染色提': '染色體', '染色蹄': '染色體',
-    '進話論': '進化論', '进话论': '进化论',
-    '原長類': '靈長類', '原长类': '灵长类',
+    '染色提': '染色体', '染色蹄': '染色体',
+    '进话论': '进化论',
+    '原长类': '灵长类',
     '基恩': '基因',
-    '物理學裡': '生物學裡', '物理学里': '生物学里',
-    '父子關': '父子關係', '堂兄弟關': '堂兄弟關係',
+    '物理学里': '生物学里',
+    '父子关': '父子关系', '堂兄弟关': '堂兄弟关系',
+    '委内日拉': '委内瑞拉', '委内日瑞拉': '委内瑞拉',
+    '送动': '松动', '宋动': '松动',
+    '高枕无优': '高枕无忧',
+    '战车尚': '战车上',
+    '否决劝': '否决权', '否决全': '否决权',
+    '压仓石': '压舱石',
+    '走刚丝': '走钢丝', '走港丝': '走钢丝',
+    '串息': '喘息',
+    '干遇': '干预',
+    '前少': '前哨',
 }
 
 def _fix_whisper_repeated_chars(text):
@@ -628,6 +650,85 @@ class ShotsMixin:
         return round(min(weight, 5.0), 2)
 
 
+    def _semantic_similarity(self, text_a, text_b):
+        """计算两段中文文本的语义相似度（0.0-1.0）
+        
+        基于共享字符比例和关键词重叠度，用于智能分镜合并决策。
+        不依赖外部库，使用字符级n-gram匹配 + 单字符重叠 + 主题关键词。
+        """
+        if not text_a or not text_b:
+            return 0.0
+        a_clean = re.sub(r'[^\u4e00-\u9fff\w]', '', text_a.lower())
+        b_clean = re.sub(r'[^\u4e00-\u9fff\w]', '', text_b.lower())
+        if not a_clean or not b_clean:
+            return 0.0
+        
+        a_chars = set(a_clean)
+        b_chars = set(b_clean)
+        char_intersection = a_chars & b_chars
+        char_union = a_chars | b_chars
+        char_jaccard = len(char_intersection) / len(char_union) if char_union else 0.0
+        
+        def _char_ngrams(s, n=2):
+            return set(s[i:i+n] for i in range(max(1, len(s)-n+1)))
+        a_ngrams = _char_ngrams(a_clean)
+        b_ngrams = _char_ngrams(b_clean)
+        if a_ngrams and b_ngrams:
+            ngram_intersection = a_ngrams & b_ngrams
+            ngram_union = a_ngrams | b_ngrams
+            ngram_jaccard = len(ngram_intersection) / len(ngram_union) if ngram_union else 0.0
+        else:
+            ngram_jaccard = 0.0
+        
+        _TOPIC_KEYWORDS = [
+            "政治", "经济", "军事", "科技", "文化", "历史", "自然", "社会",
+            "教育", "健康", "环境", "能源", "外交", "法律", "金融",
+        ]
+        _TOPIC_SINGLE = {
+            "军": "军事", "政": "政治", "经": "经济", "科": "科技",
+            "文": "文化", "史": "历史", "法": "法律", "外": "外交",
+        }
+        a_topics = set(kw for kw in _TOPIC_KEYWORDS if kw in text_a)
+        b_topics = set(kw for kw in _TOPIC_KEYWORDS if kw in text_b)
+        for char, topic in _TOPIC_SINGLE.items():
+            if char in text_a:
+                a_topics.add(topic)
+            if char in text_b:
+                b_topics.add(topic)
+        topic_overlap = 1.0 if a_topics & b_topics else (0.5 if not a_topics and not b_topics else 0.0)
+        
+        similarity = char_jaccard * 0.3 + ngram_jaccard * 0.3 + topic_overlap * 0.4
+        return min(similarity, 1.0)
+
+    def _merge_shots(self, shots, keep_idx, remove_idx):
+        """智能合并两个分镜，保留语义更丰富的一方的时间范围
+        
+        合并规则：
+        - 时间范围：合并后覆盖两个分镜的完整时间跨度
+        - 描述文本：用空格连接，保留两段语义
+        - prompt_en：保留语义权重更高的一方（避免SD提示词拼接混乱）
+        - 音画同步：确保start/end时间戳连续无间隙
+        """
+        if keep_idx >= len(shots) or remove_idx >= len(shots):
+            return
+        keeper = shots[keep_idx]
+        removed = shots[remove_idx]
+        new_start = min(keeper['start'], removed['start'])
+        new_end = max(keeper['end'], removed['end'])
+        keeper['start'] = new_start
+        keeper['end'] = new_end
+        keeper['duration'] = new_end - new_start
+        keeper['description'] = keeper.get('description', '') + ' ' + removed.get('description', '')
+        keeper_weight = keeper.get('semantic_weight', 0.5)
+        removed_weight = removed.get('semantic_weight', 0.5)
+        if removed_weight > keeper_weight and removed.get('prompt_en', ''):
+            keeper['prompt_en'] = removed['prompt_en']
+        if removed.get('negative_prompt', '') and not keeper.get('negative_prompt', ''):
+            keeper['negative_prompt'] = removed['negative_prompt']
+        keeper['semantic_weight'] = max(keeper_weight, removed_weight)
+        shots.pop(remove_idx)
+
+
     # =======================================================================
     # 第四部分：分镜创建与管理 (行 3422-3840)
     # =======================================================================
@@ -862,6 +963,83 @@ class ShotsMixin:
         return merged
 
 
+    def _review_narrative_coherence(self, pregenerated_prompts, final_tasks):
+        """全局叙事连贯性审查 - 确保视觉叙事弧线完整
+        
+        审查维度：
+        1. 首尾呼应：opening和closing分镜的视觉元素应有主题关联
+        2. 叙事弧线：确保opening→development→climax→resolution的视觉强度递进
+        3. 视觉基调一致性：检测并修正突兀的风格跳变
+        """
+        if not pregenerated_prompts or len(pregenerated_prompts) < 3:
+            return
+        
+        indices = sorted(pregenerated_prompts.keys())
+        total = len(indices)
+        if total < 3:
+            return
+        
+        first_prompt = pregenerated_prompts.get(indices[0], "")
+        last_prompt = pregenerated_prompts.get(indices[-1], "")
+        
+        if first_prompt and last_prompt:
+            _CLOSING_THEMES = {
+                'palace': 'empty courtyard, no allies',
+                'balcony': 'distant horizon, solitude',
+                'office': 'dimly lit, papers scattered',
+                'military': 'silent battlefield, aftermath',
+                'courtroom': 'empty chamber, gavel at rest',
+                'protest': 'quiet street, aftermath',
+                'portrait': 'reflective gaze, contemplation',
+                'handshake': 'sealed document, finality',
+                'flag': 'sunset over landmark, closure',
+            }
+            
+            first_lower = first_prompt.lower()
+            closing_theme_found = False
+            for key, closing_visual in _CLOSING_THEMES.items():
+                if key in first_lower and key not in last_prompt.lower():
+                    last_prompt = last_prompt.rstrip() + f", {closing_visual}"
+                    pregenerated_prompts[indices[-1]] = last_prompt
+                    closing_theme_found = True
+                    break
+            
+            if closing_theme_found:
+                self.log("   🎬 尾分镜已添加首尾呼应视觉元素")
+        
+        _SHOT_TYPE_KEYWORDS = {
+            'wide': ['wide angle', 'wide shot', 'establishing shot', 'panoramic', 'aerial'],
+            'medium': ['medium shot', 'medium close-up', 'mid shot', 'waist up'],
+            'close': ['close-up', 'close up', 'tight', 'detail shot', 'macro'],
+        }
+        
+        _has_opening_wide = any(kw in first_prompt.lower() for kw in _SHOT_TYPE_KEYWORDS['wide']) if first_prompt else False
+        if not _has_opening_wide and total >= 4:
+            first_prompt = re.sub(
+                r'(medium shot|close-up|close up|tight shot)',
+                'wide establishing shot',
+                first_prompt,
+                count=1,
+                flags=re.IGNORECASE
+            )
+            if first_prompt != pregenerated_prompts.get(indices[0], ""):
+                pregenerated_prompts[indices[0]] = first_prompt
+                self.log("   🎬 首分镜已调整为广角建立镜头")
+        
+        _has_closing_wide = any(kw in last_prompt.lower() for kw in _SHOT_TYPE_KEYWORDS['wide'] + _SHOT_TYPE_KEYWORDS['medium']) if last_prompt else False
+        if not _has_closing_wide and total >= 4:
+            last_prompt = re.sub(
+                r'(close-up|close up|tight shot|macro)',
+                'medium shot, reflective',
+                last_prompt,
+                count=1,
+                flags=re.IGNORECASE
+            )
+            if last_prompt != pregenerated_prompts.get(indices[-1], ""):
+                pregenerated_prompts[indices[-1]] = last_prompt
+                self.log("   🎬 尾分镜已调整为收束镜头")
+
+
     def _check_and_deduplicate_prompts(self, pregenerated_prompts, final_tasks):
         """检测并修正重复的提示词 - 轻量级本地处理版
         
@@ -905,6 +1083,12 @@ class ShotsMixin:
                 'ancient primate', 'hominid', 'early hominid', 'primitive hominid',
                 'cave painting', 'stone tool', 'timeline mural', 'comparative anatomy',
                 'cell division', 'protein folding',
+                'palace', 'office', 'military', 'soldier', 'general',
+                'casino', 'poker', 'card', 'gold', 'oil', 'contract',
+                'courtroom', 'prison', 'border', 'refugee',
+                'helicopter', 'warship', 'tank', 'rifle', 'missile',
+                'protest', 'crowd', 'rally', 'speech', 'podium',
+                'map', 'globe', 'flag', 'document', 'desk',
             }
             prompt_lower = prompt.lower()
             found = set()
@@ -946,6 +1130,36 @@ class ShotsMixin:
             'protein folding': ['enzyme active site', 'molecular docking', 'amino acid chain'],
             'museum': ['archive room', 'library study', 'display cabinet'],
             'laboratory': ['field station', 'research vessel', 'outdoor experiment'],
+            'palace': ['government building corridor', 'presidential residence exterior', 'official chamber'],
+            'office': ['war room', 'command center', 'briefing room', 'diplomatic chamber'],
+            'military': ['armed patrol', 'security detail', 'paramilitary unit'],
+            'soldier': ['armed guard', 'security personnel', 'military officer'],
+            'general': ['admiral', 'field marshal', 'commander in uniform'],
+            'casino': ['high-stakes negotiation table', 'backroom deal', 'luxury hotel suite'],
+            'poker': ['strategic negotiation', 'backroom dealing', 'diplomatic bargaining'],
+            'card': ['negotiation document', 'treaty paper', 'strategic dossier'],
+            'gold': ['oil contract', 'mineral rights document', 'treasury vault'],
+            'oil': ['petroleum refinery', 'oil pipeline', 'energy infrastructure'],
+            'contract': ['treaty document', 'trade agreement', 'memorandum'],
+            'courtroom': ['tribunal chamber', 'international court', 'judicial hearing room'],
+            'prison': ['detention facility', 'holding cell', 'interrogation room'],
+            'border': ['checkpoint crossing', 'frontier outpost', 'coastal patrol'],
+            'refugee': ['displaced family', 'evacuee convoy', 'humanitarian camp'],
+            'helicopter': ['military transport plane', 'surveillance drone', 'naval vessel'],
+            'warship': ['patrol boat', 'submarine', 'aircraft carrier deck'],
+            'tank': ['armored vehicle', 'military jeep', 'patrol truck'],
+            'rifle': ['sidearm', 'military baton', 'security radio'],
+            'missile': ['rocket launcher', 'military installation', 'defense system'],
+            'protest': ['demonstration march', 'public gathering', 'strike rally'],
+            'crowd': ['assembled officials', 'parliament members', 'delegation'],
+            'rally': ['political convention', 'campaign event', 'press conference'],
+            'speech': ['address from podium', 'televised announcement', 'press statement'],
+            'podium': ['negotiation table', 'cabinet desk', 'parliament lectern'],
+            'map': ['satellite view', 'strategic diagram', 'terrain model'],
+            'globe': ['world atlas page', 'regional map', 'strategic chart'],
+            'flag': ['national emblem', 'official seal', 'coat of arms'],
+            'document': ['classified folder', 'official decree', 'sealed envelope'],
+            'desk': ['conference table', 'negotiation table', 'war room table'],
         }
         
         duplicate_count = 0
@@ -962,7 +1176,7 @@ class ShotsMixin:
                 continue
             
             overlap = _token_overlap_ratio(curr_prompt, prev_prompt)
-            if overlap > 0.5:
+            if overlap > 0.35:
                 duplicate_count += 1
                 prev_elements = _get_visual_elements(prev_prompt)
                 new_prompt = curr_prompt
@@ -1029,7 +1243,74 @@ class ShotsMixin:
                             pregenerated_prompts[dup_idx] = new_prompt
                             self._pregenerated_prompts_for_context[dup_idx] = new_prompt
                             duplicate_count += 1
-        
+
+        # Pass 3: 窗口3内的非相邻相似检测
+        # 检测距离2-3的分镜之间的相似度，防止跳过一个分镜后重复
+        for i in range(2, len(indices)):
+            curr_idx = indices[i]
+            curr_prompt = pregenerated_prompts.get(curr_idx, "")
+            if not curr_prompt:
+                continue
+            for gap in (2, 3):
+                if i - gap < 0:
+                    continue
+                prev_idx = indices[i - gap]
+                prev_prompt = pregenerated_prompts.get(prev_idx, "")
+                if not prev_prompt:
+                    continue
+                overlap = _token_overlap_ratio(curr_prompt, prev_prompt)
+                if overlap > 0.45:
+                    prev_elements = _get_visual_elements(prev_prompt)
+                    new_prompt = curr_prompt
+                    for elem in prev_elements:
+                        if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
+                            alternatives = VISUAL_ALTERNATIVES[elem]
+                            import random
+                            replacement = random.choice(alternatives)
+                            pattern = r'\b' + re.escape(elem) + r'\b'
+                            new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
+                    if new_prompt != curr_prompt:
+                        new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
+                        new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                        new_prompt = new_prompt.strip(' ,')
+                        pregenerated_prompts[curr_idx] = new_prompt
+                        self._pregenerated_prompts_for_context[curr_idx] = new_prompt
+                        duplicate_count += 1
+                    break
+
+        # Pass 4: 中文语义骨架级别去重 - 利用两步法提取的语义骨架
+        if hasattr(self, '_chinese_semantic_skeletons') and self._chinese_semantic_skeletons:
+            skeleton_indices = sorted(self._chinese_semantic_skeletons.keys())
+            for i in range(1, len(skeleton_indices)):
+                curr_sk_idx = skeleton_indices[i]
+                prev_sk_idx = skeleton_indices[i - 1]
+                if abs(curr_sk_idx - prev_sk_idx) > 3:
+                    continue
+                curr_skeleton = self._chinese_semantic_skeletons.get(curr_sk_idx, "")
+                prev_skeleton = self._chinese_semantic_skeletons.get(prev_sk_idx, "")
+                if not curr_skeleton or not prev_skeleton:
+                    continue
+                sk_sim = self._semantic_similarity(curr_skeleton, prev_skeleton)
+                if sk_sim > 0.6:
+                    curr_prompt = pregenerated_prompts.get(curr_sk_idx, "")
+                    if curr_prompt:
+                        prev_elements = _get_visual_elements(curr_prompt)
+                        new_prompt = curr_prompt
+                        for elem in prev_elements:
+                            if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
+                                alternatives = VISUAL_ALTERNATIVES[elem]
+                                import random
+                                replacement = random.choice(alternatives)
+                                pattern = r'\b' + re.escape(elem) + r'\b'
+                                new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
+                        if new_prompt != curr_prompt:
+                            new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
+                            new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                            new_prompt = new_prompt.strip(' ,')
+                            pregenerated_prompts[curr_sk_idx] = new_prompt
+                            self._pregenerated_prompts_for_context[curr_sk_idx] = new_prompt
+                            duplicate_count += 1
+
         return duplicate_count
 
 
@@ -1261,6 +1542,9 @@ class ShotsMixin:
         # 清理句子，确保语义清晰
         cleaned_sentence = re.sub(r'[\s\n\r]+', ' ', sentence).strip()
         
+        # 确保繁体字转为简体
+        cleaned_sentence = _ensure_simplified_chinese(cleaned_sentence)
+        
         # 清洗和修正文本，修正错别字和语句不通顺的地方
         cleaned_sentence = self.clean_text(cleaned_sentence)
         
@@ -1336,7 +1620,7 @@ class ShotsMixin:
         sd_model_name = ""
         if hasattr(self, 'model_var'):
             sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
-        shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'], sd_model_name)
+        shot_data["negative_prompt"] = self._get_custom_negative_prompt(content_type, description_parts['dubbing'], sd_model_name, shot_id)
         
         return shot_data
     
@@ -1534,8 +1818,10 @@ class ShotsMixin:
     def _clean_prompt_output(self, raw_output):
         """清洗大模型输出的提示词，移除解释性文字和格式污染
         
-        支持两阶段输出格式: [understanding] | [prompt]
-        如果检测到此格式，只提取 [prompt] 部分
+        支持输出格式:
+        - 三阶段格式: 中文语义骨架 || English understanding || SD prompt (优先)
+        - 两阶段格式: [understanding] | [prompt] (向后兼容)
+        如果检测到对应格式，只提取 SD prompt 部分
         
         Args:
             raw_output: 大模型返回的原始输出
@@ -1548,52 +1834,63 @@ class ShotsMixin:
         
         text = str(raw_output).strip()
 
-        # 方向A: Unicode/Tokenizer腐败清洗（最高优先级）
-        # 移除 <unusedXXXX> tokenizer artifact
         text = re.sub(r'<unused\d+>', '', text)
-        # 移除非拉丁Unicode腐败字符（印地文、孟加拉文、奥里亚文、泰米尔文等）
-        # 保留: 拉丁字母、中文、日文假名、韩文、基本标点、SD权重语法字符
         text = re.sub(r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u0E00-\u0E7F\u0E80-\u0EFF\u1000-\u109F\u10A0-\u10FF\u1100-\u11FF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]', '', text)
-        # 移除Emoji和特殊符号（保留基本标点和SD语法）
         text = re.sub(r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0000FE00-\U0000FE0F\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF]', '', text)
-        # 移除数学符号 ⎤⎦ 等
         text = re.sub(r'[\u2300-\u23FF\u27C0-\u27EF\u2980-\u29FF]', '', text)
-        # 移除希腊字母混入（如 ϱ️）
         text = re.sub(r'[\u0370-\u03FF\u1F00-\u1FFF][\uFE00-\uFE0F]?', '', text)
-        # 移除损坏的方括号组合如 [prompt xxx
         text = re.sub(r'\[prompt\s+', '[', text, flags=re.IGNORECASE)
+        
+        _three_part_format = False
+        if '||' in text:
+            parts = text.split('||')
+            if len(parts) >= 3:
+                text = parts[-1].strip()
+                _three_part_format = True
+            elif len(parts) == 2:
+                text = parts[-1].strip()
+                _three_part_format = True
         
         # 解析两阶段输出格式: [understanding] | [prompt]
         # 格式1: [some understanding text] | [some prompt text]
         # 格式2: [Understanding]: some text | [Prompt]: some text
         # 格式3: Understanding: some text | Prompt: some text
+        # 格式4: bare understanding text | (prompt keywords)  <-- 最常见，LLM经常不写方括号
         
-        # 优先尝试格式2/3: [Label]: text | [Label]: text
-        label_pipe_match = re.search(
-            r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*.*?\s*\|\s*\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*',
-            text, re.IGNORECASE | re.DOTALL
-        )
-        if label_pipe_match:
-            after_match = text[label_pipe_match.end():].strip()
-            if after_match and len(after_match) > 10:
-                text = after_match
-        else:
-            # 尝试无括号的标签格式: Understanding: text | Prompt: text
-            no_bracket_match = re.search(
-                r'(?:Understanding|understanding)\s*:\s*.*?\s*\|\s*(?:Prompt|prompt)\s*:\s*',
+        if not _three_part_format:
+            label_pipe_match = re.search(
+                r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*.*?\s*\|\s*\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*',
                 text, re.IGNORECASE | re.DOTALL
             )
-            if no_bracket_match:
-                after_match = text[no_bracket_match.end():].strip()
+            if label_pipe_match:
+                after_match = text[label_pipe_match.end():].strip()
                 if after_match and len(after_match) > 10:
                     text = after_match
             else:
-                # 格式1: [text] | [text] - 原始逻辑
-                pipe_match = re.search(r'\]\s*\|\s*', text)
-                if pipe_match:
-                    after_pipe = text[pipe_match.end():].strip()
-                    if after_pipe and len(after_pipe) > 10:
+                no_bracket_match = re.search(
+                    r'(?:Understanding|understanding)\s*:\s*.*?\s*\|\s*(?:Prompt|prompt)\s*:\s*',
+                    text, re.IGNORECASE | re.DOTALL
+                )
+                if no_bracket_match:
+                    after_match = text[no_bracket_match.end():].strip()
+                    if after_match and len(after_match) > 10:
+                        text = after_match
+                else:
+                    pipe_match = re.search(r'\]\s*\|\s*', text)
+                    if pipe_match:
+                        after_pipe = text[pipe_match.end():].strip()
+                        if after_pipe and len(after_pipe) > 10:
+                            text = after_pipe
+            
+            if '|' in text and not re.search(r'\]\s*\|\s*', text):
+                pipe_positions = [m.start() for m in re.finditer(r'\|', text)]
+                for pipe_pos in pipe_positions:
+                    after_pipe = text[pipe_pos + 1:].strip()
+                    has_sd_weight = bool(re.search(r'\([^)]*:\s*1\.\d+\)', after_pipe))
+                    has_comma_keywords = len([p for p in after_pipe.split(',') if len(p.strip()) > 2]) >= 3
+                    if (has_sd_weight or has_comma_keywords) and len(after_pipe) > 10:
                         text = after_pipe
+                        break
         
         # 清除残留的 [Understanding]: 或 [Prompt]: 标签
         text = re.sub(r'\[(?:Understanding|understanding|Prompt|prompt)\]\s*:\s*', '', text, flags=re.IGNORECASE)
@@ -1849,6 +2146,29 @@ class ShotsMixin:
             text = re.sub(r',?\s*\b' + re.escape(w) + r'\b\s*,?', ',', text, flags=re.IGNORECASE)
         text = re.sub(r',\s*,+', ',', text).strip(', ')
 
+        # 修复非法权重值: (keyword:1𒁩) → (keyword:1.3), (keyword:1 dwRes) → (keyword:1.3)
+        # SD权重语法中冒号后必须是 1.X 格式的数字，否则替换为默认1.3
+        def _fix_corrupted_weights(t):
+            def _replace_bad_weight(m):
+                keyword = m.group(1)
+                weight_str = m.group(2)
+                try:
+                    weight = float(weight_str)
+                    if 0.5 <= weight <= 2.0:
+                        normalized = f'{weight:.1f}'
+                        return f'({keyword}:{normalized})'
+                    else:
+                        return f'({keyword}:1.3)'
+                except (ValueError, TypeError):
+                    return f'({keyword}:1.3)'
+            return re.sub(r'\(([^)]*?):\s*([^,)]*?)\)', _replace_bad_weight, t)
+        text = _fix_corrupted_weights(text)
+
+        # 清理截断残留: "Maduro's 3," 或 "3, a general examining" 中的孤立数字3
+        # 这是LLM输出被截断后的残留token，常见模式: "xxx 3, yyy" 或 "xxx's 3, yyy"
+        text = re.sub(r"\b3\s*,\s*(?=[a-z])", '', text)
+        text = re.sub(r"(?:'s\s+)?\b3\b\s*,", ',', text)
+
         # Fix SD syntax: [text:weight] → (text:weight) - square brackets are NOT weight syntax in SD
         text = re.sub(r'\[([^,\]]+?):([\d.]+)\]', r'(\1:\2)', text)
 
@@ -1907,27 +2227,56 @@ class ShotsMixin:
         return text.strip()
 
     def _extract_understanding(self, raw_output):
-        """从LLM原始输出中提取understanding部分，用于场景去重"""
+        """从LLM原始输出中提取understanding部分，用于场景去重
+        
+        支持格式:
+        - 三阶段: 中文语义骨架 || English understanding || SD prompt
+        - 两阶段: [understanding] | [prompt] (向后兼容)
+        """
         if not raw_output:
             return ""
         text = str(raw_output).strip()
         understanding = ""
-        pipe_match = re.search(r'\]\s*\|\s*', text)
-        if pipe_match:
-            before_pipe = text[:pipe_match.start()].strip()
-            label_match = re.search(r'\[(?:Understanding|understanding)\]\s*:\s*(.+)', before_pipe, re.DOTALL)
-            if label_match:
-                understanding = label_match.group(1).strip()
-            else:
-                no_bracket_match = re.search(r'(?:Understanding|understanding)\s*:\s*(.+)', before_pipe, re.IGNORECASE | re.DOTALL)
-                if no_bracket_match:
-                    understanding = no_bracket_match.group(1).strip()
-            if not understanding and before_pipe.startswith('[') and before_pipe.endswith(']'):
-                understanding = before_pipe[1:-1].strip()
+        if '||' in text:
+            parts = text.split('||')
+            if len(parts) >= 3:
+                understanding = parts[1].strip()
+            elif len(parts) == 2:
+                understanding = parts[0].strip()
+        if not understanding:
+            pipe_match = re.search(r'\]\s*\|\s*', text)
+            if pipe_match:
+                before_pipe = text[:pipe_match.start()].strip()
+                label_match = re.search(r'\[(?:Understanding|understanding)\]\s*:\s*(.+)', before_pipe, re.DOTALL)
+                if label_match:
+                    understanding = label_match.group(1).strip()
+                else:
+                    no_bracket_match = re.search(r'(?:Understanding|understanding)\s*:\s*(.+)', before_pipe, re.IGNORECASE | re.DOTALL)
+                    if no_bracket_match:
+                        understanding = no_bracket_match.group(1).strip()
+                if not understanding and before_pipe.startswith('[') and before_pipe.endswith(']'):
+                    understanding = before_pipe[1:-1].strip()
         if understanding:
             understanding = re.sub(r'^(Understanding|understanding)\s*:\s*', '', understanding, flags=re.IGNORECASE).strip()
             understanding = re.sub(r'\[|\]', '', understanding).strip()
         return understanding[:200] if understanding else ""
+
+    def _extract_chinese_skeleton(self, raw_output):
+        """从LLM原始输出中提取中文语义骨架部分
+        
+        格式: 中文语义骨架 || English understanding || SD prompt
+        """
+        if not raw_output:
+            return ""
+        text = str(raw_output).strip()
+        if '||' in text:
+            parts = text.split('||')
+            if len(parts) >= 3:
+                skeleton = parts[0].strip()
+                skeleton = re.sub(r'^\[\d+\]\s*', '', skeleton).strip()
+                skeleton = re.sub(r'\[|\]', '', skeleton).strip()
+                return skeleton[:150] if skeleton else ""
+        return ""
 
     def _generate_fallback_prompt(self, raw_output):
         """当清洗后提示词为空时，从原始输出中提取最小可用提示词"""
@@ -1960,6 +2309,7 @@ class ShotsMixin:
         - SD3:    无前缀，轻量后缀
 
         非写实风格（皮克斯、吉卜力、动漫等）自动移除写实关键词。
+        动态增强：根据场景语义调整质量前缀强度。
         """
         from video_generator.model_profiles import get_model_profile, detect_model_type
 
@@ -1988,6 +2338,24 @@ class ShotsMixin:
             prefix = re.sub(r',\s*,+', ',', prefix).strip(', ')
             suffix = re.sub(r',\s*,+', ',', suffix).strip(', ')
 
+        scene_lower = scene_description.lower()
+        if model_type == "sd15":
+            _has_person = bool(re.search(r'\(?(?:person|man|woman|girl|boy|portrait|figure|soldier|officer|president|leader|general|doctor|scientist|woman in|man in)[^)]*\)?:\s*1\.\d', scene_lower))
+            _has_landscape = bool(re.search(r'(?:landscape|panoramic|aerial|wide angle|establishing shot|skyline|horizon|mountain|ocean|forest)', scene_lower))
+            _has_closeup = bool(re.search(r'(?:close-up|close up|detail|macro|tight)', scene_lower))
+            
+            if _has_person and not _has_landscape:
+                if 'best quality' not in prefix.lower():
+                    prefix = "(best quality:1.2), " + prefix if prefix else "(best quality:1.2)"
+                if 'anatomy' not in prefix.lower():
+                    prefix += ", (detailed face:1.1)"
+            elif _has_landscape:
+                if 'scenic' not in prefix.lower():
+                    suffix = (suffix + ", scenic, dramatic atmosphere") if suffix else "scenic, dramatic atmosphere"
+            if _has_closeup and _has_person:
+                if 'skin detail' not in prefix.lower():
+                    prefix += ", (skin detail:1.1), (eye detail:1.1)"
+
         redundant = [
             "masterpiece", "best quality", "ultra detailed", "8k",
             "photorealistic", "cinematic lighting", "documentary style",
@@ -1995,8 +2363,11 @@ class ShotsMixin:
             "RAW photo", "raw photo", "film grain texture",
             "documentary photography", "photojournalism",
             "raw and authentic", "unposed", "candid shot",
+            "detailed face", "skin detail", "eye detail",
+            "scenic", "dramatic atmosphere",
         ]
         cleaned = scene_description
+        cleaned = re.sub(r'\(\s*masterpiece\s*,\s*best\s+quality\s*:\s*[\d.]+\s*\)', '', cleaned, flags=re.IGNORECASE)
         for tag in redundant:
             cleaned = re.sub(r',?\s*\(' + re.escape(tag) + r'(?::[\d.]+)?\)\s*,?', ',', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r',?\s*' + re.escape(tag) + r'\s*,?', ',', cleaned, flags=re.IGNORECASE)
@@ -2061,8 +2432,15 @@ class ShotsMixin:
         
         if not is_llm_available():
             self.log("⚠️ 大模型不可用，使用内置逻辑生成提示词")
+            fallback_parts = {
+                'dubbing': dubbing,
+                'content_type': content_type,
+                'custom_theme': core_theme,
+                'custom_visual_tone': visual_tone,
+                'theme_elements': theme_elements,
+            }
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
-                return self._generate_arv_format_prompt(dubbing, content_type, 0)
+                return self._generate_arv_format_prompt(fallback_parts, content_type, 0)
             elif prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
                 return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone)
             else:
@@ -2092,6 +2470,24 @@ class ShotsMixin:
                         prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx-2), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
                         if prev_prompts:
                             context_hint += f"AVOID: {', '.join(prev_prompts[-2:])}\n"
+                        
+                        # 提取已用背景关键词，防止背景同质化
+                        _BACKGROUND_KEYWORDS = [
+                            'palace interior', 'dimly lit office', 'mahogany table', 'overcast sky',
+                            'palace', 'office', 'courtroom', 'military base', 'border crossing',
+                            'rural landscape', 'port', 'harbor', 'diplomatic venue', 'refugee camp',
+                            'oil facility', 'parliament hall', 'prison corridor', 'airport tarmac',
+                            'hotel lobby', 'city street', 'war room', 'bunker', 'balcony',
+                        ]
+                        used_backgrounds = []
+                        for j in range(max(0, idx - 6), idx):
+                            if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]:
+                                prev_p_lower = self._pregenerated_prompts_for_context[j].lower()
+                                for bg in _BACKGROUND_KEYWORDS:
+                                    if bg in prev_p_lower and bg not in used_backgrounds:
+                                        used_backgrounds.append(bg)
+                        if used_backgrounds:
+                            context_hint += f"USED BACKGROUNDS (do NOT reuse): {', '.join(used_backgrounds[-5:])}\n"
                     
                     if hasattr(self, '_pregenerated_understandings_for_context'):
                         prev_understandings = [self._pregenerated_understandings_for_context[j] for j in range(max(0, idx-3), idx) if j in self._pregenerated_understandings_for_context and self._pregenerated_understandings_for_context[j]]
@@ -2102,15 +2498,38 @@ class ShotsMixin:
                     
                     total_shots = len(shot_texts)
                     if idx == 0:
-                        context_hint += "Position: OPENING\n"
+                        context_hint += "Position: OPENING - Establish the scene, set the visual tone for the entire video. Use a WIDE establishing shot.\n"
                     elif idx == total_shots - 1:
-                        context_hint += "Position: CLOSING\n"
+                        context_hint += "Position: CLOSING - Provide visual closure. Use a resonant final image that echoes the core theme.\n"
+                    else:
+                        progress = idx / max(1, total_shots - 1)
+                        if progress <= 0.25:
+                            context_hint += "Position: INTRODUCTION (first quarter) - Introduce key subjects and settings. Prefer medium shots that clearly show who/what.\n"
+                        elif progress <= 0.5:
+                            context_hint += "Position: DEVELOPMENT (second quarter) - Show actions, interactions, and details. Prefer close-ups and dynamic angles.\n"
+                        elif progress <= 0.75:
+                            context_hint += "Position: CLIMAX (third quarter) - Heighten visual intensity. Use dramatic lighting, tight close-ups, or symbolic imagery.\n"
+                        else:
+                            context_hint += "Position: RESOLUTION (final quarter) - Show consequences, outcomes, or reflection. Prefer medium/wide shots with emotional weight.\n"
             except Exception:
                 pass
         
         entity_hint = self._extract_entities_for_prompt(dubbing)
         if entity_hint:
             context_hint += f"Entities: {entity_hint}\n"
+        
+        if hasattr(self, '_chinese_semantic_skeletons') and isinstance(dubbing, str):
+            shot_texts = getattr(self, '_shot_texts_for_context', [])
+            try:
+                idx = shot_index if shot_index >= 0 else (shot_texts.index(dubbing) if dubbing in shot_texts else -1)
+                if idx >= 0:
+                    prev_skeletons = [self._chinese_semantic_skeletons[j] for j in range(max(0, idx-2), idx) if j in self._chinese_semantic_skeletons and self._chinese_semantic_skeletons[j]]
+                    if prev_skeletons:
+                        context_hint += f"前序语义骨架 (确保语义递进，不重复):\n"
+                        for sk in prev_skeletons[-2:]:
+                            context_hint += f"  - {sk}\n"
+            except Exception:
+                pass
         
         template_params["context_hint"] = context_hint
         
@@ -2131,8 +2550,8 @@ class ShotsMixin:
                 system_prompt=template["system"],
                 user_prompt=template["user"],
                 log_callback=self.log,
-                num_predict=384,
-                num_ctx=1532,
+                num_predict=512,
+                num_ctx=2560,
                 llm_config=llm_config,
                 timeout=Config.API_TIMEOUT_LLM_PROMPT
             )
@@ -2144,6 +2563,9 @@ class ShotsMixin:
                     understanding = self._extract_understanding(raw_output)
                     if understanding and hasattr(self, '_pregenerated_understandings_for_context') and shot_index >= 0:
                         self._pregenerated_understandings_for_context[shot_index] = understanding
+                    chinese_skeleton = self._extract_chinese_skeleton(raw_output)
+                    if chinese_skeleton and hasattr(self, '_chinese_semantic_skeletons') and shot_index >= 0:
+                        self._chinese_semantic_skeletons[shot_index] = chinese_skeleton
                     return cleaned_prompt
                 self.log(f"⚠️ 模型 {model} 输出被清洗后为空，原始输出: {raw_output[:100]}")
             
@@ -2156,13 +2578,181 @@ class ShotsMixin:
                     core_theme=core_theme, visual_tone=visual_tone)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
                 custom_theme=core_theme, custom_visual_tone=visual_tone)
+
+    def _generate_prompts_batch(self, batch_items, theme_info, user_prompt_type,
+                                 user_style_override, full_text):
+        """批量生成提示词 - 将多个分镜合并为一次LLM调用以减少开销
+
+        Args:
+            batch_items: 列表，每个元素为 (original_idx, task_dict)
+            theme_info: 主题信息字典
+            user_prompt_type: 提示词类型
+            user_style_override: 用户风格覆盖
+            full_text: 全文
+        Returns:
+            dict: {original_idx: prompt_string}，失败的项目值为空字符串
+        """
+        if not batch_items:
+            return {}
+
+        model = self._get_current_model()
+        if not model:
+            model = "gemma3:4b"
+
+        effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
+        effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
+
+        template_params = {
+            "content_type": theme_info.get('content_type', '') or "未指定类型",
+            "core_theme": theme_info.get('core_theme', '') or "未指定",
+            "visual_style": effective_visual_style,
+            "visual_tone": effective_visual_tone,
+            "theme_elements": ", ".join(theme_info.get('theme_elements', [])) if theme_info.get('theme_elements') else "根据配音内容确定",
+            "dubbing": "",
+            "visual_narrative_strategy": theme_info.get('visual_narrative_strategy', '')
+        }
+
+        if user_prompt_type == "ARV写实提示词":
+            template_key = "shot_prompt_sd"
+        else:
+            sd_model_name = ""
+            if hasattr(self, 'model_var'):
+                sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
+
+        dubbings = []
+        for original_idx, task in batch_items:
+            dubbing = task.get('text', '')
+            context_hint = ""
+            if hasattr(self, '_shot_texts_for_context') and dubbing:
+                shot_texts = self._shot_texts_for_context
+                try:
+                    idx = original_idx
+                    if idx >= 0:
+                        if hasattr(self, '_pregenerated_prompts_for_context'):
+                            prev_prompts = [self._pregenerated_prompts_for_context[j] for j in range(max(0, idx - 2), idx) if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]]
+                            if prev_prompts:
+                                context_hint += f"AVOID: {', '.join(prev_prompts[-2:])}\n"
+                            _BACKGROUND_KEYWORDS = [
+                                'palace interior', 'dimly lit office', 'mahogany table', 'overcast sky',
+                                'palace', 'office', 'courtroom', 'military base', 'border crossing',
+                                'rural landscape', 'port', 'harbor', 'diplomatic venue', 'refugee camp',
+                                'oil facility', 'parliament hall', 'prison corridor', 'airport tarmac',
+                                'hotel lobby', 'city street', 'war room', 'bunker', 'balcony',
+                            ]
+                            used_backgrounds = []
+                            for j in range(max(0, idx - 6), idx):
+                                if j in self._pregenerated_prompts_for_context and self._pregenerated_prompts_for_context[j]:
+                                    prev_p_lower = self._pregenerated_prompts_for_context[j].lower()
+                                    for bg in _BACKGROUND_KEYWORDS:
+                                        if bg in prev_p_lower and bg not in used_backgrounds:
+                                            used_backgrounds.append(bg)
+                            if used_backgrounds:
+                                context_hint += f"USED BACKGROUNDS (do NOT reuse): {', '.join(used_backgrounds[-5:])}\n"
+                        if hasattr(self, '_pregenerated_understandings_for_context'):
+                            prev_understandings = [self._pregenerated_understandings_for_context[j] for j in range(max(0, idx - 3), idx) if j in self._pregenerated_understandings_for_context and self._pregenerated_understandings_for_context[j]]
+                            if prev_understandings:
+                                context_hint += "PREVIOUS SCENES (do NOT repeat similar scenes):\n"
+                                for u in prev_understandings[-3:]:
+                                    context_hint += f"  - {u}\n"
+                        total_shots = len(shot_texts)
+                        if idx == 0:
+                            context_hint += "Position: OPENING\n"
+                        elif idx == total_shots - 1:
+                            context_hint += "Position: CLOSING\n"
+                except Exception:
+                    pass
+
+            entity_hint = self._extract_entities_for_prompt(dubbing)
+            if entity_hint:
+                context_hint += f"Entities: {entity_hint}\n"
+
+            if hasattr(self, '_chinese_semantic_skeletons') and dubbing:
+                shot_texts = getattr(self, '_shot_texts_for_context', [])
+                try:
+                    idx = original_idx
+                    if idx >= 0:
+                        prev_skeletons = [self._chinese_semantic_skeletons[j] for j in range(max(0, idx-2), idx) if j in self._chinese_semantic_skeletons and self._chinese_semantic_skeletons[j]]
+                        if prev_skeletons:
+                            context_hint += f"前序语义骨架 (确保语义递进，不重复):\n"
+                            for sk in prev_skeletons[-2:]:
+                                context_hint += f"  - {sk}\n"
+                except Exception:
+                    pass
+
+            dubbings.append({
+                "idx": original_idx + 1,
+                "text": dubbing,
+                "context_hint": context_hint.strip()
+            })
+
+        batch_template = PromptTemplates.get_batch_template(template_key, dubbings, **template_params)
+
+        batch_size = len(batch_items)
+        num_predict = min(512 * batch_size, 4096)
+        num_ctx = min(2560 + 256 * batch_size, 8192)
+
+        try:
+            result_text, _ = call_ollama_single(
+                model=model,
+                system_prompt=batch_template["system"],
+                user_prompt=batch_template["user"],
+                log_callback=self.log,
+                num_predict=num_predict,
+                num_ctx=num_ctx,
+                llm_config=getattr(self, 'current_llm_config', None),
+                timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size // 2)
+            )
+
+            if not result_text:
+                self.log(f"   ⚠️ 批量生成返回为空（批次大小: {batch_size}）")
+                return {idx: "" for idx, _ in batch_items}
+
+            results = {}
+            raw_output = result_text.strip()
+            lines = raw_output.split('\n')
+
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r'\[(\d+)\]\s*(.+)', line)
+                if not match:
+                    match = re.match(r'(\d+)[.\)]\s*(.+)', line)
+                if match:
+                    shot_num = int(match.group(1))
+                    content = match.group(2).strip()
+                    original_idx = shot_num - 1
+                    idx_keys = [idx for idx, _ in batch_items]
+                    if original_idx in idx_keys:
+                        cleaned = self._clean_prompt_output(content)
+                        if cleaned:
+                            results[original_idx] = cleaned
+                            understanding = self._extract_understanding(content)
+                            if understanding and hasattr(self, '_pregenerated_understandings_for_context'):
+                                self._pregenerated_understandings_for_context[original_idx] = understanding
+                            chinese_skeleton = self._extract_chinese_skeleton(content)
+                            if chinese_skeleton and hasattr(self, '_chinese_semantic_skeletons'):
+                                self._chinese_semantic_skeletons[original_idx] = chinese_skeleton
+                            if hasattr(self, '_pregenerated_prompts_for_context'):
+                                self._pregenerated_prompts_for_context[original_idx] = cleaned
+
+            for original_idx, _ in batch_items:
+                if original_idx not in results:
+                    results[original_idx] = ""
+
+            return results
+
+        except Exception as e:
+            self._log_exception(f"⚠️ 批量生成提示词失败（批次大小: {batch_size}）", e)
+            return {idx: "" for idx, _ in batch_items}
     
 
-    def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name=""):
+    def _get_custom_negative_prompt(self, content_type, dubbing, sd_model_name="", shot_index=-1):
         """根据制图模型类型和内容生成定制化负面提示词 - 增强版
         
         使用 model_profiles 统一管理基础负面提示词，
-        然后根据配音文本内容动态添加针对性的负面提示词
+        然后根据配音文本内容和中文语义骨架动态添加针对性的负面提示词
         """
         from video_generator.model_profiles import get_model_profile, detect_model_type
 
@@ -2195,40 +2785,41 @@ class ShotsMixin:
         }
 
         additional_negative = []
-        if any(kw in dubbing for kw in ["黑洞", "宇宙", "银河", "恒星", "星云"]):
+        
+        _skeleton = ""
+        if hasattr(self, '_chinese_semantic_skeletons') and shot_index >= 0:
+            _skeleton = self._chinese_semantic_skeletons.get(shot_index, "")
+        _combined = dubbing + " " + _skeleton
+
+        if any(kw in _combined for kw in ["黑洞", "宇宙", "银河", "恒星", "星云"]):
             additional_negative.extend(["star", "sun", "planet", "moon", "satellite", "human", "person", "face", "building", "tree"])
-        if any(kw in dubbing for kw in ["政治", "历史", "古代", "战争"]):
+        if any(kw in _combined for kw in ["政治", "历史", "古代", "战争"]):
             additional_negative.extend(["modern", "contemporary", "anachronism"])
         
-        # 动态检测：含人物的分镜
         person_keywords = ["人", "他", "她", "我", "你", "我们", "他们", "教授", "学生", "科学家",
                           "学者", "研究", "教授", "老師", "博士", "人類", "人类"]
-        if any(kw in dubbing for kw in person_keywords):
+        if any(kw in _combined for kw in person_keywords):
             additional_negative.extend(["(extra faces:1.2)", "(multiple people:1.1)", "(crowded:1.1)"])
         
-        # 动态检测：含动物的分镜
         animal_keywords = ["猴子", "猴", "猿", "猩猩", "黑猩猩", "动物", "動物", "灵长", "靈長",
                           "恐龙", "恐龍", "鸟", "魚", "鱼", "虎", "狮", "象"]
-        if any(kw in dubbing for kw in animal_keywords):
+        if any(kw in _combined for kw in animal_keywords):
             additional_negative.extend(["(deformed animal:1.3)", "(wrong animal anatomy:1.2)", "(extra legs:1.2)"])
         
-        # 动态检测：含抽象概念的分镜（避免生成不必要的人物）
         abstract_keywords = ["进化", "進化", "演化", "自然选择", "自然選擇", "基因", "DNA",
                             "文明", "文化", "历史", "歷史", "时间", "時間", "千萬年", "百万年",
                             "链條", "鏈條", "接力", "转折", "轉折"]
-        has_abstract = any(kw in dubbing for kw in abstract_keywords)
-        has_person = any(kw in dubbing for kw in person_keywords)
+        has_abstract = any(kw in _combined for kw in abstract_keywords)
+        has_person = any(kw in _combined for kw in person_keywords)
         if has_abstract and not has_person:
             additional_negative.extend(["realistic person", "portrait", "face close-up", "selfie"])
         
-        # 动态检测：含数字/数据的分镜（避免生成乱码文字）
         data_keywords = ["98%", "百分比", "数据", "數據", "统计", "統計", "比例", "相似度"]
-        if any(kw in dubbing for kw in data_keywords):
+        if any(kw in _combined for kw in data_keywords):
             additional_negative.extend(["(text:1.3)", "(numbers:1.2)", "(watermark with text:1.2)", "chart with text"])
         
-        # 动态检测：含自然景观的分镜
         nature_scene_keywords = ["森林", "树", "丛林", "草原", "山脉", "河流", "海洋", "沙漠"]
-        if any(kw in dubbing for kw in nature_scene_keywords):
+        if any(kw in _combined for kw in nature_scene_keywords):
             additional_negative.extend(["indoor", "room", "wall", "ceiling", "furniture"])
 
         all_negative = base_negative.copy()
@@ -2849,11 +3440,15 @@ class ShotsMixin:
                                 new = new.strip()
                                 if not old or not new:
                                     continue
+                                old_simplified = _ensure_simplified_chinese(old)
+                                new_simplified = _ensure_simplified_chinese(new)
                                 if _is_traditional_conversion(old, new):
                                     skipped_noop += 1
                                     continue
-                                if old != new:
-                                    correction_dict[old] = new
+                                if old_simplified != new_simplified:
+                                    correction_dict[old_simplified] = new_simplified
+                                    if old_simplified != old or new_simplified != new:
+                                        self.log(f"   🔄 纠错项繁→简: {old}→{new} ⇒ {old_simplified}→{new_simplified}")
                                 else:
                                     skipped_noop += 1
                             except Exception as e:
@@ -3128,15 +3723,11 @@ class ShotsMixin:
             if hasattr(self, '_shot_texts_for_context'):
                 delattr(self, '_shot_texts_for_context')
             
-            self.cache_clear()
+            self.cache_clear('analysis')
+            self.cache_clear('prompts')
 
             try:
                 prompt_cache.clear()
-            except Exception:
-                pass
-
-            try:
-                image_cache.clear()
             except Exception:
                 pass
 
@@ -3174,7 +3765,7 @@ class ShotsMixin:
             except Exception:
                 pass
 
-            self.log("🗑️ 已清除所有历史缓存和状态数据，确保使用最新数据")
+            self.log("🗑️ 已清除历史缓存（保留音频转录缓存以加速重复生成）")
             
             self.shots_data = []
             
@@ -3267,22 +3858,28 @@ class ShotsMixin:
                             self._log_exception("⚠️ Whisper迁移GPU失败，使用CPU", e)
                     else:
                         try:
-                            import torch
                             import whisper
-                            device = "cuda" if torch.cuda.is_available() else "cpu"
-                            if device == "cuda":
+                            import torch
+                            if torch.cuda.is_available():
                                 gpu_name = torch.cuda.get_device_name(0)
-                                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+                                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)")
+                                self.log(f"   使用模型: Whisper {whisper_model_size}")
+                                self.whisper_model = whisper.load_model(whisper_model_size, device="cuda")
+                                self._whisper_model_size = whisper_model_size
+                                whisper_model_loaded = True
+                                self._whisper_on_gpu = True
+                                whisper_used_gpu = True
+                                self.log(f"✅ Whisper {whisper_model_size} 加载成功 (GPU加速)")
                             else:
                                 self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
-                            self.log(f"   使用模型: Whisper {whisper_model_size}")
-                            self.whisper_model = whisper.load_model(whisper_model_size, device=device)
-                            self._whisper_model_size = whisper_model_size
-                            whisper_model_loaded = True
-                            self._whisper_on_gpu = (device == "cuda")
-                            whisper_used_gpu = (device == "cuda")
-                            self.log(f"✅ Whisper {whisper_model_size} 加载成功 ({'GPU加速' if device == 'cuda' else 'CPU模式'})")
+                                self.log(f"   使用模型: Whisper {whisper_model_size}")
+                                self.whisper_model = whisper.load_model(whisper_model_size, device="cpu")
+                                self._whisper_model_size = whisper_model_size
+                                whisper_model_loaded = True
+                                self._whisper_on_gpu = False
+                                whisper_used_gpu = False
+                                self.log(f"✅ Whisper {whisper_model_size} 加载成功 (CPU模式)")
                         except Exception as e:
                             self._log_exception("⚠️ GPU加载失败，回退到CPU", e)
                             try:
@@ -3558,58 +4155,47 @@ class ShotsMixin:
                             max_retries = len(candidate_models)
                             
                             try:
-                                with ThreadPoolExecutor(max_workers=1) as analysis_executor:
-                                    while current_model_index < max_retries and not analysis_result:
-                                        current_model = candidate_models[current_model_index]
+                                while current_model_index < max_retries and not analysis_result:
+                                    current_model = candidate_models[current_model_index]
+                                    
+                                    self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
+                                    
+                                    try:
+                                        self.log(f"   等待模型分析中...")
                                         
-                                        self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
+                                        start_time = time.time()
+                                        analysis_result = call_ollama_with_model(current_model)
+                                        elapsed_time = time.time() - start_time
                                         
-                                        try:
-                                            future = analysis_executor.submit(call_ollama_with_model, current_model)
-                                            self.log(f"   等待模型分析中...")
+                                        if analysis_result:
+                                            self.log(f"✅ 模型 {current_model} 分析完毕！")
+                                            self.log(f"   响应时间: {elapsed_time:.1f}秒")
+                                            self.log(f"   响应长度: {len(analysis_result)} 字符")
+                                            self.log(f"   响应内容预览: {analysis_result[:100]}...")
                                             
-                                            start_time = time.time()
-                                            analysis_result = future.result(timeout=180)
-                                            elapsed_time = time.time() - start_time
-                                            
-                                            if analysis_result:
-                                                self.log(f"✅ 模型 {current_model} 分析完毕！")
-                                                self.log(f"   响应时间: {elapsed_time:.1f}秒")
-                                                self.log(f"   响应长度: {len(analysis_result)} 字符")
-                                                self.log(f"   响应内容预览: {analysis_result[:100]}...")
-                                                
-                                                if current_model != user_model:
-                                                    self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
-                                                    self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
-                                                break
-                                            else:
-                                                self.log(f"⚠️ 模型 {current_model} 返回空结果")
-                                                self.log(f"   🔍 请检查上方的调试日志以了解详情")
-                                                current_model_index += 1
-                                                
-                                        except TimeoutError:
-                                            self.log(f"⚠️ 模型 {current_model} 响应超时（超过180秒）")
-                                            self.log(f"   可能原因: 模型计算量大或GPU资源不足")
+                                            if current_model != user_model:
+                                                self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
+                                                self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
+                                            break
+                                        else:
+                                            self.log(f"⚠️ 模型 {current_model} 返回空结果")
+                                            self.log(f"   🔍 请检查上方的调试日志以了解详情")
                                             current_model_index += 1
                                             
-                                            if current_model_index < max_retries:
-                                                next_model = candidate_models[current_model_index]
-                                                self.log(f"   自动切换到下一个模型: {next_model}")
-                                                time.sleep(1)
-                                        except Exception as e:
-                                            error_msg = str(e).lower()
-                                            self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
-                                            
-                                            if "connection" in error_msg or "refused" in error_msg:
-                                                self.log(f"   ❌ Ollama服务连接失败，停止尝试")
-                                                break
-                                            
-                                            current_model_index += 1
-                                            
-                                            if current_model_index < max_retries:
-                                                next_model = candidate_models[current_model_index]
-                                                self.log(f"   自动切换到下一个模型: {next_model}")
-                                                time.sleep(0.5)
+                                    except Exception as e:
+                                        error_msg = str(e).lower()
+                                        self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
+                                        
+                                        if "connection" in error_msg or "refused" in error_msg:
+                                            self.log(f"   ❌ Ollama服务连接失败，停止尝试")
+                                            break
+                                        
+                                        current_model_index += 1
+                                        
+                                        if current_model_index < max_retries:
+                                            next_model = candidate_models[current_model_index]
+                                            self.log(f"   自动切换到下一个模型: {next_model}")
+                                            time.sleep(0.5)
                             except Exception as e:
                                 self._log_exception("⚠️ 分析步骤异常", e)
                             
@@ -3718,6 +4304,7 @@ class ShotsMixin:
             for seg in original_shot_tasks:
                 text = seg.get('text', '').strip()
                 if text:
+                    text = _ensure_simplified_chinese(text)
                     if correction_dict:
                         for old, new in correction_dict.items():
                             text = text.replace(old, new)
@@ -3804,93 +4391,131 @@ class ShotsMixin:
             
             failed_count = 0
             
-            def generate_single_prompt(idx_task):
-                """单个提示词生成任务"""
-                idx, task = idx_task
-                try:
-                    dubbing = task.get('text', '')
-                    if dubbing:
-                        effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
-                        effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
-                        
-                        prompt = self._generate_prompt_with_llm(
-                            dubbing, 
-                            content_type=theme_info.get('content_type', ''), 
-                            prompt_type=user_prompt_type,
-                            core_theme=theme_info.get('core_theme', ''),
-                            visual_tone=effective_visual_tone,
-                            theme_elements=theme_info.get('theme_elements', []),
-                            visual_style=effective_visual_style,
-                            original_dubbing=dubbing,
-                            full_text=full_text,
-                            shot_index=idx
-                        )
-                        return (idx, prompt, None)
-                    return (idx, "", None)
-                except Exception as e:
-                    full_error = str(e)
-                    return (idx, "", full_error)
-            
             try:
                 from video_generator.cloud_llm_client import is_cloud_llm_enabled
                 _cloud_llm = is_cloud_llm_enabled()
             except ImportError:
                 _cloud_llm = False
             
-            if _cloud_llm:
-                prompt_max_workers = 4
-                self.log(f"   ☁️ 云端LLM模式，{prompt_max_workers}线程并行生成")
-            else:
-                prompt_max_workers = 1
-                self.log(f"   💡 本地Ollama模式，串行生成（Ollama内部串行处理，多线程仅增加排队开销）")
-                current_model = self._get_current_model()
-                if current_model:
-                    check_model_gpu_status(current_model, self.log)
-            
             total_tasks = len(final_tasks)
-            mode_desc = "串行" if prompt_max_workers == 1 else f"{prompt_max_workers}线程并行"
-            self.log(f"   开始生成 {total_tasks} 个提示词（{mode_desc}）...")
-            
+
             self._shot_texts_for_context = [task.get('text', '') for task in final_tasks]
             self._pregenerated_prompts_for_context = {}
             self._pregenerated_understandings_for_context = {}
+            self._chinese_semantic_skeletons = {}
             self._visual_narrative_strategy = theme_info.get('visual_narrative_strategy', '')
 
-            completed_count = 0
-            per_prompt_timeout = max(30, Config.API_TIMEOUT_LLM_PROMPT // max(1, total_tasks))
-            total_timeout = Config.API_TIMEOUT_LLM_PROMPT + total_tasks * per_prompt_timeout
-            executor = ThreadPoolExecutor(max_workers=prompt_max_workers)
-            future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
-            try:
-                for future in as_completed(future_to_idx, timeout=total_timeout):
+            BATCH_SIZE = 8
+
+            if _cloud_llm:
+                prompt_max_workers = 4
+                self.log(f"   ☁️ 云端LLM模式，{prompt_max_workers}线程并行生成")
+                current_model = self._get_current_model()
+                if current_model:
+                    check_model_gpu_status(current_model, self.log)
+
+                completed_count = 0
+                per_prompt_timeout = max(30, Config.API_TIMEOUT_LLM_PROMPT // max(1, total_tasks))
+                total_timeout = Config.API_TIMEOUT_LLM_PROMPT + total_tasks * per_prompt_timeout
+
+                def generate_single_prompt(idx_task):
+                    idx, task = idx_task
                     try:
-                        idx, prompt, error = future.result(timeout=per_prompt_timeout)
-                        if error:
-                            failed_count += 1
-                            error_display = error[:200] if len(error) > 200 else error
-                            self.log(f"   ⚠️ 第{idx+1}个生成失败: {error_display}")
-                            pregenerated_prompts[idx] = ""
-                        else:
-                            pregenerated_prompts[idx] = prompt
-                            self._pregenerated_prompts_for_context[idx] = prompt
+                        dubbing = task.get('text', '')
+                        if dubbing:
+                            effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
+                            effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
+                            prompt = self._generate_prompt_with_llm(
+                                dubbing,
+                                content_type=theme_info.get('content_type', ''),
+                                prompt_type=user_prompt_type,
+                                core_theme=theme_info.get('core_theme', ''),
+                                visual_tone=effective_visual_tone,
+                                theme_elements=theme_info.get('theme_elements', []),
+                                visual_style=effective_visual_style,
+                                original_dubbing=dubbing,
+                                full_text=full_text,
+                                shot_index=idx
+                            )
+                            return (idx, prompt, None)
+                        return (idx, "", None)
                     except Exception as e:
-                        idx = future_to_idx[future]
-                        failed_count += 1
+                        return (idx, "", str(e))
+
+                executor = ThreadPoolExecutor(max_workers=prompt_max_workers)
+                future_to_idx = {executor.submit(generate_single_prompt, (idx, task)): idx for idx, task in enumerate(final_tasks)}
+                try:
+                    for future in as_completed(future_to_idx, timeout=total_timeout):
+                        try:
+                            idx, prompt, error = future.result(timeout=per_prompt_timeout)
+                            if error:
+                                failed_count += 1
+                                error_display = error[:200] if len(error) > 200 else error
+                                self.log(f"   ⚠️ 第{idx+1}个生成失败: {error_display}")
+                                pregenerated_prompts[idx] = ""
+                            else:
+                                pregenerated_prompts[idx] = prompt
+                                self._pregenerated_prompts_for_context[idx] = prompt
+                        except Exception as e:
+                            idx = future_to_idx[future]
+                            failed_count += 1
+                            pregenerated_prompts[idx] = ""
+                            self._log_exception(f"   ⚠️ 第{idx+1}个生成异常", e)
+                        completed_count += 1
+                        progress_pct = 62 + int((completed_count / total_tasks) * 18)
+                        self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
+                except TimeoutError:
+                    unfinished = [idx for idx in range(total_tasks) if idx not in pregenerated_prompts or not pregenerated_prompts[idx]]
+                    self.log(f"   ⚠️ 提示词生成超时，{len(unfinished)}个未完成（将使用回退生成）")
+                    for idx in unfinished:
                         pregenerated_prompts[idx] = ""
-                        self._log_exception(f"   ⚠️ 第{idx+1}个生成异常", e)
-                    completed_count += 1
+                        failed_count += 1
+                finally:
+                    for f in future_to_idx:
+                        f.cancel()
+                    executor.shutdown(wait=False)
+            else:
+                self.log(f"   🚀 本地Ollama模式，批处理生成（每批{BATCH_SIZE}个，共享系统提示词减少开销）")
+                current_model = self._get_current_model()
+                if current_model:
+                    check_model_gpu_status(current_model, self.log)
+
+                num_batches = (total_tasks + BATCH_SIZE - 1) // BATCH_SIZE
+                self.log(f"   开始生成 {total_tasks} 个提示词（{num_batches}批，每批最多{BATCH_SIZE}个）...")
+
+                completed_count = 0
+                for batch_idx in range(num_batches):
+                    if not self.task_running:
+                        self.log("❌ 任务已被取消")
+                        break
+
+                    start = batch_idx * BATCH_SIZE
+                    end = min(start + BATCH_SIZE, total_tasks)
+                    batch_items = [(idx, final_tasks[idx]) for idx in range(start, end)]
+
+                    self.log(f"   📦 批次 {batch_idx + 1}/{num_batches}（第{start+1}-{end}个分镜）")
+
+                    batch_results = self._generate_prompts_batch(
+                        batch_items, theme_info, user_prompt_type,
+                        user_style_override, full_text
+                    )
+
+                    batch_failed = 0
+                    for original_idx, prompt in batch_results.items():
+                        if prompt:
+                            pregenerated_prompts[original_idx] = prompt
+                            self._pregenerated_prompts_for_context[original_idx] = prompt
+                        else:
+                            pregenerated_prompts[original_idx] = ""
+                            batch_failed += 1
+                            failed_count += 1
+
+                    if batch_failed > 0:
+                        self.log(f"   ⚠️ 批次 {batch_idx + 1} 中 {batch_failed} 个生成失败，将使用回退生成")
+
+                    completed_count += len(batch_items)
                     progress_pct = 62 + int((completed_count / total_tasks) * 18)
                     self.update_task_progress(f"正在生成分镜提示词 ({completed_count}/{total_tasks})...", progress_pct)
-            except TimeoutError:
-                unfinished = [idx for idx in range(total_tasks) if idx not in pregenerated_prompts or not pregenerated_prompts[idx]]
-                self.log(f"   ⚠️ 提示词生成超时，{len(unfinished)}个未完成（将使用回退生成）")
-                for idx in unfinished:
-                    pregenerated_prompts[idx] = ""
-                    failed_count += 1
-            finally:
-                for f in future_to_idx:
-                    f.cancel()
-                executor.shutdown(wait=False)
             
             elapsed = time.time() - start_time
             speed = len(pregenerated_prompts) / elapsed if elapsed > 0 else 0
@@ -3906,8 +4531,15 @@ class ShotsMixin:
                     if idx in pregenerated_prompts and not pregenerated_prompts[idx]:
                         dubbing = task.get('text', '')
                         if dubbing:
+                            fallback_parts = {
+                                'dubbing': dubbing,
+                                'content_type': theme_info.get('content_type', ''),
+                                'custom_theme': theme_info.get('core_theme', ''),
+                                'custom_visual_tone': theme_info.get('visual_tone', ''),
+                                'theme_elements': theme_info.get('theme_elements', []),
+                            }
                             if user_prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
-                                pregenerated_prompts[idx] = self._generate_arv_format_prompt(dubbing, theme_info.get('content_type', ''), 0)
+                                pregenerated_prompts[idx] = self._generate_arv_format_prompt(fallback_parts, theme_info.get('content_type', ''), 0)
                             elif user_prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
                                 pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''))
                             else:
@@ -3917,6 +4549,8 @@ class ShotsMixin:
                                 failed_count -= 1
             
             self.log(f"✅ 提示词预生成完成 ({len(pregenerated_prompts)} 个)")
+            
+            self._review_narrative_coherence(pregenerated_prompts, final_tasks)
             
             self._pregenerated_prompts = pregenerated_prompts
             
@@ -3947,13 +4581,21 @@ class ShotsMixin:
             
             # 使用线程池并行创建分镜
             
-            # 获取用户设置的线程数（默认16）
+            # 获取用户设置的线程数（默认8）
             if hasattr(self, 'thread_count_var'):
                 thread_count = self.thread_count_var.get()
             else:
-                thread_count = 16
-            
-            self.log(f"🚀 启动多线程分镜创建: {thread_count}个线程并行处理")
+                thread_count = 8
+
+            has_unpregenerated = any(
+                not pregenerated_prompts.get(i) for i in range(len(final_tasks))
+            )
+            if has_unpregenerated:
+                effective_thread_count = min(thread_count, 2)
+                self.log(f"🚀 启动分镜创建: {effective_thread_count}个线程（部分提示词未预生成，限制并发避免LLM过载）")
+            else:
+                effective_thread_count = min(thread_count, 8)
+                self.log(f"🚀 启动多线程分镜创建: {effective_thread_count}个线程并行处理")
             
             completed_count = 0
             shots_dict = {}
@@ -3979,7 +4621,7 @@ class ShotsMixin:
                 )
                 return idx, shot
             
-            with ThreadPoolExecutor(max_workers=thread_count) as executor:
+            with ThreadPoolExecutor(max_workers=effective_thread_count) as executor:
                 futures = {executor.submit(create_shot_task, task): task[0] for task in shot_tasks}
                 _last_progress_time = time.time()
                 
@@ -4016,7 +4658,7 @@ class ShotsMixin:
             
             # 按索引排序
             shots = [shots_dict[i] for i in sorted(shots_dict.keys())]
-            self.log(f"✅ 成功创建 {len(shots)} 个分镜（{thread_count}线程并行，耗时 {elapsed_time:.1f}秒，速度 {len(shots)/elapsed_time:.1f}个/秒）")
+            self.log(f"✅ 成功创建 {len(shots)} 个分镜（{effective_thread_count}线程并行，耗时 {elapsed_time:.1f}秒，速度 {len(shots)/elapsed_time:.1f}个/秒）")
 
             self.log("   ✅ 保持原始时间戳，确保音画同步")
 
@@ -4099,37 +4741,42 @@ class ShotsMixin:
             i = 0
             while i < len(shots):
                 if shots[i]['duration'] < min_shot_dur:
+                    _merged = False
+                    _prev_semantic_sim = 0.0
+                    _next_semantic_sim = 0.0
+                    
+                    if i > 0:
+                        _prev_semantic_sim = self._semantic_similarity(
+                            shots[i-1].get('description', ''), 
+                            shots[i].get('description', '')
+                        )
+                    if i < len(shots) - 1:
+                        _next_semantic_sim = self._semantic_similarity(
+                            shots[i].get('description', ''), 
+                            shots[i+1].get('description', '')
+                        )
+                    
                     if i > 0 and i < len(shots) - 1:
-                        prev_dur = shots[i-1]['duration']
-                        next_dur = shots[i+1]['duration']
-                        if prev_dur <= next_dur:
-                            shots[i-1]['description'] = shots[i-1]['description'] + shots[i]['description']
-                            shots[i-1]['end'] = shots[i]['end']
-                            shots[i-1]['duration'] = shots[i-1]['end'] - shots[i-1]['start']
-                            shots.pop(i)
+                        if _prev_semantic_sim >= _next_semantic_sim:
+                            self._merge_shots(shots, i-1, i)
                             short_merged += 1
-                            continue
+                            _merged = True
                         else:
-                            shots[i+1]['description'] = shots[i]['description'] + shots[i+1]['description']
-                            shots[i+1]['start'] = shots[i]['start']
-                            shots[i+1]['duration'] = shots[i+1]['end'] - shots[i+1]['start']
-                            shots.pop(i)
+                            self._merge_shots(shots, i, i+1)
                             short_merged += 1
-                            continue
+                            _merged = True
                     elif i > 0:
-                        shots[i-1]['description'] = shots[i-1]['description'] + shots[i]['description']
-                        shots[i-1]['end'] = shots[i]['end']
-                        shots[i-1]['duration'] = shots[i-1]['end'] - shots[i-1]['start']
-                        shots.pop(i)
+                        self._merge_shots(shots, i-1, i)
                         short_merged += 1
-                        continue
+                        _merged = True
                     elif i < len(shots) - 1:
-                        shots[i+1]['description'] = shots[i]['description'] + shots[i+1]['description']
-                        shots[i+1]['start'] = shots[i]['start']
-                        shots[i+1]['duration'] = shots[i+1]['end'] - shots[i+1]['start']
-                        shots.pop(i)
+                        self._merge_shots(shots, i, i+1)
                         short_merged += 1
-                        continue
+                        _merged = True
+                    
+                    if not _merged:
+                        i += 1
+                    continue
                 i += 1
             if short_merged > 0:
                 self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {min_shot_dur}秒）")
@@ -4221,8 +4868,7 @@ class ShotsMixin:
             gc.collect()
             
             self._unload_ollama_models()
-            
-            from video_generator.ollama_client import check_ollama_available
+
             if not check_ollama_available():
                 set_ollama_available_global(False)
             else:
@@ -4241,17 +4887,26 @@ class ShotsMixin:
             self.update_task_progress("生成失败", 0)
             return []
         finally:
+            try:
+                self._unload_ollama_models(log_prefix="🧹 ")
+            except Exception:
+                pass
             if hasattr(self, 'whisper_model') and self.whisper_model:
                 self._safe_release_whisper_gpu()
-                if not self._whisper_on_gpu:
-                    self.log("🧹 Whisper GPU显存已释放")
-                if whisper_model_loaded:
-                    del self.whisper_model
-                    self.whisper_model = None
-                    self._whisper_on_gpu = False
-                    gc.collect()
-                    self.log("🧹 Whisper模型已完全卸载，内存已释放")
-    
+                del self.whisper_model
+                self.whisper_model = None
+                self._whisper_on_gpu = False
+                self.log("🧹 Whisper模型已完全卸载，内存已释放")
+            try:
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     def generate_shots_threaded(self):
         """生成分镜脚本（线程化版本）"""
@@ -4298,6 +4953,38 @@ class ShotsMixin:
                     self.log(f"❌ 生成分镜过程中出错: {e}")
                     safe_print_exc()
                 finally:
+                    try:
+                        self._unload_ollama_models(log_prefix="🔄 分镜任务结束: ")
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(self, 'whisper_model') and self.whisper_model:
+                            self._safe_release_whisper_gpu()
+                            del self.whisper_model
+                            self.whisper_model = None
+                            self._whisper_on_gpu = False
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(self, 'shots_data') and self.shots_data:
+                            self.shots_data = []
+                    except Exception:
+                        pass
+                    try:
+                        prompt_cache.clear()
+                        image_cache.clear()
+                    except Exception:
+                        pass
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    try:
+                        gc.collect()
+                    except Exception:
+                        pass
                     with self.task_lock:
                         self.task_running = False
                         self.current_task_thread = None

@@ -1,5 +1,6 @@
 """UI initialization mixin - window setup, variables, system services."""
 import os
+import sys
 import time
 import threading
 import warnings
@@ -35,10 +36,10 @@ class UIInitMixin:
         self._start_system_services()
         
         # 显示优化状态（不立即检测硬件）
-        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 16
+        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
         print(f"🚀 性能优化已启用:")
         print(f"   - 提示词生成: 本地单线程/云端4线程（自动切换）")
-        print(f"   - 图像生成线程: {thread_count}")
+        print(f"   - 分镜创建线程: {thread_count}")
         print(f"   - 批量图像生成: 就绪")
         print(f"   - 视频编码器: 延迟检测（首次使用时）")
     
@@ -283,7 +284,10 @@ class UIInitMixin:
     def _initialize_variables(self):
         """初始化变量"""
         # 基本路径
-        self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if getattr(sys, 'frozen', False):
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.output_dir = os.path.join(self.base_dir, "output_project")
         self.images_dir = os.path.join(self.output_dir, "images")
         self.config_file = os.path.join(self.base_dir, "config.json")
@@ -338,7 +342,7 @@ class UIInitMixin:
         self.animation_var = tk.StringVar(value="无")
         
         # 并发线程数设置 - 初始默认值，由高级设置面板和load_config覆盖
-        self.thread_count_var = tk.IntVar(value=16)
+        self.thread_count_var = tk.IntVar(value=8)
         
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")
@@ -501,20 +505,17 @@ class UIInitMixin:
             self.auto_connect_ollama()
         threading.Thread(target=delayed_system_check, daemon=True).start()
         
-        # 预加载Whisper模型（延迟执行，让UI先加载）
-        def preload_whisper():
-            time.sleep(2)  # 等待UI完全加载后再预加载
-            self.preload_whisper_model()
-            
-            # 所有预加载完成后，显示就绪提示
-            time.sleep(0.5)  # 稍微延迟，确保日志输出顺序正确
+        # Whisper延迟加载 - 不再启动时预加载，改为首次使用时按需加载
+        def deferred_ready():
+            time.sleep(2)
             self.log("")
             self.log("=" * 60)
             self.log("✅ 程序启动完成，工具已就绪！")
             self.log("📂 请导入音频文件开始创作")
+            self.log("💡 Whisper模型将在生成分镜时自动加载（节省启动时间）")
             self.log("=" * 60)
             self.log("")
-        threading.Thread(target=preload_whisper, daemon=True).start()
+        threading.Thread(target=deferred_ready, daemon=True).start()
         
         self._api_heartbeat_running = True
         self._api_heartbeat_event = threading.Event()

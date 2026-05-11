@@ -5,12 +5,13 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import asyncio
 import time
 from typing import Optional
 
 from ..database import get_db
-from ..models import User
+from ..models import User, MachineBinding
 from ..schemas import UserRegister, UserLogin, LoginResponse, PasswordResetRequest, PasswordResetConfirm
 from ..auth import (
     get_current_user,
@@ -140,7 +141,6 @@ async def request_reset(data: PasswordResetRequest, request: Request, db: AsyncS
     if not check_login_rate_limit(f"reset:{client_ip}"):
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
-    from sqlalchemy import select
     result = await db.execute(select(User).filter(User.email == data.email))
     user = result.scalar_one_or_none()
     if not user:
@@ -169,7 +169,6 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
     if not success:
         raise HTTPException(status_code=400, detail=error_msg)
 
-    from sqlalchemy import select
     result = await db.execute(select(User).filter(User.email == data.email))
     user = result.scalar_one_or_none()
     if not user:
@@ -190,8 +189,15 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
     if not check_login_rate_limit(f"reg:{client_ip}"):
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
-    # 检查用户名和邮箱是否已存在
-    from sqlalchemy import select
+    if user_data.fingerprint:
+        from sqlalchemy import func as sa_func
+        fp_user_count = await db.execute(
+            select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
+        )
+        fp_count = fp_user_count.scalar() or 0
+        if fp_count >= 2:
+            raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")
+
     result = await db.execute(
         select(User).filter((User.username == user_data.username) | (User.email == user_data.email))
     )
@@ -212,6 +218,14 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
     # 为新用户创建试用许可证
     await create_trial_license(db, new_user.id)
 
+    if user_data.fingerprint:
+        binding = MachineBinding(
+            user_id=new_user.id,
+            fingerprint=user_data.fingerprint,
+        )
+        db.add(binding)
+        await db.flush()
+
     await db.commit()
 
     # 清除登录失败记录
@@ -230,7 +244,6 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
         raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
 
     # 检查用户是否存在
-    from sqlalchemy import select
     result = await db.execute(select(User).filter(User.username == user_data.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(user_data.password, user.hashed_password):

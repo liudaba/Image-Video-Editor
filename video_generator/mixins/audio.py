@@ -36,29 +36,23 @@ class AudioMixin:
     # =======================================================================
 
     def _safe_release_whisper_gpu(self):
-        """安全释放Whisper GPU显存 - 仅在Whisper确实在GPU上时才调用torch.cuda
-        
-        避免在Whisper不在GPU上时调用torch.cuda.is_available()，
-        因为该调用会触发CUDA Context创建，导致显存被永久占用。
-        """
         if not self._whisper_on_gpu or self.whisper_model is None:
             return
         
         try:
             import torch
-            if torch.cuda.is_available():
-                device = next(self.whisper_model.parameters()).device
-                if device.type == "cuda":
-                    self.whisper_model = self.whisper_model.to("cpu")
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    self._whisper_on_gpu = False
+            device_type = next(self.whisper_model.parameters()).device.type
+            if device_type == "cuda":
+                self.whisper_model = self.whisper_model.to("cpu")
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                self._whisper_on_gpu = False
         except (StopIteration, Exception):
             try:
                 import torch
                 self.whisper_model = self.whisper_model.to("cpu")
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 self._whisper_on_gpu = False
             except Exception:
                 pass

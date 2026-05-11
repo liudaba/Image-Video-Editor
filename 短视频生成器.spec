@@ -2,9 +2,9 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('video_generator', 'video_generator'), ('config.json', '.'), ('启动.vbs', '.'), ('start.bat', '.'), ('README.md', '.'), ('快速上手指南.md', '.'), ('LICENSE', '.')]
+datas = [('video_generator', 'video_generator'), ('config.json', '.'), ('README.md', '.'), ('USER_GUIDE.md', '.'), ('快速上手指南.md', '.'), ('LICENSE', '.'), ('TERMS_OF_SERVICE.md', '.'), ('PRIVACY_POLICY.md', '.')]
 binaries = []
-hiddenimports = ['whisper', 'moviepy', 'torch', 'numpy', 'PIL', 'requests', 'json', 'threading', 'subprocess', 'datetime', 'queue', 'logging', 'tkinter', 'cryptography']
+hiddenimports = ['whisper', 'moviepy', 'torch', 'numpy', 'PIL', 'requests', 'tkinter', 'cryptography', 'cryptography.fernet', 'psutil', 'GPUtil', 'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip', 'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip', 'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip', 'moviepy.video.VideoClip', 'moviepy.editor']
 hiddenimports += collect_submodules('moviepy')
 tmp_ret = collect_all('whisper')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -19,7 +19,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['test', 'tests', 'unittest', 'setuptools', 'pip', 'easy_install', 'pkg_resources', 'PyQt5', '.git', '.idea', '.vscode', '.venv', '__pycache__', '.env', 'license.json', '.secret_key', '.license_sign_key', '.license_verify_key', '.key_salt', '*.pem', '*.db', 'backend', 'models', 'model_aware_patch', 'output_project', '垃圾桶', 'build', 'dist', 'docs'],
+    excludes=['test', 'tests', 'unittest', 'setuptools', 'pip', 'easy_install', 'pkg_resources', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'sympy', 'notebook', 'IPython', 'jupyter', 'tornado', 'fastapi', 'uvicorn', 'sqlalchemy', 'alembic', 'redis', 'asyncpg', 'aiosqlite'],
     noarchive=False,
     optimize=0,
 )
