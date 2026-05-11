@@ -91,7 +91,7 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td><code>${escapeHtml(key.license_key)}</code></td>
-                    <td>${key.plan_type === 'monthly' ? '月付' : key.plan_type === 'quarterly' ? '季付' : key.plan_type === 'yearly' ? '年付' : '终身'}</td>
+                    <td>${key.plan_type === 'monthly' ? '月付' : key.plan_type === 'quarterly' ? '季付' : key.plan_type === 'yearly' ? '年付' : key.plan_type === 'lifetime' ? '终身' : key.plan_type === 'trial_15d' ? '试用15天' : key.plan_type}</td>
                     <td>
                         <span class="badge ${
                             key.status === 'unused' ? 'bg-secondary' : 

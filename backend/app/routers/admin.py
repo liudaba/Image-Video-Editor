@@ -3,7 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 
 from ..database import get_db
 from ..models import (
@@ -85,17 +85,36 @@ async def get_stats(
 async def list_users(
     page: int = 1,
     page_size: int = 20,
+    search: str = None,
+    status: str = None,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
     offset = (page - 1) * page_size
-    result = await db.execute(
-        select(User).order_by(User.created_at.desc()).offset(offset).limit(page_size)
-    )
+
+    query = select(User).order_by(User.created_at.desc())
+    count_query = select(func.count(User.id))
+
+    if search:
+        search_filter = or_(
+            User.username.ilike(f"%{search}%"),
+            User.email.ilike(f"%{search}%"),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
+
+    if status == "active":
+        query = query.where(User.is_active == True)
+        count_query = count_query.where(User.is_active == True)
+    elif status == "inactive":
+        query = query.where(User.is_active == False)
+        count_query = count_query.where(User.is_active == False)
+
+    total = await db.scalar(count_query)
+    result = await db.execute(query.offset(offset).limit(page_size))
     users = result.scalars().all()
-    total = await db.scalar(select(func.count(User.id)))
 
     return {
         "total": total,
@@ -107,6 +126,7 @@ async def list_users(
                 "username": u.username,
                 "email": u.email,
                 "is_active": u.is_active,
+                "is_admin": u.is_admin,
                 "created_at": u.created_at.isoformat() if u.created_at else None,
             }
             for u in users
@@ -136,40 +156,53 @@ async def get_user(
     }
 
 
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_admin: Optional[bool] = None
+
+
+class VersionUpdate(BaseModel):
+    version: Optional[str] = None
+    download_url: Optional[str] = None
+    file_size: Optional[int] = None
+    changelog: Optional[str] = None
+    priority: Optional[str] = None
+    force_update: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
 @router.put("/users/{user_id}")
 async def update_user(
     user_id: int,
-    username: str = None,
-    email: str = None,
-    password: str = None,
-    is_active: bool = None,
-    is_admin: bool = None,
-    request: Request = None,
+    body: UserUpdate,
+    request: Request,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """更新用户信息"""
     result = await db.execute(select(User).where(User.id == user_id))
     target_user = result.scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
-    if username is not None:
-        target_user.username = username
-    if email is not None:
-        target_user.email = email
-    if password is not None:
-        target_user.hashed_password = hash_password(password)
-    if is_active is not None:
-        target_user.is_active = is_active
-    if is_admin is not None:
-        target_user.is_admin = is_admin
+    if body.username is not None:
+        target_user.username = body.username
+    if body.email is not None:
+        target_user.email = body.email
+    if body.password is not None:
+        target_user.hashed_password = hash_password(body.password)
+    if body.is_active is not None:
+        target_user.is_active = body.is_active
+    if body.is_admin is not None:
+        target_user.is_admin = body.is_admin
     
     await db.flush()
     
     await _log_audit(
         db, user, "update_user", 
-        f"user_id={user_id}, username={username}, is_active={is_active}, is_admin={is_admin}", 
+        f"user_id={user_id}, username={body.username}, is_active={body.is_active}, is_admin={body.is_admin}", 
         request
     )
     
@@ -205,6 +238,7 @@ async def list_orders(
     recent: int = None,
     page: int = 1,
     page_size: int = 20,
+    status: str = None,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -213,19 +247,26 @@ async def list_orders(
     offset = (page - 1) * page_size
     
     query = select(Order).order_by(desc(Order.created_at))
-    
+    count_query = select(func.count(Order.id))
+
+    if status:
+        try:
+            order_status = OrderStatus(status)
+            query = query.where(Order.status == order_status)
+            count_query = count_query.where(Order.status == order_status)
+        except ValueError:
+            pass
+
     if recent:
-        # 获取最近的订单
         query = query.limit(recent)
         result = await db.execute(query)
         orders = result.scalars().all()
         total = len(orders)
     else:
-        # 分页获取订单
+        total = await db.scalar(count_query)
         query = query.offset(offset).limit(page_size)
         result = await db.execute(query)
         orders = result.scalars().all()
-        total = await db.scalar(select(func.count(Order.id)))
 
     # 获取状态对应的中文描述
     status_map = {
@@ -246,6 +287,7 @@ async def list_orders(
                 "order_no": o.order_no,
                 "user_id": o.user_id,
                 "plan_type": o.plan_type.value,
+                "payment_method": o.payment_method,
                 "amount": float(o.amount),
                 "status": o.status.value,
                 "status_text": status_map.get(o.status, o.status.value),
@@ -336,13 +378,18 @@ async def admin_generate_license_keys(
     return {"keys": keys, "count": len(keys)}
 
 
+class TrialCodeGenerate(BaseModel):
+    count: int = 20
+
+
 @router.post("/generate_trial_codes")
 async def admin_generate_trial_codes(
-    count: int = 20,
+    body: TrialCodeGenerate = None,
     request: Request = None,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    count = body.count if body else 20
     count = max(1, min(count, 100))
     keys = []
     for _ in range(count):
@@ -597,14 +644,8 @@ async def get_version(
 @router.put("/versions/{version_id}")
 async def update_version(
     version_id: int,
-    version: str = None,
-    download_url: str = None,
-    file_size: int = None,
-    changelog: str = None,
-    priority: str = None,
-    force_update: bool = None,
-    is_active: bool = None,
-    request: Request = None,
+    body: VersionUpdate,
+    request: Request,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -613,23 +654,23 @@ async def update_version(
     if not target:
         raise HTTPException(status_code=404, detail="版本不存在")
     
-    if version is not None:
-        target.version = version
-    if download_url is not None:
-        target.download_url = download_url
-    if file_size is not None:
-        target.file_size = file_size
-    if changelog is not None:
-        target.changelog = changelog
-    if priority is not None:
-        target.priority = priority
-    if force_update is not None:
-        target.force_update = force_update
-    if is_active is not None:
-        target.is_active = is_active
+    if body.version is not None:
+        target.version = body.version
+    if body.download_url is not None:
+        target.download_url = body.download_url
+    if body.file_size is not None:
+        target.file_size = body.file_size
+    if body.changelog is not None:
+        target.changelog = body.changelog
+    if body.priority is not None:
+        target.priority = body.priority
+    if body.force_update is not None:
+        target.force_update = body.force_update
+    if body.is_active is not None:
+        target.is_active = body.is_active
     
     await db.flush()
-    await _log_audit(db, user, "update_version", f"version_id={version_id}, version={version}", request)
+    await _log_audit(db, user, "update_version", f"version_id={version_id}, version={body.version}", request)
     await db.commit()
     return {"success": True}
 
@@ -770,10 +811,12 @@ async def list_audit_logs(
     offset = (page - 1) * page_size
 
     query = select(AuditLog).order_by(desc(AuditLog.created_at))
+    count_query = select(func.count(AuditLog.id))
     if action:
         query = query.where(AuditLog.action == action)
+        count_query = count_query.where(AuditLog.action == action)
 
-    total = await db.scalar(select(func.count(AuditLog.id)))
+    total = await db.scalar(count_query)
     result = await db.execute(query.offset(offset).limit(page_size))
     logs = result.scalars().all()
 

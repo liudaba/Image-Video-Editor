@@ -351,9 +351,21 @@
                 if (response.ok) {
                     contentArea.innerHTML = await response.text();
                     
+                    contentArea.querySelectorAll('script').forEach(oldScript => {
+                        const newScript = document.createElement('script');
+                        if (oldScript.src) {
+                            newScript.src = oldScript.src;
+                        } else {
+                            newScript.textContent = oldScript.textContent;
+                        }
+                        oldScript.parentNode.replaceChild(newScript, oldScript);
+                    });
+                    
                     let initFunctionName;
                     if (section === 'trial_codes') {
                         initFunctionName = 'loadTrialCodesContent';
+                    } else if (section === 'audit_logs') {
+                        initFunctionName = 'loadAuditLogsContent';
                     } else {
                         initFunctionName = `load${section.charAt(0).toUpperCase() + section.slice(1)}Content`;
                     }
