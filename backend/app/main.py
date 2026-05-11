@@ -247,6 +247,8 @@ async def verify_csrf(request: Request, call_next):
         "/api/auth/request-reset",
         "/api/auth/confirm-reset",
         "/api/payment/callback/",
+        "/auth/login",
+        "/auth/logout",
     )
     for skip_path in csrf_skip_paths:
         if request.url.path.startswith(skip_path):
