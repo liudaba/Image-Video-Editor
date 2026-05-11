@@ -666,6 +666,32 @@ class UIPanelsMixin:
         )
         thread_combo.pack(side=tk.LEFT, padx=2, pady=1)
 
+        batch_frame = ttk.Frame(thread_section)
+        batch_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(batch_frame, text="分镜批处理:", width=10, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+
+        if not hasattr(self, 'batch_size_var'):
+            self.batch_size_var = tk.IntVar(value=2)
+
+        batch_options = [1, 2, 3, 4, 5, 6, 8, 10]
+        batch_combo = ttk.Combobox(
+            batch_frame,
+            textvariable=self.batch_size_var,
+            values=batch_options,
+            state="readonly",
+            font=('Microsoft YaHei', large_font_size),
+            width=8
+        )
+        batch_combo.pack(side=tk.LEFT, padx=2, pady=1)
+
+        batch_hint = ttk.Label(
+            thread_section,
+            text="💡 小模型建议2-3，大模型可用6-8",
+            font=('Microsoft YaHei', small_font_size - 1),
+            foreground="#888888"
+        )
+        batch_hint.pack(anchor=tk.W, padx=12, pady=(0, 2))
+
         # ==================== 主题自定义 ====================
         theme_section = ttk.LabelFrame(panels["theme"], text="🎯 主题自定义", padding=4, style="Adv.TLabelframe")
         theme_section.pack(fill=tk.BOTH, expand=True)

@@ -337,6 +337,8 @@ class UIHandlersMixin:
             print(f"  动画效果:     {animation}")
             print(f"  过渡效果:     {transition}")
             print(f"  分镜创建线程: {thread_count}")
+            batch_size = self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2
+            print(f"  分镜批处理:   {batch_size}")
             if core_theme:
                 print(f"  核心主题:     {core_theme}")
             if visual_tone:
@@ -547,6 +549,7 @@ class UIHandlersMixin:
         confirm_msg += f"动画效果: {self.animation_var.get() if hasattr(self, 'animation_var') else '无'}\n"
         confirm_msg += f"过渡效果: {self.transition_var.get() if hasattr(self, 'transition_var') else '硬切'}\n"
         confirm_msg += f"分镜线程: {self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8}\n"
+        confirm_msg += f"分镜批处理: {self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2}\n"
         min_shot_dur = self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0
         confirm_msg += f"最短分镜时长: {min_shot_dur:.1f}秒\n"
 
@@ -1478,6 +1481,10 @@ class UIHandlersMixin:
                 if 'thread_count' in config and hasattr(self, 'thread_count_var'):
                     self.thread_count_var.set(config['thread_count'])
                 
+                # 加载分镜批处理大小设置
+                if 'batch_size' in config and hasattr(self, 'batch_size_var'):
+                    self.batch_size_var.set(config['batch_size'])
+                
                 # 加载Whisper模型设置
                 if 'whisper_model' in config and hasattr(self, 'whisper_model_var'):
                     self.whisper_model_var.set(config['whisper_model'])
@@ -1563,6 +1570,7 @@ class UIHandlersMixin:
                 'prompt_type': self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词',
                 'animation': self.animation_var.get() if hasattr(self, 'animation_var') else '无',
                 'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8,
+                'batch_size': self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2,
                 'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
                 'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'DeepSeek 深度求索',
                 'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',

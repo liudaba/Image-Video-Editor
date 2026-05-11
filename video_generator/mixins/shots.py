@@ -4405,7 +4405,7 @@ class ShotsMixin:
             self._chinese_semantic_skeletons = {}
             self._visual_narrative_strategy = theme_info.get('visual_narrative_strategy', '')
 
-            BATCH_SIZE = 8
+            BATCH_SIZE = self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2
 
             if _cloud_llm:
                 prompt_max_workers = 4

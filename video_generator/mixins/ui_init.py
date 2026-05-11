@@ -344,6 +344,9 @@ class UIInitMixin:
         # 并发线程数设置 - 初始默认值，由高级设置面板和load_config覆盖
         self.thread_count_var = tk.IntVar(value=8)
         
+        # 分镜批处理大小设置 - 初始默认值，由高级设置面板和load_config覆盖
+        self.batch_size_var = tk.IntVar(value=2)
+        
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")
         
