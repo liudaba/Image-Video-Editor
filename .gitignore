@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+build/
+develop-eggs/
+dist/
+dist_obfuscated/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 模型文件
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/*.safetensors
+
+# 输出文件和目录
+output/
+outputs/
+output_project/
+
+# 视频文件
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# 音频文件
+*.wav
+*.mp3
+
+# 图片文件
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# JSON配置文件 (保留config.json.example模板)
+*.json
+!config.json.example
+!config.json
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 垃圾桶
+垃圾桶/
+
+# 备份文件
+*.bak
+backups/
+
+# 安全相关 - 绝对不能提交
+.secret_key
+.key_salt
+.license_sign_key
+.license_verify_key
+.login_creds
+.env
+*.db
+*.pem
+license.json
+keys/
+logs/
+# 配置文件生成工具和安全脚本
+create_config.py
+generate_config.py
+setup_config.py
+check_packing_safety.py
+设置配置.bat
+配置信息.txt
+backend/.env
+backend/keys/
+
+# 测试脚本 (含敏感信息)
+test_api.sh
+test_server.sh
+
+# 安装包输出
+installer_output/
