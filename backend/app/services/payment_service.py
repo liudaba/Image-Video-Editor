@@ -125,8 +125,8 @@ async def create_order(
 
 def get_payment_callback_url(method: str) -> str:
     """获取支付回调地址"""
-    base_url = "https://api.videogen.com/api/payment/callback"
-    return f"{base_url}/{method}"
+    base_url = _get_site_base_url()
+    return f"{base_url}/api/payment/callback/{method}"
 
 
 def verify_alipay_signature(params: Dict, alipay_public_key: str) -> bool:
@@ -147,13 +147,14 @@ def verify_wechat_signature(params: Dict, wechat_api_key: str) -> bool:
         if not settings.WECHAT_API_KEY:
             return False
 
-        sign = params.pop('sign', None)
+        sign = params.get('sign')
         if not sign:
             return False
 
-        sign_str = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if v)
+        filtered = {k: v for k, v in params.items() if k != 'sign' and v}
+        sign_str = "&".join(f"{k}={v}" for k, v in sorted(filtered.items()))
         sign_str += f"&key={settings.WECHAT_API_KEY}"
-        computed_sign = hashlib.md5(sign_str.encode("utf-8")).hexdigest().upper()
+        computed_sign = hashlib.sha256(sign_str.encode("utf-8")).hexdigest().upper()
 
         import hmac as _hmac
         return _hmac.compare_digest(computed_sign, sign)
@@ -279,7 +280,7 @@ async def verify_wechat_notification(headers: dict, body: bytes) -> bool:
             f"{el.tag}={el.text}" for el in sorted_elements if el.text
         )
         sign_str += f"&key={settings.WECHAT_API_KEY}"
-        computed_sign = hashlib.md5(sign_str.encode("utf-8")).hexdigest().upper()
+        computed_sign = hashlib.sha256(sign_str.encode("utf-8")).hexdigest().upper()
 
         import hmac as _hmac
         return _hmac.compare_digest(computed_sign, received_sign)
@@ -294,7 +295,7 @@ async def create_payment_order(
     payment_method: str,
 ) -> Dict[str, Any]:
     """统一创建支付订单接口"""
-    plan_type_enum = PlanType(plan_type.upper())
+    plan_type_enum = PlanType(plan_type.lower())
     order = await create_order(db, user_id, plan_type_enum, payment_method)
     
     if payment_method.lower() == "alipay":

@@ -24,6 +24,18 @@ logger = logging.getLogger("videogen")
 router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 
+def _check_callback_ip(request: Request) -> bool:
+    from ..config import settings
+    allowed_str = settings.PAYMENT_CALLBACK_ALLOWED_IPS
+    if not allowed_str or not allowed_str.strip():
+        return True
+    allowed = [ip.strip() for ip in allowed_str.split(",") if ip.strip()]
+    if not allowed:
+        return True
+    client_ip = request.client.host if request.client else "unknown"
+    return client_ip in allowed
+
+
 @router.post("/create-order", response_model=OrderResponse, summary="创建支付订单")
 async def create_payment_order_route(
     order_data: PaymentCreateOrder,
@@ -105,6 +117,8 @@ async def alipay_callback(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
+    if not _check_callback_ip(request):
+        return {"code": "FAIL", "msg": "IP未授权"}
     form_data = await request.form()
     params = dict(form_data)
     
@@ -112,6 +126,8 @@ async def alipay_callback(
         return {"code": "FAIL", "msg": "签名验证失败"}
     
     order_no = params.get('out_trade_no')
+    if not order_no:
+        return {"code": "FAIL", "msg": "缺少订单号"}
     trade_status = params.get('trade_status')
     
     if trade_status in ['TRADE_SUCCESS', 'TRADE_FINISHED']:
@@ -186,6 +202,8 @@ async def wechat_callback(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
+    if not _check_callback_ip(request):
+        return {"code": "FAIL", "msg": "IP未授权"}
     body = await request.body()
     headers = request.headers
     
@@ -202,6 +220,8 @@ async def wechat_callback(
             data[child.tag] = child.text
     
     order_no = data.get('out_trade_no')
+    if not order_no:
+        return {"code": "FAIL", "msg": "缺少订单号"}
     trade_state = data.get('trade_state')
     
     if trade_state == 'SUCCESS':

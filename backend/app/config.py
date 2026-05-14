@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     SITE_BASE_URL: str = ""
 
+    PAYMENT_CALLBACK_ALLOWED_IPS: str = ""
+
     SMTP_HOST: str = ""
     SMTP_PORT: int = 465
     SMTP_USER: str = ""

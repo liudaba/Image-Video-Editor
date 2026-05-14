@@ -136,7 +136,15 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     existing_license = existing_result.scalar_one_or_none()
 
     if existing_license:
-        if license_key_obj.plan_type == PlanType.TRIAL_15D:
+        if license_key_obj.plan_type == PlanType.LIFETIME:
+            existing_license.license_type = "pro"
+            existing_license.license_key = license_key
+            existing_license.is_valid = True
+            existing_license.expiry_date = None
+            await db.flush()
+            await db.commit()
+            return existing_license
+        elif license_key_obj.plan_type == PlanType.TRIAL_15D:
             if existing_license.expiry_date:
                 current_expiry = existing_license.expiry_date
                 if current_expiry.tzinfo is None:
@@ -149,7 +157,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             existing_license.trial_end = expiry_date
             if not existing_license.trial_start:
                 existing_license.trial_start = datetime.now(timezone.utc)
-        elif license_type == "pro":
+        else:
             if existing_license.expiry_date:
                 current_expiry = existing_license.expiry_date
                 if current_expiry.tzinfo is None:

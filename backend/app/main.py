@@ -22,7 +22,7 @@ from .services.cleanup_service import cleanup_loop
 
 logger = logging.getLogger("videogen")
 
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 class JSONFormatter(logging.Formatter):
@@ -241,18 +241,9 @@ async def add_security_headers(request: Request, call_next):
 async def verify_csrf(request: Request, call_next):
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return await call_next(request)
-    csrf_skip_paths = (
-        "/api/auth/login",
-        "/api/auth/register",
-        "/api/auth/request-reset",
-        "/api/auth/confirm-reset",
-        "/api/payment/callback/",
-        "/auth/login",
-        "/auth/logout",
-    )
-    for skip_path in csrf_skip_paths:
-        if request.url.path.startswith(skip_path):
-            return await call_next(request)
+    admin_paths = ("/admin/", "/api/admin/", "/auth/logout")
+    if not any(request.url.path.startswith(p) for p in admin_paths):
+        return await call_next(request)
     admin_session = request.cookies.get("admin_session")
     if not admin_session:
         return await call_next(request)
@@ -318,7 +309,7 @@ async def root():
 
 @app.get("/admin/login")
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html")
 
 
 @app.post("/auth/login")
@@ -379,7 +370,7 @@ async def admin_logout():
 async def dashboard_page(request: Request, db=Depends(get_db)):
     session_token = request.cookies.get("admin_session")
     if not session_token:
-        return templates.TemplateResponse("login.html", {"request": request})
+        return templates.TemplateResponse(request, "login.html")
     try:
         from .auth import decode_access_token
         token_data = decode_access_token(session_token)
@@ -389,8 +380,8 @@ async def dashboard_page(request: Request, db=Depends(get_db)):
         if not user or not user.is_admin:
             raise HTTPException(status_code=403, detail="需要管理员权限")
     except HTTPException:
-        return templates.TemplateResponse("login.html", {"request": request})
-    return templates.TemplateResponse("admin_base.html", {"request": request})
+        return templates.TemplateResponse(request, "login.html")
+    return templates.TemplateResponse(request, "admin_base.html")
 
 
 @app.get("/admin/content/{section}")
@@ -424,5 +415,5 @@ async def get_content(request: Request, section: str, db=Depends(get_db)):
     if not template_file:
         raise HTTPException(status_code=404, detail="内容不存在")
 
-    return templates.TemplateResponse(template_file, {"request": request})
+    return templates.TemplateResponse(request, template_file)
 

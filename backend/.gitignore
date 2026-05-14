@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 .venv/
 alembic/versions/__pycache__/
+*.db
+logs/
+test_local.py
+test_security.py
