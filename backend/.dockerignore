@@ -1,0 +1,8 @@
+.env
+keys/
+*.pem
+__pycache__/
+*.pyc
+.venv/
+videogen.db
+.git/

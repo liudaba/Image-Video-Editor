@@ -1,0 +1,153 @@
+<div class="page-header">
+    <h2>审计日志</h2>
+    <p class="text-muted">查看系统操作记录，追踪管理员行为</p>
+</div>
+
+<div class="card shadow mb-4">
+    <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+        <h6 class="m-0 font-weight-bold text-primary">操作日志列表</h6>
+        <div class="d-flex">
+            <select class="form-select form-select-sm me-2" id="audit-action-filter" style="width: 180px;">
+                <option value="">所有操作</option>
+                <option value="login">登录</option>
+                <option value="create_user">创建用户</option>
+                <option value="update_user">更新用户</option>
+                <option value="delete_user">删除用户</option>
+                <option value="toggle_user_active">切换用户状态</option>
+                <option value="generate_license_keys">生成许可证</option>
+                <option value="generate_trial_codes">生成试用码</option>
+                <option value="revoke_license_key">撤销密钥</option>
+                <option value="create_version">创建版本</option>
+                <option value="update_version">更新版本</option>
+                <option value="delete_version">删除版本</option>
+                <option value="toggle_version_active">切换版本状态</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" id="refresh-audit">
+                <i class="fas fa-refresh"></i> 刷新
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="audit-table" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>操作人</th>
+                        <th>操作类型</th>
+                        <th>详情</th>
+                        <th>IP地址</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-list">
+                </tbody>
+            </table>
+        </div>
+
+        <nav aria-label="审计日志分页" class="mt-3">
+            <ul class="pagination justify-content-center" id="audit-pagination">
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<script>
+    let auditCurrentPage = 1;
+    let auditPageSize = 20;
+
+    const actionLabels = {
+        'login': '登录',
+        'create_user': '创建用户',
+        'update_user': '更新用户',
+        'delete_user': '删除用户',
+        'toggle_user_active': '切换用户状态',
+        'generate_license_keys': '生成许可证',
+        'generate_trial_codes': '生成试用码',
+        'revoke_license_key': '撤销密钥',
+        'create_version': '创建版本',
+        'update_version': '更新版本',
+        'delete_version': '删除版本',
+        'toggle_version_active': '切换版本状态',
+    };
+
+    async function loadAuditLogsContent() {
+        await loadAuditLogs(auditCurrentPage);
+
+        document.getElementById('refresh-audit').addEventListener('click', () => {
+            loadAuditLogs(auditCurrentPage);
+        });
+
+        document.getElementById('audit-action-filter').addEventListener('change', () => {
+            auditCurrentPage = 1;
+            loadAuditLogs(auditCurrentPage);
+        });
+    }
+
+    async function loadAuditLogs(page = 1) {
+        try {
+            const action = document.getElementById('audit-action-filter').value;
+            let queryParams = `?page=${page}&page_size=${auditPageSize}`;
+            if (action) queryParams += `&action=${encodeURIComponent(action)}`;
+
+            const response = await apiRequest(`/api/admin/audit_logs${queryParams}`);
+            const auditList = document.getElementById('audit-list');
+            auditList.innerHTML = '';
+
+            if (response.logs.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="6" class="text-center text-muted">暂无日志记录</td>';
+                auditList.appendChild(row);
+            } else {
+                response.logs.forEach(log => {
+                    const row = document.createElement('tr');
+                    const actionLabel = actionLabels[log.action] || log.action;
+                    row.innerHTML = `
+                        <td>${log.id}</td>
+                        <td>${escapeHtml(log.operator_name) || '-'}</td>
+                        <td><span class="badge bg-info">${escapeHtml(actionLabel)}</span></td>
+                        <td>${escapeHtml(log.detail) || '-'}</td>
+                        <td><code>${escapeHtml(log.ip_address) || '-'}</code></td>
+                        <td>${formatDate(log.created_at)}</td>
+                    `;
+                    auditList.appendChild(row);
+                });
+            }
+
+            renderAuditPagination(response.total, page, auditPageSize);
+        } catch (error) {
+            console.error('加载审计日志失败:', error);
+            showError('加载审计日志失败: ' + error.message);
+        }
+    }
+
+    function renderAuditPagination(total, currentPage, pageSize) {
+        const totalPages = Math.ceil(total / pageSize);
+        const pagination = document.getElementById('audit-pagination');
+        pagination.innerHTML = '';
+
+        if (totalPages <= 1) return;
+
+        const prevItem = document.createElement('li');
+        prevItem.className = `page-item ${currentPage <= 1 ? 'disabled' : ''}`;
+        prevItem.innerHTML = `<a class="page-link" href="#" onclick="switchAuditPage(${Math.max(1, currentPage - 1)})">上一页</a>`;
+        pagination.appendChild(prevItem);
+
+        for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
+            const pageItem = document.createElement('li');
+            pageItem.className = `page-item ${i === currentPage ? 'active' : ''}`;
+            pageItem.innerHTML = `<a class="page-link" href="#" onclick="switchAuditPage(${i})">${i}</a>`;
+            pagination.appendChild(pageItem);
+        }
+
+        const nextItem = document.createElement('li');
+        nextItem.className = `page-item ${currentPage >= totalPages ? 'disabled' : ''}`;
+        nextItem.innerHTML = `<a class="page-link" href="#" onclick="switchAuditPage(${Math.min(totalPages, currentPage + 1)})">下一页</a>`;
+        pagination.appendChild(nextItem);
+    }
+
+    function switchAuditPage(page) {
+        auditCurrentPage = page;
+        loadAuditLogs(page);
+    }
+</script>

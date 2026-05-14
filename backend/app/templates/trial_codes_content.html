@@ -1,0 +1,135 @@
+<div class="page-header">
+    <h2>自动生成激活码</h2>
+    <p class="text-muted">生成15天试用激活码，客户输入激活码后可免费使用工具15天（从激活开始计算）</p>
+</div>
+
+<div class="card shadow mt-4">
+    <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+        <h6 class="m-0 font-weight-bold text-primary">15天试用激活码列表</h6>
+        <button class="btn btn-sm btn-primary" id="generate-trial-btn">
+            <i class="fas fa-plus"></i> 生成20个激活码
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="trial-codes-table" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>激活码</th>
+                        <th>状态</th>
+                        <th>剩余天数</th>
+                        <th>激活用户</th>
+                        <th>激活时间</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="trial-codes-list">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadTrialCodesContent() {
+        await loadTrialCodes();
+        
+        document.getElementById('generate-trial-btn').addEventListener('click', () => {
+            showGenerateTrialModal();
+        });
+    }
+
+    async function loadTrialCodes() {
+        try {
+            const response = await apiRequest('/api/admin/trial_codes');
+            const codesList = document.getElementById('trial-codes-list');
+            codesList.innerHTML = '';
+            
+            response.keys.forEach(key => {
+                const row = document.createElement('tr');
+                const isExpired = key.is_expired || key.status === 'revoked';
+                const remainingText = key.status === 'activated' ? '已激活' : 
+                                     isExpired ? '已过期' : 
+                                     `${key.days_remaining} 天`;
+                const remainingClass = key.status === 'activated' ? 'text-success' : 
+                                       isExpired ? 'text-danger' : 
+                                       key.days_remaining <= 3 ? 'text-warning' : 'text-info';
+                
+                row.innerHTML = `
+                    <td><code>${escapeHtml(key.license_key)}</code></td>
+                    <td>
+                        <span class="badge ${
+                            isExpired ? 'bg-danger' :
+                            key.status === 'unused' ? 'bg-secondary' : 
+                            key.status === 'activated' ? 'bg-success' : 'bg-danger'
+                        }">${isExpired ? '已过期' : key.status === 'unused' ? '未使用' : key.status === 'activated' ? '已激活' : '已撤销'}</span>
+                    </td>
+                    <td><span class="${remainingClass}">${remainingText}</span></td>
+                    <td>${escapeHtml(key.activated_by_username) || '-'}</td>
+                    <td>${key.activated_at ? formatDate(key.activated_at) : '-'}</td>
+                    <td>${formatDate(key.created_at)}</td>
+                    <td>
+                        ${key.status === 'unused' && !key.is_expired ? `
+                            <button class="btn btn-sm btn-danger" onclick="revokeTrialCode('${escapeHtml(key.license_key)}')">
+                                <i class="fas fa-ban"></i> 撤销
+                            </button>
+                        ` : '-'}
+                    </td>
+                `;
+                codesList.appendChild(row);
+            });
+        } catch (error) {
+            console.error('加载试用激活码失败:', error);
+            showError('加载试用激活码失败: ' + error.message);
+        }
+    }
+
+    function showGenerateTrialModal() {
+        const modalBody = document.getElementById('commonModalBody');
+        modalBody.innerHTML = `
+            <div class="mb-3">
+                <p class="text-muted">点击确定后将生成20个15天试用激活码。</p>
+                <p class="text-muted">客户输入激活码后，可免费使用工具半个月。</p>
+            </div>
+        `;
+        
+        document.getElementById('commonModalLabel').textContent = '生成试用激活码';
+        document.getElementById('confirmModalBtn').textContent = '生成';
+        
+        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        modal.show();
+        
+        document.getElementById('confirmModalBtn').onclick = async function() {
+            try {
+                const response = await apiRequest('/api/admin/generate_trial_codes', {
+                    method: 'POST',
+                    body: JSON.stringify({count: 20})
+                });
+                
+                showSuccess(`成功生成 ${response.count} 个激活码，有效期 ${response.valid_days} 天`);
+                modal.hide();
+                loadTrialCodes();
+            } catch (error) {
+                console.error('生成试用激活码失败:', error);
+                showError(`生成试用激活码失败: ${error.message}`);
+            }
+        };
+    }
+
+    async function revokeTrialCode(key) {
+        if (!confirm(`确定要撤销激活码 ${key} 吗？`)) return;
+        
+        try {
+            await apiRequest(`/api/admin/license_keys/${key}/revoke`, {
+                method: 'POST'
+            });
+            showSuccess('撤销成功');
+            loadTrialCodes();
+        } catch (error) {
+            console.error('撤销激活码失败:', error);
+            showError(`撤销激活码失败: ${error.message}`);
+        }
+    }
+</script>

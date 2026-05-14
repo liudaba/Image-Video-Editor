@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>短视频生成器 - 管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            height: 100vh;
+            position: fixed;
+            padding-top: 20px;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar bg-light">
+                <div class="position-sticky pt-3">
+                    <h5 class="text-center">管理后台</h5>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#dashboard" onclick="showSection('dashboard')">
+                                仪表盘
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#users" onclick="showSection('users')">
+                                用户管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#licenses" onclick="showSection('licenses')">
+                                许可证管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#versions" onclick="showSection('versions')">
+                                版本管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#orders" onclick="showSection('orders')">
+                                订单管理
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 主内容区 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+                <!-- 仪表盘 -->
+                <div id="dashboard" class="section">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">仪表盘</h1>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="card text-white bg-primary mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">总用户数</h5>
+                                    <p class="card-text"><span id="total-users">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-white bg-success mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">活跃许可证</h5>
+                                    <p class="card-text"><span id="active-licenses">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-white bg-info mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">付费订单</h5>
+                                    <p class="card-text"><span id="paid-orders">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-white bg-warning mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">总收入</h5>
+                                    <p class="card-text"><span id="total-revenue">-</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 用户管理 -->
+                <div id="users" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">用户管理</h1>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-sm">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>用户名</th>
+                                    <th>邮箱</th>
+                                    <th>状态</th>
+                                    <th>注册时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body">
+                                <!-- 动态填充 -->
+                            </tbody>
+                        </table>
+                        <nav aria-label="用户列表分页">
+                            <ul class="pagination" id="users-pagination">
+                                <!-- 分页按钮 -->
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+
+                <!-- 许可证管理 -->
+                <div id="licenses" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">许可证管理</h1>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    生成新许可证
+                                </div>
+                                <div class="card-body">
+                                    <form id="license-form">
+                                        <div class="mb-3">
+                                            <label class="form-label">计划类型</label>
+                                            <select class="form-control" id="plan-type">
+                                                <option value="monthly">月度</option>
+                                                <option value="yearly" selected>年度</option>
+                                                <option value="lifetime">终身</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">数量</label>
+                                            <input type="number" class="form-control" id="license-count" value="1" min="1" max="50">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">生成许可证</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    生成的许可证
+                                </div>
+                                <div class="card-body">
+                                    <pre id="generated-keys" class="bg-light p-3 rounded">等待生成...</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 版本管理 -->
+                <div id="versions" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">版本管理</h1>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="card">
+                                <div class="card-header">
+                                    发布新版本
+                                </div>
+                                <div class="card-body">
+                                    <form id="version-form">
+                                        <div class="mb-3">
+                                            <label class="form-label">版本号</label>
+                                            <input type="text" class="form-control" id="version" placeholder="例如: 1.2.3">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">下载链接</label>
+                                            <input type="text" class="form-control" id="download-url" placeholder="完整下载链接">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">文件大小 (字节)</label>
+                                            <input type="number" class="form-control" id="file-size" placeholder="文件大小，单位字节">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">更新日志</label>
+                                            <textarea class="form-control" id="changelog" rows="3"></textarea>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">优先级</label>
+                                            <select class="form-control" id="priority">
+                                                <option value="low">低</option>
+                                                <option value="normal" selected>普通</option>
+                                                <option value="high">高</option>
+                                                <option value="critical">紧急</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-check mb-3">
+                                            <input type="checkbox" class="form-check-input" id="force-update">
+                                            <label class="form-check-label" for="force-update">强制更新</label>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">发布版本</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 订单管理 -->
+                <div id="orders" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                        <h1 class="h2">订单管理</h1>
+                    </div>
+                    <p>订单管理功能待实现...</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 初始显示仪表盘
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+            loadUsers(1);
+        });
+
+        // 显示指定区域
+        function showSection(sectionId) {
+            // 隐藏所有section
+            document.querySelectorAll('.section').forEach(el => {
+                el.style.display = 'none';
+            });
+            
+            // 显示指定section
+            document.getElementById(sectionId).style.display = 'block';
+            
+            // 更新导航高亮
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            
+            event.target.classList.add('active');
+            
+            // 根据显示的区域执行特定逻辑
+            if (sectionId === 'users') {
+                loadUsers(1);
+            } else if (sectionId === 'licenses') {
+                document.getElementById('license-form').addEventListener('submit', handleLicenseGeneration);
+            } else if (sectionId === 'versions') {
+                document.getElementById('version-form').addEventListener('submit', handleVersionCreation);
+            }
+        }
+
+        // 加载统计数据
+        function loadStats() {
+            fetch('/api/admin/stats', {
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('total-users').textContent = data.total_users;
+                document.getElementById('active-licenses').textContent = data.active_licenses;
+                document.getElementById('paid-orders').textContent = data.paid_orders;
+                document.getElementById('total-revenue').textContent = '¥' + data.total_revenue.toFixed(2);
+            })
+            .catch(error => console.error('加载统计信息出错:', error));
+        }
+
+        // 加载用户列表
+        function loadUsers(page = 1) {
+            fetch(`/api/admin/users?page=${page}&page_size=20`, {
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('users-table-body');
+                tbody.innerHTML = '';
+                
+                data.users.forEach(user => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${user.id}</td>
+                        <td>${user.username}</td>
+                        <td>${user.email}</td>
+                        <td>
+                            <span class="badge ${user.is_active ? 'bg-success' : 'bg-danger'}">
+                                ${user.is_active ? '启用' : '禁用'}
+                            </span>
+                        </td>
+                        <td>${new Date(user.created_at).toLocaleString()}</td>
+                        <td>
+                            <button class="btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}" 
+                                onclick="toggleUserActive(${user.id})">
+                                ${user.is_active ? '禁用' : '启用'}
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                renderPagination(data.total, data.page, data.page_size);
+            })
+            .catch(error => console.error('加载用户列表出错:', error));
+        }
+
+        // 渲染分页
+        function renderPagination(total, currentPage, pageSize) {
+            const totalPages = Math.ceil(total / pageSize);
+            const pagination = document.getElementById('users-pagination');
+            pagination.innerHTML = '';
+            
+            // 上一页
+            const prevItem = document.createElement('li');
+            prevItem.className = `page-item ${currentPage <= 1 ? 'disabled' : ''}`;
+            prevItem.innerHTML = `<a class="page-link" href="#" onclick="loadUsers(${Math.max(1, currentPage - 1)})">上一页</a>`;
+            pagination.appendChild(prevItem);
+            
+            // 页码
+            for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
+                const pageItem = document.createElement('li');
+                pageItem.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                pageItem.innerHTML = `<a class="page-link" href="#" onclick="loadUsers(${i})">${i}</a>`;
+                pagination.appendChild(pageItem);
+            }
+            
+            // 下一页
+            const nextItem = document.createElement('li');
+            nextItem.className = `page-item ${currentPage >= totalPages ? 'disabled' : ''}`;
+            nextItem.innerHTML = `<a class="page-link" href="#" onclick="loadUsers(${Math.min(totalPages, currentPage + 1)})">下一页</a>`;
+            pagination.appendChild(nextItem);
+        }
+
+        // 切换用户状态
+        function toggleUserActive(userId) {
+            fetch(`/api/admin/users/${userId}/toggle_active`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`用户状态已${data.is_active ? '启用' : '禁用'}`);
+                    loadUsers(); // 刷新列表
+                }
+            })
+            .catch(error => console.error('切换用户状态出错:', error));
+        }
+
+        // 处理许可证生成
+        function handleLicenseGeneration(e) {
+            e.preventDefault();
+            
+            const planType = document.getElementById('plan-type').value;
+            const count = parseInt(document.getElementById('license-count').value);
+            
+            fetch('/api/admin/generate_license_keys', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                },
+                body: JSON.stringify({
+                    plan_type: planType,
+                    count: count
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('generated-keys').textContent = data.keys.join('\n');
+            })
+            .catch(error => console.error('生成许可证出错:', error));
+        }
+
+        // 处理版本创建
+        function handleVersionCreation(e) {
+            e.preventDefault();
+            
+            const formData = {
+                version: document.getElementById('version').value,
+                download_url: document.getElementById('download-url').value,
+                file_size: parseInt(document.getElementById('file-size').value),
+                changelog: document.getElementById('changelog').value,
+                priority: document.getElementById('priority').value,
+                force_update: document.getElementById('force-update').checked
+            };
+            
+            fetch('/api/admin/versions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('版本发布成功！');
+                    document.getElementById('version-form').reset();
+                }
+            })
+            .catch(error => console.error('发布版本出错:', error));
+        }
+    </script>
+</body>
+</html>

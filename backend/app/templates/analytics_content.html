@@ -1,0 +1,227 @@
+<div class="page-header">
+    <h2>数据分析</h2>
+    <p class="text-muted">查看系统数据统计和趋势分析</p>
+</div>
+
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">本周新增用户</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="weekly-users">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-user-plus fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">本周订单</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="weekly-orders">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">本周收入</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">¥<span id="weekly-revenue">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">活跃许可证</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="active-pro-licenses">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-key fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">用户增长趋势</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="userGrowthChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">收入趋势</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="revenueChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">许可证类型分布</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="licenseChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">订单来源分布</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="paymentChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    async function loadAnalyticsContent() {
+        await loadAnalyticsData();
+    }
+
+    async function loadAnalyticsData() {
+        try {
+            const analytics = await apiRequest('/api/admin/analytics');
+            
+            document.getElementById('weekly-users').textContent = analytics.weekly_new_users;
+            document.getElementById('weekly-orders').textContent = analytics.weekly_orders;
+            document.getElementById('weekly-revenue').textContent = analytics.weekly_revenue.toFixed(2);
+            document.getElementById('active-pro-licenses').textContent = analytics.active_pro_licenses;
+            
+            renderCharts(analytics);
+        } catch (error) {
+            console.error('加载分析数据失败:', error);
+            showError('加载分析数据失败: ' + error.message);
+        }
+    }
+
+    function renderCharts(data) {
+        const weekDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        
+        // 用户增长趋势图
+        new Chart(document.getElementById('userGrowthChart'), {
+            type: 'line',
+            data: {
+                labels: weekDays,
+                datasets: [{
+                    label: '每日新用户',
+                    data: data.daily_users,
+                    borderColor: '#4E73DF',
+                    backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+        
+        // 收入趋势图
+        new Chart(document.getElementById('revenueChart'), {
+            type: 'line',
+            data: {
+                labels: weekDays,
+                datasets: [{
+                    label: '每日收入(元)',
+                    data: data.daily_revenue,
+                    borderColor: '#1CC88A',
+                    backgroundColor: 'rgba(28, 200, 138, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+        
+        // 许可证类型分布图
+        new Chart(document.getElementById('licenseChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['试用版', '专业版'],
+                datasets: [{
+                    data: [data.trial_licenses, data.pro_licenses],
+                    backgroundColor: ['#36B9CC', '#4E73DF'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+        
+        // 支付方式分布图
+        new Chart(document.getElementById('paymentChart'), {
+            type: 'pie',
+            data: {
+                labels: ['支付宝', '微信支付'],
+                datasets: [{
+                    data: [data.alipay_orders, data.wechat_orders],
+                    backgroundColor: ['#1CC88A', '#FF6384'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+    }
+</script>

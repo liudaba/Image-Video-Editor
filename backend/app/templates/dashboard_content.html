@@ -1,0 +1,177 @@
+<div class="page-header">
+    <h2>仪表盘</h2>
+    <p class="text-muted">系统概览和关键指标</p>
+</div>
+
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">总用户数</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="total-users">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-users fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">活跃许可证</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="active-licenses">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-key fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">付费订单</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="paid-orders">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card border-start-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">总收入</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">¥<span id="total-revenue">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">最近用户</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="recent-users-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>用户名</th>
+                                <th>邮箱</th>
+                                <th>注册时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-users-list">
+                            <!-- 动态加载 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">近期订单</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="recent-orders-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>订单号</th>
+                                <th>金额</th>
+                                <th>状态</th>
+                                <th>时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-orders-list">
+                            <!-- 动态加载 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function loadDashboardContent() {
+        try {
+            const stats = await apiRequest('/api/admin/stats');
+            document.getElementById('total-users').textContent = stats.total_users;
+            document.getElementById('active-licenses').textContent = stats.active_licenses;
+            document.getElementById('paid-orders').textContent = stats.paid_orders;
+            document.getElementById('total-revenue').textContent = stats.total_revenue.toFixed(2);
+
+            const usersRes = await apiRequest('/api/admin/users?page=1&page_size=5');
+            const usersList = document.getElementById('recent-users-list');
+            usersList.innerHTML = '';
+            
+            usersRes.users.forEach(user => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${escapeHtml(user.username)}</td>
+                    <td>${escapeHtml(user.email)}</td>
+                    <td>${formatDate(user.created_at)}</td>
+                `;
+                usersList.appendChild(row);
+            });
+
+            const ordersRes = await apiRequest('/api/admin/orders?recent=5');
+            const ordersList = document.getElementById('recent-orders-list');
+            ordersList.innerHTML = '';
+            
+            if (ordersRes.orders && ordersRes.orders.length > 0) {
+                ordersRes.orders.forEach(order => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${escapeHtml(order.order_no)}</td>
+                        <td>¥${order.amount}</td>
+                        <td>
+                            <span class="badge ${
+                                order.status === 'paid' ? 'bg-success' : 
+                                order.status === 'pending' ? 'bg-warning' : 
+                                order.status === 'cancelled' ? 'bg-secondary' : 'bg-danger'
+                            }">${order.status_text}</span>
+                        </td>
+                        <td>${formatDate(order.created_at)}</td>
+                    `;
+                    ordersList.appendChild(row);
+                });
+            } else {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="4" class="text-center">暂无订单数据</td>';
+                ordersList.appendChild(row);
+            }
+        } catch (error) {
+            console.error('加载仪表盘数据失败:', error);
+            showError('加载仪表盘数据失败: ' + error.message);
+        }
+    }
+</script>
