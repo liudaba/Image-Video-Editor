@@ -686,6 +686,19 @@ class LicenseManager:
         except Exception:
             return False, "创建订单失败，请稍后重试"
 
+    def check_payment_availability(self):
+        try:
+            response = get_http_session().get(
+                f"{self.API_BASE}/api/payment/methods",
+                timeout=5,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data
+            return {"methods": [], "any_online_available": False}
+        except Exception:
+            return {"methods": [], "any_online_available": False}
+
     def request_password_reset(self, email):
         try:
             response = get_http_session().post(

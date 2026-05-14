@@ -88,6 +88,9 @@
                 } else if (order.status === 'pending') {
                     actionHtml = `
                         <div class="table-actions">
+                            <button class="btn btn-sm btn-success" onclick="confirmPayment(${order.id}, '${escapeHtml(order.order_no)}')" title="确认支付">
+                                <i class="fas fa-check"></i> 确认
+                            </button>
                             <button class="btn btn-sm btn-warning" onclick="cancelOrder(${order.id}, '${escapeHtml(order.order_no)}')" title="取消">
                                 <i class="fas fa-times"></i> 取消
                             </button>
@@ -120,6 +123,26 @@
             console.error('加载订单列表失败:', error);
             showError('加载订单列表失败: ' + error.message);
         }
+    }
+
+    async function confirmPayment(orderId, orderNo) {
+        const modalBody = document.getElementById('commonModalBody');
+        modalBody.innerHTML = `<p>确定要手动确认订单 "<strong>${escapeHtml(orderNo)}</strong>" 的支付吗？</p><p class="text-danger">确认后订单将变为"已支付"，用户许可证将自动激活。</p>`;
+        document.getElementById('commonModalLabel').textContent = '手动确认支付';
+        document.getElementById('confirmModalBtn').textContent = '确认支付';
+        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        modal.show();
+
+        document.getElementById('confirmModalBtn').onclick = async function() {
+            try {
+                await apiRequest(`/api/admin/orders/${orderId}/confirm-payment`, { method: 'POST' });
+                showSuccess('订单已手动确认支付，用户许可证已激活');
+                modal.hide();
+                loadOrders(ordersCurrentPage);
+            } catch (error) {
+                showError('确认支付失败: ' + error.message);
+            }
+        };
     }
 
     async function refundOrder(orderId, orderNo) {

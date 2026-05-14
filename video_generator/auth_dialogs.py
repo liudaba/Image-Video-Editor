@@ -215,9 +215,26 @@ class LoginDialog(tk.Toplevel):
         )
         sub_lbl.pack(pady=(0, 12))
 
-        card = ttk.Frame(main, style="Login.Card.TFrame", padding=20)
-        card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self._tab_control = ttk.Notebook(main)
+        self._tab_control.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
+        login_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=20)
+        self._tab_control.add(login_tab, text="  登录/注册  ")
+
+        activate_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=20)
+        self._tab_control.add(activate_tab, text="  激活码  ")
+
+        self._build_login_tab(login_tab)
+        self._build_activate_tab(activate_tab)
+
+        trial_lbl = ttk.Label(
+            main,
+            text="✨ 注册登录7天免费试用!",
+            style="Login.Trial.TLabel",
+        )
+        trial_lbl.pack(pady=(6, 0))
+
+    def _build_login_tab(self, card):
         self.username_var = tk.StringVar()
         ttk.Label(
             card,
@@ -326,12 +343,98 @@ class LoginDialog(tk.Toplevel):
         )
         self.reset_btn.pack(fill=tk.X, pady=(0, 6))
 
-        trial_lbl = ttk.Label(
-            main,
-            text="✨ 注册登录7天免费试用!",
-            style="Login.Trial.TLabel",
+    def _build_activate_tab(self, card):
+        ttk.Label(
+            card,
+            text="🔑 激活码激活",
+            style="Login.Title.TLabel",
+            background=self._PANEL_BG,
+            font=("Microsoft YaHei", 18, "bold"),
+        ).pack(pady=(0, 10))
+
+        ttk.Label(
+            card,
+            text="请联系客服购买激活码，输入后即可激活专业版",
+            style="Login.TLabel",
+            background=self._PANEL_BG,
+            foreground=self._HINT_FG,
+            wraplength=400,
+        ).pack(pady=(0, 16))
+
+        self._activate_username_var = tk.StringVar()
+        ttk.Label(
+            card,
+            text="用户名",
+            style="Login.TLabel",
+            background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self._activate_username_entry = self._make_entry(card, self._activate_username_var)
+        self._activate_username_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+
+        self._activate_password_var = tk.StringVar()
+        ttk.Label(
+            card,
+            text="密码",
+            style="Login.TLabel",
+            background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self._activate_password_entry = self._make_entry(
+            card, self._activate_password_var, show="●"
         )
-        trial_lbl.pack(pady=(6, 0))
+        self._activate_password_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+
+        self._activate_code_var = tk.StringVar()
+        ttk.Label(
+            card,
+            text="激活码",
+            style="Login.TLabel",
+            background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        self._activate_code_entry = self._make_entry(card, self._activate_code_var)
+        self._activate_code_entry.pack(fill=tk.X, ipady=8, pady=(0, 18))
+
+        ttk.Button(
+            card,
+            text="登录并激活",
+            command=self._handle_activate,
+            style="Login.Primary.TButton",
+        ).pack(fill=tk.X, pady=(0, 8))
+
+        ttk.Label(
+            card,
+            text="💡 还没有账号？请先在\"登录/注册\"标签页注册",
+            style="Login.TLabel",
+            background=self._PANEL_BG,
+            foreground=self._HINT_FG,
+            wraplength=400,
+        ).pack(pady=(4, 0))
+
+    def _handle_activate(self):
+        username = self._activate_username_var.get().strip()
+        password = self._activate_password_var.get().strip()
+        code = self._activate_code_var.get().strip()
+
+        if not username or not password:
+            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
+            return
+        if not code:
+            messagebox.showwarning("提示", "请输入激活码", parent=self)
+            return
+
+        mgr = LicenseManager()
+        success, message = mgr.login_user(username, password)
+        if not success:
+            messagebox.showerror("错误", f"登录失败: {message}", parent=self)
+            return
+
+        success, message = mgr.activate_pro_license(code)
+        if success:
+            mgr.save_login_credentials(username, password, True, False)
+            messagebox.showinfo("成功", "激活成功！专业版已开通", parent=self)
+            self.result = True
+            self.destroy()
+        else:
+            messagebox.showerror("错误", f"激活失败: {message}", parent=self)
 
     def _on_save_toggle(self):
         if not self._save_user_var.get():
@@ -760,7 +863,7 @@ class PurchaseDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("购买会员")
-        self.geometry("560x560")
+        self.geometry("560x620")
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
@@ -774,9 +877,12 @@ class PurchaseDialog(tk.Toplevel):
 
         self._selected_plan = None
         self._plan_cards = {}
+        self._online_available = True
+        self._payment_methods_info = {}
 
         self._setup_styles()
         self._build_ui()
+        self._check_payment_availability()
 
         self.update_idletasks()
         x = (self.winfo_screenwidth() - self.winfo_width()) // 2
@@ -931,20 +1037,33 @@ class PurchaseDialog(tk.Toplevel):
         ).pack(side=tk.RIGHT)
         self._pay_hint = pay_label_frame.winfo_children()[-1]
 
+        self._online_hint_lbl = tk.Label(
+            main,
+            text="",
+            font=("Microsoft YaHei", 10),
+            bg=self._BG,
+            fg=self._WARN_FG if hasattr(self, '_WARN_FG') else "#ff9800",
+            wraplength=480,
+            justify=tk.LEFT,
+        )
+        self._online_hint_lbl.pack(fill=tk.X, pady=(0, 6))
+
         pay_btn_frame = ttk.Frame(main, style="Purchase.TFrame")
         pay_btn_frame.pack(fill=tk.X, pady=(0, 10))
-        ttk.Button(
+        self._alipay_btn = ttk.Button(
             pay_btn_frame,
             text="支付宝支付",
             command=lambda: self._do_purchase("alipay"),
             style="Purchase.TButton",
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        ttk.Button(
+        )
+        self._alipay_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self._wechat_btn = ttk.Button(
             pay_btn_frame,
             text="微信支付",
             command=lambda: self._do_purchase("wechat"),
             style="Purchase.TButton",
-        ).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+        )
+        self._wechat_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
         ttk.Button(
             main,
@@ -952,6 +1071,41 @@ class PurchaseDialog(tk.Toplevel):
             command=self.destroy,
             style="Purchase.TButton",
         ).pack(fill=tk.X, pady=(10, 0))
+
+    def _check_payment_availability(self):
+        try:
+            from .config import get_api_base_url, get_http_session
+            response = get_http_session().get(
+                f"{get_api_base_url()}/api/payment/methods",
+                timeout=5,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self._online_available = data.get("any_online_available", True)
+                self._payment_methods_info = {
+                    m["id"]: m for m in data.get("methods", [])
+                }
+        except Exception:
+            self._online_available = False
+
+        if not self._online_available:
+            self._alipay_btn.configure(state=tk.DISABLED)
+            self._wechat_btn.configure(state=tk.DISABLED)
+            self._online_hint_lbl.configure(
+                text="⚠ 在线支付暂未开通，请联系客服购买激活码\n"
+                     "您可以在上方\"激活码激活\"区域输入客服提供的激活码"
+            )
+        else:
+            alipay_info = self._payment_methods_info.get("alipay", {})
+            wechat_info = self._payment_methods_info.get("wechat", {})
+            if not alipay_info.get("available", True):
+                self._alipay_btn.configure(state=tk.DISABLED)
+            if not wechat_info.get("available", True):
+                self._wechat_btn.configure(state=tk.DISABLED)
+            if not alipay_info.get("available", True) or not wechat_info.get("available", True):
+                self._online_hint_lbl.configure(
+                    text="⚠ 部分支付方式暂未开通，请联系客服购买激活码"
+                )
 
     def _select_plan(self, plan_key):
         self._selected_plan = plan_key

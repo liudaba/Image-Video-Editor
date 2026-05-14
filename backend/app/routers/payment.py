@@ -335,6 +335,11 @@ async def list_orders(
 
 @router.get("/methods", summary="获取支持的支付方式")
 async def get_payment_methods():
+    from ..services.payment_service import _get_alipay_instance, _get_wechat_client
+
+    alipay_available = _get_alipay_instance() is not None
+    wechat_available = _get_wechat_client() is not None
+
     return {
         "methods": [
             {
@@ -343,6 +348,8 @@ async def get_payment_methods():
                 "description": "使用支付宝扫码支付",
                 "icon": "alipay",
                 "support_qr_code": True,
+                "available": alipay_available,
+                "unavailable_hint": "在线支付暂未开通，请联系客服购买激活码" if not alipay_available else "",
             },
             {
                 "id": "wechat",
@@ -350,6 +357,9 @@ async def get_payment_methods():
                 "description": "使用微信扫码支付",
                 "icon": "wechat",
                 "support_qr_code": True,
+                "available": wechat_available,
+                "unavailable_hint": "在线支付暂未开通，请联系客服购买激活码" if not wechat_available else "",
             },
-        ]
+        ],
+        "any_online_available": alipay_available or wechat_available,
     }

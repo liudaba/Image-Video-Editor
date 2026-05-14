@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import (
     User, License, Order, AppVersion, HeartbeatLog, AuditLog,
     LicenseType, OrderStatus, LicenseKey, LicenseKeyStatus, PlanType,
+    validate_order_status_transition,
 )
 from ..auth import get_current_user, require_admin, hash_password
 from ..services.license_service import generate_license_key
@@ -298,6 +299,59 @@ async def list_orders(
             for o in orders
         ],
     }
+
+
+@router.post("/orders/{order_id}/confirm-payment")
+async def confirm_payment(
+    order_id: int,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(status_code=400, detail="只能确认待支付的订单")
+
+    if not validate_order_status_transition(order.status, OrderStatus.PAID):
+        raise HTTPException(status_code=400, detail="订单状态异常")
+
+    order.status = OrderStatus.PAID
+    order.transaction_id = f"MANUAL-{order.order_no}"
+    order.paid_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    license_result = await db.execute(
+        select(License).where(License.user_id == order.user_id)
+    )
+    existing_license = license_result.scalar_one_or_none()
+    if existing_license:
+        existing_license.license_type = "pro"
+        existing_license.is_valid = True
+        from datetime import timedelta
+        plan_deltas = {
+            PlanType.MONTHLY: timedelta(days=30),
+            PlanType.QUARTERLY: timedelta(days=90),
+            PlanType.YEARLY: timedelta(days=365),
+        }
+        if order.plan_type == PlanType.LIFETIME:
+            existing_license.expiry_date = None
+        elif order.plan_type in plan_deltas:
+            now = datetime.now(timezone.utc)
+            remaining = timedelta(0)
+            if existing_license.expiry_date:
+                cur = existing_license.expiry_date
+                if cur.tzinfo is None:
+                    cur = cur.replace(tzinfo=timezone.utc)
+                remaining = max(cur - now, timedelta(0))
+            existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
+        await db.flush()
+
+    await _log_audit(db, user, "confirm_payment", f"order_id={order_id}, order_no={order.order_no}, amount={order.amount}, plan={order.plan_type.value}", request)
+    await db.commit()
+    return {"success": True, "message": "订单已手动确认支付"}
 
 
 @router.post("/orders/{order_id}/refund")
