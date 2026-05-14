@@ -1027,13 +1027,13 @@ def check_and_show_login(parent=None):
             license_status = license_mgr.check_license()
             if license_status["valid"]:
                 license_mgr.start_heartbeat()
-            else:
-                verify_secret = _get_verify_secret()
-                if not verify_secret:
-                    return {
-                        "valid": False,
-                        "message": "授权验证组件缺失(.license_verify_key)，请联系客服",
-                    }
+                return license_status
+            verify_secret = _get_verify_secret()
+            if not verify_secret:
+                return {
+                    "valid": False,
+                    "message": "授权验证组件缺失(.license_verify_key)，请联系客服",
+                }
             return license_status
         else:
             return {"valid": False, "message": "用户取消登录"}

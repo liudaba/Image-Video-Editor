@@ -55,10 +55,7 @@ def _get_verify_secret():
     if _HMAC_VERIFY_SECRET is not None:
         return _HMAC_VERIFY_SECRET
     try:
-        if getattr(sys, "frozen", False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = _get_data_dir()
         key_file = os.path.join(base_dir, ".license_verify_key")
         if os.path.exists(key_file):
             with open(key_file, "r") as f:
@@ -104,6 +101,15 @@ def _parse_iso_to_naive(iso_str):
 
 def _get_base_dir():
     if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_data_dir():
+    if getattr(sys, "frozen", False):
+        internal_dir = os.path.join(os.path.dirname(sys.executable), "_internal")
+        if os.path.isdir(internal_dir):
+            return internal_dir
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 

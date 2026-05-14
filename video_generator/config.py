@@ -104,7 +104,9 @@ def sanitize_url(url):
 
 
 def get_api_base_url():
-    """从config.json读取API基础地址，失败则使用默认值。强制HTTPS，拒绝HTTP非本地地址"""
+    """从config.json读取API基础地址，失败则使用默认值。
+    当配置为HTTPS域名时自动升级HTTP→HTTPS；IP地址保持原样（内测阶段）。
+    """
     try:
         import os
         import json

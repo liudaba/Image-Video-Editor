@@ -19,6 +19,7 @@ from .auth_core import (
     _check_clock_rollback,
     _parse_iso_to_naive,
     _get_base_dir,
+    _get_data_dir,
     _HMAC_KEY,
     _TRIAL_DAYS,
     _GRACE_HOURS,

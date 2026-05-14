@@ -116,23 +116,39 @@ def decrypt_config(config_dict, base_dir):
     return config_dict
 
 
-_OBFUSCATION_KEY = b"VideoGen2026ObfKey"
+_OBFUSCATION_SEED = b"VideoGen2026ObfSeed"
+
+
+def _get_obfuscation_key():
+    try:
+        import getpass
+        import platform
+        user = getpass.getuser()
+        machine = platform.node()
+        raw = f"ObfKey::{user}@{machine}".encode("utf-8")
+        import hashlib
+        derived = hashlib.sha256(_OBFUSCATION_SEED + raw).digest()
+        return derived
+    except Exception:
+        return _OBFUSCATION_SEED * 2
 
 
 def _obfuscate_string(plaintext):
+    key = _get_obfuscation_key()
     data = plaintext.encode("utf-8")
     result = bytearray()
     for i, b in enumerate(data):
-        result.append(b ^ _OBFUSCATION_KEY[i % len(_OBFUSCATION_KEY)])
+        result.append(b ^ key[i % len(key)])
     return result.hex()
 
 
 def deobfuscate_string(hex_str):
     try:
+        key = _get_obfuscation_key()
         data = bytes.fromhex(hex_str)
         result = bytearray()
         for i, b in enumerate(data):
-            result.append(b ^ _OBFUSCATION_KEY[i % len(_OBFUSCATION_KEY)])
+            result.append(b ^ key[i % len(key)])
         return result.decode("utf-8")
     except Exception:
         return ""
@@ -143,6 +159,20 @@ def verify_core_integrity():
     try:
         import sys
         if getattr(sys, "frozen", False):
+            base_dir = os.path.join(os.path.dirname(sys.executable), "_internal")
+            if not os.path.isdir(base_dir):
+                base_dir = os.path.dirname(sys.executable)
+            core_files = [
+                os.path.join(base_dir, "video_generator", "auth_core.py"),
+                os.path.join(base_dir, "video_generator", "auth_fingerprint.py"),
+            ]
+            for filepath in core_files:
+                if not os.path.exists(filepath):
+                    continue
+                with open(filepath, "rb") as f:
+                    content = f.read()
+                if b"os._exit" in content or b"import antidebug" in content:
+                    return False
             return True
         core_files = [
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth_core.py"),

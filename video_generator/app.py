@@ -120,8 +120,50 @@ class VideoGenApp(
     pass
 
 
+def _check_critical_files(app_dir):
+    import logging
+    logger = logging.getLogger("startup_check")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.FileHandler(os.path.join(app_dir, "startup_check.log"), encoding="utf-8")
+        handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
+        logger.addHandler(handler)
+
+    critical = {
+        "config.json": os.path.join(app_dir, "config.json"),
+        ".license_verify_key": os.path.join(app_dir, ".license_verify_key"),
+    }
+    missing = []
+    for name, path in critical.items():
+        if not os.path.exists(path):
+            missing.append(name)
+            logger.warning(f"MISSING: {name}")
+
+    if missing:
+        logger.error(f"Critical files missing: {', '.join(missing)}")
+
+    try:
+        app_dir.encode("ascii")
+    except UnicodeEncodeError:
+        logger.warning(f"Non-ASCII path detected: {app_dir}")
+
+    ffmpeg_dir = os.path.join(app_dir, "ffmpeg")
+    if os.path.isdir(ffmpeg_dir) and not os.path.isfile(os.path.join(ffmpeg_dir, "ffmpeg.exe")):
+        logger.warning("FFmpeg directory exists but ffmpeg.exe is missing")
+
+    whisper_dir = os.path.join(app_dir, "whisper_models")
+    if os.path.isdir(whisper_dir):
+        has_model = any(f.endswith(".pt") for f in os.listdir(whisper_dir))
+        if not has_model:
+            logger.warning("Whisper models directory exists but no .pt model files found")
+
+
 def main():
-    from video_generator.config import get_ffmpeg_dir
+    from video_generator.config import get_ffmpeg_dir, get_app_dir
+    _app_dir = get_app_dir()
+
+    _check_critical_files(_app_dir)
+
     ffmpeg_dir = get_ffmpeg_dir()
     if ffmpeg_dir:
         os.environ["FFMPEG_BINARY"] = os.path.join(ffmpeg_dir, "ffmpeg.exe")

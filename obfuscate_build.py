@@ -40,6 +40,9 @@ def obfuscate_modules():
     os.makedirs(output_dir, exist_ok=True)
 
     core_modules = [
+        "video_generator/auth_core.py",
+        "video_generator/auth_dialogs.py",
+        "video_generator/auth_fingerprint.py",
         "video_generator/license_manager.py",
         "video_generator/crypto_utils.py",
         "video_generator/auto_updater.py",
@@ -61,10 +64,10 @@ def obfuscate_modules():
             sys.executable, "-m", "pyarmor",
             "gen",
             "--output", module_output,
-            "--restrict", "1",
-            "--private",
+            "--restrict",
             "--assert-call",
             "--assert-import",
+            "--obf-code", "2",
             src
         ]
 

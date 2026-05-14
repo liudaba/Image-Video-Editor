@@ -24,10 +24,10 @@ def _get_allowed_hosts():
     if _ALLOWED_DOWNLOAD_HOSTS is not None:
         return _ALLOWED_DOWNLOAD_HOSTS
     _ALLOWED_DOWNLOAD_HOSTS = {
-        deobfuscate_string("6e4755515e69545e031e03037a"),
-        deobfuscate_string("37190d4b18260b0948585307785a48280a14"),
-        deobfuscate_string("350d0a4b18260b0948585307785a48280a14"),
-        deobfuscate_string("240c08000e34001d1c47535828180e2a544e6e47070a02"),
+        deobfuscate_string("c20254192e5a04d1d241b8103040f2d55f"),
+        deobfuscate_string("9e404b5a7e1a529b8b0eb8123d"),
+        deobfuscate_string("c71e134038550dccc048e8163f56bfd95d1b"),
+        deobfuscate_string("c1070e063a564dc8d54d"),
     }
     _ALLOWED_DOWNLOAD_HOSTS.discard("")
     return _ALLOWED_DOWNLOAD_HOSTS
