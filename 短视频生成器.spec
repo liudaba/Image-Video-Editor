@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('config.json', '.'), ('README.md', '.'), ('用户快速开始.md', '.'), ('LICENSE', '.'), ('TERMS_OF_SERVICE.md', '.'), ('PRIVACY_POLICY.md', '.')]
+datas = [('config.json', '.'), ('LICENSE', '.')]
 binaries = []
 hiddenimports = ['whisper', 'moviepy', 'torch', 'numpy', 'PIL', 'requests', 'tkinter', 'cryptography', 'cryptography.fernet', 'psutil', 'GPUtil', 'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip', 'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip', 'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip', 'moviepy.video.VideoClip', 'moviepy.editor']
 hiddenimports += collect_submodules('moviepy')

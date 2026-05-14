@@ -140,7 +140,7 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户已被禁用")
     if user.password_changed_at:
-        token_issued = token_data.exp - timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        token_issued = token_data.exp - settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
         if token_issued < user.password_changed_at.timestamp():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="密码已修改,请重新登录")
     return user
