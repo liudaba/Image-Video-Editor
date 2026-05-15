@@ -6,6 +6,7 @@
     <title>短视频生成器 - 管理后台</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: "Microsoft YaHei", sans-serif;
@@ -356,15 +357,23 @@
                 if (response.ok) {
                     contentArea.innerHTML = await response.text();
                     
-                    contentArea.querySelectorAll('script').forEach(oldScript => {
-                        const newScript = document.createElement('script');
-                        if (oldScript.src) {
-                            newScript.src = oldScript.src;
-                        } else {
-                            newScript.textContent = oldScript.textContent;
-                        }
-                        oldScript.parentNode.replaceChild(newScript, oldScript);
-                    });
+                    const scripts = Array.from(contentArea.querySelectorAll('script'));
+                    let loadChain = Promise.resolve();
+                    for (const oldScript of scripts) {
+                        loadChain = loadChain.then(() => new Promise((resolve, reject) => {
+                            const newScript = document.createElement('script');
+                            if (oldScript.src) {
+                                newScript.src = oldScript.src;
+                                newScript.onload = resolve;
+                                newScript.onerror = reject;
+                            } else {
+                                newScript.textContent = oldScript.textContent;
+                                resolve();
+                            }
+                            oldScript.parentNode.replaceChild(newScript, oldScript);
+                            if (!oldScript.src) resolve();
+                        }));
+                    }
                     
                     let initFunctionName;
                     if (section === 'trial_codes') {
