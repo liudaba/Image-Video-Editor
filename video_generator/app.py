@@ -129,6 +129,7 @@ def _check_critical_files(app_dir):
         handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
         logger.addHandler(handler)
 
+    internal_dir = os.path.join(app_dir, "_internal")
     critical = {
         "config.json": os.path.join(app_dir, "config.json"),
         ".license_verify_key": os.path.join(app_dir, ".license_verify_key"),
@@ -136,8 +137,12 @@ def _check_critical_files(app_dir):
     missing = []
     for name, path in critical.items():
         if not os.path.exists(path):
-            missing.append(name)
-            logger.warning(f"MISSING: {name}")
+            alt_path = os.path.join(internal_dir, name)
+            if os.path.exists(alt_path):
+                logger.info(f"FOUND in _internal/: {name}")
+            else:
+                missing.append(name)
+                logger.warning(f"MISSING: {name}")
 
     if missing:
         logger.error(f"Critical files missing: {', '.join(missing)}")

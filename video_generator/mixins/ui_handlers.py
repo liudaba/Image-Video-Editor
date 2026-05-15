@@ -1303,7 +1303,10 @@ class UIHandlersMixin:
                 self.log(f"🎨 云端生图已启用！")
                 self.log(f"   服务商: {img_provider_display}")
                 self.log(f"   模型:   {img_model}")
-                self.log(f"   所有图片将由云端生成，无需本地SD")
+                if getattr(self, 'task_running', False):
+                    self.log("   ⚠️ 有任务正在运行，云端生图将在下次任务时生效")
+                else:
+                    self.log(f"   所有图片将由云端生成，无需本地SD")
                 self.log("=" * 50)
             else:
                 sd_connected = getattr(self, '_sd_api_connected', False)
@@ -1582,7 +1585,15 @@ class UIHandlersMixin:
             
             selected_styles = self.get_selected_styles()
             
+            existing_config = {}
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    existing_config = json.load(f)
+            except Exception:
+                pass
+            
             config = {
+                'api_base_url': existing_config.get('api_base_url', 'http://8.141.101.155'),
                 'model': self.model_var.get(),
                 'width': validate_image_size(self.width_var.get(), self.height_var.get())[0],
                 'height': validate_image_size(self.width_var.get(), self.height_var.get())[1],
