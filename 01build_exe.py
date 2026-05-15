@@ -740,12 +740,26 @@ def _post_build(output_dir):
         f.write(bat_content)
     print("  ✅ 生成 start.bat（含环境检查）")
 
+    # config.json: 双位置复制（exe同级 + _internal/）
+    config_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    if os.path.exists(config_src):
+        internal_dir = os.path.join(output_dir, "_internal")
+        os.makedirs(internal_dir, exist_ok=True)
+        shutil.copy2(config_src, os.path.join(output_dir, "config.json"))
+        shutil.copy2(config_src, os.path.join(internal_dir, "config.json"))
+        print("  ✅ config.json → exe同级 + _internal/")
+    else:
+        print("  ❌ 错误: config.json 缺失！")
+        sys.exit(1)
+
+    # .license_verify_key: 双位置复制（exe同级 + _internal/）
     verify_key_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".license_verify_key")
     if os.path.exists(verify_key_src):
         internal_dir = os.path.join(output_dir, "_internal")
         os.makedirs(internal_dir, exist_ok=True)
+        shutil.copy2(verify_key_src, os.path.join(output_dir, ".license_verify_key"))
         shutil.copy2(verify_key_src, os.path.join(internal_dir, ".license_verify_key"))
-        print("  ✅ 复制 .license_verify_key → _internal/（嵌入内部目录，非明文暴露）")
+        print("  ✅ .license_verify_key → exe同级 + _internal/")
     else:
         print("  ❌ 错误: .license_verify_key 缺失！授权验证将无法工作")
         print("     请先运行 backend/init_db.py 生成密钥文件")
