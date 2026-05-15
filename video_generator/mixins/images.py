@@ -132,7 +132,8 @@ class ImagesMixin:
         try:
             response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=check_timeout)
             if response.status_code == 200:
-                self.log("✅ SD API 连接成功！")
+                if not silent:
+                    self.log("✅ SD API 连接成功！")
                 self._sd_api_connected = True
                 
                 # 更新状态变量（即使 label 还不存在也要更新，这样面板打开时能显示正确状态）
@@ -153,7 +154,8 @@ class ImagesMixin:
                 
                 return True
             else:
-                self.log(f"❌ SD API 连接失败: 状态码 {response.status_code}")
+                if not silent:
+                    self.log(f"❌ SD API 连接失败: 状态码 {response.status_code}")
                 self._sd_api_connected = False
                 
                 # 更新状态变量
@@ -169,9 +171,7 @@ class ImagesMixin:
                         self.root.after(0, update_ui)
                 return False
         except Exception as e:
-            if silent:
-                self.log("ℹ️ SD API 未连接（生图时将自动重试）")
-            else:
+            if not silent:
                 self._log_exception("❌ SD API 连接异常", e)
             self._sd_api_connected = False
             

@@ -572,12 +572,12 @@ class UIInitMixin:
 
         self._readiness = {
             'config': False,
+            'auth': False,
             'dependencies': False,
             'ollama': False,
             'sd_api': False,
             'whisper_model': False,
             'ffmpeg': False,
-            'auth': False,
         }
 
         def delayed_system_check():
@@ -593,66 +593,96 @@ class UIInitMixin:
                 pass
 
             self._readiness['config'] = True
-            self.root.after(0, lambda: self.log("  [1/6] ✅ 配置文件加载完成"))
+            self.root.after(0, lambda: self.log("  [1/7] ✅ 配置文件加载完成"))
+
+            auth_ok = False
+            try:
+                from video_generator.auth_core import AuthCore
+                auth_core = getattr(self, 'auth_core', None)
+                if auth_core:
+                    result = auth_core.check_license()
+                    auth_ok = result.get('valid', False)
+            except Exception:
+                try:
+                    license_data = getattr(self, 'license_data', None)
+                    if license_data:
+                        signed = license_data.get('signed', license_data)
+                        auth_ok = signed.get('is_valid', False)
+                except Exception:
+                    pass
+            self._readiness['auth'] = auth_ok
+            if auth_ok:
+                self.root.after(0, lambda: self.log("  [2/7] ✅ 授权认证通过"))
+            else:
+                self.root.after(0, lambda: self.log("  [2/7] ❌ 授权认证未通过（请先登录或激活软件）"))
 
             self.system_check()
             self._readiness['dependencies'] = True
-            self.root.after(0, lambda: self.log("  [2/6] ✅ 系统依赖项检查完成"))
+            self.root.after(0, lambda: self.log("  [3/7] ✅ 系统依赖项检查完成"))
 
-            cloud_img = False
-            try:
-                from video_generator.cloud_image_client import is_cloud_image_enabled
-                cloud_img = is_cloud_image_enabled()
-            except ImportError:
-                pass
+            cloud_img = getattr(self, '_cloud_img_enabled', False)
+            cloud_llm = getattr(self, '_cloud_llm_enabled', False)
 
             if cloud_img:
                 self._readiness['sd_api'] = True
-                self.root.after(0, lambda: self.log("  [3/6] ✅ 云端图片服务已启用（无需本地SD API）"))
+                provider = getattr(self, '_cloud_img_provider', '')
+                model = getattr(self, '_cloud_img_model', '')
+                self.root.after(0, lambda: self.log(f"  [4/7] ✅ 云端图片服务已启用（{provider} / {model}）"))
             else:
-                sd_thread = threading.Thread(target=lambda: self.check_sd_api_connection(silent=True), daemon=True)
-                sd_thread.start()
-                sd_thread.join(timeout=5)
-                if hasattr(self, 'sd_api_connected') and self.sd_api_connected:
+                self._check_sd_api_impl(silent=True)
+                sd_ok = getattr(self, '_sd_api_connected', False)
+                if sd_ok:
                     self._readiness['sd_api'] = True
-                    self.root.after(0, lambda: self.log("  [3/6] ✅ Stable Diffusion API 已连接"))
+                    self.root.after(0, lambda: self.log("  [4/7] ✅ Stable Diffusion API 已连接"))
                 else:
-                    self.root.after(0, lambda: self.log("  [3/6] ⚠️ Stable Diffusion API 未连接（图片生成不可用）"))
+                    self.root.after(0, lambda: self.log("  [4/7] ⚠️ Stable Diffusion API 未连接（图片生成不可用）"))
 
             self.auto_connect_ollama()
             from video_generator.ollama_client import is_ollama_available
-            if is_ollama_available():
+            ollama_ok = is_ollama_available()
+            if cloud_llm and ollama_ok:
                 self._readiness['ollama'] = True
-                self.root.after(0, lambda: self.log("  [4/6] ✅ Ollama 大模型服务已连接"))
+                provider = getattr(self, '_cloud_llm_provider', '')
+                model = getattr(self, '_cloud_llm_model', '')
+                self.root.after(0, lambda: self.log(f"  [5/7] ✅ 云端大模型已启用（{provider} / {model}）"))
+            elif cloud_llm and not ollama_ok:
+                self._readiness['ollama'] = True
+                provider = getattr(self, '_cloud_llm_provider', '')
+                model = getattr(self, '_cloud_llm_model', '')
+                self.root.after(0, lambda: self.log(f"  [5/7] ✅ 云端大模型已启用（{provider} / {model}）"))
+            elif ollama_ok:
+                self._readiness['ollama'] = True
+                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ''
+                self.root.after(0, lambda: self.log(f"  [5/7] ✅ Ollama 大模型已连接（{ollama_model}）"))
             else:
-                self.root.after(0, lambda: self.log("  [4/6] ⚠️ Ollama 大模型服务未连接（分镜生成不可用）"))
+                self.root.after(0, lambda: self.log("  [5/7] ⚠️ 大模型服务未连接（分镜生成不可用）"))
 
             import shutil
+            ffmpeg_found = False
             if shutil.which('ffmpeg'):
-                self._readiness['ffmpeg'] = True
-                self.root.after(0, lambda: self.log("  [5/6] ✅ FFmpeg 音视频工具已就绪"))
+                ffmpeg_found = True
             elif os.path.exists(os.path.join(getattr(self, 'base_dir', ''), 'ffmpeg', 'ffmpeg.exe')):
-                self._readiness['ffmpeg'] = True
-                self.root.after(0, lambda: self.log("  [5/6] ✅ FFmpeg 音视频工具已就绪"))
+                ffmpeg_found = True
+            self._readiness['ffmpeg'] = ffmpeg_found
+            if ffmpeg_found:
+                self.root.after(0, lambda: self.log("  [6/7] ✅ FFmpeg 音视频工具已就绪"))
             else:
-                self.root.after(0, lambda: self.log("  [5/6] ⚠️ FFmpeg 未找到（视频合成不可用）"))
+                self.root.after(0, lambda: self.log("  [6/7] ⚠️ FFmpeg 未找到（视频合成不可用）"))
 
             whisper_model_dir = os.path.join(getattr(self, 'base_dir', ''), 'whisper_models')
             has_whisper = False
             if os.path.isdir(whisper_model_dir):
                 has_whisper = any(f.endswith('.pt') for f in os.listdir(whisper_model_dir))
+            if not has_whisper:
+                whisper_cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+                if os.path.isdir(whisper_cache):
+                    has_whisper = any(f.endswith('.pt') for f in os.listdir(whisper_cache))
+            self._readiness['whisper_model'] = has_whisper
             if has_whisper:
-                self._readiness['whisper_model'] = True
-                self.root.after(0, lambda: self.log("  [6/6] ✅ Whisper 语音识别模型已就绪"))
+                whisper_name = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'
+                self.root.after(0, lambda: self.log(f"  [7/7] ✅ Whisper 语音识别模型已就绪（{whisper_name}）"))
             else:
-                self.root.after(0, lambda: self.log("  [6/6] ⚠️ Whisper 模型未找到（首次使用时将自动下载）"))
-
-            if hasattr(self, 'license_manager') and self.license_manager:
-                try:
-                    if self.license_manager.is_valid():
-                        self._readiness['auth'] = True
-                except Exception:
-                    pass
+                self.root.after(0, lambda: self.log("  [7/7] ⚠️ Whisper 模型未下载（首次使用时将自动下载）"))
 
             self.root.after(0, self._show_readiness_summary)
 
@@ -676,62 +706,55 @@ class UIInitMixin:
         self.log("  系统就绪状态汇总")
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        ready_items = []
-        not_ready_items = []
-
-        labels = {
+        core_labels = {
             'config': '配置文件',
-            'dependencies': '系统依赖',
-            'ollama': 'Ollama 大模型',
-            'sd_api': 'SD 图片生成',
-            'whisper_model': 'Whisper 语音识别',
-            'ffmpeg': 'FFmpeg 音视频',
             'auth': '授权认证',
+            'dependencies': '系统依赖',
+        }
+        feature_labels = {
+            'ollama': 'AI 大模型',
+            'sd_api': '图片生成',
+            'whisper_model': '语音识别',
+            'ffmpeg': '音视频处理',
         }
 
-        for key, label in labels.items():
-            if self._readiness.get(key, False):
-                ready_items.append(label)
-                self.log(f"  ✅ {label} — 已就绪")
-            else:
-                not_ready_items.append(label)
-                self.log(f"  ❌ {label} — 未就绪")
+        self.log("")
+        self.log("  【核心条件】")
+        core_all_ok = True
+        for key, label in core_labels.items():
+            ok = self._readiness.get(key, False)
+            if not ok:
+                core_all_ok = False
+            self.log(f"    {'✅' if ok else '❌'} {label} — {'已就绪' if ok else '未就绪'}")
 
         self.log("")
+        self.log("  【功能条件】")
+        feature_missing = []
+        for key, label in feature_labels.items():
+            ok = self._readiness.get(key, False)
+            if not ok:
+                feature_missing.append(label)
+            self.log(f"    {'✅' if ok else '⚠️ '} {label} — {'已就绪' if ok else '未就绪'}")
 
-        core_ready = (self._readiness.get('config') and
-                      self._readiness.get('dependencies') and
-                      self._readiness.get('auth'))
+        self.log("")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        if core_ready and len(not_ready_items) <= 2:
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            if not_ready_items:
-                missing_str = "、".join(not_ready_items)
+        if core_all_ok:
+            if feature_missing:
+                missing_str = "、".join(feature_missing)
                 self.log(f"  ⚠️ 以下功能暂不可用: {missing_str}")
                 self.log(f"     不影响基础操作，对应功能需条件满足后方可使用")
-            self.log("  🎬 所有核心条件已具备，可以导入音频开始创作！")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        elif core_ready:
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            missing_str = "、".join(not_ready_items)
-            self.log(f"  ⚠️ 以下条件尚未具备: {missing_str}")
-            self.log(f"     核心功能可用，但部分操作将受限")
-            self.log(f"     建议补充上述条件后使用完整功能")
-            self.log("  🎬 可以导入音频，但部分功能可能不可用")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            self.log("  🎬 核心条件已全部具备，可以导入音频开始创作！")
         else:
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            missing_str = "、".join(not_ready_items)
-            self.log(f"  ❌ 以下核心条件尚未具备: {missing_str}")
-            self.log(f"     当前无法正常使用，请先解决上述问题")
+            self.log(f"  ❌ 核心条件未全部具备，当前无法正常使用")
             if not self._readiness.get('auth'):
                 self.log(f"     → 授权认证未通过：请先登录或激活软件")
             if not self._readiness.get('dependencies'):
                 self.log(f"     → 系统依赖缺失：请检查安装是否完整")
             if not self._readiness.get('config'):
                 self.log(f"     → 配置文件异常：请检查 config.json")
-            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         self.log("")
     
 

@@ -1326,53 +1326,27 @@ class UIHandlersMixin:
 
             if img_enabled:
                 img_provider_display = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get("name", img_provider_id)
-                self.log("=" * 50)
-                self.log(f"🎨 云端生图已启用！")
-                self.log(f"   服务商: {img_provider_display}")
-                self.log(f"   模型:   {img_model}")
-                if getattr(self, 'task_running', False):
-                    self.log("   ⚠️ 有任务正在运行，云端生图将在下次任务时生效")
-                else:
-                    self.log(f"   所有图片将由云端生成，无需本地SD")
-                self.log("=" * 50)
+                self._cloud_img_enabled = True
+                self._cloud_img_provider = img_provider_display
+                self._cloud_img_model = img_model
             else:
-                sd_connected = getattr(self, '_sd_api_connected', False)
-                if sd_connected:
-                    self.log("🖥️ 云端生图已禁用，使用本地SD生成图片")
-                else:
-                    self.log("⚠️ 云端生图已禁用，本地SD也未连接")
-                    self.log("   请启动SD WebUI或启用云端生图，否则无法生成图片")
+                self._cloud_img_enabled = False
         except ImportError:
-            pass
-        
+            self._cloud_img_enabled = False
+
         provider_display = PROVIDER_CONFIG.get(provider_id, {}).get("name", provider_id)
         if enabled:
-            if getattr(self, 'task_running', False):
-                self.log("⚠️ 有任务正在运行，云端模式配置已保存，将在下次任务时生效")
-                self.log("⚠️ 不会在任务运行期间释放本地Ollama资源")
-            elif is_ollama_available():
+            self._cloud_llm_enabled = True
+            self._cloud_llm_provider = provider_display
+            self._cloud_llm_model = model
+            if not getattr(self, 'task_running', False) and is_ollama_available():
                 try:
-                    self._unload_ollama_models(log_prefix="☁️ ")
+                    self._unload_ollama_models(log_prefix="")
                     set_ollama_available(False)
-                    self.log("☁️ 已释放本地Ollama GPU资源（云端模式不需要本地模型）")
-                except Exception as e:
-                    self.log(f"⚠️ 释放本地Ollama资源时出错: {e}")
-            self.log("=" * 50)
-            self.log(f"☁️ 云端大模型已启用！")
-            self.log(f"   服务商: {provider_display}")
-            self.log(f"   模型:   {model}")
-            self.log(f"   所有AI思考任务将由云端完成")
-            self.log(f"   SD制图仍使用本地模型，不受影响")
-            self.log("=" * 50)
+                except Exception:
+                    pass
         else:
-            self.log("=" * 50)
-            self.log(f"🖥️ 云端大模型已禁用")
-            if is_ollama_available():
-                self.log(f"   所有AI思考任务将由本地Ollama完成")
-            else:
-                self.log(f"   ⚠️ 本地Ollama也未连接，AI功能暂不可用")
-                self.log(f"   请启动Ollama服务或启用云端大模型")
-            self.log("=" * 50)
+            self._cloud_llm_enabled = False
 
 
     def _on_cloud_llm_toggle_ui(self, *args):
@@ -1573,31 +1547,11 @@ class UIHandlersMixin:
                     self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
                 
                 if hasattr(self, '_apply_cloud_llm_config'):
-                    threading.Thread(target=self._apply_cloud_llm_config, daemon=True).start()
+                    try:
+                        self._apply_cloud_llm_config()
+                    except Exception:
+                        pass
                 
-                # 集中显示已加载的配置
-                ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'
-                whisper_model = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'
-                core_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ''
-                visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ''
-                prompt_type = self.prompt_type_var.get() if hasattr(self, 'prompt_type_var') else 'SD提示词'
-                animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
-                thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
-                
-                if is_ollama_available():
-                    self.log(f"✅ 已加载Ollama模型: {ollama_model}")
-                else:
-                    self.log(f"ℹ️ 配置的Ollama模型: {ollama_model}（服务未连接）")
-                self.log(f"✅ 已加载音频模型: {whisper_model}")
-                if core_theme:
-                    self.log(f"✅ 已加载核心主题: {core_theme}")
-                else:
-                    self.log(f"ℹ️ 未设置核心主题（将在生成分镜时自动分析）")
-                if visual_tone:
-                    self.log(f"✅ 已加载视觉基调: {visual_tone}")
-                else:
-                    self.log(f"ℹ️ 未设置视觉基调（将在生成分镜时自动分析）")
-                self.log(f"✅ 已加载提示词类型: {prompt_type}")
                 self.log(f"✅ 配置加载完成")
                 self._print_current_settings()
         except Exception as e:
