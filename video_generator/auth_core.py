@@ -38,7 +38,9 @@ _HEARTBEAT_BACKOFF_MAX_INTERVAL = 86400
 _OFFLINE_TOLERANCE = {
     "trial": 4,
     "monthly": 24,
+    "quarterly": 48,
     "annual": 72,
+    "yearly": 72,
     "lifetime": 168,
     "pro": 72,
     "default": 4,
@@ -293,6 +295,26 @@ class LicenseManager:
 
     def _try_silent_relogin(self):
         try:
+            current_token = self._get_token()
+            if current_token:
+                response = get_http_session().post(
+                    f"{self.API_BASE}/api/auth/token-renew",
+                    headers={"Authorization": f"Bearer {current_token}"},
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    signed_license = data.get("license", {})
+                    new_token = data.get("access_token", "")
+                    if signed_license and _verify_signature(signed_license) and new_token:
+                        self._save_signed_license(
+                            signed_license,
+                            token=new_token,
+                            last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                        )
+                        self._consecutive_failures = 0
+                        self._current_heartbeat_interval = _HEARTBEAT_INTERVAL
+                        return True
             username, password, save_user, save_pass = self.load_login_credentials()
             if not save_pass or not username or not password:
                 return False
@@ -318,8 +340,7 @@ class LicenseManager:
         except Exception:
             return False
 
-    @staticmethod
-    def _get_app_version():
+    def _get_app_version(self):
         try:
             from .version import __version__
             return __version__

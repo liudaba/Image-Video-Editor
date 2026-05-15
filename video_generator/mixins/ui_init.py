@@ -307,7 +307,20 @@ class UIInitMixin:
         self._auth_label_color = color
         self.auth_status_label.configure(text=text, fg=color, bg=bg)
 
+    def _set_action_buttons_state(self, state):
+        for btn_attr in ("btn_generate", "btn_render"):
+            btn = getattr(self, btn_attr, None)
+            if btn:
+                try:
+                    btn.configure(state=state)
+                except Exception:
+                    pass
+
     def _deferred_auth_check(self):
+        self._auth_valid = False
+        self._set_action_buttons_state("disabled")
+        self._update_auth_status_label("验证授权中...", "#9ca3af")
+
         def _check():
             try:
                 from video_generator.license_manager import LicenseManager
@@ -331,10 +344,11 @@ class UIInitMixin:
                 print(f"[AUTH] Deferred auth check error: {e}")
                 self.root.after(0, self._on_auth_invalid)
 
-        self._update_auth_status_label("验证授权中...", "#9ca3af")
         threading.Thread(target=_check, daemon=True).start()
 
     def _on_auth_valid(self, display_text):
+        self._auth_valid = True
+        self._set_action_buttons_state("normal")
         if display_text:
             if "终身" in display_text:
                 self._update_auth_status_label(f"✅ {display_text}", "#10b981", "#0d3325")
@@ -347,6 +361,8 @@ class UIInitMixin:
         self._update_membership_title()
 
     def _on_auth_invalid(self):
+        self._auth_valid = False
+        self._set_action_buttons_state("normal")
         self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1e293b")
         self._update_membership_title()
 

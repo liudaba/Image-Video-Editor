@@ -342,10 +342,11 @@ async def admin_login(request: Request, db=Depends(get_db)):
     response.set_cookie(
         key="admin_session",
         value=access_token,
-        httponly=False,
+        httponly=True,
         samesite="lax",
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
+        secure=False,
     )
     response.set_cookie(
         key="csrf_token",
@@ -354,6 +355,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
         samesite="lax",
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
+        secure=False,
     )
     return response
 

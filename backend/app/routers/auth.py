@@ -18,6 +18,7 @@ from ..auth import (
     hash_password,
     verify_password,
     create_access_token,
+    decode_token,
     check_login_rate_limit,
     record_login_failure,
     clear_login_failures,
@@ -274,6 +275,51 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     clear_login_failures(user_data.username)
 
     return LoginResponse(access_token=access_token, license=license_data)
+
+
+@router.post("/token-renew", response_model=LoginResponse, summary="Token续期")
+async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="缺少授权令牌")
+    
+    token = auth_header[7:]
+    
+    try:
+        from ..auth import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="令牌无效或已过期")
+        
+        user_id = payload.get("user_id")
+        username = payload.get("username")
+        if not user_id or not username:
+            raise HTTPException(status_code=401, detail="令牌数据不完整")
+    except Exception:
+        raise HTTPException(status_code=401, detail="令牌验证失败")
+    
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="账户不可用")
+    
+    from ..auth import create_access_token
+    new_token = create_access_token(
+        data={"user_id": user.id, "username": user.username}
+    )
+    
+    from ..models import License
+    license_result = await db.execute(
+        select(License).filter(License.user_id == user.id)
+    )
+    license_obj = license_result.scalar_one_or_none()
+    
+    license_data = None
+    if license_obj:
+        from ..services.license_service import encode_license_data
+        license_data = encode_license_data(license_obj, user.username)
+    
+    return LoginResponse(access_token=new_token, license=license_data)
 
 
 @router.get("/profile", summary="获取用户资料")

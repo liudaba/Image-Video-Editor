@@ -30,6 +30,18 @@ def _get_machine_user_fingerprint():
     except Exception:
         pass
 
+    if not extra_parts:
+        try:
+            from .auth_fingerprint import _get_disk_serial, _get_cpu_id
+            disk = _get_disk_serial()
+            cpu = _get_cpu_id()
+            if disk:
+                extra_parts.append(f"disk:{disk}")
+            if cpu:
+                extra_parts.append(f"cpu:{cpu}")
+        except Exception:
+            pass
+
     if extra_parts:
         combined = f"{base_hash.hex()}::{'::'.join(extra_parts)}".encode("utf-8")
         return hashlib.sha256(combined).digest()

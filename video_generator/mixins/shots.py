@@ -4922,6 +4922,10 @@ class ShotsMixin:
 
     def generate_shots_threaded(self):
         """生成分镜脚本（线程化版本）"""
+        if not getattr(self, '_auth_valid', True):
+            self.log("⚠️ 请先登录后再操作")
+            self._show_login_dialog()
+            return
         try:
             with self.task_lock:
                 if self.task_running:

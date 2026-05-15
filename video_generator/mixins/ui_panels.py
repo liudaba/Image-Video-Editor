@@ -113,9 +113,9 @@ class UIPanelsMixin:
         section2.columnconfigure(0, weight=1)
         section2.rowconfigure(0, weight=1)
         
-        btn_generate = ttk.Button(section2, text="🎬 ② 生成分镜脚本", command=self.generate_shots_threaded, style="LargeBlue.TButton")
-        btn_generate.pack(fill=tk.BOTH, expand=True, pady=5)
-        ToolTip(btn_generate, "第二步：AI自动分析音频内容\n生成视频分镜脚本和配图提示词")
+        self.btn_generate = ttk.Button(section2, text="🎬 ② 生成分镜脚本", command=self.generate_shots_threaded, style="LargeBlue.TButton")
+        self.btn_generate.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(self.btn_generate, "第二步：AI自动分析音频内容\n生成视频分镜脚本和配图提示词")
 
         # 分隔线
         sep2 = ttk.Separator(frame, orient='horizontal')
@@ -128,9 +128,9 @@ class UIPanelsMixin:
         section5.rowconfigure(0, weight=1)
         section5.rowconfigure(1, weight=1)
         
-        btn_render = ttk.Button(section5, text="🎞️ ③ 生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
-        btn_render.pack(fill=tk.BOTH, expand=True, pady=5)
-        ToolTip(btn_render, "第三步：根据分镜脚本自动生成图片\n并合成带动画效果的视频")
+        self.btn_render = ttk.Button(section5, text="🎞️ ③ 生成视频", command=self.render_video_threaded, style="LargeRed.TButton")
+        self.btn_render.pack(fill=tk.BOTH, expand=True, pady=5)
+        ToolTip(self.btn_render, "第三步：根据分镜脚本自动生成图片\n并合成带动画效果的视频")
         
 
 
