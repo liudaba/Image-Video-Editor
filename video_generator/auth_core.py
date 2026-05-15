@@ -476,9 +476,6 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    self._save_signed_license(
-                        signed_license, token=data["access_token"]
-                    )
                     components = get_fingerprint_components()
                     self._save_registered_components(components)
                     self._save_signed_license(

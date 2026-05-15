@@ -11,6 +11,7 @@ UI层只负责显示和用户交互，业务逻辑通过 auth_core.LicenseManage
 """
 
 import re
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -370,20 +371,35 @@ class LoginDialog(tk.Toplevel):
         if not username or not password:
             messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
             return
-        mgr = LicenseManager()
-        success, message = mgr.login_user(username, password)
-        if success:
-            mgr.save_login_credentials(
-                username,
-                password,
-                True,
-                self._save_pass_var.get(),
-            )
-            messagebox.showinfo("成功", message, parent=self)
-            self.result = True
-            self.destroy()
-        else:
-            messagebox.showerror("错误", message, parent=self)
+
+        login_btn = None
+        for child in self._tab_control.nametowidget(self._tab_control.tabs()[0]).winfo_children():
+            if isinstance(child, ttk.Button) and child.cget("text") == "登 录":
+                login_btn = child
+                break
+        if login_btn:
+            login_btn.configure(state=tk.DISABLED, text="登录中...")
+
+        def do_login():
+            mgr = LicenseManager()
+            success, message = mgr.login_user(username, password)
+            if success:
+                mgr.save_login_credentials(username, password, True, self._save_pass_var.get())
+                self.after(0, lambda: self._on_login_success(message))
+            else:
+                self.after(0, lambda: self._on_login_failure(message, login_btn))
+
+        threading.Thread(target=do_login, daemon=True).start()
+
+    def _on_login_success(self, message):
+        messagebox.showinfo("成功", message, parent=self)
+        self.result = True
+        self.destroy()
+
+    def _on_login_failure(self, message, btn):
+        if btn and btn.winfo_exists():
+            btn.configure(state=tk.NORMAL, text="登 录")
+        messagebox.showerror("错误", message, parent=self)
 
     def _handle_register(self):
         username = self._reg_username_var.get().strip()
@@ -439,15 +455,33 @@ class LoginDialog(tk.Toplevel):
                 "提示", "请先同意隐私政策和服务条款", parent=self
             )
             return
-        success, message = LicenseManager().register_user(
-            username, email, password
-        )
-        if success:
-            messagebox.showinfo("成功", message, parent=self)
-            self.result = True
-            self.destroy()
-        else:
-            messagebox.showerror("错误", message, parent=self)
+
+        reg_btn = None
+        for child in self._tab_control.nametowidget(self._tab_control.tabs()[1]).winfo_children():
+            if isinstance(child, ttk.Button):
+                reg_btn = child
+                break
+        if reg_btn:
+            reg_btn.configure(state=tk.DISABLED, text="注册中...")
+
+        def do_register():
+            success, message = LicenseManager().register_user(username, email, password)
+            if success:
+                self.after(0, lambda: self._on_register_success(message))
+            else:
+                self.after(0, lambda: self._on_register_failure(message, reg_btn))
+
+        threading.Thread(target=do_register, daemon=True).start()
+
+    def _on_register_success(self, message):
+        messagebox.showinfo("成功", message, parent=self)
+        self.result = True
+        self.destroy()
+
+    def _on_register_failure(self, message, btn):
+        if btn and btn.winfo_exists():
+            btn.configure(state=tk.NORMAL, text="注 册")
+        messagebox.showerror("错误", message, parent=self)
 
     def _handle_activate(self):
         username = self._activate_username_var.get().strip()
@@ -461,20 +495,45 @@ class LoginDialog(tk.Toplevel):
             messagebox.showwarning("提示", "请输入激活码", parent=self)
             return
 
-        mgr = LicenseManager()
-        success, message = mgr.login_user(username, password)
-        if not success:
-            messagebox.showerror("错误", f"登录失败: {message}", parent=self)
-            return
+        activate_btn = None
+        for child in self._tab_control.nametowidget(self._tab_control.tabs()[2]).winfo_children():
+            if isinstance(child, ttk.Button):
+                activate_btn = child
+                break
+        if activate_btn:
+            activate_btn.configure(state=tk.DISABLED, text="激活中...")
 
-        success, message = mgr.activate_pro_license(code)
-        if success:
-            mgr.save_login_credentials(username, password, True, False)
-            messagebox.showinfo("成功", "激活成功！专业版已开通", parent=self)
-            self.result = True
-            self.destroy()
-        else:
-            messagebox.showerror("错误", f"激活失败: {message}", parent=self)
+        def do_activate():
+            mgr = LicenseManager()
+            success, message = mgr.login_user(username, password)
+            if not success:
+                self.after(0, lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn))
+                return
+            success2, message2 = mgr.activate_pro_license(code)
+            if success2:
+                mgr.save_login_credentials(username, password, True, False)
+                self.after(0, lambda: self._on_activate_success())
+            else:
+                self.after(0, lambda: self._on_activate_partial(message2, activate_btn))
+
+        threading.Thread(target=do_activate, daemon=True).start()
+
+    def _on_activate_success(self):
+        messagebox.showinfo("成功", "激活成功！专业版已开通", parent=self)
+        self.result = True
+        self.destroy()
+
+    def _on_activate_partial(self, message, btn):
+        if btn and btn.winfo_exists():
+            btn.configure(state=tk.NORMAL, text="登录并激活")
+        messagebox.showerror("错误", f"激活失败: {message}", parent=self)
+        self.result = True
+        self.destroy()
+
+    def _on_activate_failure(self, message, btn):
+        if btn and btn.winfo_exists():
+            btn.configure(state=tk.NORMAL, text="登录并激活")
+        messagebox.showerror("错误", message, parent=self)
 
     def _load_saved_credentials(self):
         try:
@@ -997,21 +1056,27 @@ class PurchaseDialog(tk.Toplevel):
         ).pack(fill=tk.X, pady=(10, 0))
 
     def _check_payment_availability(self):
-        try:
-            from .config import get_api_base_url, get_http_session
-            response = get_http_session().get(
-                f"{get_api_base_url()}/api/payment/methods",
-                timeout=5,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                self._online_available = data.get("any_online_available", True)
-                self._payment_methods_info = {
-                    m["id"]: m for m in data.get("methods", [])
-                }
-        except Exception:
-            self._online_available = False
+        def _check():
+            try:
+                from .config import get_api_base_url, get_http_session
+                response = get_http_session().get(
+                    f"{get_api_base_url()}/api/payment/methods",
+                    timeout=5,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    self._online_available = data.get("any_online_available", True)
+                    self._payment_methods_info = {
+                        m["id"]: m for m in data.get("methods", [])
+                    }
+            except Exception:
+                self._online_available = False
 
+            self.after(0, self._update_payment_ui)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _update_payment_ui(self):
         if not self._online_available:
             self._alipay_btn.configure(state=tk.DISABLED)
             self._wechat_btn.configure(state=tk.DISABLED)

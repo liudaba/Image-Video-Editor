@@ -183,6 +183,7 @@ def main():
 
     try:
         app = VideoGenApp(root)
+        root.deiconify()
         print("[OK] VideoGenApp created successfully")
     except Exception as e:
         print(f"[ERROR] VideoGenApp init failed: {e}")
