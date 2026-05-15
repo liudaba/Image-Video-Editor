@@ -26,6 +26,23 @@
 - **每次执行打包（运行 01build_exe.py）前，必须先征得用户同意**，说明打包原因和预计耗时
 - 未经用户明确同意，不得自行启动打包流程
 - 打包完成后，向用户汇报结果（输出目录、大小、验证结果）
+- **打包前必须彻底删除所有旧构建产物**，包括但不限于：
+  - `build/`、`dist/`、`dist_obfuscated/`、`_obf_backup/`、`dependencies_package/`、`installer_output/` 目录
+  - `*.zip`、`*.7z`、`*.tar.gz` 压缩包
+  - `__pycache__/` 目录
+  - 旧构建产物一旦被新打包替代就毫无价值，必须彻底清除，不得占用磁盘空间
+
+## 项目根目录整洁规范
+
+- **项目根目录必须始终保持清清朗朗、工工整整**，不得残留任何临时文件或废弃产物
+- 禁止在根目录遗留以下类型的文件：
+  - 构建产物：`dist/`、`build/`、`*.zip`、`*.7z`、`*.tar.gz`、`*.spec.bak`
+  - 临时文件：`*.tmp`、`*.bak`、`*.log`、`*.db`（项目自用的除外）
+  - 缓存目录：`__pycache__/`、`.pytest_cache/`、`.mypy_cache/`
+  - 调试脚本：一次性使用的 `test_*.py`、`debug_*.py`、`check_*.py`（用完即删）
+  - IDE 产物：`.idea/`、`.vscode/`（已在 .gitignore 中排除）
+- 每次会话结束前，检查并清理根目录中不应存在的文件
+- 新建临时脚本时，必须在用途完成后立即删除
 
 ## 本地测试
 
@@ -38,7 +55,7 @@
 
 以下文件和目录是用户专用工具，**任何情况下都不得删除、移动或覆盖**：
 
-- `f:\shipinshengcheng\ssh_manager\` — SSH密码管理工具目录，包含：
+- `f:\\shipinshengcheng\\ssh_manager\\` — SSH密码管理工具目录，包含：
   - `生成SSH密码.bat` — 启动入口
   - `ssh_password_manager.py` — 主程序
   - `current_ssh_password.txt` — 当前密码
@@ -69,6 +86,7 @@
    - 确认无残留的临时文件（如 `ssh_check*.py`、`ssh_reset*.py` 等临时脚本）
    - 确认无残留的测试文件（如 `test_*.py`、`*.db` 等不应存在于项目中的文件）
    - 确认 `config.json` 的 `api_base_url` 为 `http://8.141.101.155`（非测试用的 localhost）
+   - 确认根目录无构建产物残留（`dist/`、`build/`、`*.zip` 等）
 
 5. **汇报格式**
    ```

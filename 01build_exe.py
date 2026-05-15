@@ -14,11 +14,16 @@ import json
 
 
 def clean_build_dirs():
-    dirs_to_clean = ['build', 'dist', '__pycache__', 'dist_obfuscated', '_obf_backup']
+    dirs_to_clean = ['build', 'dist', '__pycache__', 'dist_obfuscated', '_obf_backup',
+                     'dependencies_package', 'installer_output']
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
             print(f"🗑️  清理 {dir_name}/")
             shutil.rmtree(dir_name)
+    for zip_pattern in ['*.zip', '*.7z', '*.tar.gz']:
+        for zf in glob.glob(zip_pattern):
+            print(f"🗑️  删除 {zf}")
+            os.remove(zf)
 
 
 def clean_temp_files():
