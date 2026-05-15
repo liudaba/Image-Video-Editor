@@ -62,15 +62,9 @@ class UIInitMixin:
 
             title_text = " | ".join(parts)
 
-            if hasattr(self, 'title_label') and self.title_label.winfo_exists():
-                self.title_label.configure(text=title_text)
-
             self.root.title(title_text)
         except Exception:
-            fallback = f"短视频生成器 v{get_version()} | 智能分镜工作流"
-            if hasattr(self, 'title_label') and self.title_label.winfo_exists():
-                self.title_label.configure(text=fallback)
-            self.root.title(fallback)
+            self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
 
     def _initialize_ui(self):
         """初始化用户界面"""
@@ -297,17 +291,6 @@ class UIInitMixin:
         self._create_top_bar()
 
     def _create_top_bar(self):
-        self.title_label = tk.Label(
-            self.top_bar,
-            text=f"短视频生成器 v{get_version()} | 智能分镜工作流",
-            font=("Microsoft YaHei", 11, "bold"),
-            bg="#0d2137",
-            fg="#FFD700",
-            padx=12,
-            pady=2,
-        )
-        self.title_label.pack(side=tk.LEFT, padx=(8, 0), pady=2)
-
         self.auth_status_label = tk.Label(
             self.top_bar,
             text="",
