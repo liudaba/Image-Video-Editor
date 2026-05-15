@@ -1290,7 +1290,12 @@ class UIHandlersMixin:
                 self.log(f"   所有图片将由云端生成，无需本地SD")
                 self.log("=" * 50)
             else:
-                self.log("🖥️ 云端生图已禁用，使用本地SD生成图片")
+                sd_connected = getattr(self, '_sd_api_connected', False)
+                if sd_connected:
+                    self.log("🖥️ 云端生图已禁用，使用本地SD生成图片")
+                else:
+                    self.log("⚠️ 云端生图已禁用，本地SD也未连接")
+                    self.log("   请启动SD WebUI或启用云端生图，否则无法生成图片")
         except ImportError:
             pass
         
@@ -1316,7 +1321,11 @@ class UIHandlersMixin:
         else:
             self.log("=" * 50)
             self.log(f"🖥️ 云端大模型已禁用")
-            self.log(f"   所有AI思考任务将由本地Ollama完成")
+            if is_ollama_available():
+                self.log(f"   所有AI思考任务将由本地Ollama完成")
+            else:
+                self.log(f"   ⚠️ 本地Ollama也未连接，AI功能暂不可用")
+                self.log(f"   请启动Ollama服务或启用云端大模型")
             self.log("=" * 50)
 
 
@@ -1529,7 +1538,10 @@ class UIHandlersMixin:
                 animation = self.animation_var.get() if hasattr(self, 'animation_var') else '无'
                 thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
                 
-                self.log(f"✅ 已加载Ollama模型: {ollama_model}")
+                if is_ollama_available():
+                    self.log(f"✅ 已加载Ollama模型: {ollama_model}")
+                else:
+                    self.log(f"ℹ️ 配置的Ollama模型: {ollama_model}（服务未连接）")
                 self.log(f"✅ 已加载音频模型: {whisper_model}")
                 if core_theme:
                     self.log(f"✅ 已加载核心主题: {core_theme}")
