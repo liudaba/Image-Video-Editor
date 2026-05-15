@@ -32,7 +32,7 @@
 
 以下文件和目录是用户专用工具，**任何情况下都不得删除、移动或覆盖**：
 
-- `f:\音频转视频项目\ssh_manager\` — SSH密码管理工具目录，包含：
+- `f:\shipinshengcheng\ssh_manager\` — SSH密码管理工具目录，包含：
   - `生成SSH密码.bat` — 启动入口
   - `ssh_password_manager.py` — 主程序
   - `current_ssh_password.txt` — 当前密码

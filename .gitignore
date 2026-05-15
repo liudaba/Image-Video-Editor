@@ -102,10 +102,7 @@ check_packing_safety.py
 backend/.env
 backend/keys/
 # SSH密码管理 - 绝对不能提交
-current_ssh_password.txt
-ssh_password_history.txt
-ssh_password_manager.py
-生成SSH密码.bat
+ssh_manager/
 
 # 测试脚本 (含敏感信息)
 test_api.sh

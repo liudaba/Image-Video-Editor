@@ -666,7 +666,7 @@ def _post_build(output_dir):
         'shell.Run "短视频生成器.exe", 0, False\n'
     )
     vbs_path = os.path.join(output_dir, "启动.vbs")
-    with open(vbs_path, "w", encoding="utf-8") as f:
+    with open(vbs_path, "w", encoding="gbk") as f:
         f.write(vbs_content)
     print("  ✅ 生成 启动.vbs（含路径检查+缺失提示）")
 
