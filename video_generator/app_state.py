@@ -35,7 +35,6 @@ GPUtil = None
 
 
 def lazy_import():
-    """Lazy import non-essential modules (psutil, GPUtil)."""
     global PERFORMANCE_MONITOR_AVAILABLE, psutil, GPUtil
     try:
         try:
@@ -49,6 +48,5 @@ def lazy_import():
         except ImportError:
             pass
         PERFORMANCE_MONITOR_AVAILABLE = psutil is not None and GPUtil is not None
-        check_ollama_available()
     except Exception:
         pass

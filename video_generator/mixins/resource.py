@@ -427,13 +427,6 @@ class ResourceMixin:
 
 
     def _move_output_to_trash(self, reason="清理"):
-        """将output_project中的所有文件移动到垃圾桶
-        
-        Args:
-            reason: 清理原因，用于日志和子文件夹命名
-        Returns:
-            int: 移动的文件数量
-        """
         moved_count = 0
         try:
             if getattr(sys, 'frozen', False):
@@ -442,37 +435,42 @@ class ResourceMixin:
                 trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             if not os.path.exists(trash_dir):
                 os.makedirs(trash_dir)
-            
+
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
-            os.makedirs(trash_session_dir)
-            
-            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                shots_file = os.path.join(self.output_dir, "shots_data.json")
-                if os.path.exists(shots_file):
-                    if self._move_to_trash(shots_file, trash_session_dir):
-                        moved_count += 1
 
-                if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
-                    images_trash_dir = os.path.join(trash_session_dir, "images")
-                    os.makedirs(images_trash_dir, exist_ok=True)
-                    for f in os.listdir(self.images_dir):
-                        fp = os.path.join(self.images_dir, f)
+            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
+                has_content = any(os.listdir(self.output_dir))
+                if not has_content:
+                    return 0
+
+                try:
+                    shutil.move(self.output_dir, trash_session_dir)
+                    os.makedirs(self.output_dir, exist_ok=True)
+                    if hasattr(self, 'images_dir'):
+                        os.makedirs(self.images_dir, exist_ok=True)
+                    moved_count = 1
+                except Exception:
+                    os.makedirs(trash_session_dir, exist_ok=True)
+                    if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
+                        images_trash_dir = os.path.join(trash_session_dir, "images")
+                        os.makedirs(images_trash_dir, exist_ok=True)
+                        for f in os.listdir(self.images_dir):
+                            fp = os.path.join(self.images_dir, f)
+                            if os.path.isfile(fp):
+                                if self._move_to_trash(fp, images_trash_dir):
+                                    moved_count += 1
+                    for f in os.listdir(self.output_dir):
+                        fp = os.path.join(self.output_dir, f)
                         if os.path.isfile(fp):
-                            if self._move_to_trash(fp, images_trash_dir):
+                            if self._move_to_trash(fp, trash_session_dir):
                                 moved_count += 1
 
-                for f in os.listdir(self.output_dir):
-                    fp = os.path.join(self.output_dir, f)
-                    if os.path.isfile(fp):
-                        if self._move_to_trash(fp, trash_session_dir):
-                            moved_count += 1
-            
             if moved_count > 0:
-                self.log(f"🗑️ 已将 {moved_count} 个文件移至垃圾桶: {trash_session_dir}")
+                self.log(f"🗑️ 已将残留文件移至垃圾桶: {trash_session_dir}")
         except Exception as e:
             self._log_exception("⚠️ 移动文件到垃圾桶失败", e)
-        
+
         return moved_count
 
 

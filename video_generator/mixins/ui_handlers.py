@@ -61,19 +61,11 @@ class UIHandlersMixin:
     
 
     def auto_connect_ollama(self):
-        """启动时自动检测并连接Ollama服务 - 失败时弹窗提醒"""
         try:
             if check_ollama_available():
                 set_ollama_available(True)
                 self.log("✅ Ollama服务已连接")
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        gpu_name = torch.cuda.get_device_name(0)
-                        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
-                        self.log(f"🖥️ GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)")
-                except Exception:
-                    pass
+                self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
@@ -81,6 +73,7 @@ class UIHandlersMixin:
             if try_start_ollama_service():
                 set_ollama_available(True)
                 self.log("✅ Ollama服务已自动启动并连接")
+                self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
@@ -102,6 +95,35 @@ class UIHandlersMixin:
                 f"Ollama服务连接异常：{e}\n\n"
                 "分镜生成和提示词生成需要Ollama服务支持。"
             ))
+
+    def _detect_gpu_info_async(self):
+        def _detect():
+            try:
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=gpu_name,memory.total", "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=3
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    line = result.stdout.strip().split("\n")[0]
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 2:
+                        gpu_name = parts[0]
+                        gpu_mem = float(parts[1]) / 1024
+                        self.root.after(0, lambda: self.log(f"🖥️ GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)"))
+                        return
+            except Exception:
+                pass
+            try:
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                    capture_output=True, text=True, timeout=3
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    gpu_name = result.stdout.strip().split("\n")[0].strip()
+                    self.root.after(0, lambda: self.log(f"🖥️ GPU: {gpu_name} (CUDA)"))
+            except Exception:
+                pass
+        threading.Thread(target=_detect, daemon=True).start()
     
 
     def update_model_list(self):
@@ -827,17 +849,16 @@ class UIHandlersMixin:
     
 
     def check_dependencies(self):
-        """检查系统依赖项（并行版）"""
-        self.log("正在检查系统依赖项...")
-        
-        all_dependencies = [
+        lightweight_deps = [
             ("requests", "pip install requests", None, True),
             ("PIL", "pip install Pillow", None, True),
             ("numpy", "pip install numpy", None, True),
             ("moviepy", "pip install moviepy", None, True),
+        ]
+        heavy_deps = [
             ("whisper", "pip install openai-whisper", "load_model", False),
         ]
-        
+
         results = {}
         def _check_one(dep, install_cmd, required_attr, is_core):
             try:
@@ -848,37 +869,49 @@ class UIHandlersMixin:
                     results[dep] = ("ok", is_core, install_cmd)
             except (ImportError, TypeError, OSError) as e:
                 results[dep] = ("missing", is_core, install_cmd)
-        
+
+        def _check_lightweight(dep, install_cmd, is_core):
+            import importlib.util
+            spec = importlib.util.find_spec(dep)
+            if spec is not None:
+                results[dep] = ("ok", is_core, install_cmd)
+            else:
+                results[dep] = ("missing", is_core, install_cmd)
+
         threads = []
-        for dep, install_cmd, required_attr, is_core in all_dependencies:
+        for dep, install_cmd, required_attr, is_core in lightweight_deps:
             t = threading.Thread(target=_check_one, args=(dep, install_cmd, required_attr, is_core))
+            t.start()
+            threads.append(t)
+        for dep, install_cmd, required_attr, is_core in heavy_deps:
+            t = threading.Thread(target=_check_lightweight, args=(dep, install_cmd, is_core))
             t.start()
             threads.append(t)
         for t in threads:
             t.join(timeout=10)
-        
+
         missing_core = []
-        for dep, install_cmd, required_attr, is_core in all_dependencies:
+        all_deps = lightweight_deps + heavy_deps
+        for dep, install_cmd, required_attr, is_core in all_deps:
             if dep not in results:
-                self.log(f"⚠️ {dep} 检查超时")
                 if is_core:
                     missing_core.append((dep, install_cmd))
                 continue
             status, _, _ = results[dep]
             if status == "ok":
-                self.log(f"✅ {dep} 已安装")
+                pass
             elif status == "incomplete":
                 if is_core:
-                    self.log(f"⚠️ {dep} 已安装但功能不完整 (缺少 {required_attr})")
+                    self.log(f"     ⚠️ {dep} 已安装但功能不完整（缺少 {required_attr}）")
                     missing_core.append((dep, install_cmd))
                 else:
-                    self.log(f"⚠️ {dep} 已安装但功能不完整，可使用云端语音识别替代")
+                    self.log(f"     ⚠️ {dep} 已安装但功能不完整，可使用云端语音识别替代")
             elif status == "missing":
                 if is_core:
-                    self.log(f"⚠️ {dep} 加载失败")
+                    self.log(f"     ❌ {dep} 未安装，请执行: {install_cmd}")
                     missing_core.append((dep, install_cmd))
                 else:
-                    self.log(f"⚠️ {dep} 未安装，可使用云端语音识别替代")
+                    self.log(f"     ⚠️ {dep} 未安装，可使用云端语音识别替代")
         
         if missing_core:
             self.log("❌ 缺少核心依赖项")
@@ -958,13 +991,7 @@ class UIHandlersMixin:
 
 
     def system_check(self):
-        """系统检查"""
-        self.log("正在进行系统检查...")
-        # 检查依赖项
         self.check_dependencies()
-        # 检查SD API连接
-        # self.check_sd_api_connection()
-        self.log("✅ 系统检查完成")
     
 
     @staticmethod
@@ -1546,7 +1573,7 @@ class UIHandlersMixin:
                     self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
                 
                 if hasattr(self, '_apply_cloud_llm_config'):
-                    self._apply_cloud_llm_config()
+                    threading.Thread(target=self._apply_cloud_llm_config, daemon=True).start()
                 
                 # 集中显示已加载的配置
                 ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b'

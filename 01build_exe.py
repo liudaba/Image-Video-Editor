@@ -390,7 +390,7 @@ def build_executable():
                 _restore_original_modules()
 
             print(f"\n💡 分发说明:")
-            print(f"  1. 将整个 '{output_dir}' 文件夹压缩成ZIP")
+            print(f"  1. 压缩包将自动生成在 dist/ 目录下")
             print(f"  2. 上传到网盘或CDN")
             print(f"  3. 用户解压后双击 启动.vbs 即可运行")
             print(f"  4. Whisper模型和FFmpeg已预装，无需额外下载")
@@ -402,6 +402,8 @@ def build_executable():
                 print(f"  - .venv/ (虚拟环境)")
                 print(f"  - models/ (AI模型)")
                 print(f"  - backend/ (后端服务器)")
+
+            _create_release_archive(output_dir)
         else:
             print(f"\n❌ 错误: 输出目录不存在: {output_dir}")
             sys.exit(1)
@@ -787,30 +789,43 @@ def _post_build(output_dir):
 
 
 def _generate_checksums(output_dir):
-    print("\n🔐 生成完整性校验文件...")
+    print("\n🔐 生成完整性校验文件（全文件SHA256）...")
     import hashlib
     checksum_path = os.path.join(output_dir, "file_checksums.txt")
-    critical_files = [
-        "短视频生成器.exe",
-        "_internal/python310.dll",
-        "_internal/config.json",
-        "_internal/.license_verify_key",
-        "ffmpeg/ffmpeg.exe",
-        "ffmpeg/ffprobe.exe",
-    ]
+    skip_dirs = {
+        'whisper_models', 'ffmpeg', 'logs', 'output_project',
+        '垃圾桶', '__pycache__', '.git', '.idea', '.vscode',
+    }
+    skip_extensions = {'.log', '.tmp', '.bak'}
+    count = 0
+    total_size = 0
     with open(checksum_path, "w", encoding="utf-8") as f:
         f.write("# 短视频生成器 - 文件完整性校验\n")
         f.write("# 由打包脚本自动生成，请勿修改\n")
-        f.write("# 运行「环境自检修复.bat」可验证文件完整性\n\n")
-        count = 0
-        for rel_path in critical_files:
-            abs_path = os.path.join(output_dir, rel_path.replace("/", os.sep))
-            if os.path.exists(abs_path):
-                with open(abs_path, "rb") as fh:
-                    sha256 = hashlib.sha256(fh.read()).hexdigest()
-                f.write(f"{sha256}  {rel_path}\n")
-                count += 1
-    print(f"  ✅ 已生成校验文件 ({count} 个关键文件)")
+        f.write("# 运行「环境自检修复.bat」可验证文件完整性\n")
+        f.write("# 格式: SHA256  相对路径\n\n")
+        for root, dirs, files in os.walk(output_dir):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for filename in sorted(files):
+                if any(filename.endswith(ext) for ext in skip_extensions):
+                    continue
+                abs_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(abs_path, output_dir).replace(os.sep, "/")
+                if rel_path == "file_checksums.txt":
+                    continue
+                try:
+                    file_size = os.path.getsize(abs_path)
+                    total_size += file_size
+                    with open(abs_path, "rb") as fh:
+                        sha256 = hashlib.sha256(fh.read()).hexdigest()
+                    f.write(f"{sha256}  {rel_path}\n")
+                    count += 1
+                except (OSError, PermissionError):
+                    f.write(f"ERROR  {rel_path}\n")
+                    count += 1
+    print(f"  ✅ 已生成校验文件 ({count} 个文件, 总计 {total_size / (1024*1024):.0f}MB)")
+    print(f"  💡 排除了大体积目录: whisper_models/, ffmpeg/ (这些目录由环境自检单独检查大小)")
+    print(f"  💡 用户运行「环境自检修复.bat」时会自动比对SHA256")
 
 
 def _generate_diagnostic_bat(output_dir):
@@ -835,8 +850,8 @@ set PASS=0
 set FAIL=0
 set WARN=0
 
-echo [1/8] 检查安装路径...
-echo [1/8] 检查安装路径... >> "%LOG_FILE%"
+echo [1/10] 检查安装路径...
+echo [1/10] 检查安装路径... >> "%LOG_FILE%"
 set "PATH_SAFE=1"
 echo %APP_DIR%| findstr /R /C:"[^\x20-\x7E]" >nul 2>&1
 if not errorlevel 1 (
@@ -852,7 +867,7 @@ if not errorlevel 1 (
 )
 echo.
 
-echo [2/8] 检查主程序...
+echo [2/10] 检查主程序...
 if exist "%APP_DIR%短视频生成器.exe" (
     for %%F in ("%APP_DIR%短视频生成器.exe") do set EXE_SIZE=%%~zF
     if !EXE_SIZE! LSS 1000000 (
@@ -871,7 +886,7 @@ if exist "%APP_DIR%短视频生成器.exe" (
 )
 echo.
 
-echo [3/8] 检查运行时依赖...
+echo [3/10] 检查运行时依赖...
 if exist "%APP_DIR%_internal\python310.dll" (
     echo   [OK] Python运行时正常
     echo   [OK] Python运行时正常 >> "%LOG_FILE%"
@@ -883,7 +898,7 @@ if exist "%APP_DIR%_internal\python310.dll" (
 )
 echo.
 
-echo [4/8] 检查FFmpeg...
+echo [4/10] 检查FFmpeg...
 if exist "%APP_DIR%ffmpeg\ffmpeg.exe" (
     for %%F in ("%APP_DIR%ffmpeg\ffmpeg.exe") do set FF_SIZE=%%~zF
     if !FF_SIZE! LSS 1000000 (
@@ -903,7 +918,7 @@ if exist "%APP_DIR%ffmpeg\ffmpeg.exe" (
 )
 echo.
 
-echo [5/8] 检查Whisper语音模型...
+echo [5/10] 检查Whisper语音模型...
 if exist "%APP_DIR%whisper_models\medium.pt" (
     for %%F in ("%APP_DIR%whisper_models\medium.pt") do set WH_SIZE=%%~zF
     if !WH_SIZE! LSS 500000000 (
@@ -923,7 +938,7 @@ if exist "%APP_DIR%whisper_models\medium.pt" (
 )
 echo.
 
-echo [6/8] 检查配置文件...
+echo [6/10] 检查配置文件...
 if exist "%APP_DIR%_internal\config.json" (
     echo   [OK] 配置文件正常
     echo   [OK] 配置文件正常 >> "%LOG_FILE%"
@@ -935,7 +950,7 @@ if exist "%APP_DIR%_internal\config.json" (
 )
 echo.
 
-echo [7/8] 检查授权验证文件...
+echo [7/10] 检查授权验证文件...
 if exist "%APP_DIR%_internal\.license_verify_key" (
     echo   [OK] 授权文件正常
     echo   [OK] 授权文件正常 >> "%LOG_FILE%"
@@ -947,7 +962,7 @@ if exist "%APP_DIR%_internal\.license_verify_key" (
 )
 echo.
 
-echo [8/8] 检查VC++运行时...
+echo [8/10] 检查VC++运行时...
 where vcruntime140.dll >nul 2>&1
 if errorlevel 1 (
     echo   [!] VC++运行时缺失，尝试安装...
@@ -968,6 +983,114 @@ if errorlevel 1 (
 )
 echo.
 
+echo [9/10] 文件完整性SHA256校验...
+set "CHK_FILE=%APP_DIR%file_checksums.txt"
+if not exist "%CHK_FILE%" (
+    echo   [!] 校验文件缺失，跳过SHA256校验
+    echo   [!] 校验文件缺失 >> "%LOG_FILE%"
+    set /a WARN+=1
+    goto :checksum_done
+)
+
+set "CHK_PASS=0"
+set "CHK_FAIL=0"
+set "CHK_TOTAL=0"
+
+for /f "usebackq tokens=1,*" %%A in ("%CHK_FILE%") do (
+    set "HASH=%%A"
+    set "FNAME=%%B"
+
+    if "!HASH:~0,1!"=="#" goto :checksum_next
+    if "!HASH!"=="ERROR" goto :checksum_next
+    if "!HASH!"=="" goto :checksum_next
+
+    set /a CHK_TOTAL+=1
+    set "FULL_PATH=%APP_DIR%!FNAME:/=\!"
+
+    if not exist "!FULL_PATH!" (
+        echo   [!!] 文件缺失: !FNAME!
+        echo   [!!] 文件缺失: !FNAME! >> "%LOG_FILE%"
+        set /a CHK_FAIL+=1
+        goto :checksum_next
+    )
+
+    certutil -hashfile "!FULL_PATH!" SHA256 >nul 2>&1
+    if errorlevel 1 (
+        set /a CHK_PASS+=1
+        goto :checksum_next
+    )
+
+    set "ACTUAL_HASH="
+    for /f "tokens=1,* skip=1" %%H in ('certutil -hashfile "!FULL_PATH!" SHA256 2^>nul ^| findstr /v ":" ^| findstr /v "CertUtil"') do (
+        set "ACTUAL_HASH=!ACTUAL_HASH!%%H"
+    )
+
+    if "!ACTUAL_HASH!"=="" (
+        set /a CHK_PASS+=1
+        goto :checksum_next
+    )
+
+    set "ACTUAL_HASH_LC=!ACTUAL_HASH: =!"
+    set "EXPECTED_LC=!HASH: =!"
+
+    if /i "!ACTUAL_HASH_LC!"=="!EXPECTED_LC!" (
+        set /a CHK_PASS+=1
+    ) else (
+        echo   [!!] 文件已损坏: !FNAME!
+        echo   [!!] 文件已损坏: !FNAME! >> "%LOG_FILE%"
+        set /a CHK_FAIL+=1
+    )
+
+    :checksum_next
+)
+
+if !CHK_TOTAL! GTR 0 (
+    if !CHK_FAIL! EQU 0 (
+        echo   [OK] !CHK_TOTAL! 个文件SHA256校验全部通过
+        echo   [OK] SHA256校验全部通过 >> "%LOG_FILE%"
+        set /a PASS+=1
+    ) else (
+        echo   [!!] !CHK_FAIL!/!CHK_TOTAL! 个文件校验失败（文件已损坏或被篡改）
+        echo   [!!] !CHK_FAIL!个文件校验失败 >> "%LOG_FILE%"
+        set /a FAIL+=1
+    )
+) else (
+    echo   [!] 校验文件为空，无法校验
+    set /a WARN+=1
+)
+
+:checksum_done
+echo.
+
+echo [10/10] 解压验证提示...
+set "NEED_REEXTRACT=0"
+if !FAIL! GTR 0 (
+    set "NEED_REEXTRACT=1"
+)
+if !CHK_FAIL! GTR 0 (
+    set "NEED_REEXTRACT=1"
+)
+
+if "!NEED_REEXTRACT!"=="1" (
+    echo   [!!] 检测到文件缺失或损坏，可能原因:
+    echo.
+    echo        1. 解压时杀毒软件删除了部分文件（请关闭杀毒后重新解压）
+    echo        2. 解压不完整（请使用7-Zip或WinRAR重新解压）
+    echo        3. 下载文件损坏（请重新下载）
+    echo.
+    echo        建议操作:
+    echo        - 关闭杀毒软件（特别是Windows Defender实时保护）
+    echo        - 使用7-Zip或WinRAR重新解压压缩包
+    echo        - 解压完成后再次运行本工具验证
+    echo   [!!] 需要重新解压 >> "%LOG_FILE%"
+    set /a FAIL+=1
+) else (
+    echo   [OK] 所有文件完整，解压验证通过
+    echo   [OK] 解压验证通过 >> "%LOG_FILE%"
+    set /a PASS+=1
+)
+echo.
+
 echo ============================================================
 echo          自检结果
 echo ============================================================
@@ -981,8 +1104,10 @@ echo ============================================================
 echo.
 
 if %FAIL% GTR 0 (
-    echo   存在严重问题，建议重新下载完整安装包
-    echo   或联系我们获取帮助
+    echo   存在严重问题，建议:
+    echo   1. 关闭杀毒软件，使用7-Zip或WinRAR重新解压
+    echo   2. 重新下载完整安装包
+    echo   3. 联系我们获取帮助
 ) else if %WARN% GTR 0 (
     echo   存在警告项，软件可运行但部分功能可能受限
     echo   软件启动后会尝试自动修复
@@ -997,7 +1122,7 @@ pause >nul
     bat_path = os.path.join(output_dir, "环境自检修复.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
-    print("  ✅ 生成 环境自检修复.bat（8项诊断）")
+    print("  ✅ 生成 环境自检修复.bat（10项诊断，含SHA256校验）")
 
 
 def _generate_first_run_bat(output_dir):
@@ -1041,7 +1166,27 @@ if "!PATH_SAFE!"=="0" (
 echo.
 
 echo ============================================================
-echo  第2步: 解除文件锁定
+echo  第2步: 确认解压方式
+echo ============================================================
+echo.
+echo  重要：请确认您使用了正确的解压工具！
+echo.
+echo  推荐解压工具（解压时自动校验文件完整性）：
+echo    - 7-Zip（免费，推荐！下载: https://7-zip.org）
+echo    - WinRAR
+echo.
+echo  不推荐的解压方式：
+echo    - 某些国产压缩软件的"快速解压"（会跳过CRC校验）
+echo    - 直接双击压缩包内文件运行（文件不完整）
+echo.
+echo  如果解压时出现错误提示，说明下载文件损坏，请重新下载。
+echo.
+echo  按任意键继续...
+pause >nul
+echo.
+
+echo ============================================================
+echo  第3步: 解除文件锁定
 echo ============================================================
 echo.
 echo  从网盘下载的文件可能被Windows锁定，需要解除。
@@ -1057,10 +1202,13 @@ if errorlevel 1 (
 echo.
 
 echo ============================================================
-echo  第3步: 添加杀毒软件信任
+echo  第4步: 添加杀毒软件信任
 echo ============================================================
 echo.
-echo  部分杀毒软件可能误报，请将本文件夹添加为信任目录:
+echo  重要：杀毒软件可能在解压时删除关键文件！
+echo.
+echo  如果之前解压时未关闭杀毒，部分文件可能已被删除。
+echo  请将本文件夹添加为信任目录后再继续：
 echo.
 echo  - Windows Defender: 设置 -^> 病毒防护 -^> 排除项 -^> 添加文件夹
 echo  - 其他杀软: 请在对应设置中添加排除
@@ -1070,20 +1218,26 @@ pause >nul
 echo.
 
 echo ============================================================
-echo  第4步: 环境快速检查
+echo  第5步: 验证文件完整性
 echo ============================================================
 echo.
+echo  正在快速检查关键文件...
+echo.
+
+set "VERIFY_OK=1"
 
 if exist "%APP_DIR%短视频生成器.exe" (
     echo  [OK] 主程序: 存在
 ) else (
-    echo  [!!] 主程序: 缺失！请确认解压完整
+    echo  [!!] 主程序: 缺失！可能被杀毒软件删除
+    set "VERIFY_OK=0"
 )
 
 if exist "%APP_DIR%_internal\python310.dll" (
     echo  [OK] 运行时: 正常
 ) else (
-    echo  [!!] 运行时: 缺失！请重新下载
+    echo  [!!] 运行时: 缺失！解压可能不完整
+    set "VERIFY_OK=0"
 )
 
 if exist "%APP_DIR%ffmpeg\ffmpeg.exe" (
@@ -1098,10 +1252,36 @@ if exist "%APP_DIR%whisper_models\medium.pt" (
     echo  [!] 语音模型: 缺失（软件会自动下载，约770MB）
 )
 
+if exist "%APP_DIR%file_checksums.txt" (
+    echo  [OK] 校验文件: 存在（可运行环境自检修复.bat进行完整校验）
+) else (
+    echo  [!] 校验文件: 缺失
+)
+
+if "!VERIFY_OK!"=="0" (
+    echo.
+    echo  [!!] 检测到关键文件缺失！
+    echo.
+    echo  最可能的原因:
+    echo    1. 杀毒软件在解压时删除了文件
+    echo    2. 解压不完整
+    echo.
+    echo  建议操作:
+    echo    1. 关闭杀毒软件的实时保护
+    echo    2. 使用7-Zip或WinRAR重新解压
+    echo    3. 解压完成后再次运行本引导
+    echo.
+    echo  按任意键退出...
+    pause >nul
+    exit /b 1
+)
+
+echo.
+echo  如需完整文件校验，请运行「环境自检修复.bat」
 echo.
 
 echo ============================================================
-echo  第5步: 启动软件
+echo  第6步: 启动软件
 echo ============================================================
 echo.
 echo  环境检查完成！即将启动软件...
@@ -1119,7 +1299,7 @@ start "" "%APP_DIR%短视频生成器.exe"
     bat_path = os.path.join(output_dir, "首次运行引导.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
-    print("  ✅ 生成 首次运行引导.bat（5步引导）")
+    print("  ✅ 生成 首次运行引导.bat（6步引导，含解压验证）")
 
 
 def _verify_required_files(output_dir):
@@ -1190,6 +1370,64 @@ def _verify_config_content(output_dir):
     except json.JSONDecodeError:
         print("  ❌ config.json 格式错误!")
         sys.exit(1)
+
+
+def _create_release_archive(output_dir):
+    print("\n📦 创建发布压缩包...")
+
+    zip_cmd = None
+    for candidate in ["7z", os.path.join(os.environ.get("ProgramFiles", ""), "7-Zip", "7z.exe"),
+                      os.path.join(os.environ.get("ProgramFiles(x86)", ""), "7-Zip", "7z.exe")]:
+        try:
+            if os.path.isfile(candidate):
+                zip_cmd = candidate
+                break
+            result = subprocess.run([candidate, "--help"], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                zip_cmd = candidate
+                break
+        except Exception:
+            continue
+
+    if not zip_cmd:
+        print("  ⚠️  未找到 7-Zip，跳过自动压缩")
+        print("     请安装 7-Zip: https://7-zip.org/download.html")
+        print("     或手动将以下目录压缩成ZIP:")
+        print(f"     {output_dir}")
+        print()
+        print("  💡 建议使用7z固实压缩以获得更小体积和更好的完整性保护:")
+        print(f"     7z a -t7z -mx=5 -ms=on VideoGenerator.7z {output_dir}")
+        return
+
+    from datetime import datetime
+    date_stamp = datetime.now().strftime("%Y%m%d")
+    archive_name = f"VideoGenerator_{date_stamp}"
+
+    archive_7z = os.path.join("dist", f"{archive_name}.7z")
+
+    print(f"  📦 使用7z固实压缩（Solid Archive）...")
+    print(f"     输出: {archive_7z}")
+
+    cmd = [zip_cmd, "a", "-t7z", "-mx=5", "-ms=on", "-m0=lzma2",
+           archive_7z, os.path.basename(output_dir)]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd="dist")
+    if result.returncode == 0:
+        archive_size = os.path.getsize(archive_7z) / (1024 * 1024)
+        print(f"  ✅ 7z固实压缩完成: {archive_7z} ({archive_size:.0f}MB)")
+        print(f"  💡 固实压缩优势:")
+        print(f"     - 体积更小（小文件联合压缩）")
+        print(f"     - 任何文件损坏都会导致解压失败（不会悄悄损坏）")
+        print(f"     - 7-Zip解压时自动校验CRC")
+    else:
+        print(f"  ❌ 7z压缩失败: {result.stderr[:200]}")
+        print(f"     请手动压缩 {output_dir}")
+
+    print()
+    print(f"  📋 分发说明:")
+    print(f"  1. 将 {archive_7z} 上传到网盘或CDN")
+    print(f"  2. 提醒用户使用 7-Zip 或 WinRAR 解压（不要用其他压缩软件的快速解压）")
+    print(f"  3. 解压后双击「首次运行引导.bat」或「启动.vbs」")
+    print(f"  4. 建议用户解压后运行「环境自检修复.bat」验证文件完整性")
 
 
 def get_directory_size(path):
