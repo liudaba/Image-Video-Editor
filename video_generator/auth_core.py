@@ -391,7 +391,7 @@ class LicenseManager:
                 return raw
         return raw
 
-    def _save_signed_license(self, signed_license, token=None, last_heartbeat=None):
+    def _save_signed_license(self, signed_license, token=None, last_heartbeat=None, username=None):
         save_data = {"signed": signed_license}
         if last_heartbeat:
             save_data["last_heartbeat"] = last_heartbeat
@@ -406,6 +406,10 @@ class LicenseManager:
                 save_data["token"] = token
         if self._registered_components is not None:
             save_data["fingerprint_components"] = self._registered_components
+        if username:
+            save_data["username"] = username
+        elif self.license_data and self.license_data.get("username"):
+            save_data["username"] = self.license_data["username"]
         self.save_license(save_data)
 
     def get_license_path(self):
@@ -500,7 +504,8 @@ class LicenseManager:
                     components = get_fingerprint_components()
                     self._save_registered_components(components)
                     self._save_signed_license(
-                        signed_license, token=data["access_token"]
+                        signed_license, token=data["access_token"],
+                        username=username
                     )
                 else:
                     return False, "服务器返回的授权数据无效,请联系客服"
@@ -806,6 +811,92 @@ class LicenseManager:
         if days_left > 0:
             return f"会员还剩{days_left}天到期"
         return ""
+
+    def get_account_info(self):
+        info = {
+            "username": "",
+            "membership_type_name": "",
+            "days_left": 0,
+            "is_lifetime": False,
+            "is_trial": False,
+            "is_valid": False,
+        }
+        if not self.license_data:
+            return info
+        signed_data = self.license_data.get("signed", self.license_data)
+        info["is_valid"] = signed_data.get("is_valid", False)
+        username = self.license_data.get("username", "")
+        if not username:
+            username = signed_data.get("username", "")
+        if not username:
+            try:
+                saved_user, _, save_user, _ = self.load_login_credentials()
+                if save_user and saved_user:
+                    username = saved_user
+            except Exception:
+                pass
+        info["username"] = username
+        license_type = signed_data.get("license_type", "")
+        if license_type == "trial":
+            info["is_trial"] = True
+            info["membership_type_name"] = "试用期"
+            trial_end_str = signed_data.get("trial_end")
+            if trial_end_str:
+                trial_end = _parse_iso_to_naive(trial_end_str)
+                if trial_end:
+                    from datetime import timezone as _tz
+                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                    info["days_left"] = max(0, (trial_end - now_utc).days)
+            else:
+                info["days_left"] = signed_data.get("days_left", 0)
+            return info
+        if signed_data.get("activation_code") or signed_data.get("license_key"):
+            info["membership_type_name"] = "激活码会员"
+            info["days_left"] = signed_data.get("days_left", 0)
+            if info["days_left"] > 3650 or not signed_data.get("expiry_date"):
+                info["is_lifetime"] = True
+                info["membership_type_name"] = "终身会员"
+            return info
+        if license_type == "pro":
+            plan_type = signed_data.get("plan_type", "")
+            if plan_type:
+                plan_map = {
+                    "monthly": "月卡会员",
+                    "quarterly": "季卡会员",
+                    "yearly": "年卡会员",
+                    "annual": "年卡会员",
+                    "lifetime": "终身会员",
+                }
+                info["membership_type_name"] = plan_map.get(plan_type, "会员")
+                if plan_type == "lifetime":
+                    info["is_lifetime"] = True
+            else:
+                if not signed_data.get("expiry_date"):
+                    info["is_lifetime"] = True
+                    info["membership_type_name"] = "终身会员"
+                else:
+                    days_left = 0
+                    expiry_str = signed_data.get("expiry_date")
+                    if expiry_str:
+                        expiry_date = _parse_iso_to_naive(expiry_str)
+                        if expiry_date:
+                            from datetime import timezone as _tz
+                            now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                            days_left = max(0, (expiry_date - now_utc).days)
+                    else:
+                        days_left = signed_data.get("days_left", 0)
+                    info["days_left"] = days_left
+                    if days_left > 3650:
+                        info["is_lifetime"] = True
+                        info["membership_type_name"] = "终身会员"
+                    else:
+                        info["membership_type_name"] = "会员"
+            if info["is_lifetime"]:
+                info["days_left"] = 9999
+            elif info["days_left"] == 0:
+                info["days_left"] = signed_data.get("days_left", 0)
+            return info
+        return info
 
     def logout(self):
         self._stopping = True

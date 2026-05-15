@@ -48,18 +48,32 @@ class UIInitMixin:
         try:
             from video_generator.license_manager import LicenseManager
             mgr = LicenseManager()
-            display = mgr.get_membership_display()
-            base_title = f"短视频生成器 v{get_version()} | 智能分镜工作流"
-            if display:
-                self.root.title(f"{base_title} | {display}")
-            else:
-                self.root.title(base_title)
+            account_info = mgr.get_account_info()
+            version_str = f"短视频生成器 v{get_version()}"
+            base_title = f"{version_str} | 智能分镜工作流"
+
+            parts = [base_title]
+            username = account_info.get("username", "")
+            if username:
+                parts.append(username)
+            membership_name = account_info.get("membership_type_name", "")
+            if membership_name:
+                parts.append(membership_name)
+
+            title_text = " | ".join(parts)
+
+            if hasattr(self, 'title_label') and self.title_label.winfo_exists():
+                self.title_label.configure(text=title_text)
+
+            self.root.title(title_text)
         except Exception:
-            self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
+            fallback = f"短视频生成器 v{get_version()} | 智能分镜工作流"
+            if hasattr(self, 'title_label') and self.title_label.winfo_exists():
+                self.title_label.configure(text=fallback)
+            self.root.title(fallback)
 
     def _initialize_ui(self):
         """初始化用户界面"""
-        self._update_membership_title()
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         
@@ -95,6 +109,7 @@ class UIInitMixin:
         
         # 先创建布局
         self._create_layout()
+        self._update_membership_title()
         
         # 设置样式（只执行一次）
         self._setup_styles()
@@ -263,7 +278,7 @@ class UIInitMixin:
     
 
     def _create_layout(self):
-        self.top_bar = tk.Frame(self.root, bg="#141414", height=32)
+        self.top_bar = tk.Frame(self.root, bg="#0d2137", height=36)
         self.top_bar.pack(fill=tk.X, side=tk.TOP)
         self.top_bar.pack_propagate(False)
 
@@ -282,11 +297,22 @@ class UIInitMixin:
         self._create_top_bar()
 
     def _create_top_bar(self):
+        self.title_label = tk.Label(
+            self.top_bar,
+            text=f"短视频生成器 v{get_version()} | 智能分镜工作流",
+            font=("Microsoft YaHei", 11, "bold"),
+            bg="#0d2137",
+            fg="#FFD700",
+            padx=12,
+            pady=2,
+        )
+        self.title_label.pack(side=tk.LEFT, padx=(8, 0), pady=2)
+
         self.auth_status_label = tk.Label(
             self.top_bar,
             text="",
             font=("Microsoft YaHei", 10),
-            bg="#141414",
+            bg="#0d2137",
             fg="#9ca3af",
             cursor="hand2",
             padx=10,
@@ -303,7 +329,7 @@ class UIInitMixin:
         else:
             self.auth_status_label.configure(fg="#9ca3af")
 
-    def _update_auth_status_label(self, text, color="#9ca3af", bg="#141414"):
+    def _update_auth_status_label(self, text, color="#9ca3af", bg="#0d2137"):
         self._auth_label_color = color
         self.auth_status_label.configure(text=text, fg=color, bg=bg)
 
@@ -319,7 +345,7 @@ class UIInitMixin:
     def _deferred_auth_check(self):
         self._auth_valid = False
         self._set_action_buttons_state("disabled")
-        self._update_auth_status_label("验证授权中...", "#9ca3af")
+        self._update_auth_status_label("验证授权中...", "#9ca3af", "#0d2137")
 
         def _check():
             try:
@@ -349,21 +375,32 @@ class UIInitMixin:
     def _on_auth_valid(self, display_text):
         self._auth_valid = True
         self._set_action_buttons_state("normal")
-        if display_text:
-            if "终身" in display_text:
-                self._update_auth_status_label(f"✅ {display_text}", "#10b981", "#0d3325")
-            elif "试用" in display_text:
-                self._update_auth_status_label(f"⏳ {display_text}", "#f59e0b", "#1e293b")
-            else:
-                self._update_auth_status_label(f"✅ {display_text}", "#10b981", "#0d3325")
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            account_info = mgr.get_account_info()
+        except Exception:
+            account_info = {}
+
+        is_lifetime = account_info.get("is_lifetime", False)
+        is_trial = account_info.get("is_trial", False)
+        days_left = account_info.get("days_left", 0)
+
+        if is_lifetime:
+            self._update_auth_status_label("✅ 终身", "#FFD700", "#0d2137")
+        elif is_trial:
+            self._update_auth_status_label(f"⏳ 试用期剩余{days_left}天", "#f59e0b", "#1a2744")
+        elif days_left > 0:
+            self._update_auth_status_label(f"⏳ 剩余{days_left}天", "#f59e0b", "#1a2744")
         else:
             self._update_auth_status_label("✅ 已授权", "#10b981", "#0d3325")
+
         self._update_membership_title()
 
     def _on_auth_invalid(self):
         self._auth_valid = False
         self._set_action_buttons_state("normal")
-        self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1e293b")
+        self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1a2744")
         self._update_membership_title()
 
     def _show_login_dialog(self):
