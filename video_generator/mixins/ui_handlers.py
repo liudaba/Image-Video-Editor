@@ -827,42 +827,58 @@ class UIHandlersMixin:
     
 
     def check_dependencies(self):
-        """检查系统依赖项（优化版）"""
+        """检查系统依赖项（并行版）"""
         self.log("正在检查系统依赖项...")
         
-        core_dependencies = [
-            ("requests", "pip install requests", None),
-            ("PIL", "pip install Pillow", None),
-            ("numpy", "pip install numpy", None),
-            ("moviepy", "pip install moviepy", None),
-        ]
-
-        optional_dependencies = [
-            ("whisper", "pip install openai-whisper", "load_model"),
+        all_dependencies = [
+            ("requests", "pip install requests", None, True),
+            ("PIL", "pip install Pillow", None, True),
+            ("numpy", "pip install numpy", None, True),
+            ("moviepy", "pip install moviepy", None, True),
+            ("whisper", "pip install openai-whisper", "load_model", False),
         ]
         
-        missing_core = []
-        for dep, install_cmd, required_attr in core_dependencies:
+        results = {}
+        def _check_one(dep, install_cmd, required_attr, is_core):
             try:
                 module = __import__(dep)
                 if required_attr and not hasattr(module, required_attr):
+                    results[dep] = ("incomplete", is_core, install_cmd)
+                else:
+                    results[dep] = ("ok", is_core, install_cmd)
+            except (ImportError, TypeError, OSError) as e:
+                results[dep] = ("missing", is_core, install_cmd)
+        
+        threads = []
+        for dep, install_cmd, required_attr, is_core in all_dependencies:
+            t = threading.Thread(target=_check_one, args=(dep, install_cmd, required_attr, is_core))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join(timeout=10)
+        
+        missing_core = []
+        for dep, install_cmd, required_attr, is_core in all_dependencies:
+            if dep not in results:
+                self.log(f"⚠️ {dep} 检查超时")
+                if is_core:
+                    missing_core.append((dep, install_cmd))
+                continue
+            status, _, _ = results[dep]
+            if status == "ok":
+                self.log(f"✅ {dep} 已安装")
+            elif status == "incomplete":
+                if is_core:
                     self.log(f"⚠️ {dep} 已安装但功能不完整 (缺少 {required_attr})")
                     missing_core.append((dep, install_cmd))
                 else:
-                    self.log(f"✅ {dep} 已安装")
-            except (ImportError, TypeError, OSError) as e:
-                self.log(f"⚠️ {dep} 加载失败: {type(e).__name__}: {str(e)[:60]}")
-                missing_core.append((dep, install_cmd))
-        
-        for dep, install_cmd, required_attr in optional_dependencies:
-            try:
-                module = __import__(dep)
-                if required_attr and not hasattr(module, required_attr):
                     self.log(f"⚠️ {dep} 已安装但功能不完整，可使用云端语音识别替代")
+            elif status == "missing":
+                if is_core:
+                    self.log(f"⚠️ {dep} 加载失败")
+                    missing_core.append((dep, install_cmd))
                 else:
-                    self.log(f"✅ {dep} 已安装")
-            except (ImportError, TypeError, OSError) as e:
-                self.log(f"⚠️ {dep} 未安装 ({type(e).__name__})，可使用云端语音识别替代")
+                    self.log(f"⚠️ {dep} 未安装，可使用云端语音识别替代")
         
         if missing_core:
             self.log("❌ 缺少核心依赖项")

@@ -253,7 +253,7 @@ def try_start_ollama_service():
                 env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-            for _ in range(20):
+            for _ in range(10):
                 time.sleep(0.5)
                 try:
                     response = get_http_session().get(

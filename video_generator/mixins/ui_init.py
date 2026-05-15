@@ -477,9 +477,8 @@ class UIInitMixin:
         # 延迟导入非必要模块
         threading.Thread(target=lazy_import, daemon=True).start()
         
-        # 启动时运行系统检查（延迟执行，让UI先加载）
         def delayed_system_check():
-            time.sleep(1)
+            time.sleep(0.5)
             
             try:
                 from video_generator.license_manager import LicenseManager
@@ -495,22 +494,29 @@ class UIInitMixin:
                 pass
             
             self.system_check()
-            time.sleep(1)
+            
+            # SD API and Ollama checks run in parallel
             cloud_img = False
             try:
                 from video_generator.cloud_image_client import is_cloud_image_enabled
                 cloud_img = is_cloud_image_enabled()
             except ImportError:
                 pass
+            
+            sd_thread = None
             if not cloud_img:
-                self.check_sd_api_connection(silent=True)
+                sd_thread = threading.Thread(target=lambda: self.check_sd_api_connection(silent=True), daemon=True)
+                sd_thread.start()
             
             self.auto_connect_ollama()
+            
+            if sd_thread:
+                sd_thread.join(timeout=5)
         threading.Thread(target=delayed_system_check, daemon=True).start()
         
-        # Whisper延迟加载 - 不再启动时预加载，改为首次使用时按需加载
+        # Show ready message early (don't wait for all checks)
         def deferred_ready():
-            time.sleep(2)
+            time.sleep(1.5)
             self.log("")
             self.log("=" * 60)
             self.log("✅ 程序启动完成，工具已就绪！")
