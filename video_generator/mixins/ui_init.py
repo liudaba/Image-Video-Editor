@@ -263,23 +263,102 @@ class UIInitMixin:
     
 
     def _create_layout(self):
-        """创建UI布局"""
-        # 主分割窗口
+        self.top_bar = tk.Frame(self.root, bg="#141414", height=32)
+        self.top_bar.pack(fill=tk.X, side=tk.TOP)
+        self.top_bar.pack_propagate(False)
+
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
-        # 左侧面板
         self.left_frame = ttk.Frame(self.main_paned, width=280)
         self.main_paned.add(self.left_frame, weight=0)
-        
-        # 右侧分割窗口
+
         self.right_paned = ttk.PanedWindow(self.main_paned, orient=tk.VERTICAL)
         self.main_paned.add(self.right_paned, weight=1)
 
-        # 日志区域（独占右侧，分镜脚本窗口已移除）
         self.log_frame_container = ttk.Frame(self.right_paned)
         self.right_paned.add(self.log_frame_container, weight=1)
-    
+
+        self._create_top_bar()
+
+    def _create_top_bar(self):
+        self.auth_status_label = tk.Label(
+            self.top_bar,
+            text="",
+            font=("Microsoft YaHei", 10),
+            bg="#141414",
+            fg="#9ca3af",
+            cursor="hand2",
+            padx=10,
+            pady=2,
+        )
+        self.auth_status_label.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
+        self.auth_status_label.bind("<Button-1>", lambda e: self._show_login_dialog())
+        self.auth_status_label.bind("<Enter>", lambda e: self.auth_status_label.configure(fg="#ffffff"))
+        self.auth_status_label.bind("<Leave>", self._on_auth_label_leave)
+
+    def _on_auth_label_leave(self, event):
+        if hasattr(self, '_auth_label_color') and self._auth_label_color:
+            self.auth_status_label.configure(fg=self._auth_label_color)
+        else:
+            self.auth_status_label.configure(fg="#9ca3af")
+
+    def _update_auth_status_label(self, text, color="#9ca3af", bg="#141414"):
+        self._auth_label_color = color
+        self.auth_status_label.configure(text=text, fg=color, bg=bg)
+
+    def _deferred_auth_check(self):
+        def _check():
+            try:
+                from video_generator.license_manager import LicenseManager
+                mgr = LicenseManager()
+                license_status = mgr.check_license()
+                if license_status["valid"]:
+                    mgr.start_heartbeat()
+                    display = mgr.get_membership_display()
+                    self.root.after(0, lambda: self._on_auth_valid(display))
+                elif mgr._try_silent_relogin():
+                    license_status = mgr.check_license()
+                    if license_status["valid"]:
+                        mgr.start_heartbeat()
+                        display = mgr.get_membership_display()
+                        self.root.after(0, lambda: self._on_auth_valid(display))
+                    else:
+                        self.root.after(0, self._on_auth_invalid)
+                else:
+                    self.root.after(0, self._on_auth_invalid)
+            except Exception as e:
+                print(f"[AUTH] Deferred auth check error: {e}")
+                self.root.after(0, self._on_auth_invalid)
+
+        self._update_auth_status_label("验证授权中...", "#9ca3af")
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_auth_valid(self, display_text):
+        if display_text:
+            if "终身" in display_text:
+                self._update_auth_status_label(f"✅ {display_text}", "#10b981", "#0d3325")
+            elif "试用" in display_text:
+                self._update_auth_status_label(f"⏳ {display_text}", "#f59e0b", "#1e293b")
+            else:
+                self._update_auth_status_label(f"✅ {display_text}", "#10b981", "#0d3325")
+        else:
+            self._update_auth_status_label("✅ 已授权", "#10b981", "#0d3325")
+        self._update_membership_title()
+
+    def _on_auth_invalid(self):
+        self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1e293b")
+        self._update_membership_title()
+
+    def _show_login_dialog(self):
+        try:
+            from video_generator.auth_dialogs import LoginDialog
+            dialog = LoginDialog(self.root)
+            self.root.wait_window(dialog)
+            if dialog.result:
+                self._deferred_auth_check()
+        except Exception as e:
+            print(f"[AUTH] Show login dialog error: {e}")
 
     def _initialize_variables(self):
         """初始化变量"""
@@ -479,14 +558,6 @@ class UIInitMixin:
         
         def delayed_system_check():
             time.sleep(0.5)
-            
-            try:
-                from video_generator.license_manager import LicenseManager
-                license_mgr = LicenseManager()
-                license_mgr.start_heartbeat()
-                self.root.after(0, self._update_membership_title)
-            except Exception as e:
-                self.log(f"⚠️ 授权检查异常: {e}")
             
             try:
                 self._cleanup_residual_files()

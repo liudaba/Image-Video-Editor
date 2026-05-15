@@ -36,15 +36,13 @@ class LoginDialog(tk.Toplevel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.mode = "login"
         self.result = None
         self.title("用户登录")
-        self.geometry("520x720")
-        self.minsize(480, 680)
+        self.geometry("420x520")
+        self.minsize(400, 480)
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
-        self.grab_set()
 
         try:
             from ctypes import windll
@@ -74,59 +72,59 @@ class LoginDialog(tk.Toplevel):
             "Login.TLabel",
             background=self._BG,
             foreground=self._TEXT_FG,
-            font=("Microsoft YaHei", 13),
+            font=("Microsoft YaHei", 11),
         )
         style.configure(
             "Login.Title.TLabel",
             background=self._BG,
             foreground=self._ACCENT,
-            font=("Microsoft YaHei", 24, "bold"),
+            font=("Microsoft YaHei", 20, "bold"),
         )
         style.configure(
             "Login.Sub.TLabel",
             background=self._BG,
             foreground=self._HINT_FG,
-            font=("Microsoft YaHei", 11),
+            font=("Microsoft YaHei", 10),
         )
         style.configure(
             "Login.Hint.TLabel",
             background=self._BG,
             foreground=self._WARN_FG,
-            font=("Microsoft YaHei", 11),
+            font=("Microsoft YaHei", 10),
         )
         style.configure(
             "Login.Trial.TLabel",
             background=self._BG,
             foreground=self._WARN_FG,
-            font=("Microsoft YaHei", 12, "bold"),
+            font=("Microsoft YaHei", 11, "bold"),
         )
         style.configure(
             "Login.Error.TLabel",
             background=self._BG,
             foreground=self._ERROR_FG,
-            font=("Microsoft YaHei", 10),
+            font=("Microsoft YaHei", 9),
         )
         style.configure(
             "Login.TCheckbutton",
             background=self._BG,
             foreground=self._TEXT_FG,
-            font=("Microsoft YaHei", 11),
+            font=("Microsoft YaHei", 10),
         )
         style.configure(
             "Login.Card.TCheckbutton",
             background=self._PANEL_BG,
             foreground=self._TEXT_FG,
-            font=("Microsoft YaHei", 11),
+            font=("Microsoft YaHei", 10),
         )
         style.configure(
-            "Login.TButton", font=("Microsoft YaHei", 12), padding=(10, 8)
+            "Login.TButton", font=("Microsoft YaHei", 11), padding=(8, 6)
         )
         style.configure(
             "Login.Primary.TButton",
             background=self._ACCENT,
             foreground="#ffffff",
-            font=("Microsoft YaHei", 13, "bold"),
-            padding=(14, 10),
+            font=("Microsoft YaHei", 12, "bold"),
+            padding=(12, 8),
         )
         style.map(
             "Login.Primary.TButton",
@@ -136,8 +134,8 @@ class LoginDialog(tk.Toplevel):
             "Login.Link.TButton",
             background=self._BG,
             foreground=self._ACCENT,
-            font=("Microsoft YaHei", 11),
-            padding=(5, 5),
+            font=("Microsoft YaHei", 10),
+            padding=(4, 3),
         )
         style.map(
             "Login.Link.TButton", foreground=[("active", "#64b5f6")]
@@ -146,8 +144,8 @@ class LoginDialog(tk.Toplevel):
             "Login.Purchase.TButton",
             background=self._BTN_PURCHASE,
             foreground="#ffffff",
-            font=("Microsoft YaHei", 12, "bold"),
-            padding=(10, 8),
+            font=("Microsoft YaHei", 11, "bold"),
+            padding=(8, 6),
         )
         style.map(
             "Login.Purchase.TButton", background=[("active", "#f57c00")]
@@ -156,8 +154,8 @@ class LoginDialog(tk.Toplevel):
             "Login.Secondary.TButton",
             background=self._BTN_SECONDARY,
             foreground="#ffffff",
-            font=("Microsoft YaHei", 11),
-            padding=(8, 7),
+            font=("Microsoft YaHei", 10),
+            padding=(6, 5),
         )
         style.map(
             "Login.Secondary.TButton", background=[("active", "#505050")]
@@ -167,7 +165,7 @@ class LoginDialog(tk.Toplevel):
         entry = tk.Entry(
             parent,
             textvariable=variable,
-            font=("Microsoft YaHei", 14),
+            font=("Microsoft YaHei", 12),
             bg=self._INPUT_BG,
             fg=self._INPUT_FG,
             insertbackground=self._INPUT_FG,
@@ -203,211 +201,253 @@ class LoginDialog(tk.Toplevel):
         return handler
 
     def _build_ui(self):
-        main = ttk.Frame(self, style="Login.TFrame", padding=(36, 18, 36, 12))
+        main = ttk.Frame(self, style="Login.TFrame", padding=(24, 10, 24, 8))
         main.pack(fill=tk.BOTH, expand=True)
 
         title_lbl = ttk.Label(
             main, text="🎬 短视频生成器", style="Login.Title.TLabel"
         )
-        title_lbl.pack(pady=(0, 2))
+        title_lbl.pack(pady=(0, 1))
         sub_lbl = ttk.Label(
             main, text="AI驱动的音频转视频工具", style="Login.Sub.TLabel"
         )
-        sub_lbl.pack(pady=(0, 12))
+        sub_lbl.pack(pady=(0, 6))
 
         self._tab_control = ttk.Notebook(main)
-        self._tab_control.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self._tab_control.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
-        login_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=20)
-        self._tab_control.add(login_tab, text="  登录/注册  ")
+        login_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
+        self._tab_control.add(login_tab, text="  登录  ")
 
-        activate_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=20)
+        register_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
+        self._tab_control.add(register_tab, text="  注册  ")
+
+        activate_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
         self._tab_control.add(activate_tab, text="  激活码  ")
 
         self._build_login_tab(login_tab)
+        self._build_register_tab(register_tab)
         self._build_activate_tab(activate_tab)
 
+        bottom_frame = ttk.Frame(main, style="Login.TFrame")
+        bottom_frame.pack(fill=tk.X, pady=(4, 0))
+
         trial_lbl = ttk.Label(
-            main,
+            bottom_frame,
             text="✨ 注册登录7天免费试用!",
             style="Login.Trial.TLabel",
         )
-        trial_lbl.pack(pady=(6, 0))
+        trial_lbl.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            bottom_frame,
+            text="💎 购买会员",
+            command=self._show_purchase_dialog,
+            style="Login.Purchase.TButton",
+        ).pack(side=tk.RIGHT)
 
     def _build_login_tab(self, card):
-        self.username_var = tk.StringVar()
+        self._login_username_var = tk.StringVar()
         ttk.Label(
-            card,
-            text="用户名",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 6))
-        self.username_entry = self._make_entry(card, self.username_var)
-        self.username_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._login_username_entry = self._make_entry(card, self._login_username_var)
+        self._login_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
 
-        self.email_var = tk.StringVar()
-        self._email_label = ttk.Label(
-            card,
-            text="邮箱地址",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        )
-        self.email_entry = self._make_entry(card, self.email_var)
-        self._email_widgets = [self._email_label, self.email_entry]
-
-        self.password_var = tk.StringVar()
+        self._login_password_var = tk.StringVar()
         ttk.Label(
-            card,
-            text="密码",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 6))
-        self.password_entry = self._make_entry(
-            card, self.password_var, show="●"
+            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._login_password_entry = self._make_entry(
+            card, self._login_password_var, show="●"
         )
-        self.password_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+        self._login_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
 
-        self.confirm_var = tk.StringVar()
-        self._confirm_label = ttk.Label(
-            card,
-            text="确认密码",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        )
-        self.confirm_entry = self._make_entry(
-            card, self.confirm_var, show="●"
-        )
-        self._confirm_widgets = [self._confirm_label, self.confirm_entry]
-
-        self._save_user_var = tk.BooleanVar(value=False)
         self._save_pass_var = tk.BooleanVar(value=False)
-        save_frame = ttk.Frame(card, style="Login.Card.TFrame")
-        save_frame.pack(fill=tk.X, pady=(0, 8))
-        self._save_user_check = ttk.Checkbutton(
-            save_frame,
-            text="保存登录名",
-            variable=self._save_user_var,
-            style="Login.Card.TCheckbutton",
-        )
-        self._save_user_check.configure(
-            command=lambda: self._on_save_toggle()
-        )
-        self._save_user_check.pack(side=tk.LEFT, padx=(0, 20))
-        self._save_pass_check = ttk.Checkbutton(
-            save_frame,
+        ttk.Checkbutton(
+            card,
             text="保存密码",
             variable=self._save_pass_var,
             style="Login.Card.TCheckbutton",
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        ttk.Button(
+            card,
+            text="登 录",
+            command=self._handle_login,
+            style="Login.Primary.TButton",
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(
+            card,
+            text="忘记密码?",
+            command=self._show_reset_dialog,
+            style="Login.Link.TButton",
+        ).pack(anchor=tk.E)
+
+    def _build_register_tab(self, card):
+        self._reg_username_var = tk.StringVar()
+        ttk.Label(
+            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._reg_username_entry = self._make_entry(card, self._reg_username_var)
+        self._reg_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+
+        self._reg_email_var = tk.StringVar()
+        ttk.Label(
+            card, text="邮箱地址", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._reg_email_entry = self._make_entry(card, self._reg_email_var)
+        self._reg_email_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+
+        self._reg_password_var = tk.StringVar()
+        ttk.Label(
+            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._reg_password_entry = self._make_entry(
+            card, self._reg_password_var, show="●"
         )
-        self._save_pass_check.pack(side=tk.LEFT)
-        self._save_frame = save_frame
+        self._reg_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+
+        self._reg_confirm_var = tk.StringVar()
+        ttk.Label(
+            card, text="确认密码", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
+        self._reg_confirm_entry = self._make_entry(
+            card, self._reg_confirm_var, show="●"
+        )
+        self._reg_confirm_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
 
         self._agree_var = tk.BooleanVar(value=False)
-        self._agree_check = ttk.Checkbutton(
+        ttk.Checkbutton(
             card,
             text="我同意《隐私政策》和《服务条款》",
             variable=self._agree_var,
             style="Login.Card.TCheckbutton",
-        )
-        self._agree_widgets = [self._agree_check]
+        ).pack(anchor=tk.W, pady=(0, 6))
 
-        self.action_btn = ttk.Button(
+        ttk.Button(
             card,
-            text="登 录",
-            command=self._handle_action,
+            text="注 册",
+            command=self._handle_register,
             style="Login.Primary.TButton",
-        )
-        self.action_btn.pack(fill=tk.X, pady=(6, 4))
-
-        self.switch_btn = ttk.Button(
-            card,
-            text="还没有账号? 立即注册",
-            command=self._toggle_mode,
-            style="Login.Link.TButton",
-        )
-        self.switch_btn.pack(fill=tk.X, pady=(0, 4))
-
-        self.purchase_btn = ttk.Button(
-            card,
-            text="💎 购买会员",
-            command=self._show_purchase_dialog,
-            style="Login.Purchase.TButton",
-        )
-        self.purchase_btn.pack(fill=tk.X, pady=(4, 4))
-
-        self.reset_btn = ttk.Button(
-            card,
-            text="🔑 密码邮箱找回",
-            command=self._show_reset_dialog,
-            style="Login.Secondary.TButton",
-        )
-        self.reset_btn.pack(fill=tk.X, pady=(0, 6))
+        ).pack(fill=tk.X)
 
     def _build_activate_tab(self, card):
-        ttk.Label(
-            card,
-            text="🔑 激活码激活",
-            style="Login.Title.TLabel",
-            background=self._PANEL_BG,
-            font=("Microsoft YaHei", 18, "bold"),
-        ).pack(pady=(0, 10))
-
-        ttk.Label(
-            card,
-            text="请联系客服购买激活码，输入后即可激活专业版",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-            foreground=self._HINT_FG,
-            wraplength=400,
-        ).pack(pady=(0, 16))
-
         self._activate_username_var = tk.StringVar()
         ttk.Label(
-            card,
-            text="用户名",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 6))
+            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
         self._activate_username_entry = self._make_entry(card, self._activate_username_var)
-        self._activate_username_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+        self._activate_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
 
         self._activate_password_var = tk.StringVar()
         ttk.Label(
-            card,
-            text="密码",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 6))
+            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
         self._activate_password_entry = self._make_entry(
             card, self._activate_password_var, show="●"
         )
-        self._activate_password_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+        self._activate_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
 
         self._activate_code_var = tk.StringVar()
         ttk.Label(
-            card,
-            text="激活码",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 6))
+            card, text="激活码", style="Login.TLabel", background=self._PANEL_BG,
+        ).pack(anchor=tk.W, pady=(0, 3))
         self._activate_code_entry = self._make_entry(card, self._activate_code_var)
-        self._activate_code_entry.pack(fill=tk.X, ipady=8, pady=(0, 18))
+        self._activate_code_entry.pack(fill=tk.X, ipady=5, pady=(0, 12))
 
         ttk.Button(
             card,
             text="登录并激活",
             command=self._handle_activate,
             style="Login.Primary.TButton",
-        ).pack(fill=tk.X, pady=(0, 8))
+        ).pack(fill=tk.X)
 
-        ttk.Label(
-            card,
-            text="💡 还没有账号？请先在\"登录/注册\"标签页注册",
-            style="Login.TLabel",
-            background=self._PANEL_BG,
-            foreground=self._HINT_FG,
-            wraplength=400,
-        ).pack(pady=(4, 0))
+    def _handle_login(self):
+        username = self._login_username_var.get().strip()
+        password = self._login_password_var.get().strip()
+        if not username or not password:
+            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
+            return
+        mgr = LicenseManager()
+        success, message = mgr.login_user(username, password)
+        if success:
+            mgr.save_login_credentials(
+                username,
+                password,
+                True,
+                self._save_pass_var.get(),
+            )
+            messagebox.showinfo("成功", message, parent=self)
+            self.result = True
+            self.destroy()
+        else:
+            messagebox.showerror("错误", message, parent=self)
+
+    def _handle_register(self):
+        username = self._reg_username_var.get().strip()
+        if not username:
+            messagebox.showwarning("提示", "请填写用户名", parent=self)
+            return
+        if not re.match(r"^[a-zA-Z0-9_\u4e00-\u9fa5]{3,50}$", username):
+            messagebox.showwarning(
+                "提示",
+                "用户名需3-50位，支持字母数字下划线和中文",
+                parent=self,
+            )
+            return
+        email = self._reg_email_var.get().strip()
+        if not email:
+            messagebox.showwarning("提示", "请填写邮箱", parent=self)
+            return
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            messagebox.showwarning(
+                "提示", "请输入有效的邮箱地址", parent=self
+            )
+            return
+        password = self._reg_password_var.get().strip()
+        if not password:
+            messagebox.showwarning("提示", "请填写密码", parent=self)
+            return
+        if len(password) < 8:
+            messagebox.showwarning("提示", "密码至少8位", parent=self)
+            return
+        if not re.search(r"[A-Z]", password):
+            messagebox.showwarning(
+                "提示", "密码必须包含至少一个大写字母", parent=self
+            )
+            return
+        if not re.search(r"[a-z]", password):
+            messagebox.showwarning(
+                "提示", "密码必须包含至少一个小写字母", parent=self
+            )
+            return
+        if not re.search(r"\d", password):
+            messagebox.showwarning(
+                "提示", "密码必须包含至少一个数字", parent=self
+            )
+            return
+        confirm = self._reg_confirm_var.get().strip()
+        if password != confirm:
+            messagebox.showwarning(
+                "提示", "两次密码不一致", parent=self
+            )
+            return
+        if not self._agree_var.get():
+            messagebox.showwarning(
+                "提示", "请先同意隐私政策和服务条款", parent=self
+            )
+            return
+        success, message = LicenseManager().register_user(
+            username, email, password
+        )
+        if success:
+            messagebox.showinfo("成功", message, parent=self)
+            self.result = True
+            self.destroy()
+        else:
+            messagebox.showerror("错误", message, parent=self)
 
     def _handle_activate(self):
         username = self._activate_username_var.get().strip()
@@ -436,10 +476,6 @@ class LoginDialog(tk.Toplevel):
         else:
             messagebox.showerror("错误", f"激活失败: {message}", parent=self)
 
-    def _on_save_toggle(self):
-        if not self._save_user_var.get():
-            self._save_pass_var.set(False)
-
     def _load_saved_credentials(self):
         try:
             mgr = LicenseManager()
@@ -447,124 +483,12 @@ class LoginDialog(tk.Toplevel):
                 mgr.load_login_credentials()
             )
             if username:
-                self.username_var.set(username)
-            if save_user:
-                self._save_user_var.set(True)
+                self._login_username_var.set(username)
             if save_pass and password:
                 self._save_pass_var.set(True)
-                self.password_var.set(password)
+                self._login_password_var.set(password)
         except Exception:
             pass
-
-    def _toggle_mode(self):
-        self.mode = "register" if self.mode == "login" else "login"
-        if self.mode == "register":
-            self._email_label.pack(
-                after=self.username_entry, anchor=tk.W, pady=(0, 6)
-            )
-            self.email_entry.pack(
-                after=self._email_label, fill=tk.X, ipady=8, pady=(0, 14)
-            )
-            self._confirm_label.pack(
-                after=self.password_entry, anchor=tk.W, pady=(0, 6)
-            )
-            self.confirm_entry.pack(
-                after=self._confirm_label, fill=tk.X, ipady=8, pady=(0, 14)
-            )
-            self._save_frame.pack_forget()
-            self._agree_check.pack(
-                after=self.confirm_entry, fill=tk.X, pady=(8, 4)
-            )
-            self.action_btn.config(text="注 册")
-            self.switch_btn.config(text="已有账号? 立即登录")
-            self.purchase_btn.pack_forget()
-            self.reset_btn.pack_forget()
-            self.title("用户注册")
-        else:
-            for w in self._email_widgets:
-                w.pack_forget()
-            for w in self._confirm_widgets:
-                w.pack_forget()
-            for w in self._agree_widgets:
-                w.pack_forget()
-            self._save_frame.pack(fill=tk.X, pady=(0, 8))
-            self.action_btn.config(text="登 录")
-            self.switch_btn.config(text="还没有账号? 立即注册")
-            self.purchase_btn.pack(fill=tk.X, pady=(4, 4))
-            self.reset_btn.pack(fill=tk.X, pady=(0, 6))
-            self.title("用户登录")
-
-    def _handle_action(self):
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
-        if not username or not password:
-            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
-            return
-        if self.mode == "login":
-            success, message = LicenseManager().login_user(username, password)
-            if success:
-                mgr = LicenseManager()
-                mgr.save_login_credentials(
-                    username,
-                    password,
-                    self._save_user_var.get(),
-                    self._save_pass_var.get(),
-                )
-        else:
-            if not re.match(r"^[a-zA-Z0-9_\u4e00-\u9fa5]{3,50}$", username):
-                messagebox.showwarning(
-                    "提示",
-                    "用户名需3-50位，支持字母数字下划线和中文",
-                    parent=self,
-                )
-                return
-            email = self.email_var.get().strip()
-            if not email:
-                messagebox.showwarning("提示", "请填写邮箱", parent=self)
-                return
-            if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-                messagebox.showwarning(
-                    "提示", "请输入有效的邮箱地址", parent=self
-                )
-                return
-            if len(password) < 8:
-                messagebox.showwarning("提示", "密码至少8位", parent=self)
-                return
-            if not re.search(r"[A-Z]", password):
-                messagebox.showwarning(
-                    "提示", "密码必须包含至少一个大写字母", parent=self
-                )
-                return
-            if not re.search(r"[a-z]", password):
-                messagebox.showwarning(
-                    "提示", "密码必须包含至少一个小写字母", parent=self
-                )
-                return
-            if not re.search(r"\d", password):
-                messagebox.showwarning(
-                    "提示", "密码必须包含至少一个数字", parent=self
-                )
-                return
-            confirm = self.confirm_var.get().strip()
-            if password != confirm:
-                messagebox.showwarning(
-                    "提示", "两次密码不一致", parent=self
-                )
-                return
-            if not self._agree_var.get():
-                messagebox.showwarning(
-                    "提示", "请先同意隐私政策和服务条款", parent=self
-                )
-                return
-            success, message = LicenseManager().register_user(
-                username, email, password
-            )
-        if success:
-            messagebox.showinfo("成功", message, parent=self)
-            self.result = True
-            self.destroy()
-        else:
-            messagebox.showerror("错误", message, parent=self)
 
     def _show_reset_dialog(self):
         dialog = PasswordResetDialog(self)
