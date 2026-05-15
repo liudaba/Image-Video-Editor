@@ -15,11 +15,42 @@
 
 ## 远程服务器
 
-- SSH: `ssh root@8.141.101.155`，密码: `1t&zdDYk979tZYksBtfZ`
+- SSH: `ssh root@8.141.101.155`（密码定期更新，当前密码见 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt`）
 - 管理后台: `http://8.141.101.155/admin/login`
 - 管理员账号: `admin` / `Admin123456!`
-- 后端运行在 Docker 容器中（`videogen-api-1`），项目目录 `/home/backend/`
-- 代码同步方式：SFTP 上传到宿主机 + `docker cp` 到容器 + `docker restart`
+- 后端运行在 Docker 容器中（`videogen-api-1`），项目目录 `/root/videogen/`
+- docker-compose 中 `./app:/app/app` 为绑定挂载，修改宿主机文件后重启容器即生效，无需重新构建镜像
+
+### 云端代码同步流程
+
+1. **本地提交推送**：先 `git add` + `git commit` + `git push origin master`
+2. **scp 上传变更文件**：将修改的后端文件上传到服务器
+   ```bash
+   # 单文件示例
+   scp -o StrictHostKeyChecking=no backend/app/auth.py root@8.141.101.155:/root/videogen/app/auth.py
+
+   # 常用目录映射：
+   #   本地 backend/app/xxx.py        → 服务器 /root/videogen/app/xxx.py
+   #   本地 backend/app/routers/xxx.py → 服务器 /root/videogen/app/routers/xxx.py
+   #   本地 backend/app/templates/xxx  → 服务器 /root/videogen/app/templates/xxx
+   ```
+3. **重启 API 容器**：
+   ```bash
+   ssh root@8.141.101.155 "cd /root/videogen && docker compose restart api"
+   ```
+4. **验证服务正常**：
+   ```bash
+   ssh root@8.141.101.155 "curl -s http://127.0.0.1:8000/health"
+   # 期望返回: {"status":"ok","database":"ok","redis":"ok",...}
+   ```
+
+### 注意事项
+
+- **不要用 `api.videogen.com` 做 SSH**：该域名解析到 CDN 代理 IP（198.18.x.x），SSH 流量被拒绝，必须用真实 IP `8.141.101.155`
+- **不要 `git pull`**：服务器 `/root/videogen/` 不是 git 仓库，用 `scp` 直接上传文件
+- **修改了 requirements.txt 或 Dockerfile**：需要重新构建镜像 `docker compose up -d --build api`
+- **修改了数据库模型**：需要运行迁移 `docker compose exec api alembic upgrade head`
+- **SSH 密码定期更新**：用户会定期更换 SSH 密码，新密码保存在 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt`，同步前先读取该文件获取最新密码
 
 ## 打包工程文件
 
@@ -78,9 +109,10 @@
    - 如有未推送的提交，向用户汇报并询问是否需要推送
 
 3. **检查是否需要同步到云端服务器**
-   - 对比本地代码与远程服务器 `/home/backend/` 的代码版本
+   - 对比本地代码与远程服务器 `/root/videogen/app/` 的代码版本
    - 如本地有新变更尚未同步到云端，向用户汇报并询问是否需要同步
-   - 同步方式：SFTP 上传到宿主机 → `docker cp` 到容器 → `docker restart`（需用户同意后才执行）
+   - 同步方式：`scp` 上传到宿主机 → `docker compose restart api` → `curl /health` 验证（需用户同意后才执行）
+   - SSH 密码从 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt` 读取
 
 4. **检查工作区是否干净**
    - 确认无残留的临时文件（如 `ssh_check*.py`、`ssh_reset*.py` 等临时脚本）
