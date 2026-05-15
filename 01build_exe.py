@@ -250,6 +250,7 @@ def build_executable():
         '--hidden-import=whisper',
         '--hidden-import=moviepy',
         '--hidden-import=torch',
+        '--hidden-import=torchaudio',
         '--hidden-import=numpy',
         '--hidden-import=PIL',
         '--hidden-import=requests',
@@ -266,11 +267,23 @@ def build_executable():
         '--hidden-import=moviepy.video.io.VideoFileClip',
         '--hidden-import=moviepy.video.VideoClip',
         '--hidden-import=moviepy.editor',
+        '--hidden-import=tiktoken',
+        '--hidden-import=numba',
+        '--hidden-import=llvmlite',
+        '--hidden-import=regex',
+        '--hidden-import=pydub',
+        '--hidden-import=imageio',
+        '--hidden-import=imageio_ffmpeg',
+        '--hidden-import=proglog',
+        '--hidden-import=tqdm',
     ]
 
     collect_args = [
         '--collect-all=whisper',
         '--collect-submodules=moviepy',
+        '--collect-submodules=torchaudio',
+        '--collect-submodules=tiktoken',
+        '--collect-submodules=numba',
     ]
 
     exclude_module_args = [
@@ -285,7 +298,6 @@ def build_executable():
         '--exclude-module=PyQt6',
         '--exclude-module=matplotlib',
         '--exclude-module=scipy',
-        '--exclude-module=sympy',
         '--exclude-module=notebook',
         '--exclude-module=IPython',
         '--exclude-module=jupyter',
@@ -1106,6 +1118,10 @@ def _verify_required_files(output_dir):
         (".license_verify_key", "授权密钥(exe同级)"),
         ("_internal/.license_verify_key", "授权密钥(_internal)"),
     ]
+    recommended = [
+        ("whisper_models", "Whisper语音模型目录"),
+        ("ffmpeg/ffmpeg.exe", "FFmpeg视频工具"),
+    ]
     missing = []
     for rel_path, desc in required:
         abs_path = os.path.join(output_dir, rel_path.replace("/", os.sep))
@@ -1122,7 +1138,24 @@ def _verify_required_files(output_dir):
     if missing:
         print(f"\n  ❌ 关键文件缺失，打包终止!")
         sys.exit(1)
-    print("  ✅ 所有关键文件完整\n")
+    print("  ✅ 所有关键文件完整")
+
+    print("\n🔍 检查推荐文件（缺失不中止打包，但影响用户体验）...")
+    for rel_path, desc in recommended:
+        abs_path = os.path.join(output_dir, rel_path.replace("/", os.sep))
+        if os.path.exists(abs_path):
+            if os.path.isdir(abs_path):
+                pt_files = [f for f in os.listdir(abs_path) if f.endswith('.pt')]
+                if pt_files:
+                    print(f"  ✅ {desc}({rel_path}/) - {len(pt_files)}个模型")
+                else:
+                    print(f"  ⚠️  {desc}({rel_path}/) 目录存在但无模型文件")
+            else:
+                size = os.path.getsize(abs_path)
+                print(f"  ✅ {desc}({rel_path}) - {size//1024}KB")
+        else:
+            print(f"  ⚠️  {desc}({rel_path}) 缺失！用户将无法使用此功能")
+    print()
 
 
 def _verify_config_content(output_dir):
