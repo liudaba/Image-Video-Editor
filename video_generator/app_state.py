@@ -7,7 +7,6 @@ from video_generator.ollama_client import (
     is_ollama_available,
     is_llm_available,
     set_ollama_available,
-    check_ollama_available,
 )
 from video_generator.config import Config
 
