@@ -14,7 +14,7 @@ import json
 
 
 def clean_build_dirs():
-    dirs_to_clean = ['build', 'dist', '__pycache__']
+    dirs_to_clean = ['build', 'dist', '__pycache__', 'dist_obfuscated', '_obf_backup']
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
             print(f"🗑️  清理 {dir_name}/")
@@ -366,6 +366,8 @@ def build_executable():
 
             print(f"\n🔍 验证打包结果...")
             _verify_output(output_dir)
+            _verify_required_files(output_dir)
+            _verify_config_content(output_dir)
 
             if obfuscated:
                 _restore_original_modules()
@@ -539,9 +541,27 @@ def _verify_output(output_dir):
                 filename = os.path.basename(match)
                 print(f"  ❌ 错误: 发现了不应该存在的 _internal/{filename}")
                 has_error = True
+        # 深度扫描: 递归检查所有子目录中的敏感文件
+        sensitive_patterns = ['.env', 'license.json', '.secret_key', '.license_sign_key',
+                              '.key_salt', '.login_creds', 'current_ssh_password.txt']
+        sensitive_extensions = ['.pem', '.db', '.key']
+        for root, dirs, files in os.walk(internal_dir):
+            for f in files:
+                fl = f.lower()
+                if f in sensitive_patterns or any(f.endswith(ext) for ext in sensitive_extensions):
+                    rel = os.path.relpath(os.path.join(root, f), output_dir)
+                    print(f"  ❌ 错误: 发现敏感文件 {rel}")
+                    has_error = True
+                if fl.endswith('.py') and not fl.endswith('.pyd'):
+                    rel = os.path.relpath(os.path.join(root, f), output_dir)
+                    print(f"  ❌ 错误: 发现源代码文件 {rel}")
+                    has_error = True
 
     if not has_error:
-        print(f"  ✅ 验证通过: 没有发现不该存在的文件")
+        print(f"  ✅ 安全验证通过: 没有发现不该存在的文件")
+    else:
+        print(f"  ❌ 安全验证失败! 发现敏感文件泄露，打包终止!")
+        sys.exit(1)
 
 
 def _copy_whisper_models(output_dir):
@@ -707,7 +727,9 @@ def _post_build(output_dir):
         shutil.copy2(verify_key_src, os.path.join(internal_dir, ".license_verify_key"))
         print("  ✅ 复制 .license_verify_key → _internal/（嵌入内部目录，非明文暴露）")
     else:
-        print("  ⚠️  .license_verify_key 缺失！授权验证将无法工作")
+        print("  ❌ 错误: .license_verify_key 缺失！授权验证将无法工作")
+        print("     请先运行 backend/init_db.py 生成密钥文件")
+        sys.exit(1)
 
     _copy_whisper_models(output_dir)
     _copy_ffmpeg(output_dir)
@@ -751,8 +773,8 @@ def _generate_checksums(output_dir):
             abs_path = os.path.join(output_dir, rel_path.replace("/", os.sep))
             if os.path.exists(abs_path):
                 with open(abs_path, "rb") as fh:
-                    md5 = hashlib.md5(fh.read()).hexdigest()
-                f.write(f"{md5}  {rel_path}\n")
+                    sha256 = hashlib.sha256(fh.read()).hexdigest()
+                f.write(f"{sha256}  {rel_path}\n")
                 count += 1
     print(f"  ✅ 已生成校验文件 ({count} 个关键文件)")
 
@@ -1064,6 +1086,53 @@ start "" "%APP_DIR%短视频生成器.exe"
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
     print("  ✅ 生成 首次运行引导.bat（5步引导）")
+
+
+def _verify_required_files(output_dir):
+    print("\n🔍 验证关键文件完整性...")
+    required = [
+        ("短视频生成器.exe", "主程序"),
+        ("_internal/python310.dll", "Python运行时"),
+        ("_internal/config.json", "配置文件"),
+        ("_internal/.license_verify_key", "授权验证密钥"),
+    ]
+    missing = []
+    for rel_path, desc in required:
+        abs_path = os.path.join(output_dir, rel_path.replace("/", os.sep))
+        if os.path.exists(abs_path):
+            size = os.path.getsize(abs_path)
+            if size < 100:
+                print(f"  ❌ {desc}({rel_path}) 文件异常小({size}字节)")
+                missing.append(rel_path)
+            else:
+                print(f"  ✅ {desc}({rel_path}) - {size//1024}KB")
+        else:
+            print(f"  ❌ {desc}({rel_path}) 缺失!")
+            missing.append(rel_path)
+    if missing:
+        print(f"\n  ❌ 关键文件缺失，打包终止!")
+        sys.exit(1)
+    print("  ✅ 所有关键文件完整\n")
+
+
+def _verify_config_content(output_dir):
+    print("🔍 验证配置文件内容...")
+    config_path = os.path.join(output_dir, "_internal", "config.json")
+    if not os.path.exists(config_path):
+        print("  ❌ config.json 不存在!")
+        sys.exit(1)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        api_url = config.get("api_base_url", "")
+        if not api_url or "localhost" in api_url or "127.0.0.1" in api_url:
+            print(f"  ❌ api_base_url 为 {api_url}，用户无法连接服务器!")
+            print("     请确保 config.json 中 api_base_url 指向生产服务器")
+            sys.exit(1)
+        print(f"  ✅ api_base_url = {api_url}")
+    except json.JSONDecodeError:
+        print("  ❌ config.json 格式错误!")
+        sys.exit(1)
 
 
 def get_directory_size(path):
