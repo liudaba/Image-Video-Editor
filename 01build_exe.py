@@ -352,9 +352,14 @@ def build_executable():
         print("=" * 60)
 
         output_dir = os.path.join('dist', '短视频生成器')
+        final_dir = os.path.join('dist', 'VideoGenerator')
         if os.path.exists(output_dir):
             _post_build(output_dir)
             _clean_output(output_dir)
+            if os.path.exists(final_dir):
+                shutil.rmtree(final_dir)
+            os.rename(output_dir, final_dir)
+            output_dir = final_dir
             size = get_directory_size(output_dir)
             print(f"\n📁 输出目录: {output_dir}/")
             print(f"📊 总大小: {size:.2f} MB")

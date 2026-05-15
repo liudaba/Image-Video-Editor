@@ -37,7 +37,7 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 
 [Files]
 ; 主程序文件
-Source: "dist\短视频生成器\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\VideoGenerator\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

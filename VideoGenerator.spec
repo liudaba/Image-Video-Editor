@@ -50,5 +50,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='短视频生成器',
+    name='VideoGenerator',
 )
