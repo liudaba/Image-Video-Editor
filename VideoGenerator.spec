@@ -19,7 +19,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['test', 'tests', 'unittest', 'setuptools', 'pip', 'easy_install', 'pkg_resources', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'sympy', 'notebook', 'IPython', 'jupyter', 'tornado', 'fastapi', 'uvicorn', 'sqlalchemy', 'alembic', 'redis', 'asyncpg', 'aiosqlite'],
+    excludes=['test', 'tests', 'unittest', 'setuptools', 'pip', 'easy_install', 'pkg_resources', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'sympy', 'notebook', 'IPython', 'jupyter', 'tornado', 'fastapi', 'uvicorn', 'sqlalchemy', 'alembic', 'redis', 'asyncpg', 'aiosqlite', 'paramiko', 'bcrypt', 'passlib', 'python_jose', 'python_multipart', 'jose', 'httpx', 'websockets', 'starlette', 'anyio', 'httptools', 'pydantic', 'uvloop', 'httptools'],
     noarchive=False,
     optimize=0,
 )

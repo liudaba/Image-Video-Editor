@@ -415,7 +415,7 @@ def _clean_output(output_dir):
     unwanted_files = [
         # 安全相关 - 机密文件
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.license_verify_key', '.key_salt', '.login_creds',
+        '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
         # SSH密码管理 - 绝对不能打包
@@ -458,6 +458,7 @@ def _clean_output(output_dir):
             '.env', 'license.json', '.secret_key', '.license_sign_key',
             '.key_salt', '.login_creds',
             'current_ssh_password.txt', 'ssh_password_history.txt',
+            # .license_verify_key is REQUIRED, do not remove
             'README.md', 'TERMS_OF_SERVICE.md', 'PRIVACY_POLICY.md',
             '用户快速开始.md', '开发人员快速参考.md',
         ]
@@ -497,7 +498,7 @@ def _verify_output(output_dir):
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.license_verify_key', '.key_salt', '.login_creds',
+        '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
         # ⚠️ SSH密码管理 - 绝对不能打包
@@ -529,6 +530,7 @@ def _verify_output(output_dir):
         '.key_salt', '.login_creds',
         'current_ssh_password.txt', 'ssh_password_history.txt',
     ]
+    # .license_verify_key is a REQUIRED file, not a sensitive leak
     if os.path.isdir(internal_dir):
         for item in internal_sensitive:
             item_path = os.path.join(internal_dir, item)
@@ -544,6 +546,7 @@ def _verify_output(output_dir):
         # 深度扫描: 递归检查所有子目录中的敏感文件
         sensitive_patterns = ['.env', 'license.json', '.secret_key', '.license_sign_key',
                               '.key_salt', '.login_creds', 'current_ssh_password.txt']
+        # .license_verify_key is REQUIRED, excluded from sensitive scan
         sensitive_extensions = ['.pem', '.db', '.key']
         for root, dirs, files in os.walk(internal_dir):
             for f in files:
@@ -1093,8 +1096,10 @@ def _verify_required_files(output_dir):
     required = [
         ("短视频生成器.exe", "主程序"),
         ("_internal/python310.dll", "Python运行时"),
-        ("_internal/config.json", "配置文件"),
-        ("_internal/.license_verify_key", "授权验证密钥"),
+        ("config.json", "配置文件(exe同级)"),
+        ("_internal/config.json", "配置文件(_internal)"),
+        (".license_verify_key", "授权密钥(exe同级)"),
+        ("_internal/.license_verify_key", "授权密钥(_internal)"),
     ]
     missing = []
     for rel_path, desc in required:
