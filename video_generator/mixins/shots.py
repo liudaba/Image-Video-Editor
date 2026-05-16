@@ -388,14 +388,14 @@ _TRANSLATION_MAPPING = {
     '合法性': 'legitimacy', '崩盘': 'collapse',
     '难民': 'refugee', '流亡': 'exile',
     '审判': 'trial', '司法': 'judiciary',
-    '严肃': 'serious, solemn', '紧张': 'tense, intense', '激昂': 'passionate, stirring',
+    '严肃': 'serious, solemn', '紧张': 'tense, intense', '危急': 'critical, urgent', '贪婪': 'greedy, avaricious', '压抑': 'oppressive, stifling', '绝望': 'desperate, hopeless', '阴沉': 'gloomy, sinister', '动荡': 'turbulent, volatile', '悲凉': 'desolate, sorrowful', '算计': 'calculating, scheming', '沉闷': 'dull, stifling', '思辨': 'contemplative, thoughtful', '激昂': 'passionate, stirring',
     '温馨': 'warm, tender', '轻松': 'relaxed, lighthearted', '悲壮': 'tragic, heroic',
     '沉重': 'heavy, somber', '振奋': 'inspiring, uplifting', '冷静': 'calm, composed',
     '焦虑': 'anxious, worried', '绝望': 'desperate, hopeless', '坚定': 'resolute, determined',
     '讽刺': 'ironic, satirical', '震撼': 'shocking, impactful', '忧郁': 'melancholic, gloomy',
     '激愤': 'indignant, outraged', '沉稳': 'steady, composed', '压抑': 'oppressive, stifling',
     '肃穆': 'solemn, reverent', '凝重': 'grave, dignified', '犀利': 'sharp, incisive',
-    '嚴肅': 'serious, solemn', '緊張': 'tense, intense', '激昂': 'passionate, stirring',
+    '嚴肅': 'serious, solemn', '緊張': 'tense, intense', '危急': 'critical, urgent', '貪婪': 'greedy, avaricious', '壓抑': 'oppressive, stifling', '絕望': 'desperate, hopeless', '陰沉': 'gloomy, sinister', '動蕩': 'turbulent, volatile', '悲涼': 'desolate, sorrowful', '算計': 'calculating, scheming', '沉悶': 'dull, stifling', '思辨': 'contemplative, thoughtful', '激昂': 'passionate, stirring',
     '溫馨': 'warm, tender', '輕鬆': 'relaxed, lighthearted', '冷靜': 'calm, composed',
     '肅穆': 'solemn, reverent', '凝重': 'grave, dignified',
     '赌': 'gambling', '筹码': 'bargaining chip',
@@ -1614,6 +1614,27 @@ class ShotsMixin:
         
         return round(min(1.0, score), 2)
 
+    def _diversify_visual_tone(self, description, base_tone):
+        """Based on description content, enrich visual tone to avoid all shots having the same tone"""
+        if not base_tone or base_tone not in ('紧张', '緊張'):
+            return base_tone
+        tone_variants = {
+            '战争|战斗|导弹|坦克|武装|枪杆|军心|倒戈': '紧张, 危急',
+            '石油|矿产|能源|油价|金山|肥差|利益': '紧张, 贪婪',
+            '制裁|安理会|否决权|国际|外交|谈判': '紧张, 压抑',
+            '审判|海牙|逮捕|流亡|后路|崩盘': '紧张, 绝望',
+            '妻子|夫人|厉害|铁桶|关系网': '紧张, 阴沉',
+            '反对派|选票|选举|透明|过渡': '紧张, 动荡',
+            '难民|边境|冲垮|底层|食品': '紧张, 悲凉',
+            '博弈|棋局|筹码|赌|牌': '紧张, 算计',
+            '平衡|稳定|喘息|拉锯|维持': '紧张, 沉闷',
+            '救|救赎|深思|问题': '紧张, 思辨',
+        }
+        for pattern, variant in tone_variants.items():
+            if re.search(pattern, description):
+                return variant
+        return base_tone
+
     def _extract_shot_theme_elements(self, shot_text, global_elements):
         """从分镜文案中提取相关的主题元素 - 增强版
         
@@ -1925,6 +1946,8 @@ class ShotsMixin:
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
+        if hasattr(self, '_diversify_visual_tone') and visual_tone:
+            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
         theme_elements = description_parts.get('theme_elements', [])
 
         try:
@@ -1941,6 +1964,8 @@ class ShotsMixin:
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
+        if hasattr(self, '_diversify_visual_tone') and visual_tone:
+            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         
@@ -1962,6 +1987,8 @@ class ShotsMixin:
         dubbing = description_parts['dubbing']
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
+        if hasattr(self, '_diversify_visual_tone') and visual_tone:
+            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         visual_style = description_parts.get('visual_style', '')
@@ -2011,10 +2038,23 @@ class ShotsMixin:
         if '||' in text:
             parts = text.split('||')
             if len(parts) >= 3:
-                text = parts[-1].strip()
+                last_part = parts[-1].strip()
+                if last_part and last_part.lower() not in ('sd prompt', 'prompt', 'english prompt', 'stable diffusion prompt'):
+                    text = last_part
+                else:
+                    mid_part = parts[-2].strip() if len(parts) >= 3 else ''
+                    if mid_part and len(mid_part) > 10:
+                        text = mid_part
+                    else:
+                        first_part = parts[0].strip()
+                        text = first_part if first_part and len(first_part) > 10 else ''
                 _three_part_format = True
             elif len(parts) == 2:
-                text = parts[-1].strip()
+                last_part = parts[-1].strip()
+                if last_part and last_part.lower() not in ('sd prompt', 'prompt', 'english prompt'):
+                    text = last_part
+                else:
+                    text = parts[0].strip()
                 _three_part_format = True
         
         # 解析两阶段输出格式: [understanding] | [prompt]
@@ -2396,7 +2436,27 @@ class ShotsMixin:
             if fallback:
                 return fallback
             return raw_output.strip()
-        
+
+        _placeholder_patterns = [
+            'sd prompt', 'english prompt', 'stable diffusion prompt',
+            'english understanding', 'prompt here', 'your prompt',
+            'insert prompt', 'prompt goes here',
+        ]
+        text_lower = text.strip().lower()
+        if text_lower in _placeholder_patterns or len(text_lower) < 5:
+            fallback = self._generate_fallback_prompt(raw_output)
+            if fallback and len(fallback) > 10:
+                return fallback
+            return raw_output.strip()
+
+        _name_corrections = {
+            'Westley': 'Cilia Flores', 'Westylia': 'Cilia Flores',
+            'Xaviera': 'Cilia Flores', 'Wesley': 'Cilia Flores',
+        }
+        for wrong, correct in _name_corrections.items():
+            if wrong in text:
+                text = text.replace(wrong, correct)
+
         sd_model_name = ""
         if hasattr(self, 'model_var'):
             sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
