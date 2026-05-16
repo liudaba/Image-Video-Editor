@@ -1948,6 +1948,7 @@ class ShotsMixin:
         visual_tone = description_parts.get('custom_visual_tone', '')
         if hasattr(self, '_diversify_visual_tone') and visual_tone:
             visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
+            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
 
         try:
@@ -1966,6 +1967,7 @@ class ShotsMixin:
         visual_tone = description_parts.get('custom_visual_tone', '')
         if hasattr(self, '_diversify_visual_tone') and visual_tone:
             visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
+            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         
@@ -1989,6 +1991,7 @@ class ShotsMixin:
         visual_tone = description_parts.get('custom_visual_tone', '')
         if hasattr(self, '_diversify_visual_tone') and visual_tone:
             visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
+            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         visual_style = description_parts.get('visual_style', '')
