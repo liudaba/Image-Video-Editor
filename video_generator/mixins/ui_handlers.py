@@ -1106,6 +1106,58 @@ class UIHandlersMixin:
 
 
 
+    def _test_cloud_asr_connection(self):
+        """测试云端语音识别连接"""
+        try:
+            from video_generator.cloud_llm_client import test_cloud_asr_connection
+        except ImportError:
+            self.log("⚠️ 云端语音识别模块不可用")
+            return
+
+        api_key = self.cloud_asr_api_key_var.get().strip()
+        if not api_key:
+            self.log("⚠️ 请先输入API Key")
+            messagebox.showwarning("提示", "请先输入API Key再测试连接！")
+            return
+
+        self.log("☁️ 正在测试云端语音识别连接...")
+        self.cloud_asr_status_var.set("⏳ 测试中...")
+        if hasattr(self, 'cloud_asr_status_label'):
+            self.cloud_asr_status_label.config(foreground="orange")
+
+        if hasattr(self, 'btn_test_cloud_asr'):
+            self.btn_test_cloud_asr.config(state='disabled')
+
+        def _do_test():
+            success, message = test_cloud_asr_connection(api_key)
+
+            def _update_ui():
+                if success:
+                    self.cloud_asr_status_var.set(f"✅ {message}")
+                    if hasattr(self, 'cloud_asr_status_label'):
+                        self.cloud_asr_status_label.config(foreground="green")
+                    self.log("=" * 50)
+                    self.log("✅ 云端语音识别连接成功！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+                else:
+                    self.cloud_asr_status_var.set(f"❌ {message}")
+                    if hasattr(self, 'cloud_asr_status_label'):
+                        self.cloud_asr_status_label.config(foreground="red")
+                    self.log("=" * 50)
+                    self.log("❌ 云端语音识别连接失败！")
+                    self.log(f"   {message}")
+                    self.log("=" * 50)
+
+                if hasattr(self, 'btn_test_cloud_asr'):
+                    self.btn_test_cloud_asr.config(state='normal')
+
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, _update_ui)
+
+        threading.Thread(target=_do_test, daemon=True).start()
+
+
     def _test_cloud_llm_connection(self):
         """测试云端大模型连接"""
         from video_generator.cloud_llm_client import test_cloud_connection, PROVIDER_CONFIG

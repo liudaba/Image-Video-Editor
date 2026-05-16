@@ -507,6 +507,17 @@ class UIPanelsMixin:
         asr_toggle_btn = ttk.Button(asr_key_frame, text="👁", width=3, command=lambda: self._toggle_entry_visibility(asr_key_entry), style="Small.TButton")
         asr_toggle_btn.pack(side=tk.LEFT, padx=1)
 
+        asr_btn_frame = ttk.Frame(asr_section)
+        asr_btn_frame.pack(fill=tk.X, pady=1)
+
+        self.btn_test_cloud_asr = ttk.Button(asr_btn_frame, text="🔗 测试连接", command=self._test_cloud_asr_connection, style="Medium.TButton")
+        self.btn_test_cloud_asr.pack(side=tk.LEFT, padx=2, pady=1)
+
+        if not hasattr(self, 'cloud_asr_status_var'):
+            self.cloud_asr_status_var = tk.StringVar(value="❌ 未连接")
+        self.cloud_asr_status_label = ttk.Label(asr_btn_frame, textvariable=self.cloud_asr_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
+        self.cloud_asr_status_label.pack(side=tk.LEFT, padx=5)
+
         # ==================== 云端生图 ====================
         cloud_img_section = ttk.LabelFrame(panels["cloud_img"], text="🎨 云端生图", padding=4, style="Adv.TLabelframe")
         cloud_img_section.pack(fill=tk.BOTH, expand=True)

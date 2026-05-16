@@ -416,6 +416,52 @@ def is_cloud_asr_enabled():
         return _cloud_asr_config.get("enabled", False) and bool(_cloud_asr_config.get("api_key", ""))
 
 
+def test_cloud_asr_connection(api_key, provider="openai", custom_base_url=""):
+    """测试云端语音识别API连接
+
+    Args:
+        api_key: API密钥
+        provider: 服务商ID
+        custom_base_url: 自定义API地址
+
+    Returns:
+        tuple: (success, message)
+    """
+    if not api_key:
+        return False, "API Key不能为空"
+
+    try:
+        if provider == "openai":
+            base_url = custom_base_url.strip() if custom_base_url.strip() else "https://api.openai.com"
+            url = f"{base_url.rstrip('/')}/v1/models"
+            response = get_http_session().get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                model_count = len(data.get("data", []))
+                whisper_available = any(
+                    m.get("id", "").startswith("whisper")
+                    for m in data.get("data", [])
+                )
+                if whisper_available:
+                    return True, f"连接成功，Whisper模型可用"
+                else:
+                    return True, f"连接成功（共{model_count}个模型），未检测到Whisper模型"
+            elif response.status_code == 401:
+                return False, "API Key无效或已过期"
+            elif response.status_code == 429:
+                return True, "连接成功（请求频率受限，但Key有效）"
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:100]}"
+        else:
+            return False, f"不支持的服务商: {provider}"
+    except Exception as e:
+        return False, f"连接失败: {str(e)[:100]}"
+
+
 def call_cloud_asr(audio_path, language="zh", log_callback=None):
     """调用云端语音识别API
 
