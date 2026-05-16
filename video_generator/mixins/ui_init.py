@@ -585,9 +585,12 @@ class UIInitMixin:
             'whisper_model': False,
             'ffmpeg': False,
         }
+        self._gpu_info = ""
 
         def delayed_system_check():
             time.sleep(0.5)
+
+            self._detect_gpu_info_async()
 
             self.root.after(0, lambda: self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
             self.root.after(0, lambda: self.log("  系统自检开始"))
@@ -736,6 +739,11 @@ class UIInitMixin:
 
         thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
         self.log("  【性能配置】")
+        gpu_info = getattr(self, '_gpu_info', '')
+        if gpu_info:
+            self.log(f"    🖥️ GPU: {gpu_info}")
+        else:
+            self.log(f"    🖥️ GPU: 未检测到NVIDIA显卡")
         self.log(f"    🔧 分镜创建线程: {thread_count}")
         self.log(f"    🔧 提示词生成: 本地单线程 / 云端4线程（自动切换）")
         self.log(f"    🔧 批量图像生成: 就绪")

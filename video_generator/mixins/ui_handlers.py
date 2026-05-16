@@ -66,7 +66,6 @@ class UIHandlersMixin:
                 set_ollama_available(True)
                 if not silent:
                     self.log("✅ Ollama服务已连接")
-                self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
@@ -76,7 +75,6 @@ class UIHandlersMixin:
                 set_ollama_available(True)
                 if not silent:
                     self.log("✅ Ollama服务已自动启动并连接")
-                self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
@@ -116,7 +114,7 @@ class UIHandlersMixin:
                     if len(parts) >= 2:
                         gpu_name = parts[0]
                         gpu_mem = float(parts[1]) / 1024
-                        self.root.after(0, lambda: self.log(f"🖥️ GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)"))
+                        self._gpu_info = f"{gpu_name} ({gpu_mem:.1f}GB, CUDA)"
                         return
             except Exception:
                 pass
@@ -127,7 +125,7 @@ class UIHandlersMixin:
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     gpu_name = result.stdout.strip().split("\n")[0].strip()
-                    self.root.after(0, lambda: self.log(f"🖥️ GPU: {gpu_name} (CUDA)"))
+                    self._gpu_info = f"{gpu_name} (CUDA)"
             except Exception:
                 pass
         threading.Thread(target=_detect, daemon=True).start()
@@ -927,9 +925,8 @@ class UIHandlersMixin:
                 msg += f"- {dep}: {install_cmd}\n"
             if hasattr(self, 'root') and self.root:
                 self.root.after(0, lambda: messagebox.showwarning("警告", msg))
-            return False
+            return True
         else:
-            self.log("✅ 核心依赖项已安装")
             return True
 
 
