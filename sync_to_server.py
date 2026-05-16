@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import subprocess
+import paramiko
 import sys
 import os
 import time
@@ -58,27 +58,6 @@ def get_ssh_password():
     return None
 
 
-def run_cmd(cmd, timeout=30):
-    password = get_ssh_password()
-    if password and ("ssh " in cmd or "scp " in cmd):
-        if "sshpass" not in cmd:
-            cmd = f'sshpass -p "{password}" ' + cmd
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
-
-
-def scp_upload(local_path, remote_path):
-    cmd = f'scp -o StrictHostKeyChecking=no "{local_path}" {SERVER_USER}@{SERVER}:{remote_path}'
-    rc, out, err = run_cmd(cmd)
-    return rc == 0
-
-
-def ssh_exec(command):
-    cmd = f'ssh -o StrictHostKeyChecking=no {SERVER_USER}@{SERVER} "{command}"'
-    rc, out, err = run_cmd(cmd, timeout=60)
-    return rc, out, err
-
-
 def main():
     project_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(project_dir)
@@ -115,46 +94,92 @@ def main():
         print("  没有需要同步的文件")
         return
 
-    print(f"\n  [1/3] 上传 {len(files_to_sync)} 个文件到 {SERVER}...")
+    password = get_ssh_password()
+    if not password:
+        print("  ERROR: SSH密码文件不存在或为空")
+        sys.exit(1)
+
+    # [1/3] 建立连接 + 上传文件（复用同一SSH连接）
+    print(f"\n  [1/3] 连接服务器并上传 {len(files_to_sync)} 个文件...")
+    t_start = time.time()
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(SERVER, port=22, username=SERVER_USER, password=password, timeout=15)
+    except Exception as e:
+        print(f"  FAIL: SSH连接失败: {e}")
+        sys.exit(1)
+
+    t_connected = time.time()
+    print(f"  连接建立: {t_connected - t_start:.2f}秒")
+
+    sftp = ssh.open_sftp()
+
     success_count = 0
     fail_count = 0
     for local_path, remote_path in files_to_sync:
         rel = os.path.relpath(local_path, project_dir)
-        if scp_upload(local_path, remote_path):
-            print(f"  OK: {rel}")
+        try:
+            remote_dir = os.path.dirname(remote_path)
+            try:
+                sftp.stat(remote_dir)
+            except FileNotFoundError:
+                stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {remote_dir}")
+                stdout.read()
+            sftp.put(local_path, remote_path)
             success_count += 1
-        else:
-            print(f"  FAIL: {rel}")
+        except Exception as e:
+            print(f"  FAIL: {rel} - {e}")
             fail_count += 1
+
+    sftp.close()
+
+    t_uploaded = time.time()
+    print(f"  上传完成: {success_count} 个文件成功, 耗时 {t_uploaded - t_connected:.2f}秒")
 
     if fail_count > 0:
         print(f"\n  {fail_count} 个文件上传失败，中止同步")
+        ssh.close()
         sys.exit(1)
 
-    print(f"\n  全部 {success_count} 个文件上传成功")
-
+    # [2/3] 重启 API 容器
     print(f"\n  [2/3] 重启 API 容器...")
-    rc, out, err = ssh_exec("cd /root/videogen && docker compose restart api")
-    if rc == 0:
-        print(f"  OK: 容器重启成功")
-    else:
-        print(f"  FAIL: 容器重启失败: {err}")
+    stdin, stdout, stderr = ssh.exec_command("cd /root/videogen && docker compose restart api")
+    output = stdout.read().decode().strip()
+    errors = stderr.read().decode().strip()
+    if errors and "error" in errors.lower():
+        print(f"  FAIL: 容器重启失败: {errors}")
+        ssh.close()
         sys.exit(1)
+    print(f"  OK: 容器重启成功")
 
     print(f"\n  等待服务就绪...")
     time.sleep(8)
 
+    # [3/3] 健康检查
     print(f"\n  [3/3] 健康检查...")
-    rc, out, err = ssh_exec(f"curl -s {HEALTH_URL}")
-    if rc == 0 and '"status":"ok"' in out:
-        health = json.loads(out)
-        print(f"  OK: status={health.get('status')}, db={health.get('database')}, redis={health.get('redis')}")
-    else:
-        print(f"  FAIL: 健康检查失败: {out or err}")
+    stdin, stdout, stderr = ssh.exec_command(f"curl -s {HEALTH_URL}")
+    health_raw = stdout.read().decode().strip()
+    try:
+        health = json.loads(health_raw)
+        if health.get("status") == "ok":
+            print(f"  OK: status={health.get('status')}, db={health.get('database')}, redis={health.get('redis')}")
+        else:
+            print(f"  FAIL: 健康检查异常: {health_raw}")
+            ssh.close()
+            sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"  FAIL: 健康检查返回非JSON: {health_raw}")
+        ssh.close()
         sys.exit(1)
 
+    ssh.close()
+
+    t_total = time.time() - t_start
     print(f"\n{'=' * 60}")
     print(f"  同步完成！{success_count} 个文件已上传，服务运行正常")
+    print(f"  总耗时: {t_total:.1f}秒")
     print(f"{'=' * 60}")
 
 
