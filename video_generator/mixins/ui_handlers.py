@@ -84,6 +84,15 @@ class UIHandlersMixin:
 
     def auto_connect_ollama(self, silent=False):
         try:
+            try:
+                from video_generator.cloud_llm_client import is_cloud_llm_active
+                if is_cloud_llm_active():
+                    if not silent:
+                        self.log("☁️ 云端大模型已启用，无需连接本地Ollama")
+                    return
+            except ImportError:
+                pass
+
             if check_ollama_available():
                 set_ollama_available(True)
                 if not silent:
@@ -109,7 +118,7 @@ class UIHandlersMixin:
                     "Ollama服务未连接",
                     "Ollama大模型服务未运行，且自动启动失败！\n\n"
                     "分镜生成和提示词生成需要Ollama服务支持。\n\n"
-                    "请手动启动Ollama后重试，或在高级设置中检查Ollama模型配置。"
+                    "请手动启动Ollama后重试，或在高级设置中启用云端大模型。"
                 ))
         except Exception as e:
             set_ollama_available(False)
@@ -122,7 +131,7 @@ class UIHandlersMixin:
                     "Ollama服务异常",
                     "Ollama服务连接异常，无法与Ollama通信。\n\n"
                     "分镜生成和提示词生成需要Ollama服务支持。\n\n"
-                    "请检查Ollama是否已安装并正常运行。"
+                    "请在高级设置中启用云端大模型，或检查Ollama是否已安装并正常运行。"
                 ))
 
     def _detect_gpu_info_async(self):

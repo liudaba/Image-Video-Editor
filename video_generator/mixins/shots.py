@@ -4205,44 +4205,42 @@ class ShotsMixin:
                         try:
                             self.update_task_progress("正在等待模型分析...", 50)
                             
-                            # 获取用户指定的模型
-                            user_model = self._get_current_model()
+                            _cloud_llm_active = False
+                            try:
+                                from video_generator.cloud_llm_client import is_cloud_llm_active
+                                _cloud_llm_active = is_cloud_llm_active()
+                            except ImportError:
+                                pass
                             
-                            # 定义模型优先级列表（包含本地所有已安装的Ollama模型）
-                            # 按能力和稳定性排序，推理模型(deepseek-r1)不适合提示词生成
-                            model_priority_list = [
-                                ("qwen3:8b", 5, "阿里通用模型，推荐首选"),
-                                ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
-                                ("gemma3:4b", 4, "Google通用模型，推荐"),
-                                ("qwen3:4b", 4, "阿里通用模型"),
-                                ("llama3.2:3b", 3, "Meta轻量级模型"),
-                                ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
-                                ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
-                            ]
+                            if _cloud_llm_active:
+                                candidate_models = ["cloud"]
+                                self.log("🤖 启动云端大模型分析...")
+                            else:
+                                user_model = self._get_current_model()
+                                model_priority_list = [
+                                    ("qwen3:8b", 5, "阿里通用模型，推荐首选"),
+                                    ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
+                                    ("gemma3:4b", 4, "Google通用模型，推荐"),
+                                    ("qwen3:4b", 4, "阿里通用模型"),
+                                    ("llama3.2:3b", 3, "Meta轻量级模型"),
+                                    ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
+                                    ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
+                                ]
+                                available_models = get_available_models()
+                                candidate_models = []
+                                if user_model in available_models:
+                                    candidate_models.append(user_model)
+                                for model_name, size, desc in model_priority_list:
+                                    if model_name in available_models and model_name not in candidate_models:
+                                        candidate_models.append(model_name)
+                                if not candidate_models:
+                                    candidate_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
+                                    self.log("⚠️ 未检测到本地模型，使用默认候选列表")
+                                self.log(f"🤖 启动本地大模型分析...")
+                                self.log(f"   用户指定模型: {user_model}")
+                                self.log(f"   可用模型数: {len(available_models)}个")
+                                self.log(f"   候选模型数: {len(candidate_models)}个")
                             
-                            available_models = get_available_models()
-                            
-                            # 构建候选模型列表（优先使用用户指定的模型，然后按大小排序）
-                            candidate_models = []
-                            
-                            # 首先添加用户指定的模型
-                            if user_model in available_models:
-                                candidate_models.append(user_model)
-                            
-                            # 然后按优先级添加其他可用模型（从小到大）
-                            for model_name, size, desc in model_priority_list:
-                                if model_name in available_models and model_name not in candidate_models:
-                                    candidate_models.append(model_name)
-                            
-                            # 如果没有可用模型，使用默认列表
-                            if not candidate_models:
-                                candidate_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
-                                self.log("⚠️ 未检测到本地模型，使用默认候选列表")
-                            
-                            self.log(f"🤖 启动大模型分析...")
-                            self.log(f"   用户指定模型: {user_model}")
-                            self.log(f"   可用模型数: {len(available_models)}个")
-                            self.log(f"   候选模型数: {len(candidate_models)}个")
                             self.log(f"   文本长度: {len(full_text)} 字符")
                             self.log(f"   提示词类型: {prompt_type}")
                             self.log(f"   内容类型: {content_type}")
@@ -4504,15 +4502,31 @@ class ShotsMixin:
                     else:
                         self.log("✅ Ollama 服务可用")
                 
-                self.log("🔥 预热模型中...")
                 try:
-                    model = self._get_current_model()
-                    if not model:
-                        model = "gemma3:4b"
-                    warmup_start = time.time()
-                    warmup_model(model, log_callback=self.log)
-                    warmup_time = time.time() - warmup_start
-                    self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
+                    from video_generator.cloud_llm_client import is_cloud_llm_active as _is_cloud_active
+                    if _is_cloud_active():
+                        self.log("☁️ 云端模式已启用，跳过本地模型预热")
+                    else:
+                        self.log("🔥 预热模型中...")
+                        model = self._get_current_model()
+                        if not model:
+                            model = "gemma3:4b"
+                        warmup_start = time.time()
+                        warmup_model(model, log_callback=self.log)
+                        warmup_time = time.time() - warmup_start
+                        self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
+                except ImportError:
+                    self.log("🔥 预热模型中...")
+                    try:
+                        model = self._get_current_model()
+                        if not model:
+                            model = "gemma3:4b"
+                        warmup_start = time.time()
+                        warmup_model(model, log_callback=self.log)
+                        warmup_time = time.time() - warmup_start
+                        self.log(f"✅ 模型预热完成 ({warmup_time:.1f}秒)")
+                    except Exception as e:
+                        self._log_exception(f"⚠️ 模型预热失败", e)
                 except Exception as e:
                     self._log_exception(f"⚠️ 模型预热失败", e)
             
@@ -5079,10 +5093,18 @@ class ShotsMixin:
             
             self._unload_ollama_models()
 
-            if not check_ollama_available():
-                set_ollama_available_global(False)
-            else:
-                set_ollama_available_global(True)
+            try:
+                from video_generator.cloud_llm_client import is_cloud_llm_active as _is_cloud
+                if not _is_cloud():
+                    if not check_ollama_available():
+                        set_ollama_available_global(False)
+                    else:
+                        set_ollama_available_global(True)
+            except ImportError:
+                if not check_ollama_available():
+                    set_ollama_available_global(False)
+                else:
+                    set_ollama_available_global(True)
             
             # 更新进度为完成
             self.update_task_progress("分镜生成完成", 100)
