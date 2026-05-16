@@ -724,17 +724,13 @@ class ShotsMixin:
         return min(similarity, 1.0)
 
     def _regenerate_prompt_for_split_shot(self, description, orig_shot, part_index, total_parts):
-        """为拆分后的分镜重新生成差异化的提示词
+        """为拆分后的分镜生成差异化的提示词（轻量方式，不调用LLM）
 
-        策略：
-        1. 优先使用大模型根据新描述生成独特 prompt
-        2. 大模型不可用时，基于描述关键词 + 镜头变化生成差异化 prompt
-        3. 确保每个部分的 prompt 在视觉上有明显区别
+        策略：在原prompt基础上添加镜头角度 + 从描述中提取关键词，确保视觉差异
         """
-        content_type = orig_shot.get('content_type', '')
+        orig_prompt = orig_shot.get('prompt_en', '')
         core_theme = orig_shot.get('core_theme', '')
         visual_tone = orig_shot.get('visual_tone', '')
-        theme_elements = orig_shot.get('theme_elements', [])
 
         camera_angles = [
             'wide establishing shot', 'medium shot', 'close-up shot',
@@ -744,64 +740,73 @@ class ShotsMixin:
         ]
         shot_angle = camera_angles[part_index % len(camera_angles)]
 
-        if is_llm_available():
-            try:
-                description_parts = {
-                    'dubbing': description,
-                    'semantic': '',
-                    'visual_concept': '',
-                    'visual_elements': '',
-                    'style': '',
-                    'custom_theme': core_theme,
-                    'custom_visual_tone': visual_tone,
-                    'theme_elements': theme_elements,
-                    'content_type': content_type,
-                }
-                prompt_en = self._generate_sd_prompt(description_parts, content_type, part_index)
-                if prompt_en and len(prompt_en) > 30 and not re.search(r'[\u4e00-\u9fff]', prompt_en):
-                    if shot_angle.lower() not in prompt_en.lower():
-                        prompt_en = f"{shot_angle}, {prompt_en}"
-                    return prompt_en
-            except Exception:
-                pass
+        desc_keywords = self._extract_visual_keywords_from_description(description)
 
-        prompt_en = self._analyze_and_generate_sd_prompt(description, content_type, core_theme, visual_tone)
-        if shot_angle.lower() not in prompt_en.lower():
-            prompt_en = f"{shot_angle}, {prompt_en}"
-        return prompt_en
+        parts = []
+        if shot_angle.lower() not in orig_prompt.lower():
+            parts.append(shot_angle)
+        if desc_keywords:
+            parts.append(desc_keywords)
+        if orig_prompt:
+            parts.append(orig_prompt)
+        if visual_tone and visual_tone.lower() not in orig_prompt.lower():
+            parts.append(visual_tone)
+
+        result = ', '.join(parts)
+        return result if result else orig_prompt
+
+    def _extract_visual_keywords_from_description(self, description):
+        """从描述文本中提取可用于SD提示词的英文关键词"""
+        if not description:
+            return ''
+
+        _desc_keyword_map = {
+            '总统': 'president', '领袖': 'leader', '将军': 'general',
+            '士兵': 'soldier', '军官': 'military officer', '外交官': 'diplomat',
+            '民众': 'crowd', '难民': 'refugee', '反对派': 'opposition',
+            '战争': 'war zone', '战斗': 'battlefield', '冲突': 'conflict',
+            '制裁': 'sanctions', '选举': 'election', '谈判': 'negotiation',
+            '石油': 'oil industry', '经济': 'economy', '金融': 'finance',
+            '城市': 'city', '街道': 'street', '建筑': 'building',
+            '宫殿': 'palace', '办公室': 'office', '会议室': 'conference room',
+            '边境': 'border', '港口': 'harbor', '工厂': 'factory',
+            '广场': 'square', '监狱': 'prison', '法庭': 'courtroom',
+            '直升机': 'helicopter', '坦克': 'tank', '军舰': 'warship',
+            '旗帜': 'flag', '地图': 'map', '文件': 'document',
+            '演讲': 'speech', '抗议': 'protest', '游行': 'rally',
+            '会议': 'meeting', '握手': 'handshake', '签字': 'signing',
+            '行走': 'walking', '站立': 'standing', '交谈': 'conversation',
+            '夜晚': 'night scene', '白天': 'daylight', '室内': 'indoor',
+            '室外': 'outdoor', '黎明': 'dawn', '黄昏': 'dusk',
+        }
+
+        keywords = []
+        for cn, en in _desc_keyword_map.items():
+            if cn in description and en not in keywords:
+                keywords.append(en)
+
+        return ', '.join(keywords[:3]) if keywords else ''
 
     def _regenerate_prompt_for_merged_shot(self, merged_description, keeper_shot):
-        """为合并后的分镜重新生成提示词
+        """为合并后的分镜生成提示词（轻量方式，不调用LLM）
 
-        策略：
-        1. 优先使用大模型根据合并描述生成 prompt
-        2. 大模型不可用时，基于合并描述关键词生成 prompt
+        策略：合并两个prompt的关键词 + 从合并描述中提取新关键词
         """
-        content_type = keeper_shot.get('content_type', '')
-        core_theme = keeper_shot.get('core_theme', '')
+        keeper_prompt = keeper_shot.get('prompt_en', '')
         visual_tone = keeper_shot.get('visual_tone', '')
-        theme_elements = keeper_shot.get('theme_elements', [])
 
-        if is_llm_available():
-            try:
-                description_parts = {
-                    'dubbing': merged_description,
-                    'semantic': '',
-                    'visual_concept': '',
-                    'visual_elements': '',
-                    'style': '',
-                    'custom_theme': core_theme,
-                    'custom_visual_tone': visual_tone,
-                    'theme_elements': theme_elements,
-                    'content_type': content_type,
-                }
-                prompt_en = self._generate_sd_prompt(description_parts, content_type, keeper_shot.get('id', 0))
-                if prompt_en and len(prompt_en) > 30 and not re.search(r'[\u4e00-\u9fff]', prompt_en):
-                    return prompt_en
-            except Exception:
-                pass
+        desc_keywords = self._extract_visual_keywords_from_description(merged_description)
 
-        return self._analyze_and_generate_sd_prompt(merged_description, content_type, core_theme, visual_tone)
+        parts = []
+        if desc_keywords:
+            parts.append(desc_keywords)
+        if keeper_prompt:
+            parts.append(keeper_prompt)
+        if visual_tone and visual_tone.lower() not in keeper_prompt.lower():
+            parts.append(visual_tone)
+
+        result = ', '.join(parts)
+        return result if result else keeper_prompt
 
     def _merge_shots(self, shots, keep_idx, remove_idx):
         """智能合并两个分镜，保留语义更丰富的一方的时间范围
