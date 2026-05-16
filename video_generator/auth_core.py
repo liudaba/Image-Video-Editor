@@ -47,6 +47,8 @@ _OFFLINE_TOLERANCE = {
 }
 
 _HMAC_VERIFY_SECRET = None
+_ECDSA_PUBLIC_KEY = None
+_SIG_VERSION_KEY = "_sig_ver"
 _last_known_time = time.time()
 
 _CREDENTIALS_FILE = ".login_creds"
@@ -67,17 +69,46 @@ def _get_verify_secret():
     return _HMAC_VERIFY_SECRET
 
 
+def _get_ecdsa_public_key():
+    global _ECDSA_PUBLIC_KEY
+    if _ECDSA_PUBLIC_KEY is not None:
+        return _ECDSA_PUBLIC_KEY
+    try:
+        from cryptography.hazmat.primitives import serialization
+        base_dir = _get_data_dir()
+        pubkey_file = os.path.join(base_dir, ".license_verify_pubkey.pem")
+        if os.path.exists(pubkey_file):
+            with open(pubkey_file, "rb") as f:
+                _ECDSA_PUBLIC_KEY = serialization.load_pem_public_key(f.read())
+    except Exception:
+        pass
+    return _ECDSA_PUBLIC_KEY
+
+
 def _verify_signature(data: dict) -> bool:
     if _HMAC_KEY not in data:
         return False
-    secret = _get_verify_secret()
-    if not secret:
-        return False
-    expected = data[_HMAC_KEY]
-    check = {k: v for k, v in data.items() if k != _HMAC_KEY and v is not None}
+    sig_ver = data.get(_SIG_VERSION_KEY, 1)
+    check = {k: v for k, v in data.items() if k != _HMAC_KEY and k != _SIG_VERSION_KEY and v is not None}
     payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    computed = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, computed)
+    if sig_ver == 2:
+        pubkey = _get_ecdsa_public_key()
+        if pubkey is None:
+            return False
+        try:
+            from cryptography.hazmat.primitives.asymmetric import ec
+            from cryptography.hazmat.primitives import hashes
+            signature = bytes.fromhex(data[_HMAC_KEY])
+            pubkey.verify(signature, payload.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+            return True
+        except Exception:
+            return False
+    else:
+        secret = _get_verify_secret()
+        if not secret:
+            return False
+        computed = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(data[_HMAC_KEY], computed)
 
 
 def _check_clock_rollback():

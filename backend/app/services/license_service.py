@@ -14,32 +14,93 @@ from ..models import License, LicenseKey, User, LicenseKeyStatus, PlanType
 from ..schemas import LicenseData
 
 _SIG_KEY = "_sig"
+_SIG_VERSION_KEY = "_sig_ver"
+
+_ecdsa_private_key = None
+_hmac_signing_key = None
 
 
-def _get_signing_key() -> bytes:
+def _get_ecdsa_private_key():
+    global _ecdsa_private_key
+    if _ecdsa_private_key is not None:
+        return _ecdsa_private_key
+    key_path = getattr(settings, "ECDSA_PRIVATE_KEY_PATH", "") or ""
+    if not key_path:
+        key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_sign_private.pem")
+    if not os.path.isabs(key_path):
+        key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", key_path)
+    if os.path.exists(key_path):
+        try:
+            from cryptography.hazmat.primitives import serialization
+            with open(key_path, "rb") as f:
+                _ecdsa_private_key = serialization.load_pem_private_key(f.read(), password=None)
+            return _ecdsa_private_key
+        except Exception:
+            pass
+    return None
+
+
+def _get_hmac_signing_key() -> bytes:
+    global _hmac_signing_key
+    if _hmac_signing_key is not None:
+        return _hmac_signing_key
     if settings.HMAC_SIGN_KEY and settings.HMAC_SIGN_KEY.strip():
-        return settings.HMAC_SIGN_KEY.encode("utf-8")
+        _hmac_signing_key = settings.HMAC_SIGN_KEY.encode("utf-8")
+        return _hmac_signing_key
     key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
     try:
         with open(key_path, "rb") as f:
             key = f.read().strip()
             if key:
-                return key
+                _hmac_signing_key = key
+                return _hmac_signing_key
     except FileNotFoundError:
         pass
-    raise RuntimeError("HMAC_SIGN_KEY is not configured. Set HMAC_SIGN_KEY in .env or create keys/.license_verify_key file")
+    return None
 
 
-def sign_license_data(data: dict) -> str:
-    check = {k: v for k, v in data.items() if k != _SIG_KEY and v is not None}
-    payload = json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    signing_key = _get_signing_key()
-    return _hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+def _make_payload(data: dict) -> bytes:
+    check = {k: v for k, v in data.items() if k != _SIG_KEY and k != _SIG_VERSION_KEY and v is not None}
+    return json.dumps(check, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def sign_license_data(data: dict) -> tuple:
+    payload = _make_payload(data)
+    ecdsa_key = _get_ecdsa_private_key()
+    if ecdsa_key is not None:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import hashes
+        signature = ecdsa_key.sign(payload, ec.ECDSA(hashes.SHA256()))
+        return signature.hex(), 2
+    hmac_key = _get_hmac_signing_key()
+    if hmac_key is not None:
+        sig = _hmac.new(hmac_key, payload, hashlib.sha256).hexdigest()
+        return sig, 1
+    raise RuntimeError("No signing key configured. Set ECDSA_PRIVATE_KEY_PATH or HMAC_SIGN_KEY")
 
 
 def verify_signature(data: dict, signature: str) -> bool:
-    expected = sign_license_data(data)
-    return _hmac.compare_digest(expected, signature)
+    try:
+        sig_ver = data.get(_SIG_VERSION_KEY, 1)
+        payload = _make_payload(data)
+        if sig_ver == 2:
+            pubkey_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_pubkey.pem")
+            if os.path.exists(pubkey_path):
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.asymmetric import ec
+                from cryptography.hazmat.primitives import hashes
+                with open(pubkey_path, "rb") as f:
+                    public_key = serialization.load_pem_public_key(f.read())
+                public_key.verify(bytes.fromhex(signature), payload, ec.ECDSA(hashes.SHA256()))
+                return True
+        elif sig_ver == 1:
+            hmac_key = _get_hmac_signing_key()
+            if hmac_key is not None:
+                expected = _hmac.new(hmac_key, payload, hashlib.sha256).hexdigest()
+                return _hmac.compare_digest(expected, signature)
+    except Exception:
+        pass
+    return False
 
 
 def is_license_expired(license_obj: License) -> bool:
@@ -268,10 +329,11 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         "license_key": license.license_key,
     }
 
-    sig = sign_license_data(data_without_sig)
+    sig, sig_ver = sign_license_data(data_without_sig)
 
     return LicenseData(
         sig=sig,
+        sig_ver=sig_ver,
         username=username,
         license_type=license.license_type if isinstance(license.license_type, str) else license.license_type.value,
         is_valid=license.is_valid,

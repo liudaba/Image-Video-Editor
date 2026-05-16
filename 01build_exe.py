@@ -103,6 +103,133 @@ def check_packing_safety():
         print("💡 建议: 创建 check_packing_safety.py 以增强安全性")
 
 
+def _cython_compile_modules():
+    import subprocess
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    cython_modules = [
+        "video_generator/auth_core.py",
+        "video_generator/license_manager.py",
+        "video_generator/crypto_utils.py",
+        "video_generator/auth_fingerprint.py",
+    ]
+    try:
+        import Cython
+        print(f"  📦 检测到 Cython {Cython.__version__}")
+    except ImportError:
+        print("  ⚠️  Cython 未安装，跳过 Cython 编译（将使用 PyArmor 混淆替代）")
+        return False
+
+    backup_dir = os.path.join(base_dir, "_cython_backup")
+    if os.path.exists(backup_dir):
+        shutil.rmtree(backup_dir)
+    os.makedirs(backup_dir)
+
+    success_count = 0
+    for mod_path in cython_modules:
+        src = os.path.join(base_dir, mod_path)
+        if not os.path.exists(src):
+            print(f"  ⚠️  {mod_path} 不存在，跳过")
+            continue
+        shutil.copy2(src, os.path.join(backup_dir, os.path.basename(mod_path)))
+        pyx_path = src.replace(".py", ".pyx")
+        try:
+            shutil.copy2(src, pyx_path)
+            result = subprocess.run(
+                [sys.executable, "-m", "cython", "-3", pyx_path],
+                capture_output=True, text=True, cwd=base_dir, timeout=60,
+            )
+            c_path = pyx_path.replace(".pyx", ".c")
+            if result.returncode == 0 and os.path.exists(c_path):
+                ext_suffix = ".cp{}{}-win_amd64.pyd".format(sys.version_info.major, sys.version_info.minor)
+                build_cmd = [
+                    sys.executable, "-m", "pip", "install", "cython",
+                    "--quiet", "--no-deps",
+                ]
+                mod_path_posix = mod_path.replace(os.sep, "/")
+                setup_content = (
+                    "from setuptools import setup\n"
+                    "from Cython.Build import cythonize\n"
+                    "import sys\n"
+                    f'ext_modules = cythonize("{mod_path_posix}", compiler_directives={{"language_level": "3"}})\n'
+                    "setup(ext_modules=ext_modules)\n"
+                )
+                setup_path = os.path.join(base_dir, "_cython_setup.py")
+                with open(setup_path, "w", encoding="utf-8") as f:
+                    f.write(setup_content)
+                build_result = subprocess.run(
+                    [sys.executable, setup_path, "build_ext", "--inplace"],
+                    capture_output=True, text=True, cwd=base_dir, timeout=120,
+                )
+                if os.path.exists(setup_path):
+                    os.remove(setup_path)
+                mod_dir = os.path.dirname(src)
+                mod_name = os.path.basename(src).replace(".py", "")
+                pyd_found = None
+                for f in os.listdir(mod_dir):
+                    if f.startswith(mod_name) and f.endswith(".pyd"):
+                        pyd_found = os.path.join(mod_dir, f)
+                        break
+                if pyd_found:
+                    target_pyd = os.path.join(mod_dir, f"{mod_name}.pyd")
+                    if pyd_found != target_pyd:
+                        if os.path.exists(target_pyd):
+                            os.remove(target_pyd)
+                        os.rename(pyd_found, target_pyd)
+                    if os.path.exists(src):
+                        os.remove(src)
+                    success_count += 1
+                    print(f"  ✅ Cython 编译成功: {mod_path} → {mod_name}.pyd")
+                else:
+                    print(f"  ⚠️  Cython 编译 {mod_path} 未生成 .pyd，回退到源码")
+            else:
+                print(f"  ⚠️  Cython 转换 {mod_path} 失败: {result.stderr[:100]}")
+        except Exception as e:
+            print(f"  ⚠️  Cython 编译 {mod_path} 异常: {e}")
+        finally:
+            if os.path.exists(pyx_path):
+                os.remove(pyx_path)
+            c_path = pyx_path.replace(".pyx", ".c")
+            if os.path.exists(c_path):
+                os.remove(c_path)
+
+    if success_count > 0:
+        print(f"  ✅ Cython 编译完成: {success_count}/{len(cython_modules)} 个模块")
+        return True
+    else:
+        print("  ⚠️  Cython 编译全部失败，将使用 PyArmor 混淆替代")
+        if os.path.exists(backup_dir):
+            for f in os.listdir(backup_dir):
+                src_backup = os.path.join(backup_dir, f)
+                dst = os.path.join(base_dir, "video_generator", f)
+                shutil.copy2(src_backup, dst)
+            shutil.rmtree(backup_dir)
+        return False
+
+
+def _restore_cython_modules():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    backup_dir = os.path.join(base_dir, "_cython_backup")
+    if not os.path.exists(backup_dir):
+        return
+    cython_modules = [
+        "video_generator/auth_core.py",
+        "video_generator/license_manager.py",
+        "video_generator/crypto_utils.py",
+        "video_generator/auth_fingerprint.py",
+    ]
+    for mod_path in cython_modules:
+        mod_name = os.path.basename(mod_path).replace(".py", "")
+        mod_dir = os.path.join(base_dir, os.path.dirname(mod_path))
+        pyd_path = os.path.join(mod_dir, f"{mod_name}.pyd")
+        if os.path.exists(pyd_path):
+            os.remove(pyd_path)
+        src_backup = os.path.join(backup_dir, os.path.basename(mod_path))
+        if os.path.exists(src_backup):
+            shutil.copy2(src_backup, os.path.join(base_dir, mod_path))
+    shutil.rmtree(backup_dir)
+    print("  ✅ Cython 编译模块已恢复为源码")
+
+
 def _obfuscate_core_modules():
     print("\n🔒 混淆核心安全模块（PyArmor）...")
 
@@ -274,6 +401,7 @@ def build_executable():
     except ImportError:
         print("  ⚠️  无法读取版本信息")
 
+    cythonized = _cython_compile_modules()
     obfuscated = _obfuscate_core_modules()
 
     print("\n📋 检查必要文件...")
@@ -400,6 +528,8 @@ def build_executable():
 
             if obfuscated:
                 _restore_original_modules()
+            if cythonized:
+                _restore_cython_modules()
 
             print(f"\n💡 分发说明:")
             print(f"  1. 压缩包将自动生成在 dist/ 目录下")
@@ -423,6 +553,8 @@ def build_executable():
     except Exception as e:
         if obfuscated:
             _restore_original_modules()
+        if cythonized:
+            _restore_cython_modules()
         print(f"\n❌ 打包失败: {e}")
         import traceback
         traceback.print_exc()
@@ -551,7 +683,7 @@ def _verify_output(output_dir):
         matches = glob.glob(os.path.join(output_dir, pattern))
         for match in matches:
             filename = os.path.basename(match)
-            if filename == '.license_verify_key':
+            if filename in ('.license_verify_key', '.license_verify_pubkey.pem'):
                 continue
             print(f"  ❌ 错误: 发现了不应该存在的 {filename}")
             has_error = True
@@ -574,7 +706,7 @@ def _verify_output(output_dir):
             matches = glob.glob(os.path.join(internal_dir, pattern))
             for match in matches:
                 filename = os.path.basename(match)
-                if filename == '.license_verify_key':
+                if filename in ('.license_verify_key', '.license_verify_pubkey.pem'):
                     continue
                 print(f"  ❌ 错误: 发现了不应该存在的 _internal/{filename}")
                 has_error = True
@@ -586,7 +718,7 @@ def _verify_output(output_dir):
         for root, dirs, files in os.walk(internal_dir):
             for f in files:
                 fl = f.lower()
-                if f == '.license_verify_key':
+                if f in ('.license_verify_key', '.license_verify_pubkey.pem'):
                     continue
                 if f in sensitive_patterns or any(f.endswith(ext) for ext in sensitive_extensions):
                     rel = os.path.relpath(os.path.join(root, f), output_dir)
@@ -788,10 +920,22 @@ def _post_build(output_dir):
         os.makedirs(internal_dir, exist_ok=True)
         shutil.copy2(verify_key_src, os.path.join(output_dir, ".license_verify_key"))
         shutil.copy2(verify_key_src, os.path.join(internal_dir, ".license_verify_key"))
-        print("  ✅ .license_verify_key → exe同级 + _internal/")
+        print("  ✅ 复制 .license_verify_key (HMAC, 向后兼容)")
+
+    pubkey_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".license_verify_pubkey.pem")
+    if os.path.exists(pubkey_src):
+        internal_dir = os.path.join(output_dir, "_internal")
+        os.makedirs(internal_dir, exist_ok=True)
+        shutil.copy2(pubkey_src, os.path.join(output_dir, ".license_verify_pubkey.pem"))
+        shutil.copy2(pubkey_src, os.path.join(internal_dir, ".license_verify_pubkey.pem"))
+        print("  ✅ 复制 .license_verify_pubkey.pem (ECDSA 公钥)")
     else:
-        print("  ❌ 错误: .license_verify_key 缺失！授权验证将无法工作")
-        print("     请先运行 backend/init_db.py 生成密钥文件")
+        print("  ⚠️  .license_verify_pubkey.pem 缺失，ECDSA 签名验证将不可用")
+        print("     请运行 python generate_signing_keys.py 生成密钥对")
+
+    if not os.path.exists(verify_key_src) and not os.path.exists(pubkey_src):
+        print("  ❌ 错误: .license_verify_key 和 .license_verify_pubkey.pem 都缺失！")
+        print("     授权验证将无法工作")
         sys.exit(1)
 
     _copy_whisper_models(output_dir)
@@ -1376,8 +1520,8 @@ def _verify_required_files(output_dir):
         ("_internal/python310.dll", "Python运行时"),
         ("config.json", "配置文件(exe同级)"),
         ("_internal/config.json", "配置文件(_internal)"),
-        (".license_verify_key", "授权密钥(exe同级)"),
-        ("_internal/.license_verify_key", "授权密钥(_internal)"),
+        (".license_verify_pubkey.pem", "ECDSA公钥(exe同级)"),
+        ("_internal/.license_verify_pubkey.pem", "ECDSA公钥(_internal)"),
     ]
     recommended = [
         ("whisper_models", "Whisper语音模型目录"),
@@ -1400,6 +1544,12 @@ def _verify_required_files(output_dir):
         print(f"\n  ❌ 关键文件缺失，打包终止!")
         sys.exit(1)
     print("  ✅ 所有关键文件完整")
+
+    # HMAC 密钥为向后兼容保留，缺失仅警告
+    hmac_key = os.path.join(output_dir, ".license_verify_key")
+    hmac_key_internal = os.path.join(output_dir, "_internal", ".license_verify_key")
+    if not os.path.exists(hmac_key) and not os.path.exists(hmac_key_internal):
+        print("  ⚠️  .license_verify_key 缺失 (HMAC 验证不可用)")
 
     print("\n🔍 检查推荐文件（缺失不中止打包，但影响用户体验）...")
     for rel_path, desc in recommended:

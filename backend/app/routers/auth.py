@@ -196,8 +196,20 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
             select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
         )
         fp_count = fp_user_count.scalar() or 0
-        if fp_count >= 2:
+        if fp_count >= 3:
             raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")
+        fp_active_trial = await db.execute(
+            select(sa_func.count(User.id))
+            .join(MachineBinding, MachineBinding.user_id == User.id)
+            .where(
+                MachineBinding.fingerprint == user_data.fingerprint,
+                User.license_type == "trial",
+                User.is_active == True,
+            )
+        )
+        active_trial_count = fp_active_trial.scalar() or 0
+        if active_trial_count >= 1 and fp_count >= 1:
+            raise HTTPException(status_code=429, detail="该设备已有试用账号，请购买正版授权")
 
     result = await db.execute(
         select(User).filter((User.username == user_data.username) | (User.email == user_data.email))

@@ -45,6 +45,7 @@ class LicenseData(BaseModel):
     model_config = ConfigDict(populate_by_name=True, by_alias=True)
 
     sig: Optional[str] = Field(None, alias="_sig")
+    sig_ver: Optional[int] = Field(None, alias="_sig_ver")
     username: str
     license_type: str
     is_valid: bool
