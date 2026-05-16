@@ -399,6 +399,8 @@ class UIHandlersMixin:
             print(f"  分镜创建线程: {thread_count}")
             batch_size = self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2
             print(f"  分镜批处理:   {batch_size}")
+            min_shot_dur = self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0
+            print(f"  最短分镜时长: {min_shot_dur:.1f}秒")
             if core_theme:
                 print(f"  核心主题:     {core_theme}")
             if visual_tone:
@@ -1633,7 +1635,11 @@ class UIHandlersMixin:
                     self._cloud_selected_image_model_id = config.get('cloud_image_model_id', config['cloud_image_model'])
                 if 'cloud_image_custom_url' in config and hasattr(self, 'cloud_image_custom_url_var'):
                     self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
-                
+
+                if 'min_shot_duration' in config and hasattr(self, 'min_shot_duration_var'):
+                    self.min_shot_duration_var.set(float(config['min_shot_duration']))
+                    self.MIN_SHOT_DURATION = float(config['min_shot_duration'])
+
                 if hasattr(self, '_apply_cloud_llm_config'):
                     try:
                         self._apply_cloud_llm_config()
@@ -1693,6 +1699,7 @@ class UIHandlersMixin:
                 'cloud_image_model': self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else '',
                 'cloud_image_model_id': getattr(self, '_cloud_selected_image_model_id', '') or '',
                 'cloud_image_custom_url': self.cloud_image_custom_url_var.get() if hasattr(self, 'cloud_image_custom_url_var') else '',
+                'min_shot_duration': self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0,
             }
             
             try:
