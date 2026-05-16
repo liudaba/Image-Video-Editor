@@ -35,7 +35,7 @@
 
 ### 云端代码同步流程（一键同步，禁止手动分步操作）
 
-**必须使用 `sync_to_server.py` 一键同步脚本**，该脚本自动完成：上传所有后端文件 → 重启API容器 → 健康检查验证。禁止手动 scp + 手动重启的分步操作，避免遗漏重启步骤。
+**必须使用 `sync_to_server.py` 一键同步脚本**，该脚本基于 **paramiko 复用 SSH 连接**，自动完成：上传所有后端文件 → 重启API容器 → 健康检查验证。禁止手动 scp + 手动重启的分步操作，避免遗漏重启步骤。
 
 ```bash
 # 一键同步（上传所有后端文件 + 自动重启 + 自动验证）
@@ -52,10 +52,17 @@ python sync_to_server.py --templates
 
 > ⚠️ **绝对禁止**：手动 scp 上传后忘记重启容器。这会导致服务器运行旧代码，项目运行不畅。始终使用 `sync_to_server.py`。
 
+#### 同步脚本技术要点（禁止回退到 scp 方式）
+
+- **使用 paramiko 复用连接**：建立1次SSH连接，通过SFTP通道上传所有文件，同一连接执行docker命令和健康检查
+- **禁止使用 scp 逐文件上传**：scp 每个文件都建立独立SSH连接+密钥交换，31个文件需31次握手约12秒；paramiko复用连接仅需3秒，提速4倍
+- **禁止依赖 sshpass**：Windows 环境下 sshpass 通常未安装，导致 scp 方式全部失败；paramiko 纯 Python 实现，无外部依赖
+- **SSH 密码来源**：从 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt` 读取
+
 ### 注意事项
 
 - **不要用 `api.videogen.com` 做 SSH**：该域名解析到 CDN 代理 IP（198.18.x.x），SSH 流量被拒绝，必须用真实 IP `8.141.101.155`
-- **不要 `git pull`**：服务器 `/root/videogen/` 不是 git 仓库，用 `scp` 直接上传文件
+- **不要 `git pull`**：服务器 `/root/videogen/` 不是 git 仓库，使用 `sync_to_server.py` 直接上传文件
 - **修改了 requirements.txt 或 Dockerfile**：需要重新构建镜像 `docker compose up -d --build api`
 - **修改了数据库模型**：需要运行迁移 `docker compose exec api alembic upgrade head`
 - **SSH 密码定期更新**：用户会定期更换 SSH 密码，新密码保存在 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt`，同步前先读取该文件获取最新密码
@@ -79,7 +86,7 @@ python sync_to_server.py --templates
 
 ## 部署与自动重启
 
-- **必须使用 `sync_to_server.py` 一键同步**：上传 + 重启 + 验证一步到位，杜绝遗漏重启
+- **必须使用 `sync_to_server.py` 一键同步**：上传 + 重启 + 验证一步到位，杜绝遗漏重启（基于 paramiko 复用连接，速度快、无外部依赖）
 - **.env 变更后需额外操作**：`sync_to_server.py` 默认执行 `docker compose restart api`；如果修改了 `.env` 文件，需手动执行 `docker compose up -d api`（重建容器以加载新环境变量）
 - **密钥文件同步**：新密钥文件上传到服务器后，同样使用 `sync_to_server.py` 自动重启
 - **无需用户确认重启**：代码已同步到服务器意味着用户已同意部署，自动重启是部署流程的一部分
@@ -87,11 +94,10 @@ python sync_to_server.py --templates
 ### 首次部署 ECDSA 密钥的步骤
 
 1. 运行 `python generate_signing_keys.py` 生成密钥对
-2. scp 上传 `keys/.license_sign_private.pem` 到服务器 `/root/videogen/keys/`
-3. scp 上传 `keys/.license_verify_pubkey.pem` 到服务器 `/root/videogen/keys/`
-4. 更新服务器 `.env`：添加 `ECDSA_PRIVATE_KEY_PATH=keys/.license_sign_private.pem`
-5. 重建 API 容器：`docker compose up -d api`（必须用 up -d，因为 .env 变更）
-6. 验证：`curl -s http://127.0.0.1:8000/health`
+2. 使用 `sync_to_server.py` 上传密钥文件到服务器（或通过 paramiko SFTP 手动上传 `keys/.license_sign_private.pem` 和 `keys/.license_verify_pubkey.pem` 到 `/root/videogen/keys/`）
+3. 更新服务器 `.env`：添加 `ECDSA_PRIVATE_KEY_PATH=keys/.license_sign_private.pem`
+4. 重建 API 容器：`docker compose up -d api`（必须用 up -d，因为 .env 变更）
+5. 验证：`curl -s http://127.0.0.1:8000/health`
 
 ## 打包工程文件
 
@@ -152,8 +158,8 @@ python sync_to_server.py --templates
 3. **检查是否需要同步到云端服务器**
    - 对比本地代码与远程服务器 `/root/videogen/app/` 的代码版本
    - 如本地有新变更尚未同步到云端，向用户汇报并询问是否需要同步
-   - 同步方式：`scp` 上传到宿主机 → `docker compose restart api` → `curl /health` 验证（代码同步后自动重启）
-   - SSH 密码从 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt` 读取
+   - 同步方式：`python sync_to_server.py` 一键同步（上传 + 重启 + 验证）
+   - SSH 密码从 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt` 读取（脚本自动读取）
 
 4. **检查工作区是否干净**
    - 确认无残留的临时文件（如 `ssh_check*.py`、`ssh_reset*.py` 等临时脚本）
