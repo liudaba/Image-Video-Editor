@@ -311,6 +311,11 @@ class UIInitMixin:
         self.auth_status_label.configure(text=text, fg=color, bg=bg)
 
     def _set_action_buttons_state(self, state):
+        if state == "normal":
+            authed = getattr(self, '_auth_valid', False)
+            if not authed:
+                state = "disabled"
+                self._update_auth_status_label("⚠️ 授权已中断 - 点击登录", "#ef4444", "#2d1215")
         for btn_attr in ("btn_generate", "btn_render"):
             btn = getattr(self, btn_attr, None)
             if btn:
