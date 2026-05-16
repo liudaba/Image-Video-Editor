@@ -418,7 +418,7 @@
         }
 
         function getAdminToken() {
-            const stored = sessionStorage.getItem('admin_token');
+            const stored = localStorage.getItem('admin_token');
             if (stored) return stored;
             const match = document.cookie.match(/(?:^|;\s*)admin_session=([^;]*)/);
             return match ? decodeURIComponent(match[1]) : '';
