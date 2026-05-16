@@ -1,4 +1,4 @@
-"""
+﻿"""
 短视频生成器 - PyInstaller打包配置
 生成独立的.exe可执行文件
 集成PyArmor代码混淆，一键构建发布版本
@@ -11,6 +11,7 @@ import shutil
 import glob
 import subprocess
 import json
+import re
 
 
 def clean_build_dirs():
@@ -45,6 +46,42 @@ def clean_temp_files():
 
     print("✅ 临时文件清理完成\n")
 
+def _load_spec_config():
+    spec_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VideoGenerator.spec')
+    if not os.path.exists(spec_path):
+        print("  ⚠️  VideoGenerator.spec 不存在，使用内置默认配置")
+        return (
+            ['whisper', 'moviepy', 'torch', 'torchaudio', 'numpy', 'PIL', 'requests',
+             'tkinter', 'cryptography', 'cryptography.fernet', 'psutil', 'GPUtil',
+             'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip',
+             'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip',
+             'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip',
+             'moviepy.editor', 'tiktoken', 'numba', 'llvmlite', 'regex', 'pydub',
+             'imageio', 'imageio_ffmpeg', 'proglog', 'tqdm'],
+            ['test', 'tests', 'unittest', 'setuptools', 'pip', 'easy_install',
+             'pkg_resources', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'notebook',
+             'IPython', 'jupyter', 'tornado', 'fastapi', 'uvicorn', 'sqlalchemy',
+             'alembic', 'redis', 'asyncpg', 'aiosqlite', 'paramiko', 'bcrypt',
+             'passlib', 'python_jose', 'python_multipart', 'jose', 'httpx',
+             'websockets', 'starlette', 'anyio', 'httptools', 'pydantic', 'uvloop',
+             'sympy', 'networkx']
+        )
+    import re
+    with open(spec_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    hiddenimports = []
+    excludes = []
+    hi_match = re.search(r"hiddenimports\s*=\s*\[(.*?)\]", content, re.DOTALL)
+    if hi_match:
+        hiddenimports = re.findall(r"'([^']+)'", hi_match.group(1))
+    ex_match = re.search(r"excludes\s*=\s*\[(.*?)\]", content, re.DOTALL)
+    if ex_match:
+        excludes = re.findall(r"'([^']+)'", ex_match.group(1))
+    if hiddenimports:
+        print(f"  ✅ 从 spec 文件加载 {len(hiddenimports)} 个 hiddenimports")
+    if excludes:
+        print(f"  ✅ 从 spec 文件加载 {len(excludes)} 个 excludes")
+    return hiddenimports, excludes
 
 def check_packing_safety():
     print("\n🔒 执行打包安全检查...")
@@ -111,6 +148,8 @@ def _obfuscate_core_modules():
         "video_generator/license_manager.py",
         "video_generator/crypto_utils.py",
         "video_generator/auto_updater.py",
+        "video_generator/cloud_image_client.py",
+        "video_generator/cloud_llm_client.py",
     ]
 
     backup_dir = os.path.join(base_dir, "_obf_backup")
@@ -184,6 +223,8 @@ def _restore_original_modules():
         "video_generator/license_manager.py",
         "video_generator/crypto_utils.py",
         "video_generator/auto_updater.py",
+        "video_generator/cloud_image_client.py",
+        "video_generator/cloud_llm_client.py",
     ]
 
     for module_path in core_modules:
@@ -208,6 +249,30 @@ def build_executable():
     clean_temp_files()
 
     check_packing_safety()
+
+    spec_hiddenimports, spec_excludes = _load_spec_config()
+
+    try:
+        from video_generator.version import __version__, __build_number__
+        print(f"  📋 当前版本: v{__version__} (build {__build_number__})")
+        iss_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "installer_setup.iss")
+        if os.path.exists(iss_path):
+            with open(iss_path, "r", encoding="utf-8") as f:
+                iss_content = f.read()
+            iss_version_match = re.search(r'#define MyAppVersion "([^"]+)"', iss_content)
+            if iss_version_match and iss_version_match.group(1) != __version__:
+                iss_content = re.sub(
+                    r'#define MyAppVersion "[^"]+"',
+                    f'#define MyAppVersion "{__version__}"',
+                    iss_content,
+                )
+                with open(iss_path, "w", encoding="utf-8") as f:
+                    f.write(iss_content)
+                print(f"  ✅ installer_setup.iss 版本号已同步为 {__version__}")
+            elif iss_version_match:
+                print(f"  ✅ installer_setup.iss 版本号已是最新 ({__version__})")
+    except ImportError:
+        print("  ⚠️  无法读取版本信息")
 
     obfuscated = _obfuscate_core_modules()
 
@@ -246,37 +311,7 @@ def build_executable():
         '--add-data=LICENSE;.',
     ]
 
-    hidden_import_args = [
-        '--hidden-import=whisper',
-        '--hidden-import=moviepy',
-        '--hidden-import=torch',
-        '--hidden-import=torchaudio',
-        '--hidden-import=numpy',
-        '--hidden-import=PIL',
-        '--hidden-import=requests',
-        '--hidden-import=tkinter',
-        '--hidden-import=cryptography',
-        '--hidden-import=cryptography.fernet',
-        '--hidden-import=psutil',
-        '--hidden-import=GPUtil',
-        '--hidden-import=moviepy.video.io.ffmpeg_tools',
-        '--hidden-import=moviepy.video.VideoClip',
-        '--hidden-import=moviepy.video.compositing.CompositeVideoClip',
-        '--hidden-import=moviepy.audio.AudioClip',
-        '--hidden-import=moviepy.audio.io.AudioFileClip',
-        '--hidden-import=moviepy.video.io.VideoFileClip',
-        '--hidden-import=moviepy.video.VideoClip',
-        '--hidden-import=moviepy.editor',
-        '--hidden-import=tiktoken',
-        '--hidden-import=numba',
-        '--hidden-import=llvmlite',
-        '--hidden-import=regex',
-        '--hidden-import=pydub',
-        '--hidden-import=imageio',
-        '--hidden-import=imageio_ffmpeg',
-        '--hidden-import=proglog',
-        '--hidden-import=tqdm',
-    ]
+    hidden_import_args = [f'--hidden-import={m}' for m in spec_hiddenimports]
 
     collect_args = [
         '--collect-all=whisper',
@@ -286,30 +321,7 @@ def build_executable():
         '--collect-submodules=numba',
     ]
 
-    exclude_module_args = [
-        '--exclude-module=test',
-        '--exclude-module=tests',
-        '--exclude-module=unittest',
-        '--exclude-module=setuptools',
-        '--exclude-module=pip',
-        '--exclude-module=easy_install',
-        '--exclude-module=pkg_resources',
-        '--exclude-module=PyQt5',
-        '--exclude-module=PyQt6',
-        '--exclude-module=matplotlib',
-        '--exclude-module=scipy',
-        '--exclude-module=notebook',
-        '--exclude-module=IPython',
-        '--exclude-module=jupyter',
-        '--exclude-module=tornado',
-        '--exclude-module=fastapi',
-        '--exclude-module=uvicorn',
-        '--exclude-module=sqlalchemy',
-        '--exclude-module=alembic',
-        '--exclude-module=redis',
-        '--exclude-module=asyncpg',
-        '--exclude-module=aiosqlite',
-    ]
+    exclude_module_args = [f'--exclude-module={m}' for m in spec_excludes]
 
     args = [
         'run.py',
@@ -578,6 +590,14 @@ def _verify_output(output_dir):
                     rel = os.path.relpath(os.path.join(root, f), output_dir)
                     print(f"  ❌ 错误: 发现源代码文件 {rel}")
                     has_error = True
+                obf_modules = ['auth_core', 'auth_dialogs', 'auth_fingerprint',
+                               'license_manager', 'crypto_utils', 'auto_updater',
+                               'cloud_image_client', 'cloud_llm_client']
+                for mod in obf_modules:
+                    if fl == f'{mod}.py' or fl == f'{mod}.pyc':
+                        rel = os.path.relpath(os.path.join(root, f), output_dir)
+                        print(f"  ❌ 错误: 安全模块未混淆 {rel}（应为 .pyd）")
+                        has_error = True
 
     if not has_error:
         print(f"  ✅ 安全验证通过: 没有发现不该存在的文件")
@@ -710,7 +730,7 @@ def _post_build(output_dir):
         '    If result = vbNo Then WScript.Quit 0\n'
         'End If\n'
         'shell.CurrentDirectory = appDir\n'
-        'shell.Run "短视频生成器.exe", 0, False\n'
+        'shell.Run "短视频生成器.exe", 1, False\n'
     )
     vbs_path = os.path.join(output_dir, "启动.vbs")
     with open(vbs_path, "w", encoding="gbk") as f:
@@ -1218,7 +1238,27 @@ pause >nul
 echo.
 
 echo ============================================================
-echo  第5步: 验证文件完整性
+echo  第5步: 检查VC++运行时
+echo ============================================================
+echo.
+
+where vcruntime140.dll >nul 2>&1
+if errorlevel 1 (
+    echo  [!] 未检测到 VC++ 运行时
+    echo  [!] 这可能导致软件无法启动
+    echo.
+    echo  请下载并安装 Microsoft Visual C++ Redistributable:
+    echo  https://aka.ms/vs/17/release/vc_redist.x64.exe
+    echo.
+    echo  安装完成后按任意键继续...
+    pause >nul
+) else (
+    echo  [OK] VC++ 运行时已安装
+)
+echo.
+
+echo ============================================================
+echo  第6步: 验证文件完整性
 echo ============================================================
 echo.
 echo  正在快速检查关键文件...
@@ -1281,7 +1321,7 @@ echo  如需完整文件校验，请运行「环境自检修复.bat」
 echo.
 
 echo ============================================================
-echo  第6步: 启动软件
+echo  第7步: 启动软件
 echo ============================================================
 echo.
 echo  环境检查完成！即将启动软件...
@@ -1299,7 +1339,7 @@ start "" "%APP_DIR%短视频生成器.exe"
     bat_path = os.path.join(output_dir, "首次运行引导.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
-    print("  ✅ 生成 首次运行引导.bat（6步引导，含解压验证）")
+    print("  ✅ 生成 首次运行引导.bat（7步引导，含解压验证）")
 
 
 def _verify_required_files(output_dir):
@@ -1396,7 +1436,7 @@ def _create_release_archive(output_dir):
         print(f"     {output_dir}")
         print()
         print("  💡 建议使用7z固实压缩以获得更小体积和更好的完整性保护:")
-        print(f"     7z a -t7z -mx=5 -ms=on VideoGenerator.7z {output_dir}")
+        print(f"     7z a -t7z -mx=7 -ms=on VideoGenerator.7z {output_dir}")
         return
 
     from datetime import datetime
@@ -1408,7 +1448,7 @@ def _create_release_archive(output_dir):
     print(f"  📦 使用7z固实压缩（Solid Archive）...")
     print(f"     输出: {archive_7z}")
 
-    cmd = [zip_cmd, "a", "-t7z", "-mx=5", "-ms=on", "-m0=lzma2",
+    cmd = [zip_cmd, "a", "-t7z", "-mx=7", "-ms=on", "-m0=lzma2",
            archive_7z, os.path.basename(output_dir)]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd="dist")
     if result.returncode == 0:
