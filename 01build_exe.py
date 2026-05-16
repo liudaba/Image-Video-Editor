@@ -581,6 +581,7 @@ def _clean_output(output_dir):
         '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
+        'generate_signing_keys.py',
         # SSH密码管理 - 绝对不能打包
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py', '生成SSH密码.bat',
@@ -593,9 +594,11 @@ def _clean_output(output_dir):
         '后台管理系统启动器.py', '停止后台管理系统.bat',
         # 开发和部署脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
+        '!!!首次使用点我.bat',
         '检查环境.bat', '生成Demo素材.bat', 'check_and_install_deps.bat',
         # 其他
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
+    '更新日志.md', '系统要求.md', '!!!首次使用点我.bat',
         'README.md', 'TERMS_OF_SERVICE.md', 'PRIVACY_POLICY.md',
         '用户快速开始.md', '开发人员快速参考.md',
     ]
@@ -657,13 +660,16 @@ def _verify_output(output_dir):
         '后台管理系统启动器.py', '停止后台管理系统.bat',
         # 其他开发脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
+        '!!!首次使用点我.bat',
         '检查环境.bat', '生成Demo素材.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
+    '更新日志.md', '系统要求.md', '!!!首次使用点我.bat',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
+        'generate_signing_keys.py',
         # ⚠️ SSH密码管理 - 绝对不能打包
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py', '生成SSH密码.bat',
@@ -977,6 +983,27 @@ def _post_build(output_dir):
         print("  ✅ 复制 创建桌面快捷方式.bat")
     else:
         print("  ⚠️  创建桌面快捷方式.bat 缺失")
+
+    first_run_bat = os.path.join(base_dir, "!!!首次使用点我.bat")
+    if os.path.exists(first_run_bat):
+        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!首次使用点我.bat"))
+        print("  ✅ 复制 !!!首次使用点我.bat")
+    else:
+        print("  ⚠️  !!!首次使用点我.bat 缺失")
+
+    changelog_file = os.path.join(base_dir, "更新日志.md")
+    if os.path.exists(changelog_file):
+        shutil.copy2(changelog_file, os.path.join(output_dir, "更新日志.md"))
+        print("  ✅ 复制 更新日志.md")
+    else:
+        print("  ⚠️  更新日志.md 缺失")
+
+    sysreq_file = os.path.join(base_dir, "系统要求.md")
+    if os.path.exists(sysreq_file):
+        shutil.copy2(sysreq_file, os.path.join(output_dir, "系统要求.md"))
+        print("  ✅ 复制 系统要求.md")
+    else:
+        print("  ⚠️  系统要求.md 缺失")
 
     _generate_checksums(output_dir)
 
@@ -1601,6 +1628,13 @@ def _verify_config_content(output_dir):
         if api_url.startswith('http://'):
             print(f"  ⚠️  api_base_url 使用 HTTP，建议升级为 HTTPS")
         print(f"  ✅ api_base_url = {api_url}")
+        sensitive_keys = ['cloud_llm_api_key', 'cloud_asr_api_key', 'cloud_image_api_key']
+        for key in sensitive_keys:
+            if config.get(key, '') != '':
+                print(f"  ❌ config.json 中 {key} 不为空! 密钥将被分发给所有用户!")
+                print("     打包前请确保所有 API Key 字段为空字符串")
+                sys.exit(1)
+        print("  ✅ API Key 字段均为空（安全）")
     except json.JSONDecodeError:
         print("  ❌ config.json 格式错误!")
         sys.exit(1)
