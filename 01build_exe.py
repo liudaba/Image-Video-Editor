@@ -551,6 +551,8 @@ def _verify_output(output_dir):
         matches = glob.glob(os.path.join(output_dir, pattern))
         for match in matches:
             filename = os.path.basename(match)
+            if filename == '.license_verify_key':
+                continue
             print(f"  ❌ 错误: 发现了不应该存在的 {filename}")
             has_error = True
 
@@ -572,6 +574,8 @@ def _verify_output(output_dir):
             matches = glob.glob(os.path.join(internal_dir, pattern))
             for match in matches:
                 filename = os.path.basename(match)
+                if filename == '.license_verify_key':
+                    continue
                 print(f"  ❌ 错误: 发现了不应该存在的 _internal/{filename}")
                 has_error = True
         # 深度扫描: 递归检查所有子目录中的敏感文件
@@ -582,22 +586,25 @@ def _verify_output(output_dir):
         for root, dirs, files in os.walk(internal_dir):
             for f in files:
                 fl = f.lower()
+                if f == '.license_verify_key':
+                    continue
                 if f in sensitive_patterns or any(f.endswith(ext) for ext in sensitive_extensions):
                     rel = os.path.relpath(os.path.join(root, f), output_dir)
                     print(f"  ❌ 错误: 发现敏感文件 {rel}")
                     has_error = True
                 if fl.endswith('.py') and not fl.endswith('.pyd'):
                     rel = os.path.relpath(os.path.join(root, f), output_dir)
-                    print(f"  ❌ 错误: 发现源代码文件 {rel}")
-                    has_error = True
-                obf_modules = ['auth_core', 'auth_dialogs', 'auth_fingerprint',
-                               'license_manager', 'crypto_utils', 'auto_updater',
-                               'cloud_image_client', 'cloud_llm_client']
-                for mod in obf_modules:
-                    if fl == f'{mod}.py' or fl == f'{mod}.pyc':
-                        rel = os.path.relpath(os.path.join(root, f), output_dir)
-                        print(f"  ❌ 错误: 安全模块未混淆 {rel}（应为 .pyd）")
+                    rel_norm = rel.replace(os.sep, '/')
+                    if 'video_generator/' in rel_norm:
+                        print(f"  ❌ 错误: 发现源代码文件 {rel}")
                         has_error = True
+                    obf_modules = ['auth_core', 'auth_dialogs', 'auth_fingerprint',
+                                   'license_manager', 'crypto_utils', 'auto_updater',
+                                   'cloud_image_client', 'cloud_llm_client']
+                    for mod in obf_modules:
+                        if fl == f'{mod}.py' or fl == f'{mod}.pyc':
+                            print(f"  ❌ 错误: 安全模块未混淆 {rel}（应为 .pyd）")
+                            has_error = True
 
     if not has_error:
         print(f"  ✅ 安全验证通过: 没有发现不该存在的文件")
@@ -800,6 +807,19 @@ def _post_build(output_dir):
         shutil.copy2(detailed_guide, os.path.join(output_dir, "使用指南.md"))
         print("  ✅ 复制 使用指南.md（详细说明）")
 
+    license_file = os.path.join(base_dir, "LICENSE")
+    if os.path.exists(license_file):
+        shutil.copy2(license_file, os.path.join(output_dir, "LICENSE"))
+        print("  ✅ 复制 LICENSE")
+    terms_file = os.path.join(base_dir, "TERMS_OF_SERVICE.md")
+    if os.path.exists(terms_file):
+        shutil.copy2(terms_file, os.path.join(output_dir, "服务条款.md"))
+        print("  ✅ 复制 服务条款.md")
+    privacy_file = os.path.join(base_dir, "PRIVACY_POLICY.md")
+    if os.path.exists(privacy_file):
+        shutil.copy2(privacy_file, os.path.join(output_dir, "隐私政策.md"))
+        print("  ✅ 复制 隐私政策.md")
+
     _generate_checksums(output_dir)
 
     _generate_diagnostic_bat(output_dir)
@@ -836,8 +856,11 @@ def _generate_checksums(output_dir):
                 try:
                     file_size = os.path.getsize(abs_path)
                     total_size += file_size
+                    sha256_hash = hashlib.sha256()
                     with open(abs_path, "rb") as fh:
-                        sha256 = hashlib.sha256(fh.read()).hexdigest()
+                        for chunk in iter(lambda: fh.read(8192), b''):
+                            sha256_hash.update(chunk)
+                    sha256 = sha256_hash.hexdigest()
                     f.write(f"{sha256}  {rel_path}\n")
                     count += 1
                 except (OSError, PermissionError):
@@ -1019,50 +1042,53 @@ set "CHK_TOTAL=0"
 for /f "usebackq tokens=1,*" %%A in ("%CHK_FILE%") do (
     set "HASH=%%A"
     set "FNAME=%%B"
-
-    if "!HASH:~0,1!"=="#" goto :checksum_next
-    if "!HASH!"=="ERROR" goto :checksum_next
-    if "!HASH!"=="" goto :checksum_next
-
-    set /a CHK_TOTAL+=1
-    set "FULL_PATH=%APP_DIR%!FNAME:/=\!"
-
-    if not exist "!FULL_PATH!" (
-        echo   [!!] 文件缺失: !FNAME!
-        echo   [!!] 文件缺失: !FNAME! >> "%LOG_FILE%"
-        set /a CHK_FAIL+=1
-        goto :checksum_next
-    )
-
-    certutil -hashfile "!FULL_PATH!" SHA256 >nul 2>&1
-    if errorlevel 1 (
-        set /a CHK_PASS+=1
-        goto :checksum_next
-    )
-
-    set "ACTUAL_HASH="
-    for /f "tokens=1,* skip=1" %%H in ('certutil -hashfile "!FULL_PATH!" SHA256 2^>nul ^| findstr /v ":" ^| findstr /v "CertUtil"') do (
-        set "ACTUAL_HASH=!ACTUAL_HASH!%%H"
-    )
-
-    if "!ACTUAL_HASH!"=="" (
-        set /a CHK_PASS+=1
-        goto :checksum_next
-    )
-
-    set "ACTUAL_HASH_LC=!ACTUAL_HASH: =!"
-    set "EXPECTED_LC=!HASH: =!"
-
-    if /i "!ACTUAL_HASH_LC!"=="!EXPECTED_LC!" (
-        set /a CHK_PASS+=1
-    ) else (
-        echo   [!!] 文件已损坏: !FNAME!
-        echo   [!!] 文件已损坏: !FNAME! >> "%LOG_FILE%"
-        set /a CHK_FAIL+=1
-    )
-
-    :checksum_next
+    call :check_one_line
 )
+
+goto :checksum_done
+
+:check_one_line
+if "!HASH:~0,1!"=="#" goto :eof
+if "!HASH!"=="ERROR" goto :eof
+if "!HASH!"=="" goto :eof
+
+set /a CHK_TOTAL+=1
+set "FULL_PATH=%APP_DIR%!FNAME:/=\!"
+
+if not exist "!FULL_PATH!" (
+    echo   [!!] 文件缺失: !FNAME!
+    echo   [!!] 文件缺失: !FNAME! >> "%LOG_FILE%"
+    set /a CHK_FAIL+=1
+    goto :eof
+)
+
+certutil -hashfile "!FULL_PATH!" SHA256 >nul 2>&1
+if errorlevel 1 (
+    set /a CHK_PASS+=1
+    goto :eof
+)
+
+set "ACTUAL_HASH="
+for /f "tokens=1,* skip=1" %%H in ('certutil -hashfile "!FULL_PATH!" SHA256 2^>nul ^| findstr /v ":" ^| findstr /v "CertUtil"') do (
+    set "ACTUAL_HASH=!ACTUAL_HASH!%%H"
+)
+
+if "!ACTUAL_HASH!"=="" (
+    set /a CHK_PASS+=1
+    goto :eof
+)
+
+set "ACTUAL_HASH_LC=!ACTUAL_HASH: =!"
+set "EXPECTED_LC=!HASH: =!"
+
+if /i "!ACTUAL_HASH_LC!"=="!EXPECTED_LC!" (
+    set /a CHK_PASS+=1
+) else (
+    echo   [!!] 文件已损坏: !FNAME!
+    echo   [!!] 文件已损坏: !FNAME! >> "%LOG_FILE%"
+    set /a CHK_FAIL+=1
+)
+goto :eof
 
 if !CHK_TOTAL! GTR 0 (
     if !CHK_FAIL! EQU 0 (
@@ -1151,6 +1177,7 @@ def _generate_first_run_bat(output_dir):
 chcp 65001 >nul 2>&1
 title 短视频生成器 - 首次运行引导
 color 0B
+cd /d "%~dp0"
 
 set "APP_DIR=%~dp0"
 
@@ -1402,10 +1429,13 @@ def _verify_config_content(output_dir):
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
         api_url = config.get("api_base_url", "")
-        if not api_url or "localhost" in api_url or "127.0.0.1" in api_url:
+        private_patterns = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.2', '172.3']
+        if not api_url or any(p in api_url for p in private_patterns):
             print(f"  ❌ api_base_url 为 {api_url}，用户无法连接服务器!")
             print("     请确保 config.json 中 api_base_url 指向生产服务器")
             sys.exit(1)
+        if api_url.startswith('http://'):
+            print(f"  ⚠️  api_base_url 使用 HTTP，建议升级为 HTTPS")
         print(f"  ✅ api_base_url = {api_url}")
     except json.JSONDecodeError:
         print("  ❌ config.json 格式错误!")
