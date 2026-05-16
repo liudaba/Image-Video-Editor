@@ -1740,6 +1740,16 @@ class ShotsMixin:
         if theme_elements:
             description_parts['theme_elements'] = theme_elements
         
+        # 视觉基调差异化：根据每个分镜的配音内容，将全局基调细分为更精准的子基调
+        # 这是唯一调用_diversify_visual_tone的地方，确保差异化逻辑只执行一次
+        original_visual_tone = effective_visual_tone
+        if hasattr(self, '_diversify_visual_tone') and effective_visual_tone:
+            diversified = self._diversify_visual_tone(cleaned_sentence, effective_visual_tone)
+            if diversified != effective_visual_tone:
+                self.log(f"   🎨 分镜{shot_id+1} 基调差异化: 「{original_visual_tone}」→「{diversified}」")
+                effective_visual_tone = diversified
+                description_parts['custom_visual_tone'] = effective_visual_tone
+        
         # 检查用户选择的提示词类型
         prompt_type = "SD提示词"
         if hasattr(self, 'prompt_type_var'):
@@ -1947,9 +1957,6 @@ class ShotsMixin:
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
-        if hasattr(self, '_diversify_visual_tone') and visual_tone:
-            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
-            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
 
         try:
@@ -1966,9 +1973,6 @@ class ShotsMixin:
         dubbing = description_parts.get('dubbing', '')
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
-        if hasattr(self, '_diversify_visual_tone') and visual_tone:
-            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
-            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         
@@ -1990,9 +1994,6 @@ class ShotsMixin:
         dubbing = description_parts['dubbing']
         core_theme = description_parts.get('custom_theme', '')
         visual_tone = description_parts.get('custom_visual_tone', '')
-        if hasattr(self, '_diversify_visual_tone') and visual_tone:
-            visual_tone = self._diversify_visual_tone(description_parts.get('dubbing', ''), visual_tone)
-            description_parts['custom_visual_tone'] = visual_tone
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
         visual_style = description_parts.get('visual_style', '')
@@ -2845,7 +2846,7 @@ class ShotsMixin:
             model = "gemma3:4b"
 
         effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
-        effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
+        effective_visual_tone = theme_info.get('visual_tone', '')
 
         template_params = {
             "content_type": theme_info.get('content_type', '') or "未指定类型",
@@ -2927,6 +2928,15 @@ class ShotsMixin:
                                 context_hint += f"  - {sk}\n"
                 except Exception:
                     pass
+
+            shot_visual_tone = effective_visual_tone
+            if hasattr(self, '_diversify_visual_tone') and shot_visual_tone and dubbing:
+                diversified = self._diversify_visual_tone(dubbing, shot_visual_tone)
+                if diversified != shot_visual_tone:
+                    shot_visual_tone = diversified
+                    tone_en = self._translate_to_english(shot_visual_tone)
+                    if tone_en:
+                        context_hint += f"Visual tone for THIS shot: {tone_en} (different from global tone)\n"
 
             dubbings.append({
                 "idx": original_idx + 1,
@@ -3646,23 +3656,12 @@ class ShotsMixin:
 
             if '视觉基调' in cleaned_result:
                 tone_match = cleaned_result.split('视觉基调')[1].split('\n')[0].replace('：', '').replace(':', '').strip()
-                tone_en_map = {
-                    '严肃': 'serious, solemn',
-                    '紧张': 'tense, suspenseful',
-                    '轻松': 'light, relaxed',
-                    '温馨': 'warm, cozy',
-                    '激昂': 'passionate, stirring',
-                    '悲伤': 'sad, melancholic',
-                    '欢快': 'cheerful, joyful',
-                    '平静': 'calm, peaceful',
-                    '震撼': 'shocking, impactful',
-                    '忧郁': 'melancholic, gloomy',
-                }
                 theme_info['visual_tone'] = tone_match
-                if tone_match in tone_en_map:
-                    theme_info['visual_tone_en'] = tone_en_map[tone_match]
+                if tone_match in _TRANSLATION_MAPPING:
+                    theme_info['visual_tone_en'] = _TRANSLATION_MAPPING[tone_match]
                 else:
-                    theme_info['visual_tone_en'] = tone_match
+                    translated = self._translate_to_english(tone_match)
+                    theme_info['visual_tone_en'] = translated if translated else tone_match
 
             if '英文视觉风格' in cleaned_result:
                 try:
@@ -4299,7 +4298,7 @@ class ShotsMixin:
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/3: 主题分析与纠错")
-            self.log("   流程: 发送文本 → 等待模型分析 → 提取分析结果")
+            self.log("   流程: 发送全文 → 大模型提取主题/基调/元素/纠错 → 供后续分镜使用")
             self.update_task_progress("正在分析文章内容...", 40)
             
             if not self.task_running:
@@ -4385,7 +4384,11 @@ class ShotsMixin:
                     self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
                 
                 if not user_custom_tone and theme_info.get('visual_tone'):
-                    self.log(f"🎨 视觉基调: {theme_info['visual_tone']}")
+                    tone_cn = theme_info['visual_tone']
+                    tone_en = theme_info.get('visual_tone_en', '')
+                    tone_display = f"{tone_cn} ({tone_en})" if tone_en else tone_cn
+                    self.log(f"🎨 视觉基调: {tone_display}")
+                    self.log(f"   💡 每个分镜将根据配音内容自动差异化基调")
                 elif user_custom_tone:
                     theme_info['visual_tone'] = user_custom_tone
                     self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
@@ -4612,7 +4615,11 @@ class ShotsMixin:
                                 self.log(f"💭 情感基调: {theme_info['emotional_tone']}")
                             
                             if not user_custom_tone and theme_info.get('visual_tone'):
-                                self.log(f"🎨 视觉基调: {theme_info['visual_tone']}")
+                                tone_cn = theme_info['visual_tone']
+                                tone_en = theme_info.get('visual_tone_en', '')
+                                tone_display = f"{tone_cn} ({tone_en})" if tone_en else tone_cn
+                                self.log(f"🎨 视觉基调: {tone_display}")
+                                self.log(f"   💡 每个分镜将根据配音内容自动差异化基调")
                             elif user_custom_tone:
                                 theme_info['visual_tone'] = user_custom_tone
                                 self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
@@ -4660,6 +4667,7 @@ class ShotsMixin:
             
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
             self.log("\n📍 步骤 3/3: 创建分镜")
+            self.log("   流程: 语音片段 → 批量生成提示词(含差异化基调) → 创建分镜 → 合并过短/拆分超长")
             self.update_task_progress("正在准备分镜任务...", 60)
             
             correction_dict = theme_info.get('correction_dict', {})
@@ -4688,6 +4696,8 @@ class ShotsMixin:
             pregenerated_prompts = {}
             
             self.log("\n🎨 预先为原始分镜生成提示词...")
+            self.log(f"   📋 流程说明: 先批量生成提示词 → 再创建分镜时直接使用")
+            self.log(f"   🎨 视觉基调策略: 全局基调「{theme_info.get('visual_tone', '未指定')}」→ 按分镜内容自动差异化")
             self.update_task_progress(f"正在生成分镜提示词 (0/{len(final_tasks)})...", 62)
             
             if not final_tasks:
@@ -4802,13 +4812,15 @@ class ShotsMixin:
                         dubbing = task.get('text', '')
                         if dubbing:
                             effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
-                            effective_visual_tone = theme_info.get('visual_tone_en', '') or theme_info.get('visual_tone', '')
+                            shot_visual_tone = theme_info.get('visual_tone', '')
+                            if hasattr(self, '_diversify_visual_tone') and shot_visual_tone:
+                                shot_visual_tone = self._diversify_visual_tone(dubbing, shot_visual_tone)
                             prompt = self._generate_prompt_with_llm(
                                 dubbing,
                                 content_type=theme_info.get('content_type', ''),
                                 prompt_type=user_prompt_type,
                                 core_theme=theme_info.get('core_theme', ''),
-                                visual_tone=effective_visual_tone,
+                                visual_tone=shot_visual_tone,
                                 theme_elements=theme_info.get('theme_elements', []),
                                 visual_style=effective_visual_style,
                                 original_dubbing=dubbing,
@@ -4935,7 +4947,7 @@ class ShotsMixin:
             # 步骤3: 创建分镜
             self.log("\n🔧 步骤 3 - 创建分镜")
             self.update_task_progress("正在创建分镜...", 80)
-            self.log(f"📝 基于语音片段创建分镜（提示词已预生成）")
+            self.log(f"📝 基于语音片段创建分镜（提示词已预生成，将应用差异化基调）")
             
             if not self.task_running:
                 self.log("❌ 任务已被取消")
@@ -5280,9 +5292,16 @@ class ShotsMixin:
             _shots_elapsed = time.time() - _shots_start_time
             _shots_min = int(_shots_elapsed // 60)
             _shots_sec = int(_shots_elapsed % 60)
+            
+            _diversified_count = sum(1 for s in shots if s.get('visual_tone', '') != theme_info.get('visual_tone', '') and s.get('visual_tone', ''))
+            _tone_variants = list(dict.fromkeys(s.get('visual_tone', '') for s in shots if s.get('visual_tone', '')))
+            
             self.log("=" * 50)
             self.log("✅ 分镜脚本生成完成！")
             self.log(f"   📊 共 {len(shots)} 个分镜")
+            self.log(f"   🎨 基调差异化: {_diversified_count}个分镜应用了差异化基调（共{len(_tone_variants)}种变体）")
+            if _tone_variants:
+                self.log(f"   🎨 基调变体: {', '.join(_tone_variants[:8])}")
             self.log(f"   ⏱️ 总耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
             self.log(f"   📁 保存位置: {shots_file}")
             if not auto_mode:
