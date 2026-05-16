@@ -513,6 +513,7 @@ def build_executable():
         if os.path.exists(output_dir):
             _post_build(output_dir)
             _clean_output(output_dir)
+            _post_clean_copy(output_dir)
             if os.path.exists(final_dir):
                 shutil.rmtree(final_dir)
             os.rename(output_dir, final_dir)
@@ -984,33 +985,34 @@ def _post_build(output_dir):
     else:
         print("  ⚠️  创建桌面快捷方式.bat 缺失")
 
-    first_run_bat = os.path.join(base_dir, "!!!首次使用点我.bat")
-    if os.path.exists(first_run_bat):
-        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!首次使用点我.bat"))
-        print("  ✅ 复制 !!!首次使用点我.bat")
-    else:
-        print("  ⚠️  !!!首次使用点我.bat 缺失")
-
-    changelog_file = os.path.join(base_dir, "更新日志.md")
-    if os.path.exists(changelog_file):
-        shutil.copy2(changelog_file, os.path.join(output_dir, "更新日志.md"))
-        print("  ✅ 复制 更新日志.md")
-    else:
-        print("  ⚠️  更新日志.md 缺失")
-
-    sysreq_file = os.path.join(base_dir, "系统要求.md")
-    if os.path.exists(sysreq_file):
-        shutil.copy2(sysreq_file, os.path.join(output_dir, "系统要求.md"))
-        print("  ✅ 复制 系统要求.md")
-    else:
-        print("  ⚠️  系统要求.md 缺失")
-
     _generate_checksums(output_dir)
 
     _generate_diagnostic_bat(output_dir)
     _generate_first_run_bat(output_dir)
 
     print("  ✅ 后处理完成\n")
+
+
+def _post_clean_copy(output_dir):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    first_run_bat = os.path.join(base_dir, "!!!首次使用点我.bat")
+    if os.path.exists(first_run_bat):
+        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!首次使用点我.bat"))
+        print("  ✅ 复制 !!!首次使用点我.bat")
+    else:
+        print("  ⚠️  !!!首次使用点我.bat 缺失")
+    changelog_file = os.path.join(base_dir, "更新日志.md")
+    if os.path.exists(changelog_file):
+        shutil.copy2(changelog_file, os.path.join(output_dir, "更新日志.md"))
+        print("  ✅ 复制 更新日志.md")
+    else:
+        print("  ⚠️  更新日志.md 缺失")
+    sysreq_file = os.path.join(base_dir, "系统要求.md")
+    if os.path.exists(sysreq_file):
+        shutil.copy2(sysreq_file, os.path.join(output_dir, "系统要求.md"))
+        print("  ✅ 复制 系统要求.md")
+    else:
+        print("  ⚠️  系统要求.md 缺失")
 
 
 def _generate_checksums(output_dir):
