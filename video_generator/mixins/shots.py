@@ -3991,8 +3991,8 @@ class ShotsMixin:
             self.log("🎬 开始一键生成分镜")
             self.log("=" * 50)
             
-            if hasattr(self, 'min_shot_duration_var'):
-                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
+            if hasattr(self, '_sync_all_settings'):
+                self._sync_all_settings()
             
             if hasattr(self, '_pregenerated_prompts'):
                 delattr(self, '_pregenerated_prompts')

@@ -289,8 +289,7 @@ class UIHandlersMixin:
         """打开/关闭高级设置窗口"""
         if self.advanced_window and self.advanced_window.winfo_exists():
             try:
-                if hasattr(self, 'min_shot_duration_var'):
-                    self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
+                self._sync_all_settings()
                 self.save_config()
                 self._print_current_settings()
             except Exception:
@@ -418,8 +417,7 @@ class UIHandlersMixin:
     def _on_advanced_window_close(self):
         """高级设置窗口关闭事件 - 自动保存配置并显示参数"""
         try:
-            if hasattr(self, 'min_shot_duration_var'):
-                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
+            self._sync_all_settings()
             self.save_config()
             self._print_current_settings()
         except Exception:
@@ -629,8 +627,8 @@ class UIHandlersMixin:
             if custom_tone:
                 msg += f"\n视觉基调: {custom_tone}"
             if hasattr(self, 'min_shot_duration_var'):
-                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
-                msg += f"\n最短分镜时长: {self.MIN_SHOT_DURATION:.1f}秒"
+                msg += f"\n最短分镜时长: {self.min_shot_duration_var.get():.1f}秒"
+            self._sync_all_settings()
             self.log(msg)
             self.save_config()
             self._print_current_settings()
@@ -640,6 +638,19 @@ class UIHandlersMixin:
             # 取消应用
             self.log("⚠️ 设置应用已取消")
     
+
+    def _sync_all_settings(self):
+        """同步所有高级设置面板变量到运行时状态（无需点击应用按钮）"""
+        try:
+            if hasattr(self, 'min_shot_duration_var'):
+                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_apply_cloud_llm_config'):
+                self._apply_cloud_llm_config()
+        except Exception:
+            pass
 
     def check_sd_api_connection(self, silent=False):
         """连接 SD API - 在子线程中执行，避免阻塞UI
