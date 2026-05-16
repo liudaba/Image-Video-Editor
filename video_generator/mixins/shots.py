@@ -3282,9 +3282,25 @@ class ShotsMixin:
 
 
     def _translate_to_english(self, chinese_text):
-        """简单的中文到英文翻译（使用模块级常量，避免重复实例化）"""
+        """中文到英文翻译，支持多词组合（逗号/顿号分隔）"""
         if chinese_text in _TRANSLATION_MAPPING:
             return _TRANSLATION_MAPPING[chinese_text]
+        if ',' in chinese_text or '，' in chinese_text or '、' in chinese_text:
+            parts = re.split(r'[,，、]', chinese_text)
+            translated_parts = []
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+                if part in _TRANSLATION_MAPPING:
+                    translated_parts.append(_TRANSLATION_MAPPING[part])
+                else:
+                    for key, value in _TRANSLATION_MAPPING.items():
+                        if key in part:
+                            translated_parts.append(value)
+                            break
+            if translated_parts:
+                return ', '.join(translated_parts)
         for key, value in _TRANSLATION_MAPPING.items():
             if key in chinese_text:
                 return value
