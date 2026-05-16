@@ -964,6 +964,20 @@ def _post_build(output_dir):
         shutil.copy2(privacy_file, os.path.join(output_dir, "隐私政策.md"))
         print("  ✅ 复制 隐私政策.md")
 
+    icon_src = os.path.join(base_dir, "assets", "icon.ico")
+    if os.path.exists(icon_src):
+        shutil.copy2(icon_src, os.path.join(output_dir, "icon.ico"))
+        print("  ✅ 复制 icon.ico（桌面快捷方式图标）")
+    else:
+        print("  ⚠️  assets/icon.ico 缺失，桌面快捷方式将使用默认图标")
+
+    shortcut_bat = os.path.join(base_dir, "创建桌面快捷方式.bat")
+    if os.path.exists(shortcut_bat):
+        shutil.copy2(shortcut_bat, os.path.join(output_dir, "创建桌面快捷方式.bat"))
+        print("  ✅ 复制 创建桌面快捷方式.bat")
+    else:
+        print("  ⚠️  创建桌面快捷方式.bat 缺失")
+
     _generate_checksums(output_dir)
 
     _generate_diagnostic_bat(output_dir)
