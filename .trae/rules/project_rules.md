@@ -33,28 +33,24 @@
   - 正确: `scp auth.py root@8.141.101.155:/root/videogen/app/routers/auth.py`
   - 错误: `scp auth.py root@8.141.101.155:/root/videogen/backend/app/routers/auth.py`
 
-### 云端代码同步流程
+### 云端代码同步流程（一键同步，禁止手动分步操作）
 
-1. **本地提交推送**：先 `git add` + `git commit` + `git push origin master`
-2. **scp 上传变更文件**：将修改的后端文件上传到服务器
-   ```bash
-   # 单文件示例
-   scp -o StrictHostKeyChecking=no backend/app/auth.py root@8.141.101.155:/root/videogen/app/auth.py
+**必须使用 `sync_to_server.py` 一键同步脚本**，该脚本自动完成：上传所有后端文件 → 重启API容器 → 健康检查验证。禁止手动 scp + 手动重启的分步操作，避免遗漏重启步骤。
 
-   # 常用目录映射：
-   #   本地 backend/app/xxx.py        → 服务器 /root/videogen/app/xxx.py
-   #   本地 backend/app/routers/xxx.py → 服务器 /root/videogen/app/routers/xxx.py
-   #   本地 backend/app/templates/xxx  → 服务器 /root/videogen/app/templates/xxx
-   ```
-3. **自动重启 API 容器**（代码同步后自动执行，无需额外确认）：
-   ```bash
-   ssh root@8.141.101.155 "cd /root/videogen && docker compose restart api"
-   ```
-4. **验证服务正常**：
-   ```bash
-   ssh root@8.141.101.155 "curl -s http://127.0.0.1:8000/health"
-   # 期望返回: {"status":"ok","database":"ok","redis":"ok",...}
-   ```
+```bash
+# 一键同步（上传所有后端文件 + 自动重启 + 自动验证）
+python sync_to_server.py
+
+# 仅同步代码文件（不同步模板）
+python sync_to_server.py --code
+
+# 仅同步模板文件
+python sync_to_server.py --templates
+```
+
+**同步前必须先提交推送**：`git add -A && git commit -m "xxx" && git push origin master`
+
+> ⚠️ **绝对禁止**：手动 scp 上传后忘记重启容器。这会导致服务器运行旧代码，项目运行不畅。始终使用 `sync_to_server.py`。
 
 ### 注意事项
 
@@ -83,12 +79,10 @@
 
 ## 部署与自动重启
 
-- **每次代码同步到云端服务器后，必须自动重启 API 容器**，使配置变更（包括密钥更新）立即生效
-- **部署流程**：scp 上传文件 → `docker compose restart api` → `curl /health` 验证
+- **必须使用 `sync_to_server.py` 一键同步**：上传 + 重启 + 验证一步到位，杜绝遗漏重启
+- **.env 变更后需额外操作**：`sync_to_server.py` 默认执行 `docker compose restart api`；如果修改了 `.env` 文件，需手动执行 `docker compose up -d api`（重建容器以加载新环境变量）
+- **密钥文件同步**：新密钥文件上传到服务器后，同样使用 `sync_to_server.py` 自动重启
 - **无需用户确认重启**：代码已同步到服务器意味着用户已同意部署，自动重启是部署流程的一部分
-- **重启后必须验证**：执行 `curl -s http://127.0.0.1:8000/health`，确认返回 `{"status":"ok",...}`
-- **密钥文件同步**：新密钥文件上传到服务器后，同样自动重启 API 容器
-- **.env 变更后必须用 `docker compose up -d api`**（不是 restart），否则新环境变量不会加载
 
 ### 首次部署 ECDSA 密钥的步骤
 
