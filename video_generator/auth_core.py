@@ -175,6 +175,7 @@ class LicenseManager:
                 cls._instance._stopping = False
                 cls._instance._current_heartbeat_interval = _HEARTBEAT_INTERVAL
                 cls._instance._registered_components = None
+                cls._instance._auth_revoked_callback = None
                 cls._instance.load_license()
         return cls._instance
 
@@ -238,6 +239,9 @@ class LicenseManager:
             return
         self._heartbeat_stop.set()
 
+    def set_auth_revoked_callback(self, callback):
+        self._auth_revoked_callback = callback
+
     def _heartbeat_loop(self):
         import random
 
@@ -284,6 +288,11 @@ class LicenseManager:
                         token=self._get_token(),
                         last_heartbeat=datetime.now(timezone.utc).isoformat(),
                     )
+                    if self._auth_revoked_callback:
+                        try:
+                            self._auth_revoked_callback()
+                        except Exception:
+                            pass
                 else:
                     remote_license = data.get("license")
                     if remote_license:
@@ -305,6 +314,24 @@ class LicenseManager:
                 refreshed = self._try_silent_relogin()
                 if not refreshed:
                     self._on_heartbeat_failure()
+                    if self._auth_revoked_callback:
+                        try:
+                            self._auth_revoked_callback()
+                        except Exception:
+                            pass
+            elif response.status_code == 403:
+                signed_data = self.license_data.get("signed", self.license_data)
+                signed_data["is_valid"] = False
+                self._save_signed_license(
+                    signed_data,
+                    token=self._get_token(),
+                    last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                )
+                if self._auth_revoked_callback:
+                    try:
+                        self._auth_revoked_callback()
+                    except Exception:
+                        pass
         except (ConnectionError, TimeoutError, OSError):
             self._on_heartbeat_failure()
         except Exception:
@@ -325,8 +352,13 @@ class LicenseManager:
                     signed_data,
                     token=self._get_token(),
                 )
+                if self._auth_revoked_callback:
+                    try:
+                        self._auth_revoked_callback()
+                    except Exception:
+                        pass
             else:
-                self._consecutive_failures = 0
+                self._consecutive_failures = max(0, self._consecutive_failures - 2)
                 self._current_heartbeat_interval = _HEARTBEAT_INTERVAL
 
     def _try_silent_relogin(self):

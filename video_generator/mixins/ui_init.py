@@ -366,12 +366,14 @@ class UIInitMixin:
                 license_status = mgr.check_license()
                 if license_status["valid"]:
                     mgr.start_heartbeat()
+                    mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
                     display = mgr.get_membership_display()
                     self.root.after(0, lambda: self._on_auth_valid(display))
                 elif mgr._try_silent_relogin():
                     license_status = mgr.check_license()
                     if license_status["valid"]:
                         mgr.start_heartbeat()
+                        mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
                         display = mgr.get_membership_display()
                         self.root.after(0, lambda: self._on_auth_valid(display))
                     else:
@@ -414,6 +416,18 @@ class UIInitMixin:
         self._set_action_buttons_state("normal")
         self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1a2744")
         self._update_membership_title()
+
+    def _on_auth_revoked(self):
+        self._auth_valid = False
+        self._set_action_buttons_state("disabled")
+        self._update_auth_status_label("授权已失效 - 点击重新登录", "#ef4444", "#2d1215")
+        self._update_membership_title()
+        try:
+            from tkinter import messagebox
+            messagebox.showwarning("授权失效", "您的账号已被禁用或授权已失效，请重新登录。")
+        except Exception:
+            pass
+        self._show_login_dialog()
 
     def _show_login_dialog(self):
         try:

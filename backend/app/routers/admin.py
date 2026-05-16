@@ -117,21 +117,29 @@ async def list_users(
     result = await db.execute(query.offset(offset).limit(page_size))
     users = result.scalars().all()
 
+    user_list = []
+    for u in users:
+        lic_result = await db.execute(select(License).where(License.user_id == u.id))
+        lic = lic_result.scalar_one_or_none()
+        user_info = {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "is_active": u.is_active,
+            "is_admin": u.is_admin,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "license_type": lic.license_type.value if lic else None,
+            "license_is_valid": lic.is_valid if lic else None,
+            "last_heartbeat": lic.last_heartbeat.isoformat() if lic and lic.last_heartbeat else None,
+            "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
+        }
+        user_list.append(user_info)
+
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "users": [
-            {
-                "id": u.id,
-                "username": u.username,
-                "email": u.email,
-                "is_active": u.is_active,
-                "is_admin": u.is_admin,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-            for u in users
-        ],
+        "users": user_list,
     }
 
 
@@ -516,7 +524,14 @@ async def toggle_user_active(
 
     target.is_active = not target.is_active
     await db.flush()
-    await _log_audit(db, user, "toggle_user_active", f"user_id={user_id}, is_active={target.is_active}", request)
+
+    license_result = await db.execute(select(License).where(License.user_id == user_id))
+    user_license = license_result.scalar_one_or_none()
+    if user_license:
+        user_license.is_valid = target.is_active
+        await db.flush()
+
+    await _log_audit(db, user, "toggle_user_active", f"user_id={user_id}, is_active={target.is_active}, license_synced=True", request)
     await db.commit()
     return {"success": True, "is_active": target.is_active}
 
