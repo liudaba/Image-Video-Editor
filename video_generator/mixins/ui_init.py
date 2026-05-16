@@ -617,19 +617,12 @@ class UIInitMixin:
 
             auth_ok = False
             try:
-                from video_generator.auth_core import AuthCore
-                auth_core = getattr(self, 'auth_core', None)
-                if auth_core:
-                    result = auth_core.check_license()
-                    auth_ok = result.get('valid', False)
+                from video_generator.license_manager import LicenseManager
+                mgr = LicenseManager()
+                result = mgr.check_license()
+                auth_ok = result.get('valid', False)
             except Exception:
-                try:
-                    license_data = getattr(self, 'license_data', None)
-                    if license_data:
-                        signed = license_data.get('signed', license_data)
-                        auth_ok = signed.get('is_valid', False)
-                except Exception:
-                    pass
+                pass
             self._readiness['auth'] = auth_ok
             if auth_ok:
                 self.root.after(0, lambda: self.log("  [2/7] ✅ 授权认证通过"))
@@ -657,7 +650,7 @@ class UIInitMixin:
                 else:
                     self.root.after(0, lambda: self.log("  [4/7] ⚠️ Stable Diffusion API 未连接（图片生成不可用）"))
 
-            self.auto_connect_ollama()
+            self.auto_connect_ollama(silent=True)
             from video_generator.ollama_client import is_ollama_available
             ollama_ok = is_ollama_available()
             if cloud_llm and ollama_ok:
@@ -721,7 +714,6 @@ class UIInitMixin:
         threading.Thread(target=api_heartbeat, daemon=True).start()
 
     def _show_readiness_summary(self):
-        self.log("")
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         self.log("  系统就绪状态汇总")
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -737,8 +729,13 @@ class UIInitMixin:
             'whisper_model': '语音识别',
             'ffmpeg': '音视频处理',
         }
+        feature_hints = {
+            'ollama': '未连接',
+            'sd_api': 'SD API未连接',
+            'whisper_model': '模型未下载',
+            'ffmpeg': '未安装',
+        }
 
-        self.log("")
         self.log("  【核心条件】")
         core_all_ok = True
         for key, label in core_labels.items():
@@ -747,16 +744,15 @@ class UIInitMixin:
                 core_all_ok = False
             self.log(f"    {'✅' if ok else '❌'} {label} — {'已就绪' if ok else '未就绪'}")
 
-        self.log("")
         self.log("  【功能条件】")
         feature_missing = []
         for key, label in feature_labels.items():
             ok = self._readiness.get(key, False)
             if not ok:
                 feature_missing.append(label)
-            self.log(f"    {'✅' if ok else '⚠️ '} {label} — {'已就绪' if ok else '未就绪'}")
+            hint = '已就绪' if ok else feature_hints.get(key, '未就绪')
+            self.log(f"    {'✅' if ok else '⚠️ '} {label} — {hint}")
 
-        self.log("")
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         if core_all_ok:
@@ -775,6 +771,5 @@ class UIInitMixin:
                 self.log(f"     → 配置文件异常：请检查 config.json")
 
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        self.log("")
     
 

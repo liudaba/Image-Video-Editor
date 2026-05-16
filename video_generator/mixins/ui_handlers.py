@@ -60,41 +60,48 @@ class UIHandlersMixin:
             pass
     
 
-    def auto_connect_ollama(self):
+    def auto_connect_ollama(self, silent=False):
         try:
             if check_ollama_available():
                 set_ollama_available(True)
-                self.log("✅ Ollama服务已连接")
+                if not silent:
+                    self.log("✅ Ollama服务已连接")
                 self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
-            self.log("⚠️ Ollama服务未运行，正在自动启动...")
+            if not silent:
+                self.log("⚠️ Ollama服务未运行，正在自动启动...")
             if try_start_ollama_service():
                 set_ollama_available(True)
-                self.log("✅ Ollama服务已自动启动并连接")
+                if not silent:
+                    self.log("✅ Ollama服务已自动启动并连接")
                 self._detect_gpu_info_async()
                 self.update_model_list()
                 return
 
             set_ollama_available(False)
-            self.log("❌ Ollama服务自动启动失败")
+            if not silent:
+                self.log("❌ Ollama服务自动启动失败")
             self.update_model_list()
-            self.root.after(0, lambda: messagebox.showwarning(
-                "Ollama服务未连接",
-                "Ollama大模型服务未运行，且自动启动失败！\n\n"
-                "分镜生成和提示词生成需要Ollama服务支持。\n\n"
-                "请手动启动Ollama后重试，或在高级设置中检查Ollama模型配置。"
-            ))
+            if not silent:
+                self.root.after(0, lambda: messagebox.showwarning(
+                    "Ollama服务未连接",
+                    "Ollama大模型服务未运行，且自动启动失败！\n\n"
+                    "分镜生成和提示词生成需要Ollama服务支持。\n\n"
+                    "请手动启动Ollama后重试，或在高级设置中检查Ollama模型配置。"
+                ))
         except Exception as e:
             set_ollama_available(False)
-            self.log(f"❌ Ollama连接失败: {e}")
+            if not silent:
+                self.log(f"❌ Ollama连接失败: {e}")
             self.update_model_list()
-            self.root.after(0, lambda: messagebox.showwarning(
-                "Ollama服务异常",
-                f"Ollama服务连接异常：{e}\n\n"
-                "分镜生成和提示词生成需要Ollama服务支持。"
-            ))
+            if not silent:
+                self.root.after(0, lambda: messagebox.showwarning(
+                    "Ollama服务异常",
+                    f"Ollama服务连接异常：{e}\n\n"
+                    "分镜生成和提示词生成需要Ollama服务支持。"
+                ))
 
     def _detect_gpu_info_async(self):
         def _detect():
