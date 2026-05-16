@@ -1787,6 +1787,8 @@ class ShotsMixin:
         #     duration_dec = Decimal('1.0')
         #     end_dec = start_dec + duration_dec
         
+        diversified_visual_tone = description_parts.get('custom_visual_tone', effective_visual_tone)
+
         shot_data = {
             "id": shot_id,
             "start": float(start_dec),
@@ -1798,9 +1800,8 @@ class ShotsMixin:
             "content_type": content_type,
             "semantic_weight": self.calculate_semantic_weight(description_parts['dubbing']),
             "prompt_quality": prompt_quality,
-            # 新增：核心主题和视觉基调字段
             "core_theme": effective_theme if effective_theme else "",
-            "visual_tone": effective_visual_tone if effective_visual_tone else "",
+            "visual_tone": diversified_visual_tone if diversified_visual_tone else "",
             "theme_elements": theme_elements if theme_elements else []
         }
 
