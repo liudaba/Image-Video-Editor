@@ -1205,48 +1205,28 @@ class ShotsMixin:
             return found
         
         VISUAL_ALTERNATIVES = {
-            'palace': ['government building', 'official residence', 'state house'],
-            'office': ['conference room', 'command center', 'private study'],
-            'military': ['armed checkpoint', 'barracks interior', 'defense headquarters'],
-            'soldier': ['armed guard', 'patrol officer', 'security personnel'],
-            'general': ['senior commander', 'high-ranking officer', 'military leader'],
-            'courtroom': ['tribunal chamber', 'judicial hall', 'hearing room'],
-            'prison': ['detention facility', 'holding cell', 'confinement area'],
-            'border': ['checkpoint crossing', 'frontier zone', 'security perimeter'],
-            'protest': ['public demonstration', 'civil gathering', 'mass rally'],
-            'oil': ['petroleum facility', 'refinery complex', 'energy infrastructure'],
-            'forest': ['open savanna', 'coastal wetland', 'mountain meadow'],
-            'primordial': ['volcanic landscape', 'early earth', 'hazy dawn'],
-            'ancient primate': ['primate hand grasping tool', 'footprint in volcanic ash', 'nesting site'],
-            'hominid': ['bipedal trackway', 'stone tool workshop', 'fire-lit shelter'],
-            'cave painting': ['rock art close-up', 'ochre hand stencil', 'animal engraving'],
-            'timeline mural': ['chronological scroll', 'era comparison chart', 'epoch diagram'],
-            'comparative anatomy': ['hand skeleton comparison', 'skull side-by-side', 'limb bone overlay'],
-            'cell division': ['mitosis illustration', 'chromosome separation', 'spindle fiber'],
-            'protein folding': ['enzyme active site', 'molecular docking', 'amino acid chain'],
-            'museum': ['archive room', 'library study', 'display cabinet'],
-            'laboratory': ['field station', 'research vessel', 'outdoor experiment'],
             'palace': ['government building corridor', 'presidential residence exterior', 'official chamber'],
             'office': ['war room', 'command center', 'briefing room', 'diplomatic chamber'],
             'military': ['armed patrol', 'security detail', 'paramilitary unit'],
             'soldier': ['armed guard', 'security personnel', 'military officer'],
             'general': ['admiral', 'field marshal', 'commander in uniform'],
+            'courtroom': ['tribunal chamber', 'international court', 'judicial hearing room'],
+            'prison': ['detention facility', 'holding cell', 'interrogation room'],
+            'border': ['checkpoint crossing', 'frontier outpost', 'coastal patrol'],
+            'protest': ['demonstration march', 'public gathering', 'strike rally'],
+            'oil': ['petroleum refinery', 'oil pipeline', 'energy infrastructure'],
+            'forest': ['open savanna', 'coastal wetland', 'mountain meadow'],
             'casino': ['high-stakes negotiation table', 'backroom deal', 'luxury hotel suite'],
             'poker': ['strategic negotiation', 'backroom dealing', 'diplomatic bargaining'],
             'card': ['negotiation document', 'treaty paper', 'strategic dossier'],
             'gold': ['oil contract', 'mineral rights document', 'treasury vault'],
-            'oil': ['petroleum refinery', 'oil pipeline', 'energy infrastructure'],
             'contract': ['treaty document', 'trade agreement', 'memorandum'],
-            'courtroom': ['tribunal chamber', 'international court', 'judicial hearing room'],
-            'prison': ['detention facility', 'holding cell', 'interrogation room'],
-            'border': ['checkpoint crossing', 'frontier outpost', 'coastal patrol'],
             'refugee': ['displaced family', 'evacuee convoy', 'humanitarian camp'],
             'helicopter': ['military transport plane', 'surveillance drone', 'naval vessel'],
             'warship': ['patrol boat', 'submarine', 'aircraft carrier deck'],
             'tank': ['armored vehicle', 'military jeep', 'patrol truck'],
             'rifle': ['sidearm', 'military baton', 'security radio'],
             'missile': ['rocket launcher', 'military installation', 'defense system'],
-            'protest': ['demonstration march', 'public gathering', 'strike rally'],
             'crowd': ['assembled officials', 'parliament members', 'delegation'],
             'rally': ['political convention', 'campaign event', 'press conference'],
             'speech': ['address from podium', 'televised announcement', 'press statement'],
@@ -1256,6 +1236,9 @@ class ShotsMixin:
             'flag': ['national emblem', 'official seal', 'coat of arms'],
             'document': ['classified folder', 'official decree', 'sealed envelope'],
             'desk': ['conference table', 'negotiation table', 'war room table'],
+            'museum': ['archive room', 'library study', 'display cabinet'],
+            'laboratory': ['field station', 'research vessel', 'outdoor experiment'],
+            'hospital': ['medical ward', 'clinic corridor', 'treatment room'],
         }
         
         duplicate_count = 0
@@ -4832,20 +4815,6 @@ class ShotsMixin:
             self.log("   ✅ 保持原始时间戳，确保音画同步")
 
             shots_file = os.path.join(self.output_dir, "shots_data.json")
-
-            self._unload_ollama_models()
-
-            # 云端生图启用时，额外释放Whisper GPU（后续图像生成不需要本地GPU）
-            cloud_img = False
-            try:
-                from video_generator.cloud_image_client import is_cloud_image_enabled
-                cloud_img = is_cloud_image_enabled()
-            except ImportError:
-                pass
-            if cloud_img:
-                self._safe_release_whisper_gpu()
-                if not self._whisper_on_gpu:
-                    self.log("   🧹 Whisper GPU 显存已释放（云端生图模式）")
 
             # 检查分镜是否为空
             if not shots:

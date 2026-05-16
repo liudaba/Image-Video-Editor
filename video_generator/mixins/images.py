@@ -630,10 +630,23 @@ class ImagesMixin:
             
         # ========== 步骤3: 模型切换（如需要）==========
         if selected_model and selected_model != "使用当前模型":
-            self.log("")
-            self.log("🔄 模型切换:")
-            self.log(f"   目标模型: {selected_model}")
-            self.log(f"   当前模型: {current_sd_model}")
+            _skip_switch = False
+            try:
+                import re as _re_check
+                _clean_sel = _re_check.sub(r'^\[SD1\.5\]\s*|\[SDXL\]\s*|\[Flux\]\s*|\[SD3\]\s*', '', selected_model).strip()
+                _clean_cur = current_sd_model.replace('.safetensors', '').replace('.ckpt', '')
+                if _clean_sel.lower() == _clean_cur.lower():
+                    _skip_switch = True
+            except Exception:
+                pass
+
+            if _skip_switch:
+                self.log(f"✅ 当前模型已是目标模型，无需切换")
+            else:
+                self.log("")
+                self.log("🔄 模型切换:")
+                self.log(f"   目标模型: {selected_model}")
+                self.log(f"   当前模型: {current_sd_model}")
                 
             try:
                 sd_model_name = selected_model
@@ -663,7 +676,9 @@ class ImagesMixin:
                         target_model = model_title
                         break
                     
-                if target_model:
+                if _skip_switch:
+                    pass
+                elif target_model:
                     switch_response = get_http_session().post(
                         f"{api_url}/sdapi/v1/options",
                         json={"sd_model_checkpoint": target_model},
@@ -729,9 +744,8 @@ class ImagesMixin:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     vram = torch.cuda.memory_allocated(0) / 1024**3
-                    self.log(f"   📊 GPU 显存占用: {vram:.1f} GB")
                     if vram > 2.0:
-                        self.log(f"   ⚠️ GPU 显存仍较高，等待释放...")
+                        self.log(f"   ⚠️ GPU 显存仍较高 ({vram:.1f} GB)，等待释放...")
                         for _ in range(10):
                             time.sleep(1)
                             torch.cuda.empty_cache()
