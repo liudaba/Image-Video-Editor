@@ -572,9 +572,9 @@ class VideoMixin:
                         super().__init__(min_time_interval=0.5)
                         self.app = app_ref
                         self._last_progress_pct = 0.0
-                        self._phase = "video"
                         self._expected_total = expected_total_frames
-                        self._valid_bar_name = None
+                        self._video_bar = None
+                        self._audio_bar = None
                     
                     def bars_callback(self, bar, attr, value, old_value=None):
                         try:
@@ -585,29 +585,20 @@ class VideoMixin:
                             if total <= 0 or attr != 'index':
                                 return
                             
-                            if self._valid_bar_name is None:
-                                if total == self._expected_total or abs(total - self._expected_total) <= max(1, self._expected_total * 0.05):
-                                    self._valid_bar_name = bar
-                                elif total < self._expected_total * 0.5:
-                                    return
-                            
-                            if self._valid_bar_name is not None and bar != self._valid_bar_name:
-                                if total < self._expected_total * 0.8:
-                                    return
-                            
-                            if bar != self._valid_bar_name and self._valid_bar_name is not None:
-                                self._phase = "audio"
-                            else:
-                                self._phase = "video"
-                            
                             pct = (index / total) * 100
                             
-                            if self._phase == "audio":
-                                phase_label = "音频编码"
-                                progress_val = 70 + int((index / total) * 10)
-                            else:
+                            is_video = (total >= self._expected_total * 0.5)
+                            
+                            if is_video:
+                                if self._video_bar is None:
+                                    self._video_bar = bar
+                                progress_val = 70 + int((index / total) * 25)
                                 phase_label = "视频编码"
-                                progress_val = 80 + int((index / total) * 20)
+                            else:
+                                if self._audio_bar is None:
+                                    self._audio_bar = bar
+                                progress_val = 95 + int((index / total) * 5)
+                                phase_label = "音频编码"
                             
                             desc = f"{phase_label} {pct:.0f}%"
                             
@@ -629,10 +620,7 @@ class VideoMixin:
                             if _log_pct > _last_log_pct and _log_pct > 0:
                                 self._last_logged_pct = _log_pct
                                 _moviepy_last_log_time = now
-                                if self._phase == "audio":
-                                    self.app.log(f"   📊 音频编码: {_log_pct}%")
-                                else:
-                                    self.app.log(f"   📊 视频编码: {_log_pct}%")
+                                self.app.log(f"   📊 {phase_label}: {_log_pct}%")
                             
                             self._last_progress_pct = pct
                         except Exception:
