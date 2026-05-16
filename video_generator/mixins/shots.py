@@ -363,6 +363,36 @@ _TRANSLATION_MAPPING = {
     '炸彈': 'bomb', '定時炸彈': 'time bomb',
     '地緣': 'geopolitical', '棋盤': 'chessboard',
     '談判': 'negotiation',
+    '马杜罗': 'President Maduro', '普京': 'President Putin',
+    '拜登': 'President Biden', '特朗普': 'Donald Trump',
+    '习近平': 'President Xi', '泽连斯基': 'President Zelensky',
+    '内塔尼亚胡': 'Prime Minister Netanyahu',
+    '金正恩': 'Supreme Leader Kim Jong-un',
+    '委内瑞拉': 'Venezuela', '委国': 'Venezuela',
+    '加拉加斯': 'Caracas', '乌克兰': 'Ukraine',
+    '以色列': 'Israel', '巴勒斯坦': 'Palestine',
+    '朝鲜': 'North Korea', '韩国': 'South Korea',
+    '日本': 'Japan', '印度': 'India',
+    '巴西': 'Brazil', '哥伦比亚': 'Colombia',
+    '古巴': 'Cuba', '阿根廷': 'Argentina',
+    '沙特': 'Saudi Arabia', '伊朗': 'Iran',
+    '伊拉克': 'Iraq', '叙利亚': 'Syria',
+    '安理会': 'UN Security Council', '海牙': 'The Hague',
+    '否决权': 'veto power', '制裁': 'sanctions',
+    '石油': 'oil, petroleum', '矿产': 'mineral resources',
+    '油价': 'oil price', '能源': 'energy',
+    '军方': 'military', '军心': 'military morale',
+    '武装': 'armed forces', '枪杆': 'military power',
+    '权力': 'power, authority', '政权': 'regime',
+    '反对派': 'opposition', '选票': 'ballot, voting',
+    '合法性': 'legitimacy', '崩盘': 'collapse',
+    '难民': 'refugee', '流亡': 'exile',
+    '审判': 'trial', '司法': 'judiciary',
+    '赌': 'gambling', '筹码': 'bargaining chip',
+    '防线': 'defense line', '压舱石': 'ballast',
+    '后路': 'retreat route', '退路': 'way out',
+    '金山': 'gold mountain, wealth', '肥差': 'lucrative post',
+    '食品': 'food supplies', '底层': 'grassroots, bottom class',
 }
 
 _COMMON_ASR_ERROR_DICT = {
@@ -700,6 +730,86 @@ class ShotsMixin:
         similarity = char_jaccard * 0.3 + ngram_jaccard * 0.3 + topic_overlap * 0.4
         return min(similarity, 1.0)
 
+    def _regenerate_prompt_for_split_shot(self, description, orig_shot, part_index, total_parts):
+        """为拆分后的分镜重新生成差异化的提示词
+
+        策略：
+        1. 优先使用大模型根据新描述生成独特 prompt
+        2. 大模型不可用时，基于描述关键词 + 镜头变化生成差异化 prompt
+        3. 确保每个部分的 prompt 在视觉上有明显区别
+        """
+        content_type = orig_shot.get('content_type', '')
+        core_theme = orig_shot.get('core_theme', '')
+        visual_tone = orig_shot.get('visual_tone', '')
+        theme_elements = orig_shot.get('theme_elements', [])
+
+        camera_angles = [
+            'wide establishing shot', 'medium shot', 'close-up shot',
+            'over-the-shoulder shot', 'low angle shot', 'high angle shot',
+            'dutch angle shot', 'extreme close-up', 'full body shot',
+            'bird eye view shot',
+        ]
+        shot_angle = camera_angles[part_index % len(camera_angles)]
+
+        if is_llm_available():
+            try:
+                description_parts = {
+                    'dubbing': description,
+                    'semantic': '',
+                    'visual_concept': '',
+                    'visual_elements': '',
+                    'style': '',
+                    'custom_theme': core_theme,
+                    'custom_visual_tone': visual_tone,
+                    'theme_elements': theme_elements,
+                    'content_type': content_type,
+                }
+                prompt_en = self._generate_sd_prompt(description_parts, content_type, part_index)
+                if prompt_en and len(prompt_en) > 30 and not re.search(r'[\u4e00-\u9fff]', prompt_en):
+                    if shot_angle.lower() not in prompt_en.lower():
+                        prompt_en = f"{shot_angle}, {prompt_en}"
+                    return prompt_en
+            except Exception:
+                pass
+
+        prompt_en = self._analyze_and_generate_sd_prompt(description, content_type, core_theme, visual_tone)
+        if shot_angle.lower() not in prompt_en.lower():
+            prompt_en = f"{shot_angle}, {prompt_en}"
+        return prompt_en
+
+    def _regenerate_prompt_for_merged_shot(self, merged_description, keeper_shot):
+        """为合并后的分镜重新生成提示词
+
+        策略：
+        1. 优先使用大模型根据合并描述生成 prompt
+        2. 大模型不可用时，基于合并描述关键词生成 prompt
+        """
+        content_type = keeper_shot.get('content_type', '')
+        core_theme = keeper_shot.get('core_theme', '')
+        visual_tone = keeper_shot.get('visual_tone', '')
+        theme_elements = keeper_shot.get('theme_elements', [])
+
+        if is_llm_available():
+            try:
+                description_parts = {
+                    'dubbing': merged_description,
+                    'semantic': '',
+                    'visual_concept': '',
+                    'visual_elements': '',
+                    'style': '',
+                    'custom_theme': core_theme,
+                    'custom_visual_tone': visual_tone,
+                    'theme_elements': theme_elements,
+                    'content_type': content_type,
+                }
+                prompt_en = self._generate_sd_prompt(description_parts, content_type, keeper_shot.get('id', 0))
+                if prompt_en and len(prompt_en) > 30 and not re.search(r'[\u4e00-\u9fff]', prompt_en):
+                    return prompt_en
+            except Exception:
+                pass
+
+        return self._analyze_and_generate_sd_prompt(merged_description, content_type, core_theme, visual_tone)
+
     def _merge_shots(self, shots, keep_idx, remove_idx):
         """智能合并两个分镜，保留语义更丰富的一方的时间范围
         
@@ -726,6 +836,12 @@ class ShotsMixin:
         if removed.get('negative_prompt', '') and not keeper.get('negative_prompt', ''):
             keeper['negative_prompt'] = removed['negative_prompt']
         keeper['semantic_weight'] = max(keeper_weight, removed_weight)
+        merged_desc = keeper.get('description', '')
+        if merged_desc:
+            keeper['prompt_en'] = self._regenerate_prompt_for_merged_shot(merged_desc, keeper)
+            keeper['prompt_quality'] = self._calculate_prompt_quality(
+                keeper['prompt_en'], merged_desc
+            )
         shots.pop(remove_idx)
 
 
@@ -2953,19 +3069,54 @@ class ShotsMixin:
             keywords.append(tone_translated if tone_translated else custom_visual_tone)
         
         theme_map = {
-            'war': (['戰爭', '战争', '戰鬥', '战斗', '軍事', '军事', '導彈', '导弹', '坦克'], ['war zone', 'military conflict', 'battlefield']),
-            'politics': (['政治', '總統', '总统', '總理', '总理', '政府', '部長', '部长'], ['political scene', 'government', 'diplomatic']),
-            'economy': (['經濟', '经济', '金融', '股票', '投資', '投资', '商'], ['financial district', 'business', 'economy']),
+            'war': (['戰爭', '战争', '戰鬥', '战斗', '軍事', '军事', '導彈', '导弹', '坦克', '枪杆', '武装', '士兵', '军方', '军心'], ['war zone', 'military conflict', 'battlefield', 'armed forces']),
+            'politics': (['政治', '總統', '总统', '總理', '总理', '政府', '部長', '部长', '政权', '权力', '反对派', '选举', '选票', '执政', '在野', '宪政', '否决权', '合法性'], ['political scene', 'government power', 'diplomatic', 'political struggle']),
+            'economy': (['經濟', '经济', '金融', '股票', '投資', '投资', '商', '石油', '油价', '矿产', '制裁', '债务', '崩盘', '通胀', '食品'], ['financial district', 'business', 'economy', 'oil industry', 'economic crisis']),
             'tech': (['科技', '技術', '技术', '科學', '科学', '創新', '创新'], ['technology', 'laboratory', 'innovation']),
             'medical': (['醫生', '医生', '醫院', '医院', '健康', '治療', '治疗'], ['hospital', 'medical', 'healthcare']),
+            'geopolitics': (['博弈', '国际', '外交', '安理会', '前哨', '战略', '地缘', '盟友', '邻国', '华盛顿', '莫斯科', '北京', '拉美', '制裁'], ['geopolitical scene', 'diplomatic negotiation', 'international relations', 'UN security council']),
+            'refugee': (['难民', '流亡', '逃亡', '边境', '移民'], ['refugee crisis', 'border crossing', 'displacement']),
+            'justice': (['审判', '法院', '海牙', '刑事', '司法', '逮捕'], ['courtroom', 'international tribunal', 'justice system']),
+            'survival': (['生存', '保险', '压舱石', '防线', '崩塌', '退路', '后路', '赌', '筹码'], ['survival struggle', 'desperate situation', 'high stakes']),
+            'corruption': (['腐败', '贪腐', '金山', '肥差', '利益', '贿赂'], ['corruption', 'power abuse', 'wealth disparity']),
+            'social': (['民生', '社会', '底层', '百姓', '民众', '食品分发'], ['social conditions', 'civilian life', 'hardship']),
         }
         for key, (triggers, tags) in theme_map.items():
             if any(w in text for w in triggers):
                 keywords.extend(tags)
-        
+
+        for cn_key, en_val in _TRANSLATION_MAPPING.items():
+            if cn_key in text and en_val not in keywords:
+                keywords.append(en_val)
+
+        location_patterns = [
+            (r'委内瑞拉|委国', 'Venezuela, Caracas'),
+            (r'加拉加斯', 'Caracas, Venezuela'),
+            (r'俄罗斯|俄国', 'Russia, Moscow'),
+            (r'中国|北京', 'China, Beijing'),
+            (r'美国|华盛顿', 'United States, Washington DC'),
+            (r'巴西', 'Brazil'),
+            (r'哥伦比亚', 'Colombia'),
+            (r'伊朗', 'Iran'),
+        ]
+        for pattern, tag in location_patterns:
+            if re.search(pattern, text):
+                keywords.append(tag)
+
+        person_patterns = [
+            (r'总统|主席|首相|总理', 'national leader, head of state'),
+            (r'将领|军官|司令|将军', 'military general, officer'),
+            (r'夫妇|妻子|夫人', 'leader with spouse'),
+            (r'士兵|军人|武装人员', 'armed soldier'),
+            (r'外交官|大使|代表', 'diplomat, ambassador'),
+        ]
+        for pattern, tag in person_patterns:
+            if re.search(pattern, text):
+                keywords.append(tag)
+
         if not keywords:
             keywords.append('realistic scene')
-        
+
         unique_keywords = list(dict.fromkeys(keywords))
         if len(unique_keywords) <= 1:
             unique_keywords = ['realistic scene', 'detailed environment']
@@ -4874,6 +5025,12 @@ class ShotsMixin:
                         new_shot['end'] = round(orig_shot['start'] + (p + 1) * part_dur, 3)
                         new_shot['duration'] = round(part_dur, 3)
                         new_shot['description'] = desc_parts[p] if p < len(desc_parts) else desc_parts[-1]
+                        new_shot['prompt_en'] = self._regenerate_prompt_for_split_shot(
+                            new_shot['description'], orig_shot, p, num_parts
+                        )
+                        new_shot['prompt_quality'] = self._calculate_prompt_quality(
+                            new_shot['prompt_en'], new_shot['description']
+                        )
                         new_shots.append(new_shot)
 
                     shots[i:i+1] = new_shots
