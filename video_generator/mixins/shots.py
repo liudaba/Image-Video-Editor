@@ -4855,10 +4855,11 @@ class ShotsMixin:
             self.log(f"   📊 共 {len(shots)} 个分镜")
             self.log(f"   ⏱️ 总耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
             self.log(f"   📁 保存位置: {shots_file}")
-            self.log("")
-            self.log("📋 下一步操作：")
-            self.log("   1. 点击「🎨 生成图片」生成分镜画面")
-            self.log("   2. 点击「🎞️ 生成视频」合成最终视频")
+            if not auto_mode:
+                self.log("")
+                self.log("📋 下一步操作：")
+                self.log("   1. 点击「🎨 生成图片」生成分镜画面")
+                self.log("   2. 点击「🎞️ 生成视频」合成最终视频")
             self.log("=" * 50)
             
             # 显示分镜内容到脚本区域（已移除脚本窗口，仅记录到日志）
