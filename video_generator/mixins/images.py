@@ -223,6 +223,10 @@ class ImagesMixin:
 
     def generate_images(self):
         """生成图像"""
+        if not getattr(self, '_auth_valid', False):
+            self.log("⚠️ 请先登录后再操作")
+            self._show_login_dialog()
+            return
         self.log("🖼️ 开始生成图像...")
         try:
             from PIL import Image

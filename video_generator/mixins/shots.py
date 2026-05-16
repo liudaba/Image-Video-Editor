@@ -4932,7 +4932,7 @@ class ShotsMixin:
 
     def generate_shots_threaded(self):
         """生成分镜脚本（线程化版本）"""
-        if not getattr(self, '_auth_valid', True):
+        if not getattr(self, '_auth_valid', False):
             self.log("⚠️ 请先登录后再操作")
             self._show_login_dialog()
             return

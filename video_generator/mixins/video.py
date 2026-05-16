@@ -847,7 +847,7 @@ class VideoMixin:
         
         每次执行前会自动清除上一次任务的缓存
         """
-        if not getattr(self, '_auth_valid', True):
+        if not getattr(self, '_auth_valid', False):
             self.log("\u26a0\ufe0f \u8bf7\u5148\u767b\u5f55\u540e\u518d\u64cd\u4f5c")
             self._show_login_dialog()
             return
