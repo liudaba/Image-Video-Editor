@@ -292,8 +292,13 @@ class VideoMixin:
                         
                         _ffmpeg_render_start = time.time()
                         
+                        _ffmpeg_last_log_pct = [-1]
                         def _ffmpeg_progress(pct, info=None):
                             progress = 60 + int(pct * 0.35)
+                            _log_pct = int(pct // 10) * 10
+                            if _log_pct > _ffmpeg_last_log_pct[0] and _log_pct > 0:
+                                _ffmpeg_last_log_pct[0] = _log_pct
+                                self.log(f"   📊 渲染进度: {_log_pct}%")
                             if info:
                                 time_str = f"{int(info.get('current_time', 0)//60):02d}:{int(info.get('current_time', 0)%60):02d}"
                                 total_str = f"{int(info.get('total_time', 0)//60):02d}:{int(info.get('total_time', 0)%60):02d}"
@@ -303,15 +308,12 @@ class VideoMixin:
                                     eta_min = int(eta // 60)
                                     eta_sec = int(eta % 60)
                                     desc += f" 剩余{eta_min}:{eta_sec:02d}"
-                                speed = info.get('speed')
-                                if speed:
-                                    desc += f" {speed:.1f}x"
                                 self.update_task_progress(desc, progress)
                             else:
                                 self.update_task_progress(f"FFmpeg渲染中 {pct:.0f}%", progress)
                         
                         def _ffmpeg_log(msg):
-                            self.log(f"   {msg}")
+                            pass
                         
                         success = self.video_renderer.render(
                             resized_images, self.audio_path, output_path,
@@ -325,11 +327,8 @@ class VideoMixin:
                             _video_min = int(_video_elapsed // 60)
                             _video_sec = int(_video_elapsed % 60)
                             self.update_task_progress("视频生成完成", 100)
-                            self.log("\n" + "=" * 60)
-                            self.log("✅ 视频生成完成！（FFmpeg直接渲染）")
-                            self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
-                            self.log(f"   📁 保存位置: {output_path}")
-                            self.log("=" * 60)
+                            self.log(f"✅ 视频生成完成！耗时{_video_min}分{_video_sec}秒")
+                            self.log(f"   📁 {output_path}")
                             
                             self.state_manager['video']['generated'] = True
                             self.state_manager['video']['path'] = output_path
@@ -535,9 +534,9 @@ class VideoMixin:
             if self._gpu_encoder_cache is not None:
                 use_gpu, gpu_encoder, gpu_preset = self._gpu_encoder_cache
                 if use_gpu:
-                    self.log(f"   ⚡ 使用缓存检测结果: GPU加速 ({gpu_encoder}, preset='{gpu_preset}')")
+                    self.log(f"   ⚡ GPU加速渲染 ({gpu_encoder})")
                 else:
-                    self.log(f"   🖥️ 使用缓存检测结果: CPU渲染 (libx264)")
+                    self.log(f"   🖥️ CPU渲染")
             else:
                 try:
                     if self.video_renderer is None:
@@ -550,16 +549,16 @@ class VideoMixin:
                         gpu_encoder = enc_name
                         gpu_preset = enc_info.get('preset', 'medium')
                         hw_desc = {"h264_nvenc": "NVIDIA GPU", "h264_qsv": "Intel QuickSync", "h264_amf": "AMD AMF"}.get(enc_name, "GPU")
-                        self.log(f"   ⚡ 检测到{hw_desc}加速 ({enc_name})")
+                        self.log(f"   ⚡ 检测到{hw_desc}加速")
                     else:
-                        self.log("      🖥️ 未检测到硬件编码器，将使用CPU渲染")
+                        self.log("   🖥️ 将使用CPU渲染")
                 except Exception as e:
                     self._log_exception(f"      ⚠️ 编码器检测失败: {type(e).__name__}", e)
                 
                 self._gpu_encoder_cache = (use_gpu, gpu_encoder, gpu_preset)
             
             if not use_gpu:
-                self.log("      🖥️ 将使用CPU渲染 (libx264, preset='medium')")
+                self.log("   🖥️ CPU渲染 (libx264)")
             
             try:
                 from proglog import ProgressBarLogger
@@ -625,12 +624,15 @@ class VideoMixin:
                             
                             now = time.time()
                             nonlocal _moviepy_last_log_time
-                            if now - _moviepy_last_log_time >= 5.0 and pct > 1.0:
+                            _log_pct = int(pct // 10) * 10
+                            _last_log_pct = int(getattr(self, '_last_logged_pct', -1))
+                            if _log_pct > _last_log_pct and _log_pct > 0:
+                                self._last_logged_pct = _log_pct
                                 _moviepy_last_log_time = now
                                 if self._phase == "audio":
-                                    self.app.log(f"   📊 音频编码: {pct:.0f}% ({index}/{total})")
+                                    self.app.log(f"   📊 音频编码: {_log_pct}%")
                                 else:
-                                    self.app.log(f"   📊 视频编码: {pct:.0f}% ({index}/{total}帧)")
+                                    self.app.log(f"   📊 视频编码: {_log_pct}%")
                             
                             self._last_progress_pct = pct
                         except Exception:
@@ -643,8 +645,7 @@ class VideoMixin:
                 
                 encoder_desc = gpu_encoder if use_gpu else 'libx264'
                 total_frames_desc = _moviepy_total_frames
-                self.log(f"   🔄 正在渲染视频文件...")
-                self.log(f"      编码器: {encoder_desc}, 总帧数: {total_frames_desc}, 输出: {os.path.basename(output_path)}")
+                self.log(f"   🔄 正在渲染视频... ({encoder_desc})")
                 
                 if use_gpu:
                     hw_params = ['-movflags', '+faststart', '-threads', '0']
@@ -683,18 +684,13 @@ class VideoMixin:
             file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
             size_mb = file_size / (1024 * 1024)
             self.update_task_progress("视频生成完成", 100)
-            self.log("\n" + "=" * 60)
-            self.log(f"✅ 视频生成完成！")
-            self.log(f"   ⏱️ 总耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
-            self.log(f"   🎥 渲染耗时: {_render_elapsed:.1f}s, 文件{size_mb:.1f}MB")
-            self.log(f"   📁 保存位置: {output_path}")
-            self.log("=" * 60)
+            self.log(f"✅ 视频生成完成！耗时{_video_min}分{_video_sec}秒, 文件{size_mb:.1f}MB")
+            self.log(f"   📁 {output_path}")
             
             self.state_manager['video']['generated'] = True
             self.state_manager['video']['path'] = output_path
             
-            self.log("\n🧹 释放资源...")
-            self.log("   ✅ 资源释放完成")
+            self.log("🧹 资源已释放")
             
             self.log("\n📂 打开输出文件夹...")
             self._open_folder(os.path.dirname(output_path))
