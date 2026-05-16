@@ -340,6 +340,12 @@ class ResourceMixin:
             pass
 
         try:
+            if hasattr(self, '_translation_cache'):
+                self._translation_cache.clear()
+        except Exception:
+            pass
+
+        try:
             prompt_cache.clear()
         except Exception:
             pass
@@ -558,19 +564,18 @@ class ResourceMixin:
             pass
 
         try:
+            if hasattr(self, 'video_renderer') and self.video_renderer is not None:
+                self.video_renderer.cancel_render()
+                self.video_renderer = None
+        except Exception:
+            pass
+
+        try:
             if self.whisper_model is not None:
-                if self._whisper_on_gpu:
-                    try:
-                        import torch
-                        self.whisper_model = self.whisper_model.to("cpu")
-                        torch.cuda.synchronize()
-                        torch.cuda.empty_cache()
-                    except Exception:
-                        pass
-                    self._whisper_on_gpu = False
+                self._safe_release_whisper_gpu()
                 del self.whisper_model
                 self.whisper_model = None
-
+                self._whisper_on_gpu = False
             gc.collect()
         except Exception:
             pass

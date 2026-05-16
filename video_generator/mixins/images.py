@@ -237,6 +237,18 @@ class ImagesMixin:
         except Exception as e:
             self.log(f"❌ 图像生成失败: {e}")
             safe_print_exc()
+        finally:
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
 
     def _generate_images_cloud(self):
         """云端生图流程"""
