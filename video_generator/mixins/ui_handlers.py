@@ -29,7 +29,7 @@ from video_generator.app_state import (
 
 class UIHandlersMixin:
     def _check_api_heartbeat(self):
-        """周期性检测API连接状态，发现恢复时自动连接并提示"""
+        """周期性检测API连接状态，发现恢复时自动连接，发现断开时通知用户"""
         try:
             if not is_cloud_image_active():
                 sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
@@ -49,6 +49,23 @@ class UIHandlersMixin:
                                 self.root.after(0, self._update_model_dropdown)
                     except Exception:
                         pass
+                else:
+                    try:
+                        resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=3)
+                        if resp.status_code != 200:
+                            self._sd_api_connected = False
+                            if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
+                                self.root.after(0, lambda: self.sd_api_status_var.set("❌ 已断开"))
+                            if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
+                                self.root.after(0, lambda: self.sd_api_status_label.config(foreground="red"))
+                            self.log("⚠️ SD API 连接已断开")
+                    except Exception:
+                        self._sd_api_connected = False
+                        if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
+                            self.root.after(0, lambda: self.sd_api_status_var.set("❌ 已断开"))
+                        if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
+                            self.root.after(0, lambda: self.sd_api_status_label.config(foreground="red"))
+                        self.log("⚠️ SD API 连接已断开")
 
             ollama_connected = is_ollama_available()
             if not ollama_connected:
@@ -56,6 +73,11 @@ class UIHandlersMixin:
                     if check_ollama_available():
                         set_ollama_available(True)
                         self.log("✅ Ollama服务已自动连接")
+            else:
+                if not is_cloud_llm_active():
+                    if not check_ollama_available():
+                        set_ollama_available(False)
+                        self.log("⚠️ Ollama服务已断开")
         except Exception:
             pass
     
@@ -92,13 +114,15 @@ class UIHandlersMixin:
         except Exception as e:
             set_ollama_available(False)
             if not silent:
-                self.log(f"❌ Ollama连接失败: {e}")
+                self.log("❌ Ollama连接失败，请检查Ollama是否已安装并运行")
+                safe_print_exc()
             self.update_model_list()
             if not silent:
                 self.root.after(0, lambda: messagebox.showwarning(
                     "Ollama服务异常",
-                    f"Ollama服务连接异常：{e}\n\n"
-                    "分镜生成和提示词生成需要Ollama服务支持。"
+                    "Ollama服务连接异常，无法与Ollama通信。\n\n"
+                    "分镜生成和提示词生成需要Ollama服务支持。\n\n"
+                    "请检查Ollama是否已安装并正常运行。"
                 ))
 
     def _detect_gpu_info_async(self):
@@ -1015,8 +1039,7 @@ class UIHandlersMixin:
     def open_output_folder(self):
         """打开输出文件夹"""
         output_folder = os.path.join(self.base_dir, "output_project")
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
+        os.makedirs(output_folder, exist_ok=True)
         self._open_folder(output_folder)
     
 

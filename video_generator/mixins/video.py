@@ -77,11 +77,15 @@ class VideoMixin:
             if not self.shots_data:
                 shots_file = os.path.join(self.output_dir, "shots_data.json")
                 if os.path.exists(shots_file):
-                    with open(shots_file, 'r', encoding='utf-8') as f:
-                        loaded = json.load(f)
-                    with self.resource_lock:
-                        self.shots_data = loaded
-                    self.log(f"   📂 从文件加载分镜数据: {len(self.shots_data)} 个")
+                    try:
+                        with open(shots_file, 'r', encoding='utf-8') as f:
+                            loaded = json.load(f)
+                        with self.resource_lock:
+                            self.shots_data = loaded
+                        self.log(f"   📂 从文件加载分镜数据: {len(self.shots_data)} 个")
+                    except (json.JSONDecodeError, Exception) as e:
+                        self.log(f"   ⚠️ 分镜数据文件损坏，请重新生成分镜")
+                        self.shots_data = []
                 else:
                     self.log("❌ 没有分镜数据，请先生成分镜")
                     self.update_task_progress("就绪")
@@ -699,7 +703,7 @@ class VideoMixin:
             _video_elapsed = time.time() - _video_start_time
             _video_min = int(_video_elapsed // 60)
             _video_sec = int(_video_elapsed % 60)
-            self.log(f"\n❌ 视频生成失败: {e}")
+            self.log("\n❌ 视频生成失败，请检查文件和配置是否正确")
             self.log(f"   ⏱️ 已耗时: {_video_min}分{_video_sec}秒 ({_video_elapsed:.1f}s)")
             safe_print_exc()
         finally:
@@ -854,6 +858,8 @@ class VideoMixin:
                 return
             self.task_running = True
 
+        self._set_action_buttons_state("disabled")
+
         try:
             self.log("🎞️ 开始跑图生成视频...")
             self.log("🎬 开始执行生成视频任务")
@@ -863,13 +869,17 @@ class VideoMixin:
             if not self.audio_path:
                 self.log("❌ 没有导入音频文件，无法执行任务")
                 messagebox.showwarning("缺少音频", "请先导入音频文件，再执行跑图生成视频任务！")
-                self.task_running = False
+                with self.task_lock:
+                    self.task_running = False
+                self._set_action_buttons_state("normal")
                 return
             
             if not os.path.exists(self.audio_path):
                 self.log(f"❌ 音频文件不存在: {self.audio_path}")
                 messagebox.showwarning("音频文件丢失", "音频文件不存在，请重新导入音频文件！")
-                self.task_running = False
+                with self.task_lock:
+                    self.task_running = False
+                self._set_action_buttons_state("normal")
                 return
             
             # 检查2: 检查是否存在分镜脚本文件
@@ -954,6 +964,9 @@ class VideoMixin:
         except Exception as e:
             self.log(f"❌ 渲染视频线程启动失败: {e}")
             safe_print_exc()
+            with self.task_lock:
+                self.task_running = False
+            self._set_action_buttons_state("normal")
     
 
     def _check_sd_available(self):
@@ -1113,7 +1126,7 @@ class VideoMixin:
                                 sd_connected = True
                                 break
                             else:
-                                self.log("⏳ SD API 仍未连接，继续等待...（可随时取消任务）")
+                                self.log("⏳ SD API 仍未连接，继续等待...（可点击「停止任务」取消）")
                         
                         if not sd_connected:
                             self.log("")
@@ -1157,7 +1170,7 @@ class VideoMixin:
                 self.log("✅ 所有阶段完成")
                 
             except Exception as e:
-                self.log(f"❌ 渲染视频出错: {type(e).__name__}: {str(e)[:200]}")
+                self.log("❌ 渲染视频出错，请检查分镜数据和图片文件是否完整")
                 safe_print_exc()
             finally:
                 self._waiting_for_sd = False
@@ -1195,6 +1208,7 @@ class VideoMixin:
                     pass
                 with self.task_lock:
                     self.task_running = False
+                self._set_action_buttons_state("normal")
                 if hasattr(self, '_pregenerated_prompts'):
                     delattr(self, '_pregenerated_prompts')
         

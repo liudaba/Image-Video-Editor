@@ -4682,8 +4682,18 @@ class ShotsMixin:
             self.state_manager['shots']['data'] = None
             
             shots_file = os.path.join(self.output_dir, "shots_data.json")
-            with open(shots_file, 'w', encoding='utf-8') as f:
-                json.dump(shots, f, ensure_ascii=False, indent=2)
+            tmp_file = shots_file + ".tmp"
+            try:
+                with open(tmp_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_file, shots_file)
+            except Exception:
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+                with open(shots_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
             self.log(f"   ✅ 分镜数据已保存: {shots_file}")
 
             self._unload_ollama_models()
@@ -4926,12 +4936,18 @@ class ShotsMixin:
             self.log("⚠️ 请先登录后再操作")
             self._show_login_dialog()
             return
+        if not self.audio_path:
+            self.log("❌ 没有导入音频文件，无法生成分镜")
+            messagebox.showwarning("缺少音频", "请先导入音频文件，再生成分镜脚本！")
+            return
         try:
             with self.task_lock:
                 if self.task_running:
                     self.log("⚠️ 已有任务正在运行，请稍后再试")
                     return
                 self.task_running = True
+            
+            self._set_action_buttons_state("disabled")
             
             self.log("🎬 开始执行生成分镜脚本任务")
             # 检查2: 输出文件夹中不允许存在分镜脚本文件
@@ -4946,6 +4962,7 @@ class ShotsMixin:
                 )
                 with self.task_lock:
                     self.task_running = False
+                self._set_action_buttons_state("normal")
                 return
             
             self.log("🎬 开始线程化生成分镜...")
@@ -5004,6 +5021,7 @@ class ShotsMixin:
                     with self.task_lock:
                         self.task_running = False
                         self.current_task_thread = None
+                    self._set_action_buttons_state("normal")
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
                     self.log("✅ 分镜生成任务结束")

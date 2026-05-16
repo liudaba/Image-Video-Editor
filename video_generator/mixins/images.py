@@ -307,8 +307,7 @@ class ImagesMixin:
         self.log(f"   所有图片将由云端生成，无需本地SD")
         self.log("")
 
-        if not os.path.exists(self.images_dir):
-            os.makedirs(self.images_dir)
+        os.makedirs(self.images_dir, exist_ok=True)
 
         style_descriptions = []
         for style in selected_styles:
@@ -570,9 +569,7 @@ class ImagesMixin:
             self.log(f"   风格预设: {', '.join(selected_styles)}")
             
         # 确保图像目录存在
-        if not os.path.exists(self.images_dir):
-            os.makedirs(self.images_dir)
-            
+        os.makedirs(self.images_dir, exist_ok=True)
         # 准备风格描述
         style_descriptions = []
         for style in selected_styles:

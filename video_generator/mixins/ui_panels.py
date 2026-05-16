@@ -132,6 +132,11 @@ class UIPanelsMixin:
         self.btn_render.pack(fill=tk.BOTH, expand=True, pady=5)
         ToolTip(self.btn_render, "第三步：根据分镜脚本自动生成图片\n并合成带动画效果的视频")
         
+        self.btn_cancel = ttk.Button(section5, text="⏹ 停止任务", command=self._cancel_current_task, style="Medium.TButton")
+        self.btn_cancel.pack(fill=tk.X, pady=(0, 5))
+        self.btn_cancel.pack_forget()
+        ToolTip(self.btn_cancel, "停止当前正在运行的任务")
+        
 
 
         # 分隔线

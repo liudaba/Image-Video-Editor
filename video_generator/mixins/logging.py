@@ -95,9 +95,9 @@ class LoggingMixin:
 
         try:
             self.txt_log.configure(state=tk.NORMAL)
-            for msg in messages:
-                self.txt_log.insert(tk.END, msg + '\n')
-                self._log_line_count += 1
+            combined = '\n'.join(messages) + '\n'
+            self.txt_log.insert(tk.END, combined)
+            self._log_line_count += len(messages)
 
             if self._log_line_count > _MAX_LOG_LINES:
                 delete_count = self._log_line_count - _TRIM_LOG_LINES
@@ -120,7 +120,7 @@ class LoggingMixin:
 
         with _print_lock:
             try:
-                print(log_message, flush=True)
+                print(log_message)
             except Exception:
                 pass
 

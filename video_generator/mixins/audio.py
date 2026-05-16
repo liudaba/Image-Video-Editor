@@ -141,8 +141,8 @@ class AudioMixin:
             self.log(f"✅ 音频导入完成: {os.path.basename(file_path)}")
             
         except Exception as e:
-            self.log(f"❌ 音频导入失败: {e}")
-            messagebox.showerror("错误", f"音频导入失败: {str(e)}")
+            self.log("❌ 音频导入失败，请检查文件格式是否支持")
+            messagebox.showerror("错误", "音频导入失败，请检查文件格式是否支持。\n\n支持的格式：MP3、WAV、FLAC、OGG等")
             safe_print_exc()
     
 

@@ -318,6 +318,36 @@ class UIInitMixin:
                     btn.configure(state=state)
                 except Exception:
                     pass
+        if state == "disabled":
+            self._show_cancel_button(True)
+        else:
+            self._show_cancel_button(False)
+
+    def _show_cancel_button(self, show):
+        btn = getattr(self, 'btn_cancel', None)
+        if btn:
+            try:
+                if show:
+                    btn.pack(fill=tk.X, pady=(0, 5))
+                else:
+                    btn.pack_forget()
+            except Exception:
+                pass
+
+    def _cancel_current_task(self):
+        with self.task_lock:
+            if self.task_running:
+                self.task_running = False
+                self.task_paused = False
+                self.pause_event.set()
+                self.log("⏹ 用户已请求停止任务...")
+                self._show_cancel_button(False)
+                renderer = getattr(self, 'video_renderer', None)
+                if renderer:
+                    try:
+                        renderer.cancel_render()
+                    except Exception:
+                        pass
 
     def _deferred_auth_check(self):
         self._auth_valid = False
@@ -402,8 +432,7 @@ class UIInitMixin:
         self.config_file = os.path.join(self.base_dir, "config.json")
         
         # 创建必要的目录
-        if not os.path.exists(self.images_dir):
-            os.makedirs(self.images_dir)
+        os.makedirs(self.images_dir, exist_ok=True)
         
         # 核心变量
         self.audio_path = None

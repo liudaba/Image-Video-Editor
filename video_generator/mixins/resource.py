@@ -409,14 +409,12 @@ class ResourceMixin:
                 trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
             else:
                 trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
-            if not os.path.exists(trash_dir):
-                os.makedirs(trash_dir)
+            os.makedirs(trash_dir, exist_ok=True)
 
             if trash_session_dir is None:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
-            if not os.path.exists(trash_session_dir):
-                os.makedirs(trash_session_dir)
+            os.makedirs(trash_session_dir, exist_ok=True)
             
             filename = os.path.basename(file_path)
             dest = os.path.join(trash_session_dir, filename)
@@ -439,8 +437,7 @@ class ResourceMixin:
                 trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
             else:
                 trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
-            if not os.path.exists(trash_dir):
-                os.makedirs(trash_dir)
+            os.makedirs(trash_dir, exist_ok=True)
 
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
