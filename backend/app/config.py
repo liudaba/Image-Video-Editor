@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+﻿from pydantic_settings import BaseSettings
 from typing import List, Optional
 import os
 import sys
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
     HMAC_SIGN_KEY: str = ""
+    ECDSA_PRIVATE_KEY_PATH: str = ""
     TRIAL_DAYS: int = 7
     GRACE_HOURS: int = 2
 

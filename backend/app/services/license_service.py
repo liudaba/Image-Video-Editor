@@ -1,4 +1,4 @@
-import secrets
+﻿import secrets
 import string
 import hashlib
 import hmac as _hmac
@@ -84,7 +84,7 @@ def verify_signature(data: dict, signature: str) -> bool:
         sig_ver = data.get(_SIG_VERSION_KEY, 1)
         payload = _make_payload(data)
         if sig_ver == 2:
-            pubkey_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_pubkey.pem")
+            pubkey_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "keys", ".license_verify_pubkey.pem")
             if os.path.exists(pubkey_path):
                 from cryptography.hazmat.primitives import serialization
                 from cryptography.hazmat.primitives.asymmetric import ec

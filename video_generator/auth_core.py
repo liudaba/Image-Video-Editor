@@ -75,11 +75,16 @@ def _get_ecdsa_public_key():
         return _ECDSA_PUBLIC_KEY
     try:
         from cryptography.hazmat.primitives import serialization
-        base_dir = _get_data_dir()
-        pubkey_file = os.path.join(base_dir, ".license_verify_pubkey.pem")
-        if os.path.exists(pubkey_file):
-            with open(pubkey_file, "rb") as f:
-                _ECDSA_PUBLIC_KEY = serialization.load_pem_public_key(f.read())
+        search_dirs = [_get_data_dir()]
+        parent_dir = os.path.dirname(_get_data_dir())
+        if parent_dir and parent_dir not in search_dirs:
+            search_dirs.append(parent_dir)
+        for search_dir in search_dirs:
+            pubkey_file = os.path.join(search_dir, ".license_verify_pubkey.pem")
+            if os.path.exists(pubkey_file):
+                with open(pubkey_file, "rb") as f:
+                    _ECDSA_PUBLIC_KEY = serialization.load_pem_public_key(f.read())
+                break
     except Exception:
         pass
     return _ECDSA_PUBLIC_KEY
