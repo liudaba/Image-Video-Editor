@@ -35,13 +35,7 @@ class UIInitMixin:
         self._initialize_event_handlers()
         self._start_system_services()
         
-        # 显示优化状态（不立即检测硬件）
         thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
-        print(f"🚀 性能优化已启用:")
-        print(f"   - 提示词生成: 本地单线程/云端4线程（自动切换）")
-        print(f"   - 分镜创建线程: {thread_count}")
-        print(f"   - 批量图像生成: 就绪")
-        print(f"   - 视频编码器: 延迟检测（首次使用时）")
     
 
     def _update_membership_title(self):
@@ -522,21 +516,10 @@ class UIInitMixin:
     
 
     def _initialize_systems(self):
-        """初始化各个系统"""
-        # ========== 启动时清空所有全局缓存（确保全新开始）==========
-        try:
-            prompt_cache.clear()
-            image_cache.clear()
-            self.log("🗑️ 已清空全局缓存（prompt_cache + image_cache）")
-        except Exception as e:
-            self.log(f"⚠️ 清空全局缓存失败: {e}")
-        
-        # 通信系统
         self.event_system = {}
         self.state_manager = {}
         self.data_bus = {}
 
-        # 缓存系统
         self.cache_system = {
             'models': {},
             'prompts': {},
@@ -544,7 +527,6 @@ class UIInitMixin:
             'audio': {}
         }
 
-        # 线程池管理
         self.thread_pool = {}
         self.thread_pool_stats = {
             'active_threads': 0,
@@ -553,7 +535,12 @@ class UIInitMixin:
             'total_tasks': 0
         }
 
-        # ARV提示词生成器（保持单例，确保分镜连贯性）
+        try:
+            prompt_cache.clear()
+            image_cache.clear()
+        except Exception:
+            pass
+
         self.arv_prompter = None
         if ARV_OPTIMIZATION_AVAILABLE:
             try:
@@ -561,7 +548,6 @@ class UIInitMixin:
             except Exception:
                 pass
 
-        # 初始化各个系统
         self.init_state_manager()
         self.init_event_system()
         self.init_cache_system()
@@ -653,12 +639,7 @@ class UIInitMixin:
             self.auto_connect_ollama(silent=True)
             from video_generator.ollama_client import is_ollama_available
             ollama_ok = is_ollama_available()
-            if cloud_llm and ollama_ok:
-                self._readiness['ollama'] = True
-                provider = getattr(self, '_cloud_llm_provider', '')
-                model = getattr(self, '_cloud_llm_model', '')
-                self.root.after(0, lambda: self.log(f"  [5/7] ✅ 云端大模型已启用（{provider} / {model}）"))
-            elif cloud_llm and not ollama_ok:
+            if cloud_llm:
                 self._readiness['ollama'] = True
                 provider = getattr(self, '_cloud_llm_provider', '')
                 model = getattr(self, '_cloud_llm_model', '')
@@ -752,6 +733,13 @@ class UIInitMixin:
                 feature_missing.append(label)
             hint = '已就绪' if ok else feature_hints.get(key, '未就绪')
             self.log(f"    {'✅' if ok else '⚠️ '} {label} — {hint}")
+
+        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
+        self.log("  【性能配置】")
+        self.log(f"    🔧 分镜创建线程: {thread_count}")
+        self.log(f"    🔧 提示词生成: 本地单线程 / 云端4线程（自动切换）")
+        self.log(f"    🔧 批量图像生成: 就绪")
+        self.log(f"    🔧 视频编码器: 延迟检测（首次使用时）")
 
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
