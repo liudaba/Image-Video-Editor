@@ -3570,7 +3570,9 @@ class ShotsMixin:
                         
                         for part in parts:
                             part = part.strip()
-                            if not part or '→' not in part:
+                            if not part:
+                                continue
+                            if '→' not in part and '->' not in part and '=>' not in part:
                                 continue
                             try:
                                 if '→' in part:
@@ -4087,7 +4089,7 @@ class ShotsMixin:
                         self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
-            self.log("\n📍 步骤 2/3: 分析文章内容与提示词生成")
+            self.log("\n📍 步骤 2/3: 主题分析与纠错")
             self.log("   流程: 发送文本 → 等待模型分析 → 提取分析结果")
             self.update_task_progress("正在分析文章内容...", 40)
             
@@ -4448,7 +4450,7 @@ class ShotsMixin:
                     self.log(f"   💡 提示: 主题分析需要至少20字符的文本内容")
             
             # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
-            self.log("\n📍 步骤 2.5/4: 准备分镜任务")
+            self.log("\n📍 步骤 3/3: 创建分镜")
             self.update_task_progress("正在准备分镜任务...", 60)
             
             correction_dict = theme_info.get('correction_dict', {})
@@ -4466,12 +4468,10 @@ class ShotsMixin:
                             text = text.replace(wrong, correct)
                     text = _fix_whisper_repeated_chars(text)
                     text = _ensure_simplified_chinese(text)
-                    seg_content_type = self.analyze_content_type(text)
                     final_tasks.append({
                         'text': text,
                         'start': seg.get('start', 0),
                         'end': seg.get('end', 0),
-                        'content_type': seg_content_type
                     })
             self.log(f"📝 共 {len(final_tasks)} 个语音片段分镜（已应用纠错）")
             
@@ -4724,7 +4724,7 @@ class ShotsMixin:
             self._pregenerated_prompts = pregenerated_prompts
             
             # 步骤3: 创建分镜
-            self.log("\n📍 步骤 3/3: 创建分镜与后处理")
+            self.log("\n🔧 步骤 3 - 创建分镜")
             self.update_task_progress("正在创建分镜...", 80)
             self.log(f"📝 基于语音片段创建分镜（提示词已预生成）")
             
@@ -4855,7 +4855,7 @@ class ShotsMixin:
                 return
             
             # 后处理：时间戳修复 + 合并过短 + 拆分超长
-            self.log("\n📍 步骤 3/3: 后处理（时间戳修复、合并、拆分）")
+            self.log("\n🔧 步骤 3 - 后处理（时间戳修复、合并、拆分）")
             self.update_task_progress("正在后处理分镜数据...", 85)
             
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
