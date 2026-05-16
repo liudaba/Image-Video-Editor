@@ -9,13 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import time
 
-from .config import settings  # 使用相对导入
-from .database import get_db  # 使用相对导入
+from .config import settings
+from .database import get_db
 from .models import User
 from .schemas import TokenData
 
 logger = logging.getLogger("videogen")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_SECONDS = 900
@@ -137,10 +137,18 @@ def clear_login_failures(identifier: str):
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    token_data = decode_access_token(credentials.credentials)
+    token = None
+    if credentials:
+        token = credentials.credentials
+    if not token:
+        token = request.cookies.get("admin_session")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    token_data = decode_access_token(token)
     result = await db.execute(select(User).where(User.id == token_data.user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -159,10 +167,14 @@ async def get_current_user_optional(
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    token = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    if not token:
+        token = request.cookies.get("admin_session")
+    if not token:
         return None
     try:
-        token = auth_header.split(" ", 1)[1]
         token_data = decode_access_token(token)
         result = await db.execute(select(User).where(User.id == token_data.user_id))
         user = result.scalar_one_or_none()
