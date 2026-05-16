@@ -1181,23 +1181,16 @@ class ShotsMixin:
             if not prompt:
                 return set()
             visual_keywords = {
-                'dna', 'helix', 'double helix', 'gene', 'genetic', 'chromosome',
-                'tree', 'branching', 'evolutionary tree', 'family tree', 'phylogenetic',
-                'fossil', 'fossilized', 'skull', 'skeleton', 'bone', 'remains',
-                'sediment', 'strata', 'stratified', 'geological', 'layered',
-                'paleontologist', 'excavation', 'dig site',
-                'forest', 'jungle', 'canopy', 'prehistoric', 'primordial',
-                'professor', 'scientist', 'researcher', 'student',
-                'laboratory', 'museum',
-                'ancient primate', 'hominid', 'early hominid', 'primitive hominid',
-                'cave painting', 'stone tool', 'timeline mural', 'comparative anatomy',
-                'cell division', 'protein folding',
                 'palace', 'office', 'military', 'soldier', 'general',
                 'casino', 'poker', 'card', 'gold', 'oil', 'contract',
                 'courtroom', 'prison', 'border', 'refugee',
                 'helicopter', 'warship', 'tank', 'rifle', 'missile',
                 'protest', 'crowd', 'rally', 'speech', 'podium',
                 'map', 'globe', 'flag', 'document', 'desk',
+                'professor', 'scientist', 'researcher',
+                'laboratory', 'museum', 'hospital',
+                'forest', 'jungle', 'mountain', 'ocean', 'desert',
+                'factory', 'port', 'harbor', 'airport', 'train station',
             }
             prompt_lower = prompt.lower()
             found = set()
@@ -1207,28 +1200,17 @@ class ShotsMixin:
             return found
         
         VISUAL_ALTERNATIVES = {
-            'dna': ['microscopic cell structure', 'chromosome diagram', 'RNA strand'],
-            'helix': ['protein folding', 'gene expression pattern', 'cellular machinery'],
-            'double helix': ['twisted ladder metaphor', 'genetic code visualization', 'molecular structure'],
-            'gene': ['allele comparison', 'genotype diagram', 'heredity chart'],
-            'genetic': ['molecular biology', 'hereditary trait', 'biochemical pathway'],
-            'chromosome': ['karyotype display', 'chromatid pair', 'cell nucleus detail'],
-            'tree': ['river delta', 'branching coral', 'neural network'],
-            'branching': ['diverging path', 'splitting stream', 'forked lightning'],
-            'evolutionary tree': ['phylogenetic chart', 'cladogram diagram', 'lineage map'],
-            'fossil': ['living habitat reconstruction', 'footprint trackway', 'ancient egg'],
-            'fossilized': ['petrified wood', 'amber specimen', 'mineralized imprint'],
-            'skull': ['brain cavity cast', 'jaw structure', 'cranial capacity diagram'],
-            'skeleton': ['muscular reconstruction', 'body silhouette', 'joint mechanism'],
-            'bone': ['cartilage model', 'tissue cross-section', 'growth ring'],
-            'sediment': ['erosion pattern', 'riverbed cross-section', 'depositional layer'],
-            'strata': ['geological column', 'rock formation', 'cliff face exposure'],
-            'stratified': ['banded iron formation', 'layered canyon wall', 'sedimentary fold'],
-            'geological': ['tectonic plate boundary', 'volcanic formation', 'mineral vein'],
-            'layered': ['laminated rock', 'sedimentary stack', 'depositional sequence'],
-            'paleontologist': ['field researcher', 'laboratory analyst', 'science student'],
+            'palace': ['government building', 'official residence', 'state house'],
+            'office': ['conference room', 'command center', 'private study'],
+            'military': ['armed checkpoint', 'barracks interior', 'defense headquarters'],
+            'soldier': ['armed guard', 'patrol officer', 'security personnel'],
+            'general': ['senior commander', 'high-ranking officer', 'military leader'],
+            'courtroom': ['tribunal chamber', 'judicial hall', 'hearing room'],
+            'prison': ['detention facility', 'holding cell', 'confinement area'],
+            'border': ['checkpoint crossing', 'frontier zone', 'security perimeter'],
+            'protest': ['public demonstration', 'civil gathering', 'mass rally'],
+            'oil': ['petroleum facility', 'refinery complex', 'energy infrastructure'],
             'forest': ['open savanna', 'coastal wetland', 'mountain meadow'],
-            'prehistoric': ['ancient civilization', 'primordial landscape', 'dawn of time'],
             'primordial': ['volcanic landscape', 'early earth', 'hazy dawn'],
             'ancient primate': ['primate hand grasping tool', 'footprint in volcanic ash', 'nesting site'],
             'hominid': ['bipedal trackway', 'stone tool workshop', 'fire-lit shelter'],
@@ -1582,31 +1564,21 @@ class ShotsMixin:
             return []
 
         semantic_map = {
-            '地产': ['房', '楼', '万达', '恒大', 'SOHO', '建筑', '楼盘', '物业', '土地'],
-            '财富': ['钱', '资产', '富豪', '身价', '亿万', '财富', '资本', '收益'],
-            '债务': ['债', '欠', '贷款', '负债', '还债', '资金链', '违约', '杠杆'],
-            '风险': ['危险', '危机', '暴雷', '崩塌', '断裂', '凶险', '暴风'],
-            '法律': ['法', '刑', '逮捕', '调查', '审判', '违规', '诈骗', '洗钱', '追责', '强制措施'],
-            '科技': ['技术', 'AI', '人工智能', '百度', '互联网', '数字化', '芯片'],
-            '农业': ['农', '养殖', '饲料', '新希望', '种植'],
-            '转型': ['转', '升级', '布局', '多元化', '调整', '改革'],
-            '商业': ['商', '市场', '竞争', '资本', '投资', '并购'],
-            '权力': ['权', '控制', '掌控', '帝国', '教父', '大佬'],
-            '病毒': ['病毒', '感染', '传染', '疫情', '新冠', '德尔塔', '变异'],
-            '疫苗': ['疫苗', '接种', '免疫', '抗体', '防感染'],
-            '变异': ['变异', '突变', '变异株', '德尔塔', '毒株'],
-            '致死率': ['致死', '死亡', '重症', '死亡率', '病死'],
-            'ICU': ['ICU', '重症', '呼吸机', '监护', '急救'],
-            '基因编辑': ['基因', '编辑', 'DNA', 'CRISPR', '遗传', '基因组'],
-            '城市': ['城市', '建筑', '街道', '巷弄', '社区', '胡同', '弄堂'],
-            '生命': ['生命', '生存', '活着', '呼吸', '生活'],
-            '进化': ['进化', '演化', '進化', '演變', '自然選擇', '自然筛选', '适者生存', '达尔文', '達爾文'],
-            '灵长类': ['灵长', '靈長', '猿', '猴', '猩猩', '古人類', '古人猿'],
-            '共同祖先': ['祖先', '共同', '起源', '起源地', '根'],
-            '基因': ['基因', 'DNA', '遗传', '遺傳', '染色體', '染色体', '双螺旋'],
-            '气候变化': ['气候', '氣候', '森林', '环境', '環境', '变暖', '冰川'],
-            '文明': ['文明', '文化', '工具', '思考', '智慧', '哲学'],
-            '生存': ['生存', '活下去', '适应', '適應', '妥协', '妥協'],
+            '地产': ['房', '楼', '建筑', '楼盘', '物业', '土地'],
+            '财富': ['钱', '资产', '富豪', '身价', '亿万', '财富', '资本'],
+            '债务': ['债', '欠', '贷款', '负债', '资金链', '违约'],
+            '风险': ['危险', '危机', '崩塌', '断裂', '凶险'],
+            '法律': ['法', '刑', '逮捕', '调查', '审判', '违规', '追责'],
+            '科技': ['技术', 'AI', '人工智能', '数字化', '芯片'],
+            '农业': ['农', '养殖', '种植'],
+            '商业': ['商', '市场', '竞争', '投资', '并购'],
+            '权力': ['权', '控制', '掌控', '政权'],
+            '军事': ['军', '武', '战', '士兵', '将领', '武装'],
+            '政治': ['政治', '总统', '政府', '选举', '反对派'],
+            '经济': ['经济', '金融', '股票', '石油', '制裁'],
+            '外交': ['外交', '谈判', '国际', '盟友', '否决权'],
+            '社会': ['社会', '民生', '民众', '底层'],
+            '能源': ['石油', '矿产', '油价', '能源'],
         }
 
         matched_elements = []
@@ -1621,21 +1593,16 @@ class ShotsMixin:
         if not matched_elements:
             dynamic_keywords = []
             concept_patterns = [
-                ('进化', ['进化', '演化', '進化', '演變']),
-                ('灵长类', ['灵长', '靈長', '猿', '猴', '猩猩']),
-                ('基因', ['基因', 'DNA', '遗传', '遺傳']),
-                ('共同祖先', ['祖先', '共同', '起源']),
-                ('气候变化', ['气候', '氣候', '森林减少']),
-                ('文明', ['文明', '工具', '思考']),
-                ('自然选择', ['自然選擇', '自然筛选', '适者生存']),
                 ('战争', ['战争', '戰爭', '战斗', '軍事', '军事', '导弹', '坦克']),
-                ('政治', ['政治', '总统', '總統', '政府', '选举', '選舉', '权力']),
-                ('经济', ['经济', '經濟', '金融', '股票', '投资', '投資']),
-                ('外交', ['外交', '谈判', '談判', '制裁', '国际', '國際']),
-                ('军事', ['军队', '軍隊', '武装', '武裝', '军官', '軍官', '士兵']),
-                ('社会', ['社会', '社會', '民生', '抗议', '抗議', '示威']),
+                ('政治', ['政治', '总统', '總統', '政府', '选举', '選舉', '权力', '政权']),
+                ('经济', ['经济', '經濟', '金融', '股票', '投资', '投資', '制裁']),
+                ('外交', ['外交', '谈判', '談判', '制裁', '国际', '國際', '否决权']),
+                ('军事', ['军队', '軍隊', '武装', '武裝', '军官', '軍官', '士兵', '军方']),
+                ('社会', ['社会', '社會', '民生', '抗议', '抗議', '示威', '底层']),
                 ('科技', ['科技', '技术', '技術', '人工智能', 'AI', '芯片']),
-                ('能源', ['石油', '石油', '天然气', '能源', '矿产', '礦產']),
+                ('能源', ['石油', '天然气', '能源', '矿产', '礦產']),
+                ('司法', ['审判', '法院', '海牙', '司法', '逮捕']),
+                ('生存', ['生存', '保险', '防线', '后路', '退路']),
             ]
             for concept, patterns in concept_patterns:
                 if any(p in shot_text for p in patterns):
@@ -3945,7 +3912,7 @@ class ShotsMixin:
             self._move_output_to_trash(reason="一键生成分镜")
             
             # 步骤1: 音频分析
-            self.log("\n📍 步骤 1/4: 音频语音识别")
+            self.log("\n📍 步骤 1/3: 音频语音识别")
             self.update_task_progress("正在识别音频语音...", 10)
             
             # 生成音频文件的缓存键（添加文件大小防止冲突）
@@ -4115,7 +4082,7 @@ class ShotsMixin:
                         self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
-            self.log("\n📍 步骤 2/4: 分析文章内容（用于统一分镜基调）")
+            self.log("\n📍 步骤 2/3: 分析文章内容与提示词生成")
             self.log("   流程: 发送文本 → 等待模型分析 → 提取分析结果")
             self.update_task_progress("正在分析文章内容...", 40)
             
@@ -4144,12 +4111,10 @@ class ShotsMixin:
                 seg_start = seg.get('start', 0)
                 seg_end = seg.get('end', 0)
                 if text and seg_end > seg_start:
-                    seg_content_type = self.analyze_content_type(text)
                     original_shot_tasks.append({
                         'text': text,
                         'start': seg_start,
                         'end': seg_end,
-                        'content_type': seg_content_type
                     })
             
             self.log(f"   原始语音片段数: {len(original_shot_tasks)}个")
@@ -4740,7 +4705,7 @@ class ShotsMixin:
             self._pregenerated_prompts = pregenerated_prompts
             
             # 步骤3: 创建分镜
-            self.log("\n📍 步骤 3/4: 创建分镜")
+            self.log("\n📍 步骤 3/3: 创建分镜与后处理")
             self.update_task_progress("正在创建分镜...", 80)
             self.log(f"📝 基于语音片段创建分镜（提示词已预生成）")
             
@@ -4847,27 +4812,7 @@ class ShotsMixin:
 
             self.log("   ✅ 保持原始时间戳，确保音画同步")
 
-            # 立即保存分镜数据（先保存再验证，确保文件不延迟）
-            with self.resource_lock:
-                self.shots_data = shots
-            self.state_manager['shots']['generated'] = True
-            self.state_manager['shots']['count'] = len(shots)
-            self.state_manager['shots']['data'] = None
-            
             shots_file = os.path.join(self.output_dir, "shots_data.json")
-            tmp_file = shots_file + ".tmp"
-            try:
-                with open(tmp_file, 'w', encoding='utf-8') as f:
-                    json.dump(shots, f, ensure_ascii=False, indent=2)
-                os.replace(tmp_file, shots_file)
-            except Exception:
-                try:
-                    os.remove(tmp_file)
-                except OSError:
-                    pass
-                with open(shots_file, 'w', encoding='utf-8') as f:
-                    json.dump(shots, f, ensure_ascii=False, indent=2)
-            self.log(f"   ✅ 分镜数据已保存: {shots_file}")
 
             self._unload_ollama_models()
 
@@ -4890,9 +4835,9 @@ class ShotsMixin:
                 self.root.after(0, lambda: messagebox.showwarning("警告", "未能生成分镜，请检查音频文件是否正确"))
                 return
             
-            # 步骤4: 验证和完成
-            self.log("\n📍 步骤 4/4: 验证分镜数据")
-            self.update_task_progress("正在验证分镜数据...", 91)
+            # 后处理：时间戳修复 + 合并过短 + 拆分超长
+            self.log("\n📍 步骤 3/3: 后处理（时间戳修复、合并、拆分）")
+            self.update_task_progress("正在后处理分镜数据...", 85)
             
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
             
@@ -4975,13 +4920,6 @@ class ShotsMixin:
                 i += 1
             if short_merged > 0:
                 self.log(f"   🔧 已合并 {short_merged} 个过短分镜（< {min_shot_dur}秒）")
-                self.update_task_progress("正在合并过短分镜...", 93)
-                for j in range(len(shots)):
-                    shots[j]['id'] = j
-                    shots[j]['image_file'] = f"shot_{j+1:02d}.png"
-                with open(shots_file, 'w', encoding='utf-8') as f:
-                    json.dump(shots, f, ensure_ascii=False, indent=2)
-                self.log(f"   ✅ 合并后分镜数据已重新保存: {shots_file}")
 
             # 拆分超长分镜（单帧超过10秒会导致画面呆板）
             max_shot_dur = 10.0
@@ -5034,11 +4972,6 @@ class ShotsMixin:
 
             if split_count > 0:
                 self.log(f"   🔧 已拆分 {split_count} 个超长分镜（> {max_shot_dur}秒）")
-                for j in range(len(shots)):
-                    shots[j]['id'] = j
-                with open(shots_file, 'w', encoding='utf-8') as f:
-                    json.dump(shots, f, ensure_ascii=False, indent=2)
-                self.log(f"   ✅ 拆分后分镜数据已重新保存: {shots_file}")
             
             # 确保首尾覆盖整个音频时长
             if shots and audio_total_duration > 0:
@@ -5059,22 +4992,34 @@ class ShotsMixin:
             else:
                 self.log(f"   ✅ 时间戳验证通过")
             
-            self.update_task_progress("正在保存分镜数据...", 95)
-            
-            # 重新编号image_file（合并/拆分后编号可能不连续）
+            # 一次性完成：重新编号 + 浮点修复 + 保存
             for j in range(len(shots)):
                 shots[j]['id'] = j
                 shots[j]['image_file'] = f"shot_{j+1:02d}.png"
-
-            # 修复duration浮点精度
-            for j in range(len(shots)):
                 shots[j]['start'] = round(shots[j]['start'], 3)
                 shots[j]['end'] = round(shots[j]['end'], 3)
                 shots[j]['duration'] = round(shots[j]['duration'], 3)
 
-            with open(shots_file, 'w', encoding='utf-8') as f:
-                json.dump(shots, f, ensure_ascii=False, indent=2)
-            self.log(f"   ✅ 验证后分镜数据已保存: {shots_file}")
+            with self.resource_lock:
+                self.shots_data = shots
+            self.state_manager['shots']['generated'] = True
+            self.state_manager['shots']['count'] = len(shots)
+            self.state_manager['shots']['data'] = None
+
+            self.update_task_progress("正在保存分镜数据...", 95)
+            tmp_file = shots_file + ".tmp"
+            try:
+                with open(tmp_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_file, shots_file)
+            except Exception:
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+                with open(shots_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
+            self.log(f"   ✅ 分镜数据已保存: {shots_file}")
             
             gaps = []
             for i in range(1, len(shots)):
