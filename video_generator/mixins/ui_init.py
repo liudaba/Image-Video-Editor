@@ -504,6 +504,9 @@ class UIInitMixin:
         # 分镜批处理大小设置 - 初始默认值，由高级设置面板和load_config覆盖
         self.batch_size_var = tk.IntVar(value=2)
         
+        # 最短分镜时长设置 - 初始默认值，由load_config覆盖
+        self.min_shot_duration_var = tk.DoubleVar(value=DEFAULT_MIN_SHOT_DURATION)
+        
         # 音频模型设置 - 初始默认值，由load_config覆盖
         self.whisper_model_var = tk.StringVar(value="medium")
         
