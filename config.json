@@ -29,5 +29,6 @@
   "cloud_image_api_key": "",
   "cloud_image_model": "",
   "cloud_image_model_id": "",
-  "cloud_image_custom_url": ""
+  "cloud_image_custom_url": "",
+  "min_shot_duration": 4.0
 }

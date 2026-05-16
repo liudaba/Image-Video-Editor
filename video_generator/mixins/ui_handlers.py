@@ -289,6 +289,8 @@ class UIHandlersMixin:
         """打开/关闭高级设置窗口"""
         if self.advanced_window and self.advanced_window.winfo_exists():
             try:
+                if hasattr(self, 'min_shot_duration_var'):
+                    self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
                 self.save_config()
                 self._print_current_settings()
             except Exception:
@@ -416,6 +418,8 @@ class UIHandlersMixin:
     def _on_advanced_window_close(self):
         """高级设置窗口关闭事件 - 自动保存配置并显示参数"""
         try:
+            if hasattr(self, 'min_shot_duration_var'):
+                self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
             self.save_config()
             self._print_current_settings()
         except Exception:
