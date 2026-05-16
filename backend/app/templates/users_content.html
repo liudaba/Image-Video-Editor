@@ -122,6 +122,7 @@
             
             response.users.forEach(user => {
                 const row = document.createElement('tr');
+                if (!user.is_active) row.classList.add('table-secondary');
                 const licTypeMap = {'trial': '试用', 'pro': '专业版'};
                 const licType = user.license_type ? (licTypeMap[user.license_type] || user.license_type) : '-';
                 const licValid = user.license_is_valid;
@@ -144,8 +145,8 @@
                         <div class="table-actions">
                             <button class="btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}" 
                                 onclick="toggleUserActive(${user.id}, ${user.is_active})"
-                                title="${user.is_active ? '禁用' : '启用'}用户">
-                                <i class="fas ${user.is_active ? 'fa-ban' : 'fa-check'}"></i>
+                                title="${user.is_active ? '禁用此用户' : '重新启用此用户'}">
+                                <i class="fas ${user.is_active ? 'fa-ban' : 'fa-check'}"></i> ${user.is_active ? '禁用' : '启用'}
                             </button>
                             <button class="btn btn-sm btn-info" 
                                 onclick="showEditUserModal(${user.id})"
@@ -207,15 +208,19 @@
     // 切换用户状态
     async function toggleUserActive(userId, isActive) {
         try {
-            await apiRequest(`/api/admin/users/${userId}/toggle_active`, {
+            const result = await apiRequest(`/api/admin/users/${userId}/toggle_active`, {
                 method: 'POST'
             });
             
-            showSuccess(`${isActive ? '禁用' : '启用'}用户成功`);
+            if (isActive) {
+                showSuccess('用户已禁用，其许可证已同步失效');
+            } else {
+                showSuccess('用户已重新启用，其许可证已同步恢复有效');
+            }
             loadUsers(usersCurrentPage);
         } catch (error) {
             console.error('切换用户状态失败:', error);
-            showError(`切换用户状态失败: ${error.message}`);
+            showError(`操作失败: ${error.message}`);
         }
     }
 
