@@ -388,6 +388,16 @@ _TRANSLATION_MAPPING = {
     '合法性': 'legitimacy', '崩盘': 'collapse',
     '难民': 'refugee', '流亡': 'exile',
     '审判': 'trial', '司法': 'judiciary',
+    '严肃': 'serious, solemn', '紧张': 'tense, intense', '激昂': 'passionate, stirring',
+    '温馨': 'warm, tender', '轻松': 'relaxed, lighthearted', '悲壮': 'tragic, heroic',
+    '沉重': 'heavy, somber', '振奋': 'inspiring, uplifting', '冷静': 'calm, composed',
+    '焦虑': 'anxious, worried', '绝望': 'desperate, hopeless', '坚定': 'resolute, determined',
+    '讽刺': 'ironic, satirical', '震撼': 'shocking, impactful', '忧郁': 'melancholic, gloomy',
+    '激愤': 'indignant, outraged', '沉稳': 'steady, composed', '压抑': 'oppressive, stifling',
+    '肃穆': 'solemn, reverent', '凝重': 'grave, dignified', '犀利': 'sharp, incisive',
+    '嚴肅': 'serious, solemn', '緊張': 'tense, intense', '激昂': 'passionate, stirring',
+    '溫馨': 'warm, tender', '輕鬆': 'relaxed, lighthearted', '冷靜': 'calm, composed',
+    '肅穆': 'solemn, reverent', '凝重': 'grave, dignified',
     '赌': 'gambling', '筹码': 'bargaining chip',
     '防线': 'defense line', '压舱石': 'ballast',
     '后路': 'retreat route', '退路': 'way out',
@@ -742,17 +752,54 @@ class ShotsMixin:
 
         desc_keywords = self._extract_visual_keywords_from_description(description)
 
+        translated_tone = self._translate_to_english(visual_tone) if visual_tone else ''
+        if translated_tone and re.search(r'[\u4e00-\u9fff]', translated_tone):
+            translated_tone = ''
+
+        orig_desc = orig_shot.get('description', '')
+        is_desc_different = description != orig_desc and description.strip()
+
         parts = []
-        if shot_angle.lower() not in orig_prompt.lower():
-            parts.append(shot_angle)
-        if desc_keywords:
-            parts.append(desc_keywords)
-        if orig_prompt:
-            parts.append(orig_prompt)
-        if visual_tone and visual_tone.lower() not in orig_prompt.lower():
-            parts.append(visual_tone)
+        parts.append(shot_angle)
+
+        if is_desc_different:
+            new_keywords = self._extract_visual_keywords_from_description(description)
+            orig_kw_set = set(k.strip().lower() for k in orig_prompt.split(',') if len(k.strip()) > 2)
+            if new_keywords:
+                for kw in new_keywords.split(','):
+                    kw = kw.strip()
+                    if kw and kw.lower() not in orig_kw_set:
+                        parts.append(kw)
+
+            theme_translated = self._translate_to_english(core_theme) if core_theme else ''
+            if theme_translated and not re.search(r'[\u4e00-\u9fff]', theme_translated) and theme_translated.lower() not in orig_prompt.lower():
+                parts.append(theme_translated)
+
+            quality_tags = ['ultra detailed', 'cinematic lighting', 'photorealistic']
+            for qt in quality_tags:
+                if qt.lower() not in orig_prompt.lower():
+                    parts.append(qt)
+        else:
+            if desc_keywords:
+                parts.append(desc_keywords)
+            if orig_prompt:
+                parts.append(orig_prompt)
+
+        if translated_tone and translated_tone.lower() not in ' '.join(parts).lower():
+            parts.append(translated_tone)
 
         result = ', '.join(parts)
+        result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+        result = re.sub(r',\s*,', ',', result)
+        result = re.sub(r'^\s*,|,\s*$', '', result)
+        seen = set()
+        deduped = []
+        for p in result.split(','):
+            p = p.strip()
+            if p and p.lower() not in seen:
+                seen.add(p.lower())
+                deduped.append(p)
+        result = ', '.join(deduped)
         return result if result else orig_prompt
 
     def _extract_visual_keywords_from_description(self, description):
@@ -794,6 +841,9 @@ class ShotsMixin:
         """
         keeper_prompt = keeper_shot.get('prompt_en', '')
         visual_tone = keeper_shot.get('visual_tone', '')
+        translated_tone = self._translate_to_english(visual_tone) if visual_tone else ''
+        if translated_tone and re.search(r'[\u4e00-\u9fff]', translated_tone):
+            translated_tone = ''
 
         desc_keywords = self._extract_visual_keywords_from_description(merged_description)
 
@@ -802,10 +852,13 @@ class ShotsMixin:
             parts.append(desc_keywords)
         if keeper_prompt:
             parts.append(keeper_prompt)
-        if visual_tone and visual_tone.lower() not in keeper_prompt.lower():
-            parts.append(visual_tone)
+        if translated_tone and translated_tone.lower() not in keeper_prompt.lower():
+            parts.append(translated_tone)
 
         result = ', '.join(parts)
+        result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+        result = re.sub(r',\s*,', ',', result)
+        result = re.sub(r'^\s*,|,\s*$', '', result)
         return result if result else keeper_prompt
 
     def _merge_shots(self, shots, keep_idx, remove_idx):
@@ -1244,6 +1297,19 @@ class ShotsMixin:
         duplicate_count = 0
         indices = sorted(pregenerated_prompts.keys())
         
+        def _remove_duplicate_keywords(prompt):
+            if not prompt:
+                return prompt
+            parts = [p.strip() for p in prompt.split(',') if p.strip()]
+            seen = set()
+            result = []
+            for part in parts:
+                key = part.lower().strip()
+                if key not in seen:
+                    seen.add(key)
+                    result.append(part)
+            return ', '.join(result)
+
         # Pass 1: 相邻去重（阈值50%）- 本地替换
         for i in range(1, len(indices)):
             curr_idx = indices[i]
@@ -1264,6 +1330,8 @@ class ShotsMixin:
                         alternatives = VISUAL_ALTERNATIVES[elem]
                         import random
                         replacement = random.choice(alternatives)
+                        if replacement.lower() in new_prompt.lower():
+                            continue
                         pattern = r'\b' + re.escape(elem) + r'\b'
                         new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
                 if new_prompt != curr_prompt:
@@ -1272,6 +1340,7 @@ class ShotsMixin:
                     new_prompt = re.sub(r'\b\w+ized\b', '', new_prompt)
                     new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
                     new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                    new_prompt = _remove_duplicate_keywords(new_prompt)
                     new_prompt = new_prompt.strip(' ,')
                     pregenerated_prompts[curr_idx] = new_prompt
                     self._pregenerated_prompts_for_context[curr_idx] = new_prompt
@@ -1310,6 +1379,8 @@ class ShotsMixin:
                         alternatives = VISUAL_ALTERNATIVES[elem]
                         import random
                         replacement = random.choice(alternatives)
+                        if replacement.lower() in dup_prompt.lower():
+                            continue
                         pattern = r'\b' + re.escape(elem) + r'\b'
                         new_prompt = re.sub(pattern, replacement, dup_prompt, count=1, flags=re.IGNORECASE)
                         if new_prompt != dup_prompt:
@@ -1318,6 +1389,7 @@ class ShotsMixin:
                             new_prompt = re.sub(r'\b\w+ized\b', '', new_prompt)
                             new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
                             new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                            new_prompt = _remove_duplicate_keywords(new_prompt)
                             new_prompt = new_prompt.strip(' ,')
                             pregenerated_prompts[dup_idx] = new_prompt
                             self._pregenerated_prompts_for_context[dup_idx] = new_prompt
@@ -1346,11 +1418,14 @@ class ShotsMixin:
                             alternatives = VISUAL_ALTERNATIVES[elem]
                             import random
                             replacement = random.choice(alternatives)
+                            if replacement.lower() in new_prompt.lower():
+                                continue
                             pattern = r'\b' + re.escape(elem) + r'\b'
                             new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
                     if new_prompt != curr_prompt:
                         new_prompt = re.sub(r'\s{2,}', ' ', new_prompt)
                         new_prompt = re.sub(r',\s*,', ',', new_prompt)
+                        new_prompt = _remove_duplicate_keywords(new_prompt)
                         new_prompt = new_prompt.strip(' ,')
                         pregenerated_prompts[curr_idx] = new_prompt
                         self._pregenerated_prompts_for_context[curr_idx] = new_prompt
@@ -1660,7 +1735,17 @@ class ShotsMixin:
         prompt_quality = self._calculate_prompt_quality(prompt_en, description_parts.get('dubbing', ''))
         optimized_prompt = prompt_en
 
-        # 安全网：如果清洗后prompt_en仍含中文，使用回退生成
+        # 安全网：如果清洗后prompt_en仍含中文，先尝试翻译移除，再使用回退生成
+        if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
+            chinese_matches = re.findall(r'[\u4e00-\u9fff]+', optimized_prompt)
+            for cm in chinese_matches:
+                en_trans = self._translate_to_english(cm)
+                if en_trans:
+                    optimized_prompt = optimized_prompt.replace(cm, en_trans)
+                else:
+                    optimized_prompt = optimized_prompt.replace(cm, '')
+            optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
+            optimized_prompt = re.sub(r'^\s*,|,\s*$', '', optimized_prompt)
         if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
             dubbing_text = description_parts.get('dubbing', '')
             if dubbing_text:
@@ -2554,6 +2639,9 @@ class ShotsMixin:
         }
         
         context_hint = ""
+        if full_text and isinstance(full_text, str) and len(full_text) > 50:
+            summary = full_text[:300] if len(full_text) > 300 else full_text
+            context_hint += f"FULL AUDIO CONTEXT (use this to understand the overall narrative):\n{summary}\n\n"
         if hasattr(self, '_shot_texts_for_context') and isinstance(dubbing, str):
             shot_texts = self._shot_texts_for_context
             try:
@@ -2717,6 +2805,9 @@ class ShotsMixin:
         for original_idx, task in batch_items:
             dubbing = task.get('text', '')
             context_hint = ""
+            if full_text and isinstance(full_text, str) and len(full_text) > 50:
+                summary = full_text[:300] if len(full_text) > 300 else full_text
+                context_hint += f"FULL AUDIO CONTEXT (use this to understand the overall narrative):\n{summary}\n\n"
             if hasattr(self, '_shot_texts_for_context') and dubbing:
                 shot_texts = self._shot_texts_for_context
                 try:
@@ -3006,15 +3097,20 @@ class ShotsMixin:
         return ""
 
     def _analyze_and_generate_sd_prompt(self, text, content_type, custom_theme='', custom_visual_tone=''):
-        """分析文本语义并生成SD提示词 - 精简版回退方案（Ollama不可用时使用）"""
+        """分析文本语义并生成SD提示词 - 精简版回退方案（Ollama不可用时使用）
+
+        改进：基于文本内容生成具有叙事意义的场景描述，而非简单的关键词匹配
+        """
         keywords = []
         
         if custom_theme:
             theme_translated = self._translate_to_english(custom_theme)
-            keywords.append(theme_translated if theme_translated else custom_theme)
+            if theme_translated and not re.search(r'[\u4e00-\u9fff]', theme_translated):
+                keywords.append(theme_translated)
         if custom_visual_tone:
             tone_translated = self._translate_to_english(custom_visual_tone)
-            keywords.append(tone_translated if tone_translated else custom_visual_tone)
+            if tone_translated and not re.search(r'[\u4e00-\u9fff]', tone_translated):
+                keywords.append(tone_translated)
         
         theme_map = {
             'war': (['戰爭', '战争', '戰鬥', '战斗', '軍事', '军事', '導彈', '导弹', '坦克', '枪杆', '武装', '士兵', '军方', '军心'], ['war zone', 'military conflict', 'battlefield', 'armed forces']),
@@ -3062,17 +3158,64 @@ class ShotsMixin:
             if re.search(pattern, text):
                 keywords.append(tag)
 
+        scene_keywords = []
+        _SCENE_PATTERNS = [
+            (r'总统|總統|主席|领袖|領導', 'national leader at podium'),
+            (r'军方|軍方|将军|將軍|军官|軍官|武装|武裝', 'military officer in uniform'),
+            (r'石油|礦產|矿产|能源|油价', 'oil refinery, petroleum infrastructure'),
+            (r'制裁|谈判|談判|外交|安理会', 'diplomatic negotiation table'),
+            (r'反对派|選舉|选举|选票|執政', 'political rally, crowd gathering'),
+            (r'难民|難民|流亡|边境|逃亡', 'refugees at border crossing'),
+            (r'腐败|貪腐|金山|利益|贿赂', 'corruption scene, wealth disparity'),
+            (r'审判|審判|法院|海牙|逮捕', 'courtroom, judicial proceedings'),
+            (r'战争|戰短|战斗|戰鬥|导弹|坦克', 'war zone, military conflict'),
+            (r'民众|百姓|民生|食品|底层', 'civilian life, everyday hardship'),
+            (r'签字|签约|合同|协议|握手', 'signing ceremony, handshake over document'),
+            (r'妻子|夫人|夫妇|女性', 'woman in formal attire, political figure'),
+        ]
+        for pattern, scene in _SCENE_PATTERNS:
+            if re.search(pattern, text):
+                scene_keywords.append(scene)
+                break
+
+        camera_keywords = []
+        if hasattr(self, '_shot_texts_for_context'):
+            shot_texts = getattr(self, '_shot_texts_for_context', [])
+            try:
+                idx = shot_texts.index(text) if text in shot_texts else -1
+                total = len(shot_texts)
+                if idx == 0:
+                    camera_keywords.append('wide establishing shot')
+                elif idx == total - 1:
+                    camera_keywords.append('medium shot, reflective')
+                elif idx >= 0:
+                    progress = idx / max(1, total - 1)
+                    if progress <= 0.3:
+                        camera_keywords.append('medium shot')
+                    elif progress <= 0.7:
+                        camera_keywords.append('close-up shot')
+                    else:
+                        camera_keywords.append('medium shot')
+            except (ValueError, AttributeError):
+                pass
+
         if not keywords:
             keywords.append('realistic scene')
 
-        unique_keywords = list(dict.fromkeys(keywords))
-        if len(unique_keywords) <= 1:
-            unique_keywords = ['realistic scene', 'detailed environment']
-        
+        all_parts = []
+        if camera_keywords:
+            all_parts.extend(camera_keywords)
+        if scene_keywords:
+            all_parts.extend(scene_keywords)
+        all_parts.extend(keywords)
+
+        unique_parts = list(dict.fromkeys(all_parts))
+        if len(unique_parts) <= 1:
+            unique_parts = ['realistic scene', 'detailed environment']
+
         quality_tags = 'ultra detailed, hyper realistic, photorealistic, cinematic lighting, professional photography'
-        return f"{', '.join(unique_keywords)}, {quality_tags}"
-    
-    
+        return f"{', '.join(unique_parts)}, {quality_tags}"
+
 
     def _translate_to_english(self, chinese_text):
         """简单的中文到英文翻译（使用模块级常量，避免重复实例化）"""
@@ -4924,16 +5067,45 @@ class ShotsMixin:
                     desc = orig_shot.get('description', '')
                     desc_parts = []
                     if desc:
-                        sentences = re.split(r'[，,。.！!？?；;、]', desc)
-                        sentences = [s.strip() for s in sentences if s.strip()]
-                        if len(sentences) >= num_parts:
-                            per_part = len(sentences) // num_parts
+                        sentences = re.split(r'([。.！!？?；;])', desc)
+                        merged = []
+                        buf = ''
+                        for seg in sentences:
+                            buf += seg
+                            if seg in '\u3002.\uff01\uff1f\uff1b' and buf.strip():
+                                merged.append(buf.strip())
+                                buf = ''
+                        if buf.strip():
+                            merged.append(buf.strip())
+                        if not merged:
+                            sentences2 = re.split(r'[，,、\s]', desc)
+                            merged = [s.strip() for s in sentences2 if s.strip()]
+                        if len(merged) >= num_parts:
+                            per_part = len(merged) // num_parts
                             for p in range(num_parts):
                                 start_idx = p * per_part
-                                end_idx = start_idx + per_part if p < num_parts - 1 else len(sentences)
-                                desc_parts.append('，'.join(sentences[start_idx:end_idx]))
+                                end_idx = start_idx + per_part if p < num_parts - 1 else len(merged)
+                                desc_parts.append(''.join(merged[start_idx:end_idx]))
+                        elif len(merged) >= 2:
+                            chunk_size = max(1, len(merged) // num_parts)
+                            for p in range(num_parts):
+                                start_idx = min(p * chunk_size, len(merged))
+                                end_idx = min(start_idx + chunk_size, len(merged)) if p < num_parts - 1 else len(merged)
+                                part = ''.join(merged[start_idx:end_idx])
+                                if not part:
+                                    part = ''.join(merged[max(0, start_idx - 1):start_idx + 1])
+                                desc_parts.append(part if part else desc)
+                            while len(desc_parts) < num_parts:
+                                desc_parts.append(desc_parts[-1] if desc_parts else desc)
                         else:
-                            desc_parts = [desc] * num_parts
+                            chars_per_part = max(1, len(desc) // num_parts)
+                            for p in range(num_parts):
+                                start_c = p * chars_per_part
+                                end_c = start_c + chars_per_part if p < num_parts - 1 else len(desc)
+                                part = desc[start_c:end_c].strip()
+                                if not part:
+                                    part = desc
+                                desc_parts.append(part)
                     else:
                         desc_parts = [''] * num_parts
 
