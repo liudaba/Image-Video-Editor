@@ -11,7 +11,7 @@ import time
 from typing import Optional
 
 from ..database import get_db
-from ..models import User, MachineBinding
+from ..models import User, MachineBinding, License
 from ..schemas import UserRegister, UserLogin, LoginResponse, PasswordResetRequest, PasswordResetConfirm
 from ..auth import (
     get_current_user,
@@ -198,13 +198,14 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
         fp_count = fp_user_count.scalar() or 0
         if fp_count >= 3:
             raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")
+        from ..models import License
         fp_active_trial = await db.execute(
-            select(sa_func.count(User.id))
-            .join(MachineBinding, MachineBinding.user_id == User.id)
+            select(sa_func.count(License.id))
+            .join(MachineBinding, MachineBinding.user_id == License.user_id)
             .where(
                 MachineBinding.fingerprint == user_data.fingerprint,
-                User.license_type == "trial",
-                User.is_active == True,
+                License.license_type == "trial",
+                License.is_valid == True,
             )
         )
         active_trial_count = fp_active_trial.scalar() or 0

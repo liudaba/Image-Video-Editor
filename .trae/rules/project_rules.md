@@ -21,6 +21,18 @@
 - 后端运行在 Docker 容器中（`videogen-api-1`），项目目录 `/root/videogen/`
 - docker-compose 中 `./app:/app/app` 为绑定挂载，修改宿主机文件后重启容器即生效，无需重新构建镜像
 
+### Docker 容器操作关键规则
+
+- **`docker compose restart api`**：只重启现有容器，**不会重新读取 .env 文件**。适用于代码文件变更（通过绑定挂载自动生效）
+- **`docker compose up -d api`**：检测配置变化并**重新创建容器**，会加载新的 .env 环境变量。适用于 .env 变更、新增环境变量等场景
+- **何时用 `up -d` 而非 `restart`**：
+  - 修改了 `.env` 文件 → `docker compose up -d api`
+  - 修改了 `docker-compose.yml` → `docker compose up -d api`
+  - 只修改了 `app/` 下的代码文件 → `docker compose restart api`
+- **Docker 挂载路径**：`./app:/app/app`，所以宿主机路径是 `/root/videogen/app/`，而非 `/root/videogen/backend/app/`
+  - 正确: `scp auth.py root@8.141.101.155:/root/videogen/app/routers/auth.py`
+  - 错误: `scp auth.py root@8.141.101.155:/root/videogen/backend/app/routers/auth.py`
+
 ### 云端代码同步流程
 
 1. **本地提交推送**：先 `git add` + `git commit` + `git push origin master`
@@ -76,6 +88,7 @@
 - **无需用户确认重启**：代码已同步到服务器意味着用户已同意部署，自动重启是部署流程的一部分
 - **重启后必须验证**：执行 `curl -s http://127.0.0.1:8000/health`，确认返回 `{"status":"ok",...}`
 - **密钥文件同步**：新密钥文件上传到服务器后，同样自动重启 API 容器
+- **.env 变更后必须用 `docker compose up -d api`**（不是 restart），否则新环境变量不会加载
 
 ### 首次部署 ECDSA 密钥的步骤
 
@@ -83,7 +96,7 @@
 2. scp 上传 `keys/.license_sign_private.pem` 到服务器 `/root/videogen/keys/`
 3. scp 上传 `keys/.license_verify_pubkey.pem` 到服务器 `/root/videogen/keys/`
 4. 更新服务器 `.env`：添加 `ECDSA_PRIVATE_KEY_PATH=keys/.license_sign_private.pem`
-5. 重启 API 容器：`docker compose restart api`
+5. 重建 API 容器：`docker compose up -d api`（必须用 up -d，因为 .env 变更）
 6. 验证：`curl -s http://127.0.0.1:8000/health`
 
 ## 打包工程文件
