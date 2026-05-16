@@ -47,8 +47,8 @@ class LoginDialog(tk.Toplevel):
         super().__init__(parent)
         self.result = None
         self.title("用户登录")
-        self.geometry("460x580")
-        self.minsize(440, 540)
+        self.geometry("460x660")
+        self.minsize(440, 620)
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
