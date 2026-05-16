@@ -1519,11 +1519,19 @@ class ShotsMixin:
                 ('气候变化', ['气候', '氣候', '森林减少']),
                 ('文明', ['文明', '工具', '思考']),
                 ('自然选择', ['自然選擇', '自然筛选', '适者生存']),
+                ('战争', ['战争', '戰爭', '战斗', '軍事', '军事', '导弹', '坦克']),
+                ('政治', ['政治', '总统', '總統', '政府', '选举', '選舉', '权力']),
+                ('经济', ['经济', '經濟', '金融', '股票', '投资', '投資']),
+                ('外交', ['外交', '谈判', '談判', '制裁', '国际', '國際']),
+                ('军事', ['军队', '軍隊', '武装', '武裝', '军官', '軍官', '士兵']),
+                ('社会', ['社会', '社會', '民生', '抗议', '抗議', '示威']),
+                ('科技', ['科技', '技术', '技術', '人工智能', 'AI', '芯片']),
+                ('能源', ['石油', '石油', '天然气', '能源', '矿产', '礦產']),
             ]
             for concept, patterns in concept_patterns:
                 if any(p in shot_text for p in patterns):
                     dynamic_keywords.append(concept)
-            matched_elements = dynamic_keywords[:3]
+            matched_elements = dynamic_keywords[:5]
 
         return matched_elements[:3]
 
@@ -1587,6 +1595,15 @@ class ShotsMixin:
         
         prompt_quality = self._calculate_prompt_quality(prompt_en, description_parts.get('dubbing', ''))
         optimized_prompt = prompt_en
+
+        # 安全网：如果清洗后prompt_en仍含中文，使用回退生成
+        if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
+            dubbing_text = description_parts.get('dubbing', '')
+            if dubbing_text:
+                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type)
+                if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
+                    optimized_prompt = fallback
+                    prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
         
         # 修复：使用Decimal进行高精度时间戳计算，确保duration = end - start
         from decimal import Decimal, ROUND_HALF_UP
@@ -2074,6 +2091,18 @@ class ShotsMixin:
         # 清除残留的 ** 标记
         text = re.sub(r'\*{2,}', '', text)
         # 清除 " - " 分隔符
+
+        # 【关键】清除所有中文字符 - SD/SDXL模型无法理解中文提示词
+        # 如果清洗后仍含中文，说明LLM直接输出了中文配音文本，必须移除
+        chinese_chars = re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', text)
+        if chinese_chars:
+            # 移除所有中文字符及紧邻的中文标点
+            text = re.sub(r'[\u4e00-\u9fff]+[\u3000-\u303f\uff00-\uffef]?', '', text)
+            # 清理因移除中文产生的多余逗号和空格
+            text = re.sub(r'\s*,\s*,\s*', ', ', text)
+            text = re.sub(r'^\s*,\s*', '', text)
+            text = re.sub(r'\s*,\s*$', '', text)
+            text = text.strip()
         text = re.sub(r'\s*[-–—]\s*$', '', text)
         text = re.sub(r'^\s*[-–—]\s*', '', text)
         
@@ -4805,9 +4834,61 @@ class ShotsMixin:
                 self.update_task_progress("正在合并过短分镜...", 93)
                 for j in range(len(shots)):
                     shots[j]['id'] = j
+                    shots[j]['image_file'] = f"shot_{j+1:02d}.png"
                 with open(shots_file, 'w', encoding='utf-8') as f:
                     json.dump(shots, f, ensure_ascii=False, indent=2)
                 self.log(f"   ✅ 合并后分镜数据已重新保存: {shots_file}")
+
+            # 拆分超长分镜（单帧超过10秒会导致画面呆板）
+            max_shot_dur = 10.0
+            split_count = 0
+            i = 0
+            while i < len(shots):
+                if shots[i]['duration'] > max_shot_dur:
+                    orig_dur = shots[i]['duration']
+                    num_parts = int(orig_dur // max_shot_dur) + (1 if orig_dur % max_shot_dur > 1.0 else 0)
+                    if num_parts < 2:
+                        num_parts = 2
+                    part_dur = orig_dur / num_parts
+                    orig_shot = shots[i].copy()
+                    desc = orig_shot.get('description', '')
+                    desc_parts = []
+                    if desc:
+                        sentences = re.split(r'[，,。.！!？?；;、]', desc)
+                        sentences = [s.strip() for s in sentences if s.strip()]
+                        if len(sentences) >= num_parts:
+                            per_part = len(sentences) // num_parts
+                            for p in range(num_parts):
+                                start_idx = p * per_part
+                                end_idx = start_idx + per_part if p < num_parts - 1 else len(sentences)
+                                desc_parts.append('，'.join(sentences[start_idx:end_idx]))
+                        else:
+                            desc_parts = [desc] * num_parts
+                    else:
+                        desc_parts = [''] * num_parts
+
+                    new_shots = []
+                    for p in range(num_parts):
+                        new_shot = orig_shot.copy()
+                        new_shot['start'] = round(orig_shot['start'] + p * part_dur, 3)
+                        new_shot['end'] = round(orig_shot['start'] + (p + 1) * part_dur, 3)
+                        new_shot['duration'] = round(part_dur, 3)
+                        new_shot['description'] = desc_parts[p] if p < len(desc_parts) else desc_parts[-1]
+                        new_shots.append(new_shot)
+
+                    shots[i:i+1] = new_shots
+                    split_count += 1
+                    i += num_parts
+                    continue
+                i += 1
+
+            if split_count > 0:
+                self.log(f"   🔧 已拆分 {split_count} 个超长分镜（> {max_shot_dur}秒）")
+                for j in range(len(shots)):
+                    shots[j]['id'] = j
+                with open(shots_file, 'w', encoding='utf-8') as f:
+                    json.dump(shots, f, ensure_ascii=False, indent=2)
+                self.log(f"   ✅ 拆分后分镜数据已重新保存: {shots_file}")
             
             # 确保首尾覆盖整个音频时长
             if shots and audio_total_duration > 0:
@@ -4830,6 +4911,17 @@ class ShotsMixin:
             
             self.update_task_progress("正在保存分镜数据...", 95)
             
+            # 重新编号image_file（合并/拆分后编号可能不连续）
+            for j in range(len(shots)):
+                shots[j]['id'] = j
+                shots[j]['image_file'] = f"shot_{j+1:02d}.png"
+
+            # 修复duration浮点精度
+            for j in range(len(shots)):
+                shots[j]['start'] = round(shots[j]['start'], 3)
+                shots[j]['end'] = round(shots[j]['end'], 3)
+                shots[j]['duration'] = round(shots[j]['duration'], 3)
+
             with open(shots_file, 'w', encoding='utf-8') as f:
                 json.dump(shots, f, ensure_ascii=False, indent=2)
             self.log(f"   ✅ 验证后分镜数据已保存: {shots_file}")
