@@ -34,7 +34,7 @@
    #   本地 backend/app/routers/xxx.py → 服务器 /root/videogen/app/routers/xxx.py
    #   本地 backend/app/templates/xxx  → 服务器 /root/videogen/app/templates/xxx
    ```
-3. **重启 API 容器**：
+3. **自动重启 API 容器**（代码同步后自动执行，无需额外确认）：
    ```bash
    ssh root@8.141.101.155 "cd /root/videogen && docker compose restart api"
    ```
@@ -51,6 +51,40 @@
 - **修改了 requirements.txt 或 Dockerfile**：需要重新构建镜像 `docker compose up -d --build api`
 - **修改了数据库模型**：需要运行迁移 `docker compose exec api alembic upgrade head`
 - **SSH 密码定期更新**：用户会定期更换 SSH 密码，新密码保存在 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt`，同步前先读取该文件获取最新密码
+
+## ECDSA 密钥管理与安全
+
+- **ECDSA 密钥对**用于授权数据签名验证，替代旧的 HMAC 对称签名
+- **私钥**（`keys/.license_sign_private.pem`）：仅服务端使用，**绝不随客户端分发**
+- **公钥**（`.license_verify_pubkey.pem`）：随客户端打包分发，用于验证签名
+- **旧 HMAC 密钥**（`.license_verify_key`）：保留用于向后兼容，新授权数据自动使用 ECDSA 签名（sig_ver=2）
+- **密钥轮换**：如需更换密钥对，运行 `python generate_signing_keys.py`，然后同步到服务端和客户端
+- **密钥文件安全**：私钥文件不得提交到公开仓库（已在 .gitignore 中排除）
+
+### 密钥文件位置
+
+| 文件 | 本地位置 | 服务端位置 | 客户端位置 |
+|------|---------|-----------|-----------|
+| 私钥 | `keys/.license_sign_private.pem` | `/root/videogen/keys/.license_sign_private.pem` | 不分发 |
+| 公钥 | `.license_verify_pubkey.pem` | `/root/videogen/keys/.license_verify_pubkey.pem` | exe同级 + `_internal/` |
+| HMAC密钥 | `.license_verify_key` | `/root/videogen/keys/.license_verify_key` | exe同级 + `_internal/` |
+
+## 部署与自动重启
+
+- **每次代码同步到云端服务器后，必须自动重启 API 容器**，使配置变更（包括密钥更新）立即生效
+- **部署流程**：scp 上传文件 → `docker compose restart api` → `curl /health` 验证
+- **无需用户确认重启**：代码已同步到服务器意味着用户已同意部署，自动重启是部署流程的一部分
+- **重启后必须验证**：执行 `curl -s http://127.0.0.1:8000/health`，确认返回 `{"status":"ok",...}`
+- **密钥文件同步**：新密钥文件上传到服务器后，同样自动重启 API 容器
+
+### 首次部署 ECDSA 密钥的步骤
+
+1. 运行 `python generate_signing_keys.py` 生成密钥对
+2. scp 上传 `keys/.license_sign_private.pem` 到服务器 `/root/videogen/keys/`
+3. scp 上传 `keys/.license_verify_pubkey.pem` 到服务器 `/root/videogen/keys/`
+4. 更新服务器 `.env`：添加 `ECDSA_PRIVATE_KEY_PATH=keys/.license_sign_private.pem`
+5. 重启 API 容器：`docker compose restart api`
+6. 验证：`curl -s http://127.0.0.1:8000/health`
 
 ## 打包工程文件
 
@@ -111,7 +145,7 @@
 3. **检查是否需要同步到云端服务器**
    - 对比本地代码与远程服务器 `/root/videogen/app/` 的代码版本
    - 如本地有新变更尚未同步到云端，向用户汇报并询问是否需要同步
-   - 同步方式：`scp` 上传到宿主机 → `docker compose restart api` → `curl /health` 验证（需用户同意后才执行）
+   - 同步方式：`scp` 上传到宿主机 → `docker compose restart api` → `curl /health` 验证（代码同步后自动重启）
    - SSH 密码从 `f:\shipinshengcheng\ssh_manager\current_ssh_password.txt` 读取
 
 4. **检查工作区是否干净**

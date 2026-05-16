@@ -27,6 +27,13 @@ echo "0️⃣ 创建必要目录..."
 mkdir -p keys logs backups
 echo "   ✅ 目录创建完成"
 
+if [ ! -f "keys/.license_sign_private.pem" ]; then
+    echo "   ⚠️  ECDSA 私钥不存在，请从开发机上传 keys/.license_sign_private.pem"
+fi
+if [ ! -f "keys/.license_verify_pubkey.pem" ]; then
+    echo "   ⚠️  ECDSA 公钥不存在，请从开发机上传 keys/.license_verify_pubkey.pem"
+fi
+
 echo ""
 echo "1️⃣ 安装 Docker（如果未安装）..."
 if ! command -v docker &> /dev/null; then
@@ -190,7 +197,8 @@ echo ""
 echo "  管理员登录: admin / (你在.env中设置的密码)"
 echo ""
 echo "  下一步:"
-echo "  1. 将 keys/.license_verify_key 的内容复制到客户端的 .license_verify_key"
+echo "  1. 确保 keys/.license_sign_private.pem（私钥）和 .license_verify_pubkey.pem（公钥）已就位"
+echo "     公钥文件需复制到客户端项目根目录，打包时自动包含"
 echo "  2. 运行 python obfuscate_build.py 混淆核心模块"
 echo "  3. 运行 python 01build_exe.py 打包客户端"
 echo "  4. 在管理后台创建版本记录"
