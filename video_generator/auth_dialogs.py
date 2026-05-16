@@ -19,28 +19,36 @@ from .auth_core import LicenseManager, _get_verify_secret
 
 
 class LoginDialog(tk.Toplevel):
-    _BG = "#1e1e1e"
-    _PANEL_BG = "#252526"
-    _TEXT_FG = "#d4d4d4"
-    _ACCENT = "#2196f3"
-    _ACCENT_HOVER = "#1976d2"
-    _INPUT_BG = "#3a3a3a"
-    _INPUT_FG = "#ffffff"
-    _INPUT_BORDER = "#5a5a5a"
-    _INPUT_FOCUS = "#2196f3"
-    _HINT_FG = "#888888"
-    _WARN_FG = "#ff9800"
-    _SUCCESS_FG = "#4caf50"
-    _ERROR_FG = "#f44336"
-    _BTN_SECONDARY = "#3c3f41"
-    _BTN_PURCHASE = "#ff9800"
+    _BG = "#0f1923"
+    _PANEL_BG = "#162231"
+    _CARD_BG = "#1b2d3e"
+    _TEXT_FG = "#e8edf2"
+    _TEXT_SECONDARY = "#8fa3b8"
+    _ACCENT = "#3b82f6"
+    _ACCENT_HOVER = "#2563eb"
+    _ACCENT_LIGHT = "#60a5fa"
+    _INPUT_BG = "#1e3448"
+    _INPUT_FG = "#f0f4f8"
+    _INPUT_BORDER = "#2d4a5f"
+    _INPUT_FOCUS = "#3b82f6"
+    _HINT_FG = "#6b8299"
+    _WARN_FG = "#f59e0b"
+    _SUCCESS_FG = "#10b981"
+    _ERROR_FG = "#ef4444"
+    _BTN_SECONDARY = "#253b4f"
+    _BTN_PURCHASE = "#f59e0b"
+    _BTN_PURCHASE_HOVER = "#d97706"
+    _DIVIDER = "#2d4a5f"
+    _TAB_ACTIVE_BG = "#1b2d3e"
+    _TAB_INACTIVE_BG = "#0f1923"
+    _SHADOW = "#0a1018"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.result = None
         self.title("用户登录")
-        self.geometry("420x520")
-        self.minsize(400, 480)
+        self.geometry("460x580")
+        self.minsize(440, 540)
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
@@ -68,7 +76,7 @@ class LoginDialog(tk.Toplevel):
             style.theme_use("clam")
 
         style.configure("Login.TFrame", background=self._BG)
-        style.configure("Login.Card.TFrame", background=self._PANEL_BG)
+        style.configure("Login.Card.TFrame", background=self._CARD_BG)
         style.configure(
             "Login.TLabel",
             background=self._BG,
@@ -78,13 +86,13 @@ class LoginDialog(tk.Toplevel):
         style.configure(
             "Login.Title.TLabel",
             background=self._BG,
-            foreground=self._ACCENT,
-            font=("Microsoft YaHei", 20, "bold"),
+            foreground=self._ACCENT_LIGHT,
+            font=("Microsoft YaHei", 22, "bold"),
         )
         style.configure(
             "Login.Sub.TLabel",
             background=self._BG,
-            foreground=self._HINT_FG,
+            foreground=self._TEXT_SECONDARY,
             font=("Microsoft YaHei", 10),
         )
         style.configure(
@@ -113,7 +121,7 @@ class LoginDialog(tk.Toplevel):
         )
         style.configure(
             "Login.Card.TCheckbutton",
-            background=self._PANEL_BG,
+            background=self._CARD_BG,
             foreground=self._TEXT_FG,
             font=("Microsoft YaHei", 10),
         )
@@ -125,31 +133,31 @@ class LoginDialog(tk.Toplevel):
             background=self._ACCENT,
             foreground="#ffffff",
             font=("Microsoft YaHei", 12, "bold"),
-            padding=(12, 8),
+            padding=(12, 10),
         )
         style.map(
             "Login.Primary.TButton",
-            background=[("active", self._ACCENT_HOVER), ("pressed", "#1565c0")],
+            background=[("active", self._ACCENT_HOVER), ("pressed", "#1d4ed8")],
         )
         style.configure(
             "Login.Link.TButton",
             background=self._BG,
-            foreground=self._ACCENT,
+            foreground=self._ACCENT_LIGHT,
             font=("Microsoft YaHei", 10),
             padding=(4, 3),
         )
         style.map(
-            "Login.Link.TButton", foreground=[("active", "#64b5f6")]
+            "Login.Link.TButton", foreground=[("active", "#93c5fd")]
         )
         style.configure(
             "Login.Purchase.TButton",
             background=self._BTN_PURCHASE,
             foreground="#ffffff",
             font=("Microsoft YaHei", 11, "bold"),
-            padding=(8, 6),
+            padding=(10, 7),
         )
         style.map(
-            "Login.Purchase.TButton", background=[("active", "#f57c00")]
+            "Login.Purchase.TButton", background=[("active", self._BTN_PURCHASE_HOVER)]
         )
         style.configure(
             "Login.Secondary.TButton",
@@ -159,20 +167,45 @@ class LoginDialog(tk.Toplevel):
             padding=(6, 5),
         )
         style.map(
-            "Login.Secondary.TButton", background=[("active", "#505050")]
+            "Login.Secondary.TButton", background=[("active", "#354f66")]
+        )
+
+        style.configure(
+            "Login.TNotebook",
+            background=self._BG,
+            borderwidth=0,
+            relief=tk.FLAT,
+        )
+        style.configure(
+            "Login.TNotebook.Tab",
+            background=self._TAB_INACTIVE_BG,
+            foreground=self._TEXT_SECONDARY,
+            font=("Microsoft YaHei", 11, "bold"),
+            padding=(18, 10),
+        )
+        style.map(
+            "Login.TNotebook.Tab",
+            background=[("selected", self._TAB_ACTIVE_BG)],
+            foreground=[("selected", self._ACCENT_LIGHT)],
+            expand=[("selected", [0, 0, 0, 2])],
+        )
+        style.configure(
+            "Login.TNotebook.Panel",
+            background=self._CARD_BG,
+            borderwidth=0,
         )
 
     def _make_entry(self, parent, variable, show=None, placeholder=""):
         entry = tk.Entry(
             parent,
             textvariable=variable,
-            font=("Microsoft YaHei", 12),
+            font=("Microsoft YaHei", 13),
             bg=self._INPUT_BG,
             fg=self._INPUT_FG,
             insertbackground=self._INPUT_FG,
             insertwidth=2,
-            relief=tk.SOLID,
-            bd=1,
+            relief=tk.FLAT,
+            bd=0,
             show=show if show else "",
             highlightthickness=2,
             highlightcolor=self._INPUT_FOCUS,
@@ -201,166 +234,179 @@ class LoginDialog(tk.Toplevel):
 
         return handler
 
+    def _make_label(self, parent, text, **kw):
+        return tk.Label(
+            parent,
+            text=text,
+            font=("Microsoft YaHei", 11, "bold"),
+            bg=self._CARD_BG,
+            fg=self._TEXT_SECONDARY,
+            anchor=tk.W,
+            **kw,
+        )
+
     def _build_ui(self):
-        main = ttk.Frame(self, style="Login.TFrame", padding=(24, 10, 24, 8))
+        main = ttk.Frame(self, style="Login.TFrame", padding=(28, 16, 28, 12))
         main.pack(fill=tk.BOTH, expand=True)
 
-        title_lbl = ttk.Label(
-            main, text="🎬 短视频生成器", style="Login.Title.TLabel"
+        title_frame = tk.Frame(main, bg=self._BG)
+        title_frame.pack(fill=tk.X, pady=(0, 2))
+
+        title_lbl = tk.Label(
+            title_frame,
+            text="\u25c6 \u77ed\u89c6\u9891\u751f\u6210\u5668",
+            font=("Microsoft YaHei", 22, "bold"),
+            bg=self._BG,
+            fg=self._ACCENT_LIGHT,
         )
-        title_lbl.pack(pady=(0, 1))
-        sub_lbl = ttk.Label(
-            main, text="AI驱动的音频转视频工具", style="Login.Sub.TLabel"
+        title_lbl.pack()
+
+        sub_lbl = tk.Label(
+            title_frame,
+            text="AI\u9a71\u52a8\u7684\u97f3\u9891\u8f6c\u89c6\u9891\u5de5\u5177",
+            font=("Microsoft YaHei", 10),
+            bg=self._BG,
+            fg=self._TEXT_SECONDARY,
         )
-        sub_lbl.pack(pady=(0, 6))
+        sub_lbl.pack(pady=(2, 0))
 
-        self._tab_control = ttk.Notebook(main)
-        self._tab_control.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        sep = tk.Frame(main, bg=self._DIVIDER, height=1)
+        sep.pack(fill=tk.X, pady=(10, 6))
 
-        login_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
-        self._tab_control.add(login_tab, text="  登录  ")
+        self._tab_control = ttk.Notebook(main, style="Login.TNotebook")
+        self._tab_control.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
-        register_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
-        self._tab_control.add(register_tab, text="  注册  ")
+        login_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=16)
+        self._tab_control.add(login_tab, text="  \u767b\u5f55  ")
 
-        activate_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=14)
-        self._tab_control.add(activate_tab, text="  激活码  ")
+        register_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=16)
+        self._tab_control.add(register_tab, text="  \u6ce8\u518c  ")
+
+        activate_tab = ttk.Frame(self._tab_control, style="Login.Card.TFrame", padding=16)
+        self._tab_control.add(activate_tab, text="  \u6fc0\u6d3b\u7801  ")
 
         self._build_login_tab(login_tab)
         self._build_register_tab(register_tab)
         self._build_activate_tab(activate_tab)
 
-        bottom_frame = ttk.Frame(main, style="Login.TFrame")
-        bottom_frame.pack(fill=tk.X, pady=(4, 0))
+        sep2 = tk.Frame(main, bg=self._DIVIDER, height=1)
+        sep2.pack(fill=tk.X, pady=(4, 8))
 
-        trial_lbl = ttk.Label(
+        bottom_frame = ttk.Frame(main, style="Login.TFrame")
+        bottom_frame.pack(fill=tk.X, pady=(0, 0))
+
+        trial_lbl = tk.Label(
             bottom_frame,
-            text="✨ 注册登录7天免费试用!",
-            style="Login.Trial.TLabel",
+            text="\u2728 \u6ce8\u518c\u767b\u5f557\u5929\u514d\u8d39\u8bd5\u7528!",
+            font=("Microsoft YaHei", 11, "bold"),
+            bg=self._BG,
+            fg=self._WARN_FG,
         )
         trial_lbl.pack(side=tk.LEFT, padx=(0, 10))
 
         ttk.Button(
             bottom_frame,
-            text="💎 购买会员",
+            text="\u2726 \u8d2d\u4e70\u4f1a\u5458",
             command=self._show_purchase_dialog,
             style="Login.Purchase.TButton",
         ).pack(side=tk.RIGHT)
 
     def _build_login_tab(self, card):
         self._login_username_var = tk.StringVar()
-        ttk.Label(
-            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u7528\u6237\u540d").pack(anchor=tk.W, pady=(0, 4))
         self._login_username_entry = self._make_entry(card, self._login_username_var)
-        self._login_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._login_username_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._login_password_var = tk.StringVar()
-        ttk.Label(
-            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self._login_password_entry = self._make_entry(
-            card, self._login_password_var, show="●"
+            card, self._login_password_var, show="\u25cf"
         )
-        self._login_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._login_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._save_pass_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             card,
-            text="保存密码",
+            text="\u4fdd\u5b58\u5bc6\u7801",
             variable=self._save_pass_var,
             style="Login.Card.TCheckbutton",
-        ).pack(anchor=tk.W, pady=(0, 6))
+        ).pack(anchor=tk.W, pady=(0, 10))
 
         ttk.Button(
             card,
-            text="登 录",
+            text="\u767b  \u5f55",
             command=self._handle_login,
             style="Login.Primary.TButton",
-        ).pack(fill=tk.X, pady=(0, 4))
+        ).pack(fill=tk.X, pady=(0, 8))
 
         ttk.Button(
             card,
-            text="忘记密码?",
+            text="\u5fd8\u8bb0\u5bc6\u7801?",
             command=self._show_reset_dialog,
             style="Login.Link.TButton",
         ).pack(anchor=tk.E)
 
     def _build_register_tab(self, card):
         self._reg_username_var = tk.StringVar()
-        ttk.Label(
-            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u7528\u6237\u540d").pack(anchor=tk.W, pady=(0, 4))
         self._reg_username_entry = self._make_entry(card, self._reg_username_var)
-        self._reg_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._reg_username_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._reg_email_var = tk.StringVar()
-        ttk.Label(
-            card, text="邮箱地址", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u90ae\u7bb1\u5730\u5740").pack(anchor=tk.W, pady=(0, 4))
         self._reg_email_entry = self._make_entry(card, self._reg_email_var)
-        self._reg_email_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._reg_email_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._reg_password_var = tk.StringVar()
-        ttk.Label(
-            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self._reg_password_entry = self._make_entry(
-            card, self._reg_password_var, show="●"
+            card, self._reg_password_var, show="\u25cf"
         )
-        self._reg_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._reg_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._reg_confirm_var = tk.StringVar()
-        ttk.Label(
-            card, text="确认密码", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u786e\u8ba4\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self._reg_confirm_entry = self._make_entry(
-            card, self._reg_confirm_var, show="●"
+            card, self._reg_confirm_var, show="\u25cf"
         )
-        self._reg_confirm_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._reg_confirm_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._agree_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             card,
-            text="我同意《隐私政策》和《服务条款》",
+            text="\u6211\u540c\u610f\u300a\u9690\u79c1\u653f\u7b56\u300b\u548c\u300a\u670d\u52a1\u6761\u6b3e\u300b",
             variable=self._agree_var,
             style="Login.Card.TCheckbutton",
-        ).pack(anchor=tk.W, pady=(0, 6))
+        ).pack(anchor=tk.W, pady=(0, 10))
 
         ttk.Button(
             card,
-            text="注 册",
+            text="\u6ce8  \u518c",
             command=self._handle_register,
             style="Login.Primary.TButton",
         ).pack(fill=tk.X)
 
     def _build_activate_tab(self, card):
         self._activate_username_var = tk.StringVar()
-        ttk.Label(
-            card, text="用户名", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u7528\u6237\u540d").pack(anchor=tk.W, pady=(0, 4))
         self._activate_username_entry = self._make_entry(card, self._activate_username_var)
-        self._activate_username_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._activate_username_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._activate_password_var = tk.StringVar()
-        ttk.Label(
-            card, text="密码", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self._activate_password_entry = self._make_entry(
-            card, self._activate_password_var, show="●"
+            card, self._activate_password_var, show="\u25cf"
         )
-        self._activate_password_entry.pack(fill=tk.X, ipady=5, pady=(0, 8))
+        self._activate_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
 
         self._activate_code_var = tk.StringVar()
-        ttk.Label(
-            card, text="激活码", style="Login.TLabel", background=self._PANEL_BG,
-        ).pack(anchor=tk.W, pady=(0, 3))
+        self._make_label(card, "\u6fc0\u6d3b\u7801").pack(anchor=tk.W, pady=(0, 4))
         self._activate_code_entry = self._make_entry(card, self._activate_code_var)
-        self._activate_code_entry.pack(fill=tk.X, ipady=5, pady=(0, 12))
+        self._activate_code_entry.pack(fill=tk.X, ipady=6, pady=(0, 14))
 
         ttk.Button(
             card,
-            text="登录并激活",
+            text="\u767b\u5f55\u5e76\u6fc0\u6d3b",
             command=self._handle_activate,
             style="Login.Primary.TButton",
         ).pack(fill=tk.X)
@@ -369,16 +415,16 @@ class LoginDialog(tk.Toplevel):
         username = self._login_username_var.get().strip()
         password = self._login_password_var.get().strip()
         if not username or not password:
-            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u586b\u5199\u7528\u6237\u540d\u548c\u5bc6\u7801", parent=self)
             return
 
         login_btn = None
         for child in self._tab_control.nametowidget(self._tab_control.tabs()[0]).winfo_children():
-            if isinstance(child, ttk.Button) and child.cget("text") == "登 录":
+            if isinstance(child, ttk.Button) and child.cget("text") == "\u767b  \u5f55":
                 login_btn = child
                 break
         if login_btn:
-            login_btn.configure(state=tk.DISABLED, text="登录中...")
+            login_btn.configure(state=tk.DISABLED, text="\u767b\u5f55\u4e2d...")
 
         def do_login():
             mgr = LicenseManager()
@@ -392,67 +438,67 @@ class LoginDialog(tk.Toplevel):
         threading.Thread(target=do_login, daemon=True).start()
 
     def _on_login_success(self, message):
-        messagebox.showinfo("成功", message, parent=self)
+        messagebox.showinfo("\u6210\u529f", message, parent=self)
         self.result = True
         self.destroy()
 
     def _on_login_failure(self, message, btn):
         if btn and btn.winfo_exists():
-            btn.configure(state=tk.NORMAL, text="登 录")
-        messagebox.showerror("错误", message, parent=self)
+            btn.configure(state=tk.NORMAL, text="\u767b  \u5f55")
+        messagebox.showerror("\u9519\u8bef", message, parent=self)
 
     def _handle_register(self):
         username = self._reg_username_var.get().strip()
         if not username:
-            messagebox.showwarning("提示", "请填写用户名", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u586b\u5199\u7528\u6237\u540d", parent=self)
             return
         if not re.match(r"^[a-zA-Z0-9_\u4e00-\u9fa5]{3,50}$", username):
             messagebox.showwarning(
-                "提示",
-                "用户名需3-50位，支持字母数字下划线和中文",
+                "\u63d0\u793a",
+                "\u7528\u6237\u540d\u97003-50\u4f4d\uff0c\u652f\u6301\u5b57\u6bcd\u6570\u5b57\u4e0b\u5212\u7ebf\u548c\u4e2d\u6587",
                 parent=self,
             )
             return
         email = self._reg_email_var.get().strip()
         if not email:
-            messagebox.showwarning("提示", "请填写邮箱", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u586b\u5199\u90ae\u7bb1", parent=self)
             return
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             messagebox.showwarning(
-                "提示", "请输入有效的邮箱地址", parent=self
+                "\u63d0\u793a", "\u8bf7\u8f93\u5165\u6709\u6548\u7684\u90ae\u7bb1\u5730\u5740", parent=self
             )
             return
         password = self._reg_password_var.get().strip()
         if not password:
-            messagebox.showwarning("提示", "请填写密码", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u586b\u5199\u5bc6\u7801", parent=self)
             return
         if len(password) < 8:
-            messagebox.showwarning("提示", "密码至少8位", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u5bc6\u7801\u81f3\u5c118\u4f4d", parent=self)
             return
         if not re.search(r"[A-Z]", password):
             messagebox.showwarning(
-                "提示", "密码必须包含至少一个大写字母", parent=self
+                "\u63d0\u793a", "\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u5927\u5199\u5b57\u6bcd", parent=self
             )
             return
         if not re.search(r"[a-z]", password):
             messagebox.showwarning(
-                "提示", "密码必须包含至少一个小写字母", parent=self
+                "\u63d0\u793a", "\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u5c0f\u5199\u5b57\u6bcd", parent=self
             )
             return
         if not re.search(r"\d", password):
             messagebox.showwarning(
-                "提示", "密码必须包含至少一个数字", parent=self
+                "\u63d0\u793a", "\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u6570\u5b57", parent=self
             )
             return
         confirm = self._reg_confirm_var.get().strip()
         if password != confirm:
             messagebox.showwarning(
-                "提示", "两次密码不一致", parent=self
+                "\u63d0\u793a", "\u4e24\u6b21\u5bc6\u7801\u4e0d\u4e00\u81f4", parent=self
             )
             return
         if not self._agree_var.get():
             messagebox.showwarning(
-                "提示", "请先同意隐私政策和服务条款", parent=self
+                "\u63d0\u793a", "\u8bf7\u5148\u540c\u610f\u9690\u79c1\u653f\u7b56\u548c\u670d\u52a1\u6761\u6b3e", parent=self
             )
             return
 
@@ -462,7 +508,7 @@ class LoginDialog(tk.Toplevel):
                 reg_btn = child
                 break
         if reg_btn:
-            reg_btn.configure(state=tk.DISABLED, text="注册中...")
+            reg_btn.configure(state=tk.DISABLED, text="\u6ce8\u518c\u4e2d...")
 
         def do_register():
             success, message = LicenseManager().register_user(username, email, password)
@@ -474,14 +520,14 @@ class LoginDialog(tk.Toplevel):
         threading.Thread(target=do_register, daemon=True).start()
 
     def _on_register_success(self, message):
-        messagebox.showinfo("成功", message, parent=self)
+        messagebox.showinfo("\u6210\u529f", message, parent=self)
         self.result = True
         self.destroy()
 
     def _on_register_failure(self, message, btn):
         if btn and btn.winfo_exists():
-            btn.configure(state=tk.NORMAL, text="注 册")
-        messagebox.showerror("错误", message, parent=self)
+            btn.configure(state=tk.NORMAL, text="\u6ce8  \u518c")
+        messagebox.showerror("\u9519\u8bef", message, parent=self)
 
     def _handle_activate(self):
         username = self._activate_username_var.get().strip()
@@ -489,10 +535,10 @@ class LoginDialog(tk.Toplevel):
         code = self._activate_code_var.get().strip()
 
         if not username or not password:
-            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u586b\u5199\u7528\u6237\u540d\u548c\u5bc6\u7801", parent=self)
             return
         if not code:
-            messagebox.showwarning("提示", "请输入激活码", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u8f93\u5165\u6fc0\u6d3b\u7801", parent=self)
             return
 
         activate_btn = None
@@ -501,13 +547,13 @@ class LoginDialog(tk.Toplevel):
                 activate_btn = child
                 break
         if activate_btn:
-            activate_btn.configure(state=tk.DISABLED, text="激活中...")
+            activate_btn.configure(state=tk.DISABLED, text="\u6fc0\u6d3b\u4e2d...")
 
         def do_activate():
             mgr = LicenseManager()
             success, message = mgr.login_user(username, password)
             if not success:
-                self.after(0, lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn))
+                self.after(0, lambda: self._on_activate_failure(f"\u767b\u5f55\u5931\u8d25: {message}", activate_btn))
                 return
             success2, message2 = mgr.activate_pro_license(code)
             if success2:
@@ -519,21 +565,21 @@ class LoginDialog(tk.Toplevel):
         threading.Thread(target=do_activate, daemon=True).start()
 
     def _on_activate_success(self):
-        messagebox.showinfo("成功", "激活成功！专业版已开通", parent=self)
+        messagebox.showinfo("\u6210\u529f", "\u6fc0\u6d3b\u6210\u529f\uff01\u4e13\u4e1a\u7248\u5df2\u5f00\u901a", parent=self)
         self.result = True
         self.destroy()
 
     def _on_activate_partial(self, message, btn):
         if btn and btn.winfo_exists():
-            btn.configure(state=tk.NORMAL, text="登录并激活")
-        messagebox.showerror("错误", f"激活失败: {message}", parent=self)
+            btn.configure(state=tk.NORMAL, text="\u767b\u5f55\u5e76\u6fc0\u6d3b")
+        messagebox.showerror("\u9519\u8bef", f"\u6fc0\u6d3b\u5931\u8d25: {message}", parent=self)
         self.result = True
         self.destroy()
 
     def _on_activate_failure(self, message, btn):
         if btn and btn.winfo_exists():
-            btn.configure(state=tk.NORMAL, text="登录并激活")
-        messagebox.showerror("错误", message, parent=self)
+            btn.configure(state=tk.NORMAL, text="\u767b\u5f55\u5e76\u6fc0\u6d3b")
+        messagebox.showerror("\u9519\u8bef", message, parent=self)
 
     def _load_saved_credentials(self):
         try:
@@ -567,19 +613,22 @@ class LoginDialog(tk.Toplevel):
 
 
 class PasswordResetDialog(tk.Toplevel):
-    _BG = "#1e1e1e"
-    _PANEL_BG = "#252526"
-    _TEXT_FG = "#d4d4d4"
-    _ACCENT = "#2196f3"
-    _INPUT_BG = "#3a3a3a"
-    _INPUT_FG = "#ffffff"
-    _INPUT_BORDER = "#5a5a5a"
-    _HINT_FG = "#888888"
+    _BG = "#0f1923"
+    _CARD_BG = "#1b2d3e"
+    _TEXT_FG = "#e8edf2"
+    _TEXT_SECONDARY = "#8fa3b8"
+    _ACCENT = "#3b82f6"
+    _ACCENT_LIGHT = "#60a5fa"
+    _INPUT_BG = "#1e3448"
+    _INPUT_FG = "#f0f4f8"
+    _INPUT_BORDER = "#2d4a5f"
+    _HINT_FG = "#6b8299"
+    _DIVIDER = "#2d4a5f"
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.title("密码邮箱找回")
-        self.geometry("480x520")
+        self.title("\u5bc6\u7801\u627e\u56de")
+        self.geometry("480x540")
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
@@ -611,8 +660,8 @@ class PasswordResetDialog(tk.Toplevel):
         style.configure(
             "Reset.Title.TLabel",
             background=self._BG,
-            foreground=self._ACCENT,
-            font=("Microsoft YaHei", 16, "bold"),
+            foreground=self._ACCENT_LIGHT,
+            font=("Microsoft YaHei", 18, "bold"),
         )
         style.configure(
             "Reset.Hint.TLabel",
@@ -643,13 +692,13 @@ class PasswordResetDialog(tk.Toplevel):
         entry = tk.Entry(
             parent,
             textvariable=variable,
-            font=("Microsoft YaHei", 14),
+            font=("Microsoft YaHei", 13),
             bg=self._INPUT_BG,
             fg=self._INPUT_FG,
             insertbackground=self._INPUT_FG,
             insertwidth=2,
-            relief=tk.SOLID,
-            bd=1,
+            relief=tk.FLAT,
+            bd=0,
             show=show if show else "",
             highlightthickness=2,
             highlightcolor=self._ACCENT,
@@ -657,70 +706,75 @@ class PasswordResetDialog(tk.Toplevel):
         )
         return entry
 
+    def _make_label(self, parent, text):
+        return tk.Label(
+            parent,
+            text=text,
+            font=("Microsoft YaHei", 11, "bold"),
+            bg=self._BG,
+            fg=self._TEXT_SECONDARY,
+            anchor=tk.W,
+        )
+
     def _build_ui(self):
         main = ttk.Frame(self, style="Reset.TFrame", padding=(30, 20, 30, 15))
         main.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(
-            main, text="🔑 密码找回", style="Reset.Title.TLabel"
+        tk.Label(
+            main, text="\u25c6 \u5bc6\u7801\u627e\u56de", font=("Microsoft YaHei", 18, "bold"),
+            bg=self._BG, fg=self._ACCENT_LIGHT,
         ).pack(pady=(0, 4))
-        ttk.Label(
+        tk.Label(
             main,
-            text="通过注册邮箱验证身份后重置密码",
-            style="Reset.Hint.TLabel",
+            text="\u901a\u8fc7\u6ce8\u518c\u90ae\u7bb1\u9a8c\u8bc1\u8eab\u4efd\u540e\u91cd\u7f6e\u5bc6\u7801",
+            font=("Microsoft YaHei", 10),
+            bg=self._BG, fg=self._HINT_FG,
         ).pack(pady=(0, 14))
 
+        self._make_label(main, "\u6ce8\u518c\u90ae\u7bb1").pack(anchor=tk.W, pady=(0, 4))
+        self.email_entry = self._make_entry(main, tk.StringVar() if not hasattr(self, 'email_var') else self.email_var)
         self.email_var = tk.StringVar()
-        ttk.Label(
-            main, text="注册邮箱", style="Reset.TLabel"
-        ).pack(anchor=tk.W, pady=(0, 6))
         self.email_entry = self._make_entry(main, self.email_var)
         self.email_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
 
+        self._make_label(main, "\u9a8c\u8bc1\u7801").pack(anchor=tk.W, pady=(0, 4))
         btn_row = ttk.Frame(main, style="Reset.TFrame")
         btn_row.pack(fill=tk.X, pady=(0, 14))
         self.code_var = tk.StringVar()
-        ttk.Label(btn_row, text="验证码", style="Reset.TLabel").pack(
-            side=tk.LEFT
-        )
         self.code_entry = self._make_entry(btn_row, self.code_var)
         self.code_entry.pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 8), ipady=6
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10), ipady=8
         )
         self.send_btn = ttk.Button(
             btn_row,
-            text="发送验证码",
+            text="\u53d1\u9001\u9a8c\u8bc1\u7801",
             command=self._send_code,
             style="Reset.TButton",
         )
         self.send_btn.pack(side=tk.RIGHT)
 
+        self._make_label(main, "\u65b0\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self.new_pass_var = tk.StringVar()
-        ttk.Label(
-            main, text="新密码", style="Reset.TLabel"
-        ).pack(anchor=tk.W, pady=(0, 6))
         self.new_pass_entry = self._make_entry(
-            main, self.new_pass_var, show="●"
+            main, self.new_pass_var, show="\u25cf"
         )
         self.new_pass_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
 
+        self._make_label(main, "\u786e\u8ba4\u65b0\u5bc6\u7801").pack(anchor=tk.W, pady=(0, 4))
         self.confirm_pass_var = tk.StringVar()
-        ttk.Label(
-            main, text="确认新密码", style="Reset.TLabel"
-        ).pack(anchor=tk.W, pady=(0, 6))
         self.confirm_pass_entry = self._make_entry(
-            main, self.confirm_pass_var, show="●"
+            main, self.confirm_pass_var, show="\u25cf"
         )
         self.confirm_pass_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
 
         ttk.Button(
             main,
-            text="重置密码",
+            text="\u91cd\u7f6e\u5bc6\u7801",
             command=self._do_reset,
             style="Reset.Primary.TButton",
-        ).pack(fill=tk.X, pady=(0, 6))
+        ).pack(fill=tk.X, pady=(0, 8))
         ttk.Button(
-            main, text="取消", command=self.destroy, style="Reset.TButton"
+            main, text="\u53d6\u6d88", command=self.destroy, style="Reset.TButton"
         ).pack(fill=tk.X)
 
         self._code_sent = False
@@ -729,24 +783,24 @@ class PasswordResetDialog(tk.Toplevel):
     def _send_code(self):
         email = self.email_var.get().strip()
         if not email:
-            messagebox.showwarning("提示", "请输入注册邮箱", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u8f93\u5165\u6ce8\u518c\u90ae\u7bb1", parent=self)
             return
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             messagebox.showwarning(
-                "提示", "请输入有效的邮箱地址", parent=self
+                "\u63d0\u793a", "\u8bf7\u8f93\u5165\u6709\u6548\u7684\u90ae\u7bb1\u5730\u5740", parent=self
             )
             return
         success, message = LicenseManager().request_password_reset(email)
         if success:
             self._code_sent = True
-            messagebox.showinfo("成功", message, parent=self)
+            messagebox.showinfo("\u6210\u529f", message, parent=self)
             self._start_countdown(60)
         else:
-            messagebox.showerror("错误", message, parent=self)
+            messagebox.showerror("\u9519\u8bef", message, parent=self)
 
     def _start_countdown(self, seconds):
         if seconds <= 0:
-            self.send_btn.config(text="发送验证码", state=tk.NORMAL)
+            self.send_btn.config(text="\u53d1\u9001\u9a8c\u8bc1\u7801", state=tk.NORMAL)
             return
         self.send_btn.config(text=f"{seconds}s", state=tk.DISABLED)
         self._countdown_id = self.after(
@@ -760,32 +814,32 @@ class PasswordResetDialog(tk.Toplevel):
         confirm_pass = self.confirm_pass_var.get().strip()
 
         if not email:
-            messagebox.showwarning("提示", "请输入注册邮箱", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u8f93\u5165\u6ce8\u518c\u90ae\u7bb1", parent=self)
             return
         if not code:
-            messagebox.showwarning("提示", "请输入验证码", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u8f93\u5165\u9a8c\u8bc1\u7801", parent=self)
             return
         if len(new_pass) < 8:
-            messagebox.showwarning("提示", "新密码至少8位", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u65b0\u5bc6\u7801\u81f3\u5c118\u4f4d", parent=self)
             return
         if not re.search(r"[A-Z]", new_pass):
             messagebox.showwarning(
-                "提示", "新密码必须包含至少一个大写字母", parent=self
+                "\u63d0\u793a", "\u65b0\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u5927\u5199\u5b57\u6bcd", parent=self
             )
             return
         if not re.search(r"[a-z]", new_pass):
             messagebox.showwarning(
-                "提示", "新密码必须包含至少一个小写字母", parent=self
+                "\u63d0\u793a", "\u65b0\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u5c0f\u5199\u5b57\u6bcd", parent=self
             )
             return
         if not re.search(r"\d", new_pass):
             messagebox.showwarning(
-                "提示", "新密码必须包含至少一个数字", parent=self
+                "\u63d0\u793a", "\u65b0\u5bc6\u7801\u5fc5\u987b\u5305\u542b\u81f3\u5c11\u4e00\u4e2a\u6570\u5b57", parent=self
             )
             return
         if new_pass != confirm_pass:
             messagebox.showwarning(
-                "提示", "两次密码不一致", parent=self
+                "\u63d0\u793a", "\u4e24\u6b21\u5bc6\u7801\u4e0d\u4e00\u81f4", parent=self
             )
             return
 
@@ -793,10 +847,10 @@ class PasswordResetDialog(tk.Toplevel):
             email, code, new_pass
         )
         if success:
-            messagebox.showinfo("成功", message, parent=self)
+            messagebox.showinfo("\u6210\u529f", message, parent=self)
             self.destroy()
         else:
-            messagebox.showerror("错误", message, parent=self)
+            messagebox.showerror("\u9519\u8bef", message, parent=self)
 
     def destroy(self):
         if self._countdown_id:
@@ -805,48 +859,53 @@ class PasswordResetDialog(tk.Toplevel):
 
 
 class PurchaseDialog(tk.Toplevel):
-    _BG = "#1e1e1e"
-    _PANEL_BG = "#252526"
-    _TEXT_FG = "#d4d4d4"
-    _ACCENT = "#2196f3"
-    _INPUT_BG = "#3a3a3a"
-    _INPUT_FG = "#ffffff"
-    _INPUT_BORDER = "#5a5a5a"
-    _HINT_FG = "#888888"
-    _GOLD = "#ffc107"
+    _BG = "#0f1923"
+    _CARD_BG = "#1b2d3e"
+    _TEXT_FG = "#e8edf2"
+    _TEXT_SECONDARY = "#8fa3b8"
+    _ACCENT = "#3b82f6"
+    _ACCENT_LIGHT = "#60a5fa"
+    _INPUT_BG = "#1e3448"
+    _INPUT_FG = "#f0f4f8"
+    _INPUT_BORDER = "#2d4a5f"
+    _HINT_FG = "#6b8299"
+    _GOLD = "#f59e0b"
+    _GOLD_HOVER = "#d97706"
     _SELECTED_BG = "#1a3a5c"
+    _DIVIDER = "#2d4a5f"
+    _WARN_FG = "#f59e0b"
 
     PLANS = [
         {
             "key": "monthly",
-            "name": "月卡",
-            "price": "¥14.9/月",
-            "desc": "30天专业版",
+            "name": "\u6708\u5361",
+            "price": "\u00a514.9/\u6708",
+            "desc": "30\u5929\u4e13\u4e1a\u7248",
         },
         {
             "key": "quarterly",
-            "name": "季卡",
-            "price": "¥39.9/季",
-            "desc": "90天专业版",
+            "name": "\u5b63\u5361",
+            "price": "\u00a539.9/\u5b63",
+            "desc": "90\u5929\u4e13\u4e1a\u7248",
         },
         {
             "key": "yearly",
-            "name": "年卡",
-            "price": "¥129.9/年",
-            "desc": "365天专业版",
+            "name": "\u5e74\u5361",
+            "price": "\u00a5129.9/\u5e74",
+            "desc": "365\u5929\u4e13\u4e1a\u7248",
         },
         {
             "key": "lifetime",
-            "name": "终身会员",
-            "price": "¥219.9",
-            "desc": "永久专业版",
+            "name": "\u7ec8\u8eab\u4f1a\u5458",
+            "price": "\u00a5219.9",
+            "desc": "\u6c38\u4e45\u4e13\u4e1a\u7248",
         },
     ]
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.title("购买会员")
-        self.geometry("560x620")
+        self.title("\u8d2d\u4e70\u4f1a\u5458")
+        self.geometry("560x640")
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
@@ -895,7 +954,7 @@ class PurchaseDialog(tk.Toplevel):
         style.configure(
             "Purchase.Primary.TButton",
             background=self._GOLD,
-            foreground="#1e1e1e",
+            foreground="#0f1923",
             font=("Microsoft YaHei", 12, "bold"),
             padding=(12, 8),
         )
@@ -910,13 +969,13 @@ class PurchaseDialog(tk.Toplevel):
         entry = tk.Entry(
             parent,
             textvariable=variable,
-            font=("Microsoft YaHei", 14),
+            font=("Microsoft YaHei", 13),
             bg=self._INPUT_BG,
             fg=self._INPUT_FG,
             insertbackground=self._INPUT_FG,
             insertwidth=2,
-            relief=tk.SOLID,
-            bd=1,
+            relief=tk.FLAT,
+            bd=0,
             show=show if show else "",
             highlightthickness=2,
             highlightcolor=self._ACCENT,
@@ -930,9 +989,10 @@ class PurchaseDialog(tk.Toplevel):
         )
         main.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(
-            main, text="💎 购买会员", style="Purchase.Title.TLabel"
-        ).pack(pady=(0, 12))
+        tk.Label(
+            main, text="\u25c6 \u8d2d\u4e70\u4f1a\u5458", font=("Microsoft YaHei", 18, "bold"),
+            bg=self._BG, fg=self._GOLD,
+        ).pack(pady=(0, 14))
 
         plans_frame = ttk.Frame(main, style="Purchase.TFrame")
         plans_frame.pack(fill=tk.X, pady=(0, 10))
@@ -940,12 +1000,12 @@ class PurchaseDialog(tk.Toplevel):
         for i, plan in enumerate(self.PLANS):
             card = tk.Frame(
                 plans_frame,
-                bg=self._PANEL_BG,
+                bg=self._CARD_BG,
                 bd=1,
                 relief=tk.RAISED,
                 cursor="hand2",
-                padx=8,
-                pady=6,
+                padx=10,
+                pady=8,
             )
             card.grid(row=0, column=i, padx=4, pady=0, sticky="nsew")
             plans_frame.columnconfigure(i, weight=1)
@@ -954,7 +1014,7 @@ class PurchaseDialog(tk.Toplevel):
                 card,
                 text=plan["name"],
                 font=("Microsoft YaHei", 12, "bold"),
-                bg=self._PANEL_BG,
+                bg=self._CARD_BG,
                 fg=self._TEXT_FG,
             )
             name_lbl.pack()
@@ -962,7 +1022,7 @@ class PurchaseDialog(tk.Toplevel):
                 card,
                 text=plan["price"],
                 font=("Microsoft YaHei", 14, "bold"),
-                bg=self._PANEL_BG,
+                bg=self._CARD_BG,
                 fg=self._GOLD,
             )
             price_lbl.pack(pady=(2, 0))
@@ -970,7 +1030,7 @@ class PurchaseDialog(tk.Toplevel):
                 card,
                 text=plan["desc"],
                 font=("Microsoft YaHei", 10),
-                bg=self._PANEL_BG,
+                bg=self._CARD_BG,
                 fg=self._HINT_FG,
             )
             desc_lbl.pack(pady=(0, 2))
@@ -983,11 +1043,13 @@ class PurchaseDialog(tk.Toplevel):
 
             self._plan_cards[plan["key"]] = card
 
-        sep = ttk.Separator(main, orient="horizontal")
+        sep = tk.Frame(main, bg=self._DIVIDER, height=1)
         sep.pack(fill=tk.X, pady=(10, 14))
 
-        ttk.Label(
-            main, text="激活码激活", style="Purchase.TLabel"
+        tk.Label(
+            main, text="\u6fc0\u6d3b\u7801\u6fc0\u6d3b",
+            font=("Microsoft YaHei", 12, "bold"),
+            bg=self._BG, fg=self._TEXT_FG,
         ).pack(anchor=tk.W, pady=(0, 6))
         activate_frame = ttk.Frame(main, style="Purchase.TFrame")
         activate_frame.pack(fill=tk.X, pady=(0, 14))
@@ -999,33 +1061,36 @@ class PurchaseDialog(tk.Toplevel):
         )
         ttk.Button(
             activate_frame,
-            text="激活",
+            text="\u6fc0\u6d3b",
             command=self._do_activate,
             style="Purchase.TButton",
         ).pack(side=tk.RIGHT)
 
-        sep2 = ttk.Separator(main, orient="horizontal")
+        sep2 = tk.Frame(main, bg=self._DIVIDER, height=1)
         sep2.pack(fill=tk.X, pady=(6, 14))
 
         pay_label_frame = ttk.Frame(main, style="Purchase.TFrame")
         pay_label_frame.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(
-            pay_label_frame, text="在线购买", style="Purchase.TLabel"
+        tk.Label(
+            pay_label_frame, text="\u5728\u7ebf\u8d2d\u4e70",
+            font=("Microsoft YaHei", 12, "bold"),
+            bg=self._BG, fg=self._TEXT_FG,
         ).pack(side=tk.LEFT)
-        ttk.Label(
+        self._pay_hint = tk.Label(
             pay_label_frame,
-            text="请先选择套餐",
-            style="Purchase.TLabel",
-            foreground=self._HINT_FG,
-        ).pack(side=tk.RIGHT)
-        self._pay_hint = pay_label_frame.winfo_children()[-1]
+            text="\u8bf7\u5148\u9009\u62e9\u5957\u9910",
+            font=("Microsoft YaHei", 10),
+            bg=self._BG,
+            fg=self._HINT_FG,
+        )
+        self._pay_hint.pack(side=tk.RIGHT)
 
         self._online_hint_lbl = tk.Label(
             main,
             text="",
             font=("Microsoft YaHei", 10),
             bg=self._BG,
-            fg=self._WARN_FG if hasattr(self, '_WARN_FG') else "#ff9800",
+            fg=self._WARN_FG,
             wraplength=480,
             justify=tk.LEFT,
         )
@@ -1035,14 +1100,14 @@ class PurchaseDialog(tk.Toplevel):
         pay_btn_frame.pack(fill=tk.X, pady=(0, 10))
         self._alipay_btn = ttk.Button(
             pay_btn_frame,
-            text="支付宝支付",
+            text="\u652f\u4ed8\u5b9d\u652f\u4ed8",
             command=lambda: self._do_purchase("alipay"),
             style="Purchase.TButton",
         )
         self._alipay_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         self._wechat_btn = ttk.Button(
             pay_btn_frame,
-            text="微信支付",
+            text="\u5fae\u4fe1\u652f\u4ed8",
             command=lambda: self._do_purchase("wechat"),
             style="Purchase.TButton",
         )
@@ -1050,7 +1115,7 @@ class PurchaseDialog(tk.Toplevel):
 
         ttk.Button(
             main,
-            text="关闭",
+            text="\u5173\u95ed",
             command=self.destroy,
             style="Purchase.TButton",
         ).pack(fill=tk.X, pady=(10, 0))
@@ -1081,8 +1146,8 @@ class PurchaseDialog(tk.Toplevel):
             self._alipay_btn.configure(state=tk.DISABLED)
             self._wechat_btn.configure(state=tk.DISABLED)
             self._online_hint_lbl.configure(
-                text="⚠ 在线支付暂未开通，请联系客服购买激活码\n"
-                     "您可以在上方\"激活码激活\"区域输入客服提供的激活码"
+                text="\u26a0 \u5728\u7ebf\u652f\u4ed8\u6682\u672a\u5f00\u901a\uff0c\u8bf7\u8054\u7cfb\u5ba2\u670d\u8d2d\u4e70\u6fc0\u6d3b\u7801\n"
+                     "\u60a8\u53ef\u4ee5\u5728\u4e0a\u65b9\"\u6fc0\u6d3b\u7801\u6fc0\u6d3b\"\u533a\u57df\u8f93\u5165\u5ba2\u670d\u63d0\u4f9b\u7684\u6fc0\u6d3b\u7801"
             )
         else:
             alipay_info = self._payment_methods_info.get("alipay", {})
@@ -1093,7 +1158,7 @@ class PurchaseDialog(tk.Toplevel):
                 self._wechat_btn.configure(state=tk.DISABLED)
             if not alipay_info.get("available", True) or not wechat_info.get("available", True):
                 self._online_hint_lbl.configure(
-                    text="⚠ 部分支付方式暂未开通，请联系客服购买激活码"
+                    text="\u26a0 \u90e8\u5206\u652f\u4ed8\u65b9\u5f0f\u6682\u672a\u5f00\u901a\uff0c\u8bf7\u8054\u7cfb\u5ba2\u670d\u8d2d\u4e70\u6fc0\u6d3b\u7801"
                 )
 
     def _select_plan(self, plan_key):
@@ -1104,34 +1169,34 @@ class PurchaseDialog(tk.Toplevel):
                 for w in card.winfo_children():
                     w.configure(bg=self._SELECTED_BG)
             else:
-                card.configure(bg=self._PANEL_BG)
+                card.configure(bg=self._CARD_BG)
                 for w in card.winfo_children():
-                    w.configure(bg=self._PANEL_BG)
+                    w.configure(bg=self._CARD_BG)
         plan_name = next(
             (p["name"] for p in self.PLANS if p["key"] == plan_key), ""
         )
-        self._pay_hint.configure(text=f"已选择: {plan_name}")
+        self._pay_hint.configure(text=f"\u5df2\u9009\u62e9: {plan_name}")
 
     def _do_activate(self):
         code = self.activate_var.get().strip()
         if not code:
             messagebox.showwarning(
-                "提示", "请输入正确的激活码", parent=self
+                "\u63d0\u793a", "\u8bf7\u8f93\u5165\u6b63\u786e\u7684\u6fc0\u6d3b\u7801", parent=self
             )
             return
         mgr = LicenseManager()
         success, message = mgr.activate_pro_license(code)
         if success:
-            messagebox.showinfo("提示", "程序已激活", parent=self)
+            messagebox.showinfo("\u63d0\u793a", "\u7a0b\u5e8f\u5df2\u6fc0\u6d3b", parent=self)
             self.destroy()
         else:
             messagebox.showerror(
-                "提示", "请输入正确的激活码", parent=self
+                "\u63d0\u793a", "\u8bf7\u8f93\u5165\u6b63\u786e\u7684\u6fc0\u6d3b\u7801", parent=self
             )
 
     def _do_purchase(self, payment_method):
         if not self._selected_plan:
-            messagebox.showwarning("提示", "请先选择套餐", parent=self)
+            messagebox.showwarning("\u63d0\u793a", "\u8bf7\u5148\u9009\u62e9\u5957\u9910", parent=self)
             return
         mgr = LicenseManager()
         success, result = mgr.purchase_subscription(
@@ -1141,16 +1206,17 @@ class PurchaseDialog(tk.Toplevel):
             order_id = result.get("order_id", "")
             qr_code = result.get("qr_code", "")
             msg = result.get("message", "")
-            info = f"订单号: {order_id}\n"
+            info = f"\u8ba2\u5355\u53f7: {order_id}\n"
             if msg:
-                info += f"提示: {msg}\n"
+                info += f"\u63d0\u793a: {msg}\n"
             if qr_code:
-                info += f"\n请使用{'支付宝' if payment_method == 'alipay' else '微信'}扫描以下二维码支付:\n{qr_code}"
-            messagebox.showinfo("订单创建成功", info, parent=self)
+                pay_name = "\u652f\u4ed8\u5b9d" if payment_method == "alipay" else "\u5fae\u4fe1"
+                info += f"\n\u8bf7\u4f7f\u7528{pay_name}\u626b\u63cf\u4ee5\u4e0b\u4e8c\u7ef4\u7801\u652f\u4ed8:\n{qr_code}"
+            messagebox.showinfo("\u8ba2\u5355\u521b\u5efa\u6210\u529f", info, parent=self)
         else:
             messagebox.showerror(
-                "错误",
-                result if isinstance(result, str) else "创建订单失败",
+                "\u9519\u8bef",
+                result if isinstance(result, str) else "\u521b\u5efa\u8ba2\u5355\u5931\u8d25",
                 parent=self,
             )
 
@@ -1175,10 +1241,10 @@ def check_and_show_login(parent=None):
             if not verify_secret:
                 return {
                     "valid": False,
-                    "message": "授权验证组件缺失(.license_verify_key)，请联系客服",
+                    "message": "\u6388\u6743\u9a8c\u8bc1\u7ec4\u4ef6\u7f3a\u5931(.license_verify_key)\uff0c\u8bf7\u8054\u7cfb\u5ba2\u670d",
                 }
             return license_status
         else:
-            return {"valid": False, "message": "用户取消登录"}
+            return {"valid": False, "message": "\u7528\u6237\u53d6\u6d88\u767b\u5f55"}
     license_mgr.start_heartbeat()
     return license_status
