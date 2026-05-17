@@ -485,10 +485,20 @@ async def refund_order(
     if user_license and user_license.license_key == order.order_no:
         user_license.is_valid = False
         user_license.license_type = LicenseType.TRIAL
+        from datetime import timedelta as _td
+        now = datetime.now(timezone.utc)
+        user_license.expiry_date = now + _td(days=7)
+        user_license.trial_start = now
+        user_license.trial_end = user_license.expiry_date
         await db.flush()
     elif user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
         user_license.is_valid = False
         user_license.license_type = LicenseType.TRIAL
+        from datetime import timedelta as _td
+        now = datetime.now(timezone.utc)
+        user_license.expiry_date = now + _td(days=7)
+        user_license.trial_start = now
+        user_license.trial_end = user_license.expiry_date
         await db.flush()
 
     await _log_audit(db, user, "refund_order", f"order_id={order_id}, amount={order.amount}, license_revoked=True", request)
@@ -703,6 +713,9 @@ async def create_user(
                 is_valid=True,
                 expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
             )
+            if lic_type.value == "trial":
+                new_license.trial_start = datetime.now(timezone.utc)
+                new_license.trial_end = new_license.expiry_date
             db.add(new_license)
             await db.flush()
 

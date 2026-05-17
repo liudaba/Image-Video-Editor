@@ -27,7 +27,7 @@ from .auth_fingerprint import (
 )
 
 _HMAC_KEY = "_sig"
-_TRIAL_DAYS = 7
+_TRIAL_DAYS = 15
 _GRACE_HOURS = 2
 
 _HEARTBEAT_INTERVAL = 1800
@@ -844,6 +844,8 @@ class LicenseManager:
                             "days_left": days_left,
                             "message": f"专业版剩余 {days_left} 天",
                         }
+                    else:
+                        return {"valid": False, "message": "专业版已过期,请续费继续使用"}
             if not expiry_str:
                 return {
                     "valid": True,
@@ -853,12 +855,7 @@ class LicenseManager:
                 }
             if not is_valid:
                 return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
-            return {
-                "valid": True,
-                "type": "pro",
-                "days_left": 9999,
-                "message": "终身会员",
-            }
+            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
 
         if not is_valid:
             return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}

@@ -244,7 +244,6 @@ async def reset_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    reset_token = secrets.token_urlsafe(16)
     alphabet = string.ascii_letters + string.digits
     new_password = ''.join(secrets.choice(alphabet) for _ in range(16))
     user.hashed_password = hash_password(new_password)
@@ -263,4 +262,4 @@ async def reset_user_password(
     db.add(audit_log)
     await db.commit()
 
-    return {"message": "密码重置成功", "reset_token": reset_token}
+    return {"message": "密码重置成功", "new_password": new_password}

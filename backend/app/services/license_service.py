@@ -248,6 +248,8 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             license_key=license_key,
             is_valid=True,
             expiry_date=expiry_date,
+            trial_start=datetime.now(timezone.utc) if license_type == "trial" else None,
+            trial_end=expiry_date if license_type == "trial" else None,
         )
         db.add(license_obj)
         await db.flush()
