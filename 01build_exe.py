@@ -567,6 +567,7 @@ def _clean_output(output_dir):
 
     unwanted_dirs = [
         '.git', '.idea', '.vscode', '.venv', '__pycache__',
+        '.trae', 'keys',
         'backend', 'models', 'model_aware_patch',
         'output_project', '垃圾桶', 'docs', 'logs',
     ]
@@ -602,6 +603,9 @@ def _clean_output(output_dir):
     '更新日志.md', '系统要求.md', '!!!首次使用点我.bat',
         'README.md', 'TERMS_OF_SERVICE.md', 'PRIVACY_POLICY.md',
         '用户快速开始.md', '开发人员快速参考.md',
+        'sync_to_server.py', 'config.json.example',
+        'VideoGenerator.spec', 'obfuscate_build.py',
+        'check_packing_safety.py', 'generate_signing_keys.py',
     ]
     for f in unwanted_files:
         fp = os.path.join(output_dir, f)
@@ -613,6 +617,8 @@ def _clean_output(output_dir):
                 pass
 
     for pem in glob.glob(os.path.join(output_dir, '*.pem')):
+        if os.path.basename(pem) == '.license_verify_pubkey.pem':
+            continue
         print(f"  🗑️  删除 {os.path.basename(pem)}")
         os.remove(pem)
     for db in glob.glob(os.path.join(output_dir, '*.db')):
@@ -638,6 +644,8 @@ def _clean_output(output_dir):
                 except OSError:
                     pass
         for pem in glob.glob(os.path.join(internal_dir, '*.pem')):
+            if os.path.basename(pem) == '.license_verify_pubkey.pem':
+                continue
             print(f"  🗑️  删除 _internal/{os.path.basename(pem)}")
             os.remove(pem)
         for db in glob.glob(os.path.join(internal_dir, '*.db')):
@@ -651,6 +659,7 @@ def _verify_output(output_dir):
     should_not_exist = [
         # 目录 - 绝对不能给客户的
         '.git', '.idea', '.venv', 'backend', 'models', 'keys',
+        '.trae', 'dist_obfuscated', '_obf_backup', '_cython_backup',
         'output_project', '垃圾桶', 'docs', 'logs',
         # 源代码和构建脚本
         'run.py', 'run.pyw',
@@ -661,10 +670,11 @@ def _verify_output(output_dir):
         '后台管理系统启动器.py', '停止后台管理系统.bat',
         # 其他开发脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
-        '!!!首次使用点我.bat',
         '检查环境.bat', '生成Demo素材.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
-    '更新日志.md', '系统要求.md', '!!!首次使用点我.bat',
+        'sync_to_server.py', 'config.json.example',
+        'VideoGenerator.spec', 'check_packing_safety.py',
+        'generate_signing_keys.py',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds',
