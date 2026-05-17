@@ -127,12 +127,14 @@
                 const licType = user.license_type ? (licTypeMap[user.license_type] || user.license_type) : '-';
                 const licValid = user.license_is_valid;
                 const lastHb = user.last_heartbeat ? formatDate(user.last_heartbeat) : '-';
+                const expiryStr = user.expiry_date ? formatDate(user.expiry_date) : (user.license_type === 'pro' ? '永久' : '-');
                 row.innerHTML = `
                     <td>${user.id}</td>
                     <td>${escapeHtml(user.username)}</td>
                     <td>${escapeHtml(user.email)}</td>
                     <td>
                         <span class="badge ${licValid ? 'bg-info' : 'bg-secondary'}">${licType}</span>
+                        <br><small class="text-muted">${expiryStr}</small>
                     </td>
                     <td>
                         <span class="badge ${user.is_active ? 'bg-success' : 'bg-danger'}">
@@ -248,6 +250,18 @@
                         <option value="admin">管理员</option>
                     </select>
                 </div>
+                <hr>
+                <div class="mb-3">
+                    <label for="new-plan-type" class="form-label">会员类型</label>
+                    <select class="form-select" id="new-plan-type">
+                        <option value="">不设置（用户后续自行激活）</option>
+                        <option value="trial_15d">试用（15天）</option>
+                        <option value="monthly">月卡（30天）</option>
+                        <option value="quarterly">季卡（90天）</option>
+                        <option value="yearly">年卡（365天）</option>
+                        <option value="lifetime">终身VIP</option>
+                    </select>
+                </div>
             </form>
         `;
         
@@ -265,6 +279,10 @@
                     password: document.getElementById('new-password').value,
                     is_admin: document.getElementById('new-role').value === 'admin'
                 };
+                const planType = document.getElementById('new-plan-type').value;
+                if (planType) {
+                    userData.plan_type = planType;
+                }
                 
                 await apiRequest('/api/admin/users', {
                     method: 'POST',
@@ -312,6 +330,31 @@
                         <input type="checkbox" class="form-check-input" id="edit-active" ${user.is_active ? 'checked' : ''}>
                         <label class="form-check-label" for="edit-active">账户活跃</label>
                     </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">会员管理</label>
+                        <div class="mb-2">
+                            <small class="text-muted">当前状态：
+                                <span class="badge ${user.license_is_valid ? 'bg-info' : 'bg-secondary'}">${user.license_type === 'pro' ? '专业版' : (user.license_type === 'trial' ? '试用' : '未设置')}</span>
+                                ${user.expiry_date ? '<span class="ms-1 text-muted">到期: ' + formatDate(user.expiry_date) + '</span>' : (user.license_type === 'pro' ? '<span class="ms-1 text-success">永久有效</span>' : '')}
+                            </small>
+                        </div>
+                        <label for="edit-plan-type" class="form-label">变更会员类型</label>
+                        <select class="form-select" id="edit-plan-type">
+                            <option value="">不修改</option>
+                            <option value="trial_15d">试用（15天）</option>
+                            <option value="monthly">月卡（30天）</option>
+                            <option value="quarterly">季卡（90天）</option>
+                            <option value="yearly">年卡（365天）</option>
+                            <option value="lifetime">终身VIP</option>
+                        </select>
+                        <small class="text-muted">选择后将叠加到现有有效期之上</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-expiry-date" class="form-label">自定义到期时间</label>
+                        <input type="datetime-local" class="form-control" id="edit-expiry-date">
+                        <small class="text-muted">留空则不修改；选择后将覆盖自动计算的到期时间</small>
+                    </div>
                 </form>
             `;
             
@@ -333,6 +376,16 @@
                     const newPassword = document.getElementById('edit-password').value;
                     if (newPassword) {
                         userData.password = newPassword;
+                    }
+                    
+                    const planType = document.getElementById('edit-plan-type').value;
+                    if (planType) {
+                        userData.plan_type = planType;
+                    }
+                    
+                    const expiryDate = document.getElementById('edit-expiry-date').value;
+                    if (expiryDate) {
+                        userData.expiry_date = new Date(expiryDate).toISOString();
                     }
                     
                     await apiRequest(`/api/admin/users/${userId}`, {

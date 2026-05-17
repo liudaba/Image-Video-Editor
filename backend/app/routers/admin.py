@@ -48,6 +48,7 @@ class UserCreate(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     is_admin: bool = False
+    plan_type: Optional[str] = None
 
 
 @router.get("/stats")
@@ -155,6 +156,27 @@ async def get_user(
     if not target_user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
+    lic_result = await db.execute(select(License).where(License.user_id == user_id))
+    lic = lic_result.scalar_one_or_none()
+
+    current_plan = "trial_15d"
+    if lic:
+        if lic.license_type == LicenseType.PRO:
+            if lic.expiry_date is None:
+                current_plan = "lifetime"
+            elif lic.expiry_date:
+                from datetime import timedelta
+                cur = lic.expiry_date
+                if cur.tzinfo is None:
+                    cur = cur.replace(tzinfo=timezone.utc)
+                remaining = (cur - datetime.now(timezone.utc)).days
+                if remaining <= 30:
+                    current_plan = "monthly"
+                elif remaining <= 90:
+                    current_plan = "quarterly"
+                else:
+                    current_plan = "yearly"
+
     return {
         "id": target_user.id,
         "username": target_user.username,
@@ -162,6 +184,10 @@ async def get_user(
         "is_active": target_user.is_active,
         "is_admin": target_user.is_admin,
         "created_at": target_user.created_at.isoformat() if target_user.created_at else None,
+        "license_type": lic.license_type.value if lic else None,
+        "license_is_valid": lic.is_valid if lic else None,
+        "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
+        "current_plan": current_plan,
     }
 
 
@@ -171,6 +197,8 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
+    plan_type: Optional[str] = None
+    expiry_date: Optional[str] = None
 
 
 class VersionUpdate(BaseModel):
@@ -215,11 +243,70 @@ async def update_user(
     if body.is_admin is not None:
         target_user.is_admin = body.is_admin
 
+    if body.plan_type is not None:
+        from datetime import timedelta
+        plan_deltas = {
+            "trial_15d": (LicenseType.TRIAL, timedelta(days=15)),
+            "monthly": (LicenseType.PRO, timedelta(days=30)),
+            "quarterly": (LicenseType.PRO, timedelta(days=90)),
+            "yearly": (LicenseType.PRO, timedelta(days=365)),
+            "lifetime": (LicenseType.PRO, None),
+        }
+        if body.plan_type not in plan_deltas:
+            raise HTTPException(status_code=400, detail=f"无效的套餐类型: {body.plan_type}")
+        lic_type, delta = plan_deltas[body.plan_type]
+        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        user_license = license_result.scalar_one_or_none()
+        if not user_license:
+            user_license = License(
+                user_id=user_id,
+                license_type=lic_type,
+                is_valid=True,
+                expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
+            )
+            db.add(user_license)
+        else:
+            user_license.license_type = lic_type
+            user_license.is_valid = True
+            if delta is None:
+                user_license.expiry_date = None
+            else:
+                now = datetime.now(timezone.utc)
+                remaining = timedelta(0)
+                if user_license.expiry_date:
+                    cur = user_license.expiry_date
+                    if cur.tzinfo is None:
+                        cur = cur.replace(tzinfo=timezone.utc)
+                    remaining = max(cur - now, timedelta(0))
+                user_license.expiry_date = now + remaining + delta
+        await db.flush()
+
+    if body.expiry_date is not None:
+        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        user_license = license_result.scalar_one_or_none()
+        if not user_license:
+            user_license = License(
+                user_id=user_id,
+                license_type=LicenseType.PRO,
+                is_valid=True,
+            )
+            db.add(user_license)
+            await db.flush()
+        if body.expiry_date == "never":
+            user_license.expiry_date = None
+        else:
+            try:
+                parsed = datetime.fromisoformat(body.expiry_date.replace("Z", "+00:00"))
+                user_license.expiry_date = parsed
+            except (ValueError, AttributeError):
+                raise HTTPException(status_code=400, detail="无效的到期时间格式")
+        await db.flush()
+
     await db.flush()
 
     await _log_audit(
         db, user, "update_user",
-        f"user_id={user_id}, username={body.username}, is_active={body.is_active}, is_admin={body.is_admin}",
+        f"user_id={user_id}, username={body.username}, is_active={body.is_active}, is_admin={body.is_admin}, plan_type={body.plan_type}, expiry_date={body.expiry_date}",
         request
     )
     
@@ -592,7 +679,28 @@ async def create_user(
     )
     db.add(new_user)
     await db.flush()
-    await _log_audit(db, user, "create_user", f"username={body.username}, is_admin={body.is_admin}", request)
+
+    if body.plan_type:
+        from datetime import timedelta
+        plan_deltas = {
+            "trial_15d": (LicenseType.TRIAL, timedelta(days=15)),
+            "monthly": (LicenseType.PRO, timedelta(days=30)),
+            "quarterly": (LicenseType.PRO, timedelta(days=90)),
+            "yearly": (LicenseType.PRO, timedelta(days=365)),
+            "lifetime": (LicenseType.PRO, None),
+        }
+        if body.plan_type in plan_deltas:
+            lic_type, delta = plan_deltas[body.plan_type]
+            new_license = License(
+                user_id=new_user.id,
+                license_type=lic_type,
+                is_valid=True,
+                expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
+            )
+            db.add(new_license)
+            await db.flush()
+
+    await _log_audit(db, user, "create_user", f"username={body.username}, is_admin={body.is_admin}, plan_type={body.plan_type}", request)
     await db.commit()
     return {"success": True}
 
