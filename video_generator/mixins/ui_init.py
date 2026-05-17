@@ -367,6 +367,7 @@ class UIInitMixin:
                 if license_status["valid"]:
                     mgr.start_heartbeat()
                     mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
+                    mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
                     display = mgr.get_membership_display()
                     self.root.after(0, lambda: self._on_auth_valid(display))
                 elif mgr._try_silent_relogin():
@@ -374,6 +375,7 @@ class UIInitMixin:
                     if license_status["valid"]:
                         mgr.start_heartbeat()
                         mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
+                        mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
                         display = mgr.get_membership_display()
                         self.root.after(0, lambda: self._on_auth_valid(display))
                     else:
@@ -418,6 +420,16 @@ class UIInitMixin:
         self._update_membership_title()
 
     def _on_auth_revoked(self):
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            if mgr.verify_with_server():
+                license_status = mgr.check_license()
+                if license_status["valid"]:
+                    self._on_auth_recovered()
+                    return
+        except Exception:
+            pass
         self._auth_valid = False
         self._set_action_buttons_state("disabled")
         self._update_auth_status_label("授权已失效 - 点击重新登录", "#ef4444", "#2d1215")
@@ -428,6 +440,15 @@ class UIInitMixin:
         except Exception:
             pass
         self._show_login_dialog()
+
+    def _on_auth_recovered(self):
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            display = mgr.get_membership_display()
+            self._on_auth_valid(display)
+        except Exception:
+            self._deferred_auth_check()
 
     def _show_login_dialog(self):
         try:

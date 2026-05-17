@@ -176,6 +176,8 @@ class LicenseManager:
                 cls._instance._current_heartbeat_interval = _HEARTBEAT_INTERVAL
                 cls._instance._registered_components = None
                 cls._instance._auth_revoked_callback = None
+                cls._instance._auth_recovered_callback = None
+                cls._instance._revoked_notified = False
                 cls._instance.load_license()
         return cls._instance
 
@@ -256,6 +258,13 @@ class LicenseManager:
                         token=self._get_token(),
                         last_heartbeat=datetime.now(timezone.utc).isoformat(),
                     )
+                if self._revoked_notified:
+                    self._revoked_notified = False
+                    if self._auth_recovered_callback:
+                        try:
+                            self._auth_recovered_callback()
+                        except Exception:
+                            pass
                 return True
             elif response.status_code == 403:
                 signed_data = self.license_data.get("signed", self.license_data)
@@ -265,9 +274,19 @@ class LicenseManager:
                     token=self._get_token(),
                     last_heartbeat=datetime.now(timezone.utc).isoformat(),
                 )
+                if not self._revoked_notified:
+                    self._revoked_notified = True
                 return False
             elif response.status_code == 401:
-                return self._try_silent_relogin()
+                result = self._try_silent_relogin()
+                if result and self._revoked_notified:
+                    self._revoked_notified = False
+                    if self._auth_recovered_callback:
+                        try:
+                            self._auth_recovered_callback()
+                        except Exception:
+                            pass
+                return result
             return True
         except Exception:
             if self.license_data:
@@ -294,6 +313,9 @@ class LicenseManager:
 
     def set_auth_revoked_callback(self, callback):
         self._auth_revoked_callback = callback
+
+    def set_auth_recovered_callback(self, callback):
+        self._auth_recovered_callback = callback
 
     def _heartbeat_loop(self):
         import random
@@ -346,11 +368,13 @@ class LicenseManager:
                         token=self._get_token(),
                         last_heartbeat=datetime.now(timezone.utc).isoformat(),
                     )
-                    if self._auth_revoked_callback:
-                        try:
-                            self._auth_revoked_callback()
-                        except Exception:
-                            pass
+                    if not self._revoked_notified:
+                        self._revoked_notified = True
+                        if self._auth_revoked_callback:
+                            try:
+                                self._auth_revoked_callback()
+                            except Exception:
+                                pass
                 else:
                     remote_license = data.get("license")
                     if remote_license:
@@ -368,15 +392,32 @@ class LicenseManager:
                             token=self._get_token(),
                             last_heartbeat=datetime.now(timezone.utc).isoformat(),
                         )
+                    if self._revoked_notified:
+                        self._revoked_notified = False
+                        if self._auth_recovered_callback:
+                            try:
+                                self._auth_recovered_callback()
+                            except Exception:
+                                pass
             elif response.status_code == 401:
                 refreshed = self._try_silent_relogin()
-                if not refreshed:
+                if refreshed:
+                    if self._revoked_notified:
+                        self._revoked_notified = False
+                        if self._auth_recovered_callback:
+                            try:
+                                self._auth_recovered_callback()
+                            except Exception:
+                                pass
+                else:
                     self._on_heartbeat_failure()
-                    if self._auth_revoked_callback:
-                        try:
-                            self._auth_revoked_callback()
-                        except Exception:
-                            pass
+                    if not self._revoked_notified:
+                        self._revoked_notified = True
+                        if self._auth_revoked_callback:
+                            try:
+                                self._auth_revoked_callback()
+                            except Exception:
+                                pass
             elif response.status_code == 403:
                 signed_data = self.license_data.get("signed", self.license_data)
                 signed_data["is_valid"] = False
@@ -385,11 +426,13 @@ class LicenseManager:
                     token=self._get_token(),
                     last_heartbeat=datetime.now(timezone.utc).isoformat(),
                 )
-                if self._auth_revoked_callback:
-                    try:
-                        self._auth_revoked_callback()
-                    except Exception:
-                        pass
+                if not self._revoked_notified:
+                    self._revoked_notified = True
+                    if self._auth_revoked_callback:
+                        try:
+                            self._auth_revoked_callback()
+                        except Exception:
+                            pass
         except (ConnectionError, TimeoutError, OSError):
             self._on_heartbeat_failure()
         except Exception:
@@ -410,11 +453,13 @@ class LicenseManager:
                     signed_data,
                     token=self._get_token(),
                 )
-                if self._auth_revoked_callback:
-                    try:
-                        self._auth_revoked_callback()
-                    except Exception:
-                        pass
+                if not self._revoked_notified:
+                    self._revoked_notified = True
+                    if self._auth_revoked_callback:
+                        try:
+                            self._auth_revoked_callback()
+                        except Exception:
+                            pass
             else:
                 self._consecutive_failures = max(0, self._consecutive_failures - 2)
                 self._current_heartbeat_interval = _HEARTBEAT_INTERVAL
@@ -437,6 +482,8 @@ class LicenseManager:
                             token=self._get_token(),
                             last_heartbeat=datetime.now(timezone.utc).isoformat(),
                         )
+                    if not self._revoked_notified:
+                        self._revoked_notified = True
                     return False
                 if response.status_code == 200:
                     data = response.json()
@@ -643,6 +690,7 @@ class LicenseManager:
                         signed_license, token=data["access_token"],
                         username=username
                     )
+                    self._revoked_notified = False
                 else:
                     return False, "服务器返回的授权数据无效,请联系客服"
                 self.start_heartbeat()
