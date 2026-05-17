@@ -522,6 +522,9 @@ async def toggle_user_active(
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    if target.id == user.id:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+
     target.is_active = not target.is_active
     await db.flush()
 
