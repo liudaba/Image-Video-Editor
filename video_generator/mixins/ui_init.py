@@ -365,7 +365,7 @@ class UIInitMixin:
                 mgr = LicenseManager()
                 license_status = mgr.check_license()
                 if license_status["valid"]:
-                    mgr.refresh_license()
+                    mgr.verify_with_server()
                     mgr.start_heartbeat()
                     mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
                     mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
@@ -798,7 +798,7 @@ class UIInitMixin:
                     from video_generator.license_manager import LicenseManager
                     mgr = LicenseManager()
                     if mgr.license_data:
-                        mgr.refresh_license()
+                        mgr.verify_with_server()
                 except Exception:
                     pass
                 self.root.after(0, self._update_membership_title)
