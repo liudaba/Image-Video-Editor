@@ -18,6 +18,24 @@ from tkinter import ttk, messagebox
 from .auth_core import LicenseManager, _get_verify_secret
 
 
+
+def _bind_entry_context_menu(entry):
+    menu = tk.Menu(entry, tearoff=0)
+    menu.add_command(label="粘贴 Ctrl+V", command=lambda: entry.event_generate("<<Paste>>"))
+    menu.add_command(label="复制 Ctrl+C", command=lambda: entry.event_generate("<<Copy>>"))
+    menu.add_command(label="剪切 Ctrl+X", command=lambda: entry.event_generate("<<Cut>>"))
+    menu.add_separator()
+    menu.add_command(label="全选 Ctrl+A", command=lambda: entry.select_range(0, tk.END))
+    menu.add_command(label="清空", command=lambda: entry.delete(0, tk.END))
+    def _show_menu(event):
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    entry.bind("<Button-3>", _show_menu)
+    return entry
+
+
 class LoginDialog(tk.Toplevel):
     _BG = "#0f1923"
     _PANEL_BG = "#162231"
@@ -211,6 +229,7 @@ class LoginDialog(tk.Toplevel):
             highlightcolor=self._INPUT_FOCUS,
             highlightbackground=self._INPUT_BORDER,
         )
+        _bind_entry_context_menu(entry)
         if placeholder:
             entry.insert(0, placeholder)
             entry.configure(fg=self._HINT_FG)
@@ -704,6 +723,7 @@ class PasswordResetDialog(tk.Toplevel):
             highlightcolor=self._ACCENT,
             highlightbackground=self._INPUT_BORDER,
         )
+        _bind_entry_context_menu(entry)
         return entry
 
     def _make_label(self, parent, text):
@@ -981,6 +1001,7 @@ class PurchaseDialog(tk.Toplevel):
             highlightcolor=self._ACCENT,
             highlightbackground=self._INPUT_BORDER,
         )
+        _bind_entry_context_menu(entry)
         return entry
 
     def _build_ui(self):

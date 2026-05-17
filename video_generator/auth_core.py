@@ -801,20 +801,16 @@ class LicenseManager:
                 pass
 
         is_valid = signed_data.get("is_valid", False)
-        if not is_valid:
-            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
-
         license_type = signed_data.get("license_type", "none")
         days_left = signed_data.get("days_left", 0)
+        from datetime import timezone as _tz
+        now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
 
         if license_type == "trial":
             trial_end_str = signed_data.get("trial_end")
             if trial_end_str:
                 trial_end = _parse_iso_to_naive(trial_end_str)
                 if trial_end:
-                    from datetime import timezone as _tz
-
-                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
                     if now_utc <= trial_end + timedelta(hours=_GRACE_HOURS):
                         days_left = max(0, (trial_end - now_utc).days)
                         return {
@@ -823,6 +819,13 @@ class LicenseManager:
                             "days_left": days_left,
                             "message": f"试用期剩余 {days_left} 天",
                         }
+                    else:
+                        return {
+                            "valid": False,
+                            "message": "试用期已结束,请购买专业版继续使用",
+                        }
+            if not is_valid:
+                return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
             return {
                 "valid": False,
                 "message": "试用期已结束,请购买专业版继续使用",
@@ -833,9 +836,6 @@ class LicenseManager:
             if expiry_str:
                 expiry_date = _parse_iso_to_naive(expiry_str)
                 if expiry_date:
-                    from datetime import timezone as _tz
-
-                    now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
                     if now_utc <= expiry_date + timedelta(hours=_GRACE_HOURS):
                         days_left = max(0, (expiry_date - now_utc).days)
                         return {
@@ -844,6 +844,15 @@ class LicenseManager:
                             "days_left": days_left,
                             "message": f"专业版剩余 {days_left} 天",
                         }
+            if not expiry_str:
+                return {
+                    "valid": True,
+                    "type": "pro",
+                    "days_left": 9999,
+                    "message": "终身会员",
+                }
+            if not is_valid:
+                return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
             return {
                 "valid": True,
                 "type": "pro",
@@ -851,6 +860,8 @@ class LicenseManager:
                 "message": "终身会员",
             }
 
+        if not is_valid:
+            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
         return {"valid": False, "message": "未知的授权类型,请重新登录"}
 
     def activate_pro_license(self, license_key):

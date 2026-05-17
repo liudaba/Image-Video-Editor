@@ -156,9 +156,11 @@ async def request_reset(data: PasswordResetRequest, request: Request, db: AsyncS
     email_sent = _send_reset_email(data.email, code)
     if not email_sent:
         logger.warning("Email send failed for %s, code: %s (display for debug only)", data.email, code)
+        if stored:
+            return {"message": "验证码已生成，邮件服务暂不可用，请联系客服获取验证码"}
         raise HTTPException(
             status_code=503,
-            detail="邮件发送服务暂不可用，请联系客服重置密码"
+            detail="验证码服务暂不可用，请稍后重试或联系客服重置密码"
         )
 
     return {"message": "验证码已发送到您的邮箱"}
