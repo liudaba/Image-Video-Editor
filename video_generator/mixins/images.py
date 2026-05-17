@@ -764,22 +764,11 @@ class ImagesMixin:
             from PIL import Image
             from io import BytesIO
 
-            save_queue = None
-            saver_thread = None
+            save_queue = queue.Queue(maxsize=8)
+            saver_thread = threading.Thread(target=self._run_image_saver, args=(save_queue,), daemon=True)
+            saver_thread.start()
+            result_queue = queue.Queue(maxsize=16)
             producer_thread = None
-
-            if tasks:
-                save_queue = queue.Queue(maxsize=8)
-
-                saver_thread = threading.Thread(target=self._run_image_saver, args=(save_queue,), daemon=True)
-                saver_thread.start()
-
-                result_queue = queue.Queue(maxsize=16)
-
-            if not tasks:
-                self.log("   ⚠️ 没有需要生成的图片任务")
-                self.update_task_progress("就绪")
-                return
 
             def sd_producer():
                 """独立请求线程: 连续发送SD生成请求，实现预取"""
@@ -831,7 +820,7 @@ class ImagesMixin:
                             }
                             _shot_data = None
                             for s in sorted_shots:
-                                if s.get('id') == idx:
+                                if s.get('id') == sid:
                                     _shot_data = s
                                     break
                             if _shot_data:

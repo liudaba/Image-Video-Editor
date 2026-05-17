@@ -89,7 +89,6 @@ class VideoMixin:
                 else:
                     self.log("❌ 没有分镜数据，请先生成分镜")
                     self.update_task_progress("就绪")
-                    self.task_running = False
                     return
             else:
                 self.log(f"   ✅ 使用内存中的分镜数据: {len(self.shots_data)} 个")
@@ -100,14 +99,12 @@ class VideoMixin:
             if not self.audio_path:
                 self.log("❌ 没有音频文件，请先导入音频")
                 self.update_task_progress("就绪")
-                self.task_running = False
                 return
             
             if not os.path.exists(self.audio_path):
                 self.log(f"❌ 音频文件不存在: {self.audio_path}")
                 self.log("   请重新导入音频文件")
                 self.update_task_progress("就绪")
-                self.task_running = False
                 return
             self.log(f"   ✅ 音频文件存在: {os.path.basename(self.audio_path)}")
             
@@ -145,7 +142,6 @@ class VideoMixin:
                         if len(missing_files) > 5:
                             self.log(f"      ... 还有 {len(missing_files) - 5} 张")
                         self.update_task_progress("就绪")
-                        self.task_running = False
                         return
                     else:
                         self.log("   ✅ 所有图片已补全")
@@ -281,7 +277,6 @@ class VideoMixin:
                         if not resized_images:
                             self.log("❌ 没有可用的图片文件")
                             self.update_task_progress("就绪")
-                            self.task_running = False
                             return
                         
                         self.update_task_progress("正在渲染视频...", 60)
@@ -393,6 +388,7 @@ class VideoMixin:
                     for img in shot_img_map.values():
                         try: img.close()
                         except Exception: pass
+                    shot_img_map.clear()
                     for ic in intermediate_clips:
                         try: ic.close()
                         except Exception: pass
@@ -443,7 +439,6 @@ class VideoMixin:
             if not clips:
                 self.log("❌ 没有有效的图片文件")
                 self.update_task_progress("就绪")
-                self.task_running = False
                 return
             
             self.log(f"   ✅ 视频片段创建完成: {len(clips)} 个片段")
@@ -501,7 +496,6 @@ class VideoMixin:
             except Exception as e:
                 self._log_exception(f"   ❌ 视频片段合成失败: {type(e).__name__}", e)
                 self.update_task_progress("就绪")
-                self.task_running = False
                 return
 
             if check_cancelled():
@@ -714,6 +708,9 @@ class VideoMixin:
             self._active_clips = None
             self._active_background = None
             self._active_final_clip = None
+            with self.task_lock:
+                self.task_running = False
+            self._set_action_buttons_state("normal")
             try:
                 gc.collect()
             except Exception:

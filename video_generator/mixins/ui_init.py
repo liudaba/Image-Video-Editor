@@ -34,8 +34,6 @@ class UIInitMixin:
         self._setup_ui_components()
         self._initialize_event_handlers()
         self._start_system_services()
-        
-        thread_count = self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8
     
 
     def _update_membership_title(self):
@@ -587,46 +585,13 @@ class UIInitMixin:
         self.task_executor = None
         self.max_workers = min((os.cpu_count() or 4) // 2, 4)
         self.pause_event = threading.Event()
+        self.pause_event.set()
         self._sd_api_connected = False
         self._waiting_for_sd = False
-        self.pause_event.set()
-        
-        # 任务优先级和状态
-        self.TASK_PRIORITY = {
-            'generate_shots': 3,      # 最高优先级
-            'generate_images': 2,     # 中优先级
-            'generate_video': 1        # 低优先级
-        }
-        
-        self.TASK_STATUS = {
-            'queued': '排队中',
-            'running': '执行中',
-            'paused': '已暂停',
-            'completed': '已完成',
-            'failed': '失败',
-            'cancelled': '已取消'
-        }
     
 
     def _initialize_systems(self):
-        self.event_system = {}
-        self.state_manager = {}
         self.data_bus = {}
-
-        self.cache_system = {
-            'models': {},
-            'prompts': {},
-            'images': {},
-            'audio': {}
-        }
-
-        self.thread_pool = {}
-        self.thread_pool_stats = {
-            'active_threads': 0,
-            'completed_tasks': 0,
-            'failed_tasks': 0,
-            'total_tasks': 0
-        }
 
         try:
             prompt_cache.clear()

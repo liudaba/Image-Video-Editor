@@ -10,7 +10,11 @@ import tkinter as tk
 from video_generator.mixins.logging import safe_print_exc
 from tkinter import ttk, messagebox
 
-from video_generator.config import Config, get_http_session, validate_image_size, sanitize_url
+from video_generator.config import (
+    Config, get_http_session, validate_image_size, sanitize_url,
+    RE_BOLD, RE_ITALIC, RE_NEWLINES, RE_WHITESPACE,
+    RE_COLON_SPLIT, RE_LEADING_PUNCT, RE_TRAILING_PUNCT,
+)
 from video_generator.ollama_client import (
     is_ollama_available,
     set_ollama_available,
@@ -759,35 +763,48 @@ class UIHandlersMixin:
 
 
     def _update_model_dropdown(self):
-        """更新模型下拉菜单（在 SD API 连接成功后调用）"""
+        """更新模型下拉菜单（在 SD API 连接成功后调用）- 异步执行避免阻塞UI"""
         if not hasattr(self, 'model_combo'):
             return
-        
-        sd_models = self._get_sd_models_from_api()
-        if sd_models:
-            labeled_models = self._add_model_type_labels(sd_models)
-            models = ["使用当前模型"] + labeled_models
-            self.model_combo['values'] = models
-            if self.model_var.get() in ["Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]:
-                self.model_var.set("使用当前模型")
-        else:
-            models = list(self._default_models)
-            current = self.model_var.get()
-            if current and current not in models:
-                models.append(current)
-            self.model_combo['values'] = models
+
+        def _do_update():
+            try:
+                sd_models = self._get_sd_models_from_api()
+                def update_ui():
+                    try:
+                        if sd_models:
+                            labeled_models = self._add_model_type_labels(sd_models)
+                            models = ["使用当前模型"] + labeled_models
+                            self.model_combo['values'] = models
+                            if self.model_var.get() in ["Stable Diffusion 1.5", "SDXL 1.0", "Flux Dev", "Stable Diffusion 3", "DALL·E 3"]:
+                                self.model_var.set("使用当前模型")
+                        else:
+                            models = list(self._default_models)
+                            current = self.model_var.get()
+                            if current and current not in models:
+                                models.append(current)
+                            self.model_combo['values'] = models
+                    except Exception:
+                        pass
+                if hasattr(self, 'root') and self.root:
+                    self.root.after(0, update_ui)
+            except Exception:
+                pass
+
+        threading.Thread(target=_do_update, daemon=True).start()
     
 
     def close_sd_api_connection(self):
         """关闭 SD API 连接"""
         self.log("正在关闭 SD API 连接...")
-        
-        # 更新连接状态
-        if hasattr(self, 'sd_api_status_var') and hasattr(self, 'sd_api_status_label'):
+
+        self._sd_api_connected = False
+
+        if hasattr(self, 'sd_api_status_var'):
             self.sd_api_status_var.set("❌ 未连接")
-            self.sd_api_status_label.config(foreground="red")  # 断开态呈现红色
-        
-        # 清理可能的连接资源
+        if hasattr(self, 'sd_api_status_label'):
+            self.sd_api_status_label.config(foreground="red")
+
         self.log("✅ SD API 连接已关闭")
     
     # =======================================================================
@@ -953,9 +970,7 @@ class UIHandlersMixin:
                     missing_core.append((dep, install_cmd))
                 continue
             status, _, _ = results[dep]
-            if status == "ok":
-                pass
-            elif status == "incomplete":
+            if status == "incomplete":
                 if is_core:
                     self.log(f"     ⚠️ {dep} 已安装但功能不完整（缺少 {required_attr}）")
                     missing_core.append((dep, install_cmd))
@@ -989,7 +1004,8 @@ class UIHandlersMixin:
             if psutil:
                 psutil.cpu_percent(interval=None)  # 初始化
             
-            update_interval = 0  # 更新计数器
+            update_interval = 0
+            gpu_memory_percent = 0  # 更新计数器
             
             while getattr(self, 'perf_monitor_running', True):
                 if psutil and GPUtil:
@@ -1682,11 +1698,12 @@ class UIHandlersMixin:
             except Exception:
                 pass
             
+            _w, _h = validate_image_size(self.width_var.get(), self.height_var.get())
             config = {
                 'api_base_url': existing_config.get('api_base_url', 'http://8.141.101.155'),
                 'model': self.model_var.get(),
-                'width': validate_image_size(self.width_var.get(), self.height_var.get())[0],
-                'height': validate_image_size(self.width_var.get(), self.height_var.get())[1],
+                'width': _w,
+                'height': _h,
                 'api_type': self.api_var.get(),
                 'api_url': self.sd_api_url_var.get(),
                 'ollama_model': self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else 'gemma3:4b',
