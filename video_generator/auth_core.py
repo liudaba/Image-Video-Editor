@@ -223,6 +223,55 @@ class LicenseManager:
         else:
             return False
 
+    def verify_with_server(self):
+        try:
+            token = self._get_token()
+            if not token:
+                return False
+            fingerprint = get_machine_fingerprint()
+            response = get_http_session().post(
+                f"{self.API_BASE}/api/user/heartbeat",
+                json={
+                    "fingerprint": fingerprint,
+                    "app_version": self._get_app_version(),
+                },
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if not data.get("is_valid", False):
+                    signed_data = self.license_data.get("signed", self.license_data)
+                    signed_data["is_valid"] = False
+                    self._save_signed_license(
+                        signed_data,
+                        token=self._get_token(),
+                        last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                    )
+                    return False
+                remote_license = data.get("license")
+                if remote_license and _verify_signature(remote_license):
+                    self._save_signed_license(
+                        remote_license,
+                        token=self._get_token(),
+                        last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                    )
+                return True
+            elif response.status_code == 403:
+                signed_data = self.license_data.get("signed", self.license_data)
+                signed_data["is_valid"] = False
+                self._save_signed_license(
+                    signed_data,
+                    token=self._get_token(),
+                    last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                )
+                return False
+            elif response.status_code == 401:
+                return self._try_silent_relogin()
+            return True
+        except Exception:
+            return True
+
     def start_heartbeat(self):
         if self._heartbeat_thread and self._heartbeat_thread.is_alive():
             return
@@ -245,9 +294,14 @@ class LicenseManager:
     def _heartbeat_loop(self):
         import random
 
+        first_check = True
         while not self._heartbeat_stop.is_set():
-            jitter = random.randint(-_HEARTBEAT_JITTER, _HEARTBEAT_JITTER)
-            interval = self._current_heartbeat_interval + jitter
+            if first_check:
+                interval = 5
+                first_check = False
+            else:
+                jitter = random.randint(-_HEARTBEAT_JITTER, _HEARTBEAT_JITTER)
+                interval = self._current_heartbeat_interval + jitter
             if self._heartbeat_stop.wait(timeout=interval):
                 break
             try:

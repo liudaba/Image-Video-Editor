@@ -1228,6 +1228,18 @@ def check_and_show_login(parent=None):
         if license_mgr._try_silent_relogin():
             license_status = license_mgr.check_license()
             if license_status["valid"]:
+                if not license_mgr.verify_with_server():
+                    license_status = license_mgr.check_license()
+                    if not license_status["valid"]:
+                        dialog = LoginDialog(parent)
+                        dialog.wait_window()
+                        if dialog.result:
+                            license_status = license_mgr.check_license()
+                            if license_status["valid"]:
+                                license_mgr.start_heartbeat()
+                                return license_status
+                            return license_status
+                        return {"valid": False, "message": "用户取消登录"}
                 license_mgr.start_heartbeat()
                 return license_status
         dialog = LoginDialog(parent)
@@ -1241,10 +1253,22 @@ def check_and_show_login(parent=None):
             if not verify_secret:
                 return {
                     "valid": False,
-                    "message": "\u6388\u6743\u9a8c\u8bc1\u7ec4\u4ef6\u7f3a\u5931(.license_verify_key)\uff0c\u8bf7\u8054\u7cfb\u5ba2\u670d",
+                    "message": "授权验证组件缺失(.license_verify_key)，请联系客服",
                 }
             return license_status
         else:
-            return {"valid": False, "message": "\u7528\u6237\u53d6\u6d88\u767b\u5f55"}
+            return {"valid": False, "message": "用户取消登录"}
+    if not license_mgr.verify_with_server():
+        license_status = license_mgr.check_license()
+        if not license_status["valid"]:
+            dialog = LoginDialog(parent)
+            dialog.wait_window()
+            if dialog.result:
+                license_status = license_mgr.check_license()
+                if license_status["valid"]:
+                    license_mgr.start_heartbeat()
+                    return license_status
+                return license_status
+            return {"valid": False, "message": "用户取消登录"}
     license_mgr.start_heartbeat()
     return license_status
