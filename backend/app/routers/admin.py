@@ -281,6 +281,9 @@ async def update_user(
                         cur = cur.replace(tzinfo=timezone.utc)
                     remaining = max(cur - now, timedelta(0))
                 user_license.expiry_date = now + remaining + delta
+            if lic_type.value == "trial":
+                user_license.trial_start = datetime.now(timezone.utc)
+                user_license.trial_end = user_license.expiry_date
         await db.flush()
 
     if body.expiry_date is not None:
