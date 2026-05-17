@@ -101,6 +101,10 @@
                     <input type="number" class="form-control" id="file-size" min="1" required>
                 </div>
                 <div class="mb-3">
+                    <label for="file-hash" class="form-label">文件哈希 (SHA256, 可选)</label>
+                    <input type="text" class="form-control" id="file-hash" placeholder="SHA256哈希值，用于完整性校验">
+                </div>
+                <div class="mb-3">
                     <label for="changelog" class="form-label">更新日志</label>
                     <textarea class="form-control" id="changelog" rows="3"></textarea>
                 </div>
@@ -131,6 +135,7 @@
                     version: document.getElementById('version-number').value,
                     download_url: document.getElementById('download-url').value,
                     file_size: parseInt(document.getElementById('file-size').value),
+                    file_hash: document.getElementById('file-hash').value || null,
                     changelog: document.getElementById('changelog').value,
                     priority: document.getElementById('priority').value,
                     force_update: document.getElementById('force-update').checked
@@ -171,6 +176,10 @@
                         <input type="number" class="form-control" id="edit-file-size" value="${version.file_size}" min="1" required>
                     </div>
                     <div class="mb-3">
+                        <label for="edit-file-hash" class="form-label">文件哈希 (SHA256, 可选)</label>
+                        <input type="text" class="form-control" id="edit-file-hash" value="${escapeHtml(version.file_hash || '')}" placeholder="SHA256哈希值，用于完整性校验">
+                    </div>
+                    <div class="mb-3">
                         <label for="edit-changelog" class="form-label">更新日志</label>
                         <textarea class="form-control" id="edit-changelog" rows="3">${escapeHtml(version.changelog || '')}</textarea>
                     </div>
@@ -205,6 +214,7 @@
                         version: document.getElementById('edit-version-number').value,
                         download_url: document.getElementById('edit-download-url').value,
                         file_size: parseInt(document.getElementById('edit-file-size').value),
+                        file_hash: document.getElementById('edit-file-hash').value || null,
                         changelog: document.getElementById('edit-changelog').value,
                         priority: document.getElementById('edit-priority').value,
                         force_update: document.getElementById('edit-force-update').checked,

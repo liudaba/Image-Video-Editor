@@ -163,6 +163,7 @@ def _check_critical_files(app_dir):
             logger.warning("Whisper models directory exists but no .pt model files found")
 
 
+
 def main():
     from video_generator.config import get_ffmpeg_dir, get_app_dir
     _app_dir = get_app_dir()
@@ -192,8 +193,10 @@ def main():
         sys.exit(1)
 
     root.after(800, app._deferred_auth_check)
+    root.after(30000, lambda: app.start_periodic_update_check(interval_hours=24))
     root.mainloop()
 
 
 if __name__ == "__main__":
     main()
+

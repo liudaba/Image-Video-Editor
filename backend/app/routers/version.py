@@ -61,14 +61,20 @@ async def get_latest_version(
     from sqlalchemy import select
 
     result = await db.execute(
-        select(AppVersion)
-        .filter(AppVersion.is_active == True)
-        .order_by(AppVersion.release_date.desc())
+        select(AppVersion).filter(AppVersion.is_active == True)
     )
-    latest_version = result.scalar_one_or_none()
+    all_versions = result.scalars().all()
 
-    if not latest_version:
+    if not all_versions:
         return VersionInfo(has_update=False)
+
+    def _version_key(v):
+        try:
+            return tuple(int(x) for x in v.version.split("."))
+        except (ValueError, AttributeError):
+            return (0, 0, 0)
+
+    latest_version = max(all_versions, key=_version_key)
 
     has_update = False
     if current_version:
@@ -82,7 +88,7 @@ async def get_latest_version(
     return VersionInfo(
         has_update=has_update,
         version=latest_version.version,
-        release_date=latest_version.release_date,
+        release_date=latest_version.release_date.isoformat() if latest_version.release_date else None,
         changelog=latest_version.changelog.split('\n') if latest_version.changelog else [],
         download_url=latest_version.download_url,
         file_size=latest_version.file_size,
@@ -99,18 +105,23 @@ async def list_versions(
 ):
     from sqlalchemy import select
     
-    result = await db.execute(
-        select(AppVersion)
-        .order_by(AppVersion.release_date.desc())
-    )
-    versions = result.scalars().all()
+    result = await db.execute(select(AppVersion))
+    versions = list(result.scalars().all())
+
+    def _version_key(v):
+        try:
+            return tuple(int(x) for x in v.version.split("."))
+        except (ValueError, AttributeError):
+            return (0, 0, 0)
+
+    versions.sort(key=_version_key, reverse=True)
 
     return {
         "versions": [
             {
                 "id": v.id,
                 "version": v.version,
-                "release_date": v.release_date,
+                "release_date": v.release_date.isoformat() if v.release_date else None,
                 "changelog": v.changelog.split('\n') if v.changelog else [],
                 "download_url": v.download_url,
                 "file_size": v.file_size,
@@ -118,7 +129,7 @@ async def list_versions(
                 "priority": v.priority,
                 "force_update": v.force_update,
                 "is_active": v.is_active,
-                "created_at": v.created_at
+                "created_at": v.created_at.isoformat() if v.created_at else None
             }
             for v in versions
         ]

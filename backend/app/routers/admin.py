@@ -33,6 +33,7 @@ class VersionCreate(BaseModel):
     version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
     download_url: str = Field(..., pattern=r"^https?://")
     file_size: int = Field(..., gt=0)
+    file_hash: Optional[str] = None
     changelog: str = ""
     priority: str = "normal"
     force_update: bool = False
@@ -205,6 +206,7 @@ class VersionUpdate(BaseModel):
     version: Optional[str] = None
     download_url: Optional[str] = None
     file_size: Optional[int] = None
+    file_hash: Optional[str] = None
     changelog: Optional[str] = None
     priority: Optional[str] = None
     force_update: Optional[bool] = None
@@ -645,6 +647,7 @@ async def create_version(
         version=body.version,
         download_url=body.download_url,
         file_size=body.file_size,
+        file_hash=body.file_hash,
         changelog=body.changelog,
         priority=body.priority,
         force_update=body.force_update,
@@ -782,9 +785,17 @@ async def list_versions(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(AppVersion).order_by(desc(AppVersion.release_date)))
-    versions = result.scalars().all()
-    
+    result = await db.execute(select(AppVersion))
+    versions = list(result.scalars().all())
+
+    def _version_key(v):
+        try:
+            return tuple(int(x) for x in v.version.split("."))
+        except (ValueError, AttributeError):
+            return (0, 0, 0)
+
+    versions.sort(key=_version_key, reverse=True)
+
     return {
         "versions": [
             {
@@ -792,6 +803,7 @@ async def list_versions(
                 "version": v.version,
                 "download_url": v.download_url,
                 "file_size": v.file_size,
+                "file_hash": v.file_hash,
                 "changelog": v.changelog,
                 "priority": v.priority,
                 "force_update": v.force_update,
@@ -820,6 +832,7 @@ async def get_version(
         "version": version.version,
         "download_url": version.download_url,
         "file_size": version.file_size,
+        "file_hash": version.file_hash,
         "changelog": version.changelog,
         "priority": version.priority,
         "force_update": version.force_update,
@@ -856,6 +869,8 @@ async def update_version(
         target.force_update = body.force_update
     if body.is_active is not None:
         target.is_active = body.is_active
+    if body.file_hash is not None:
+        target.file_hash = body.file_hash
     
     await db.flush()
     await _log_audit(db, user, "update_version", f"version_id={version_id}, version={body.version}", request)
