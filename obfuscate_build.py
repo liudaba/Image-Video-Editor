@@ -46,6 +46,8 @@ def obfuscate_modules():
         "video_generator/license_manager.py",
         "video_generator/crypto_utils.py",
         "video_generator/auto_updater.py",
+        "video_generator/cloud_image_client.py",
+        "video_generator/cloud_llm_client.py",
     ]
 
     for module_path in core_modules:
