@@ -49,6 +49,8 @@ def _get_redis_for_reset():
         return None
 
 
+_memory_reset_codes = {}
+
 def _store_reset_code(email: str, code: str) -> bool:
     r = _get_redis_for_reset()
     if r:
@@ -58,7 +60,8 @@ def _store_reset_code(email: str, code: str) -> bool:
             return True
         except Exception:
             pass
-    return False
+    _memory_reset_codes[email] = (code, 0, time.time() + _RESET_CODE_TTL)
+    return True
 
 
 def _verify_reset_code(email: str, code: str) -> tuple[bool, str]:
@@ -81,7 +84,21 @@ def _verify_reset_code(email: str, code: str) -> tuple[bool, str]:
             return True, ""
         except Exception:
             pass
-    return False, "验证码服务不可用，请稍后重试"
+    if email in _memory_reset_codes:
+        stored_code, attempts, expire_at = _memory_reset_codes[email]
+        if time.time() > expire_at:
+            del _memory_reset_codes[email]
+            return False, "验证码已过期，请重新获取"
+        attempts += 1
+        if attempts > _RESET_CODE_MAX_ATTEMPTS:
+            del _memory_reset_codes[email]
+            return False, "验证次数过多，请重新获取验证码"
+        if stored_code != code:
+            _memory_reset_codes[email] = (stored_code, attempts, expire_at)
+            return False, "验证码错误"
+        del _memory_reset_codes[email]
+        return True, ""
+    return False, "验证码已过期，请重新获取"
 
 
 def _send_reset_email(email: str, code: str) -> bool:
@@ -146,6 +163,8 @@ async def request_reset(data: PasswordResetRequest, request: Request, db: AsyncS
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="该邮箱未注册")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账户已被禁用，请联系客服")
 
     code = f"{secrets.randbelow(1000000):06d}"
 
@@ -176,6 +195,8 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账户已被禁用，请联系客服")
 
     user.hashed_password = hash_password(data.new_password)
     user.password_changed_at = datetime.now(timezone.utc)

@@ -423,7 +423,13 @@ class UIInitMixin:
         try:
             from video_generator.license_manager import LicenseManager
             mgr = LicenseManager()
-            if mgr.verify_with_server():
+            server_ok = mgr.verify_with_server()
+            if server_ok:
+                license_status = mgr.check_license()
+                if license_status["valid"]:
+                    self._on_auth_recovered()
+                    return
+            else:
                 license_status = mgr.check_license()
                 if license_status["valid"]:
                     self._on_auth_recovered()

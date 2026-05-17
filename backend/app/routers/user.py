@@ -40,7 +40,10 @@ async def heartbeat(
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        is_valid = is_valid and expiry >= now
+        if expiry >= now:
+            is_valid = True
+        else:
+            is_valid = is_valid and False
 
     if is_valid and req.fingerprint:
         can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)

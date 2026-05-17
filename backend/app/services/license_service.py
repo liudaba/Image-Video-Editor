@@ -104,15 +104,17 @@ def verify_signature(data: dict, signature: str) -> bool:
 
 
 def is_license_expired(license_obj: License) -> bool:
+    if license_obj.expiry_date is not None:
+        now = datetime.now(timezone.utc)
+        if license_obj.expiry_date.tzinfo is None:
+            from datetime import timezone as _tz
+            license_obj.expiry_date = license_obj.expiry_date.replace(tzinfo=_tz.utc)
+        if license_obj.expiry_date < now:
+            return True
+        return False
     if not license_obj.is_valid:
         return True
-    if license_obj.expiry_date is None:
-        return False
-    now = datetime.now(timezone.utc)
-    if license_obj.expiry_date.tzinfo is None:
-        from datetime import timezone as _tz
-        license_obj.expiry_date = license_obj.expiry_date.replace(tzinfo=_tz.utc)
-    return license_obj.expiry_date < now
+    return False
 
 
 def build_license_response(license_obj: License, username: str) -> LicenseData:
