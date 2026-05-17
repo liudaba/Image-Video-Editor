@@ -287,12 +287,27 @@ class LicenseManager:
                         except Exception:
                             pass
                 return result
+            if self.license_data:
+                signed_data = self.license_data.get("signed", self.license_data)
+                if not signed_data.get("is_valid", False):
+                    return False
             return True
         except Exception:
             if self.license_data:
                 signed_data = self.license_data.get("signed", self.license_data)
                 if not signed_data.get("is_valid", False):
                     return False
+                last_hb_str = self.license_data.get("last_heartbeat")
+                if last_hb_str:
+                    last_hb = _parse_iso_to_naive(last_hb_str)
+                    if last_hb:
+                        from datetime import timezone as _tz
+                        now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                        offline_hours = (now_utc - last_hb).total_seconds() / 3600
+                        license_type = signed_data.get("license_type", "trial")
+                        tolerance = _get_offline_tolerance_hours(license_type)
+                        if offline_hours > tolerance:
+                            return False
             return True
 
     def start_heartbeat(self):

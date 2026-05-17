@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -26,27 +26,27 @@
                     <h5 class="text-center">管理后台</h5>
                     <ul class="nav flex-column">
                         <li class="nav-item">
-                            <a class="nav-link active" href="#dashboard" onclick="showSection('dashboard')">
+                            <a class="nav-link active" href="#dashboard" onclick="showSection('dashboard', event)">
                                 仪表盘
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="#users" onclick="showSection('users')">
+                            <a class="nav-link" href="#users" onclick="showSection('users', event)">
                                 用户管理
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="#licenses" onclick="showSection('licenses')">
+                            <a class="nav-link" href="#licenses" onclick="showSection('licenses', event)">
                                 许可证管理
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="#versions" onclick="showSection('versions')">
+                            <a class="nav-link" href="#versions" onclick="showSection('versions', event)">
                                 版本管理
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="#orders" onclick="showSection('orders')">
+                            <a class="nav-link" href="#orders" onclick="showSection('orders', event)">
                                 订单管理
                             </a>
                         </li>
@@ -239,7 +239,7 @@
         });
 
         // 显示指定区域
-        function showSection(sectionId) {
+        function showSection(sectionId, evt) {
             // 隐藏所有section
             document.querySelectorAll('.section').forEach(el => {
                 el.style.display = 'none';
@@ -253,15 +253,15 @@
                 link.classList.remove('active');
             });
             
-            event.target.classList.add('active');
+            evt.target.classList.add('active');
             
             // 根据显示的区域执行特定逻辑
             if (sectionId === 'users') {
                 loadUsers(1);
             } else if (sectionId === 'licenses') {
-                document.getElementById('license-form').addEventListener('submit', handleLicenseGeneration);
+                if (!document.getElementById('license-form').dataset.bound) { document.getElementById('license-form').dataset.bound = 'true'; document.getElementById('license-form').addEventListener('submit', handleLicenseGeneration); }
             } else if (sectionId === 'versions') {
-                document.getElementById('version-form').addEventListener('submit', handleVersionCreation);
+                if (!document.getElementById('version-form').dataset.bound) { document.getElementById('version-form').dataset.bound = 'true'; document.getElementById('version-form').addEventListener('submit', handleVersionCreation); }
             }
         }
 

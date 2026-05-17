@@ -443,10 +443,12 @@ class UIInitMixin:
         try:
             from video_generator.license_manager import LicenseManager
             mgr = LicenseManager()
-            server_ok = mgr.verify_with_server()
-            if server_ok:
-                self._on_auth_recovered()
-                return
+            license_status = mgr.check_license()
+            if license_status.get("valid"):
+                server_ok = mgr.verify_with_server()
+                if server_ok:
+                    self._on_auth_recovered()
+                    return
         except Exception:
             pass
         self._auth_valid = False

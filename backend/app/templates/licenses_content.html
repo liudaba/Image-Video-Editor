@@ -155,6 +155,7 @@
                         <option value="quarterly">季付</option>
                         <option value="yearly" selected>年付</option>
                         <option value="lifetime">终身</option>
+                        <option value="trial_15d">试用15天</option>
                     </select>
                 </div>
             </form>
@@ -173,14 +174,33 @@
                     plan_type: document.getElementById('key-plan').value
                 };
                 
-                await apiRequest('/api/admin/generate_license_keys', {
+                const result = await apiRequest('/api/admin/generate_license_keys', {
                     method: 'POST',
                     body: JSON.stringify(data)
                 });
                 
                 showSuccess(`成功生成 ${data.count} 个许可证密钥`);
-                modal.hide();
-                loadLicenseKeys();
+
+                let keyList = result.keys.join('\n');
+                let keysDisplay = document.getElementById('generatedKeysDisplay');
+                if (!keysDisplay) {
+                    keysDisplay = document.createElement('pre');
+                    keysDisplay.id = 'generatedKeysDisplay';
+                    keysDisplay.className = 'mt-3 p-3 bg-light border rounded';
+                    keysDisplay.style.maxHeight = '200px';
+                    keysDisplay.style.overflow = 'auto';
+                    keysDisplay.style.whiteSpace = 'pre-wrap';
+                    keysDisplay.style.wordBreak = 'break-all';
+                    let modalBodyEl = document.querySelector('#commonModal .modal-body');
+                    if (modalBodyEl) modalBodyEl.appendChild(keysDisplay);
+                }
+                keysDisplay.textContent = keyList;
+
+                document.getElementById('confirmModalBtn').textContent = '关闭';
+                document.getElementById('confirmModalBtn').onclick = function() {
+                    modal.hide();
+                    loadLicenseKeys();
+                };
             } catch (error) {
                 console.error('生成许可证密钥失败:', error);
                 showError(`生成许可证密钥失败: ${error.message}`);

@@ -156,7 +156,7 @@
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-sm btn-danger" 
-                                onclick="showDeleteUserModal(${user.id}, '${user.username}')"
+                                onclick="showDeleteUserModal(this)" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}"
                                 title="删除用户">
                                 <i class="fas fa-trash"></i>
                             </button>
@@ -408,7 +408,9 @@
     }
 
     // 显示删除用户模态框
-    function showDeleteUserModal(userId, username) {
+    function showDeleteUserModal(btn) {
+        let userId = btn.dataset.userId;
+        let username = btn.dataset.username;
         const modalBody = document.getElementById('commonModalBody');
         modalBody.innerHTML = `
             <p>您确定要删除用户 "<strong>${escapeHtml(username)}</strong>" 吗？此操作不可撤销。</p>
