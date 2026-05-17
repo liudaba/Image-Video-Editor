@@ -1,4 +1,4 @@
-"""UI initialization mixin - window setup, variables, system services."""
+﻿"""UI initialization mixin - window setup, variables, system services."""
 import os
 import sys
 import time
@@ -365,6 +365,7 @@ class UIInitMixin:
                 mgr = LicenseManager()
                 license_status = mgr.check_license()
                 if license_status["valid"]:
+                    mgr.refresh_license()
                     mgr.start_heartbeat()
                     mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
                     mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
@@ -412,6 +413,27 @@ class UIInitMixin:
             self._update_auth_status_label("✅ 已授权", "#10b981", "#0d3325")
 
         self._update_membership_title()
+
+    def _refresh_auth_status_display(self):
+        if not getattr(self, '_auth_valid', False):
+            return
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            account_info = mgr.get_account_info()
+            is_lifetime = account_info.get("is_lifetime", False)
+            is_trial = account_info.get("is_trial", False)
+            days_left = account_info.get("days_left", 0)
+            if is_lifetime:
+                self._update_auth_status_label("✅ 终身", "#FFD700", "#0d2137")
+            elif is_trial:
+                self._update_auth_status_label(f"⏳ 试用期剩余{days_left}天", "#f59e0b", "#1a2744")
+            elif days_left > 0:
+                self._update_auth_status_label(f"⏳ 剩余{days_left}天", "#f59e0b", "#1a2744")
+            else:
+                self._update_auth_status_label("✅ 已授权", "#10b981", "#0d3325")
+        except Exception:
+            pass
 
     def _on_auth_invalid(self):
         self._auth_valid = False
@@ -773,6 +795,7 @@ class UIInitMixin:
                     break
                 self._check_api_heartbeat()
                 self.root.after(0, self._update_membership_title)
+                self.root.after(0, self._refresh_auth_status_display)
         threading.Thread(target=api_heartbeat, daemon=True).start()
 
     def _show_readiness_summary(self):
