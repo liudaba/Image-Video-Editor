@@ -270,6 +270,10 @@ class LicenseManager:
                 return self._try_silent_relogin()
             return True
         except Exception:
+            if self.license_data:
+                signed_data = self.license_data.get("signed", self.license_data)
+                if not signed_data.get("is_valid", False):
+                    return False
             return True
 
     def start_heartbeat(self):
@@ -424,6 +428,16 @@ class LicenseManager:
                     headers={"Authorization": f"Bearer {current_token}"},
                     timeout=10,
                 )
+                if response.status_code == 403:
+                    if self.license_data:
+                        signed_data = self.license_data.get("signed", self.license_data)
+                        signed_data["is_valid"] = False
+                        self._save_signed_license(
+                            signed_data,
+                            token=self._get_token(),
+                            last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                        )
+                    return False
                 if response.status_code == 200:
                     data = response.json()
                     signed_license = data.get("license", {})

@@ -1247,6 +1247,10 @@ def check_and_show_login(parent=None):
         if dialog.result:
             license_status = license_mgr.check_license()
             if license_status["valid"]:
+                if not license_mgr.verify_with_server():
+                    license_status = license_mgr.check_license()
+                    if not license_status["valid"]:
+                        return license_status
                 license_mgr.start_heartbeat()
                 return license_status
             verify_secret = _get_verify_secret()

@@ -155,12 +155,21 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    if is_active is not None and is_active is False and user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+
     if username is not None:
         user.username = username
     if email is not None:
         user.email = email
     if is_active is not None:
         user.is_active = is_active
+        from ..models import License as LicenseModel
+        license_result = await db.execute(select(LicenseModel).where(LicenseModel.user_id == user_id))
+        user_license = license_result.scalar_one_or_none()
+        if user_license:
+            user_license.is_valid = is_active
+            await db.flush()
     if is_admin is not None:
         user.is_admin = is_admin
 
@@ -194,6 +203,9 @@ async def delete_user(
 
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能删除自己的账户")
 
     await db.execute(delete(User).where(User.id == user_id))
 

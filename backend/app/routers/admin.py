@@ -202,16 +202,24 @@ async def update_user(
         target_user.email = body.email
     if body.password is not None:
         target_user.hashed_password = hash_password(body.password)
+    if body.is_active is not None and body.is_active is False and target_user.id == user.id:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+
     if body.is_active is not None:
         target_user.is_active = body.is_active
+        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        user_license = license_result.scalar_one_or_none()
+        if user_license:
+            user_license.is_valid = body.is_active
+            await db.flush()
     if body.is_admin is not None:
         target_user.is_admin = body.is_admin
-    
+
     await db.flush()
-    
+
     await _log_audit(
-        db, user, "update_user", 
-        f"user_id={user_id}, username={body.username}, is_active={body.is_active}, is_admin={body.is_admin}", 
+        db, user, "update_user",
+        f"user_id={user_id}, username={body.username}, is_active={body.is_active}, is_admin={body.is_admin}",
         request
     )
     
