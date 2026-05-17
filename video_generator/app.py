@@ -133,6 +133,7 @@ def _check_critical_files(app_dir):
     critical = {
         "config.json": os.path.join(app_dir, "config.json"),
         ".license_verify_key": os.path.join(app_dir, ".license_verify_key"),
+        ".license_verify_pubkey.pem": os.path.join(internal_dir, ".license_verify_pubkey.pem"),
     }
     missing = []
     for name, path in critical.items():

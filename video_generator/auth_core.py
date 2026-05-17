@@ -727,6 +727,11 @@ class LicenseManager:
             return {"valid": False, "message": "未登录,请先注册或登录"}
 
         signed_data = self.license_data.get("signed", self.license_data)
+
+        is_valid = signed_data.get("is_valid", False)
+        if not is_valid:
+            return {"valid": False, "message": "授权已失效,请重新登录"}
+
         has_signature = _HMAC_KEY in signed_data
         if has_signature and not _verify_signature(signed_data):
             return {"valid": False, "message": "授权数据已被篡改,请重新登录"}
@@ -800,7 +805,6 @@ class LicenseManager:
             except (ValueError, TypeError):
                 pass
 
-        is_valid = signed_data.get("is_valid", False)
         license_type = signed_data.get("license_type", "none")
         days_left = signed_data.get("days_left", 0)
         from datetime import timezone as _tz
@@ -824,8 +828,6 @@ class LicenseManager:
                             "valid": False,
                             "message": "试用期已结束,请购买专业版继续使用",
                         }
-            if not is_valid:
-                return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
             return {
                 "valid": False,
                 "message": "试用期已结束,请购买专业版继续使用",
@@ -853,12 +855,8 @@ class LicenseManager:
                     "days_left": 9999,
                     "message": "终身会员",
                 }
-            if not is_valid:
-                return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
             return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
 
-        if not is_valid:
-            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
         return {"valid": False, "message": "未知的授权类型,请重新登录"}
 
     def activate_pro_license(self, license_key):
@@ -875,8 +873,13 @@ class LicenseManager:
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
                     self._save_signed_license(signed_license, token=token)
+                    if not (self._heartbeat_thread and self._heartbeat_thread.is_alive()):
+                        self.start_heartbeat()
                 else:
                     return False, "激活响应数据无效,请联系客服"
+                lic_type = signed_license.get("license_type", "pro")
+                if lic_type == "trial":
+                    return True, "试用版激活成功!"
                 return True, "专业版激活成功!"
             else:
                 error_msg = response.json().get("detail", "激活失败")
@@ -922,7 +925,8 @@ class LicenseManager:
                 timeout=15,
             )
             if response.status_code == 200:
-                return True, "验证码已发送到您的邮箱"
+                data = response.json()
+                return True, data.get("message", "验证码已发送")
             else:
                 error_msg = response.json().get("detail", "请求失败")
                 return False, error_msg

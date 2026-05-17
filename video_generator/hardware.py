@@ -11,6 +11,18 @@ import time
 from typing import Dict
 
 
+def _get_ffmpeg_bin():
+    return os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+
+
+def _get_ffprobe_bin():
+    ffmpeg_bin = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+    ffmpeg_dir = os.path.dirname(ffmpeg_bin)
+    if ffmpeg_dir:
+        return os.path.join(ffmpeg_dir, 'ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+    return 'ffprobe'
+
+
 def _sanitize_ffmpeg_path(path):
     """净化文件路径，防止FFmpeg concat文件注入
     
@@ -47,7 +59,7 @@ class HardwareAcceleratedRenderer:
         self._encoders_detected = True
         try:
             result = subprocess.run(
-                ['ffmpeg', '-encoders'],
+                [_get_ffmpeg_bin(), '-encoders'],
                 capture_output=True, text=True, timeout=3
             )
             stdout = result.stdout
@@ -104,7 +116,7 @@ class HardwareAcceleratedRenderer:
     def _check_cuda_filters(self):
         try:
             result = subprocess.run(
-                ['ffmpeg', '-filters'],
+                [_get_ffmpeg_bin(), '-filters'],
                 capture_output=True, text=True, timeout=3
             )
             return 'hwupload_cuda' in result.stdout
@@ -127,7 +139,7 @@ class HardwareAcceleratedRenderer:
     def _detect_nvenc_options(self):
         try:
             result = subprocess.run(
-                ['ffmpeg', '-hide_banner', '-h', 'encoder=h264_nvenc'],
+                [_get_ffmpeg_bin(), '-hide_banner', '-h', 'encoder=h264_nvenc'],
                 capture_output=True, text=True, timeout=5
             )
             help_text = result.stdout
@@ -458,7 +470,7 @@ class HardwareAcceleratedRenderer:
                             and encoder_config.get('vcodec') == 'h264_nvenc')
 
                 cmd = [
-                    'ffmpeg', '-y',
+                    _get_ffmpeg_bin(), '-y',
                     '-f', 'concat', '-safe', '0',
                     '-i', seg_concat,
                 ]
@@ -623,7 +635,7 @@ class HardwareAcceleratedRenderer:
                     f.write(f"file '{_sanitize_ffmpeg_path(seg_file)}'\n")
 
             merge_cmd = [
-                'ffmpeg', '-y',
+                _get_ffmpeg_bin(), '-y',
                 '-f', 'concat', '-safe', '0',
                 '-i', concat_file,
                 '-i', audio_file,
@@ -726,7 +738,7 @@ class HardwareAcceleratedRenderer:
                     and encoder_config.get('vcodec') == 'h264_nvenc')
 
         cmd = [
-            'ffmpeg', '-y',
+            _get_ffmpeg_bin(), '-y',
             '-f', 'concat', '-safe', '0',
             '-i', concat_file,
         ]
@@ -776,7 +788,7 @@ class HardwareAcceleratedRenderer:
     def _get_audio_duration(self, audio_file):
         try:
             cmd = [
-                'ffprobe', '-v', 'error',
+                _get_ffprobe_bin(), '-v', 'error',
                 '-show_entries', 'format=duration',
                 '-of', 'json',
                 audio_file

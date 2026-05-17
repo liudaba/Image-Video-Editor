@@ -70,6 +70,7 @@ class LoginDialog(tk.Toplevel):
         self.resizable(True, True)
         self.configure(bg=self._BG)
         self.transient(parent)
+        self.grab_set()
 
         try:
             from ctypes import windll
@@ -592,8 +593,6 @@ class LoginDialog(tk.Toplevel):
         if btn and btn.winfo_exists():
             btn.configure(state=tk.NORMAL, text="\u767b\u5f55\u5e76\u6fc0\u6d3b")
         messagebox.showerror("\u9519\u8bef", f"\u6fc0\u6d3b\u5931\u8d25: {message}", parent=self)
-        self.result = True
-        self.destroy()
 
     def _on_activate_failure(self, message, btn):
         if btn and btn.winfo_exists():
@@ -752,7 +751,6 @@ class PasswordResetDialog(tk.Toplevel):
         ).pack(pady=(0, 14))
 
         self._make_label(main, "\u6ce8\u518c\u90ae\u7bb1").pack(anchor=tk.W, pady=(0, 4))
-        self.email_entry = self._make_entry(main, tk.StringVar() if not hasattr(self, 'email_var') else self.email_var)
         self.email_var = tk.StringVar()
         self.email_entry = self._make_entry(main, self.email_var)
         self.email_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))

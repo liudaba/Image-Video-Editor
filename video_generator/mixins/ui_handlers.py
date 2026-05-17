@@ -975,7 +975,7 @@ class UIHandlersMixin:
                 msg += f"- {dep}: {install_cmd}\n"
             if hasattr(self, 'root') and self.root:
                 self.root.after(0, lambda: messagebox.showwarning("警告", msg))
-            return True
+            return False
         else:
             return True
 

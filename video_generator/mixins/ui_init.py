@@ -437,7 +437,7 @@ class UIInitMixin:
 
     def _on_auth_invalid(self):
         self._auth_valid = False
-        self._set_action_buttons_state("normal")
+        self._set_action_buttons_state("disabled")
         self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1a2744")
         self._update_membership_title()
 
@@ -447,15 +447,8 @@ class UIInitMixin:
             mgr = LicenseManager()
             server_ok = mgr.verify_with_server()
             if server_ok:
-                license_status = mgr.check_license()
-                if license_status["valid"]:
-                    self._on_auth_recovered()
-                    return
-            else:
-                license_status = mgr.check_license()
-                if license_status["valid"]:
-                    self._on_auth_recovered()
-                    return
+                self._on_auth_recovered()
+                return
         except Exception:
             pass
         self._auth_valid = False
@@ -464,7 +457,7 @@ class UIInitMixin:
         self._update_membership_title()
         try:
             from tkinter import messagebox
-            messagebox.showwarning("授权失效", "您的账号已被禁用或授权已失效，请重新登录。")
+            messagebox.showwarning("授权失效", "您的账号已被禁用或授权已失效，请重新登录。", parent=self.root)
         except Exception:
             pass
         self._show_login_dialog()

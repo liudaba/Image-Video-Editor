@@ -38,13 +38,21 @@ _RESET_CODE_TTL = 600
 _RESET_CODE_MAX_ATTEMPTS = 5
 
 
+_reset_redis_pool = None
+
 def _get_redis_for_reset():
+    global _reset_redis_pool
+    if _reset_redis_pool is None:
+        try:
+            import redis
+            _reset_redis_pool = redis.ConnectionPool.from_url(
+                settings.REDIS_URL, socket_timeout=2, max_connections=5
+            )
+        except Exception:
+            return None
     try:
         import redis
-        pool = redis.ConnectionPool.from_url(
-            settings.REDIS_URL, socket_timeout=2, max_connections=5
-        )
-        return redis.Redis(connection_pool=pool)
+        return redis.Redis(connection_pool=_reset_redis_pool)
     except Exception:
         return None
 
@@ -114,7 +122,7 @@ def _send_reset_email(email: str, code: str) -> bool:
         smtp_from = getattr(settings, "SMTP_FROM", smtp_user)
 
         if not smtp_host or not smtp_user:
-            logger.warning("SMTP not configured, reset code for %s: %s", email, code)
+            logger.warning("SMTP not configured, reset email not sent for %s", email)
             return False
 
         msg = MIMEMultipart("alternative")
@@ -162,7 +170,7 @@ async def request_reset(data: PasswordResetRequest, request: Request, db: AsyncS
     result = await db.execute(select(User).filter(User.email == data.email))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="该邮箱未注册")
+        return {"message": "如果该邮箱已注册，验证码已发送至您的邮箱"}
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账户已被禁用，请联系客服")
 

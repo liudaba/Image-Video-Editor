@@ -35,15 +35,16 @@ async def heartbeat(
         return HeartbeatResponse(is_valid=False, reason="未找到许可证", timestamp=time.time())
 
     is_valid = license_obj.is_valid
+    if not current_user.is_active:
+        is_valid = False
     if license_obj.expiry_date:
         expiry = license_obj.expiry_date
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        if expiry >= now:
-            is_valid = True
-        else:
-            is_valid = is_valid and False
+        if expiry < now:
+            is_valid = False
+            license_obj.is_valid = False
 
     if is_valid and req.fingerprint:
         can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)

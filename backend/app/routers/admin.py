@@ -284,6 +284,9 @@ async def update_user(
             if lic_type.value == "trial":
                 user_license.trial_start = datetime.now(timezone.utc)
                 user_license.trial_end = user_license.expiry_date
+            else:
+                user_license.trial_start = None
+                user_license.trial_end = None
         await db.flush()
 
     if body.expiry_date is not None:

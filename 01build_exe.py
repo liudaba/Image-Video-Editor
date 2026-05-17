@@ -1,4 +1,4 @@
-﻿"""
+"""
 短视频生成器 - PyInstaller打包配置
 生成独立的.exe可执行文件
 集成PyArmor代码混淆，一键构建发布版本
@@ -408,15 +408,14 @@ def build_executable():
     required_files = [
         'video_generator/__init__.py',
         'config.json',
-        'README.md',
-        'LICENSE',
-        '用户快速开始.md',
+        '.license_verify_pubkey.pem',
         'assets/icon.ico',
     ]
 
-    optional_files = {
-        'TERMS_OF_SERVICE.md': '服务条款(建议包含)',
-        'PRIVACY_POLICY.md': '隐私政策(建议包含)',
+    recommended_files = {
+        '快速上手指南.md': '快速上手指南',
+        '使用指南.md': '详细使用指南',
+        'LICENSE': '商业软件许可证',
     }
 
     for file_path in required_files:
@@ -426,7 +425,7 @@ def build_executable():
         else:
             print(f"  ✅ {file_path}")
 
-    for file_path, desc in optional_files.items():
+    for file_path, desc in recommended_files.items():
         if os.path.exists(file_path):
             print(f"  ✅ {file_path} ({desc})")
         else:
@@ -436,8 +435,9 @@ def build_executable():
 
     add_data_args = [
         '--add-data=config.json;.',
-        '--add-data=LICENSE;.',
     ]
+    if os.path.exists('LICENSE'):
+        add_data_args.append('--add-data=LICENSE;.')
 
     hidden_import_args = [f'--hidden-import={m}' for m in spec_hiddenimports]
 
@@ -476,22 +476,16 @@ def build_executable():
     print("\n📦 打包内容清单:")
     print("  ✅ video_generator/     - 核心程序模块")
     print("  ✅ config.json          - 配置文件")
-    print("  ✅ README.md            - 项目介绍")
-    print("  ✅ 用户快速开始.md      - 使用说明书")
-    print("  ✅ LICENSE              - 商业软件许可证")
-    if os.path.exists('TERMS_OF_SERVICE.md'):
-        print("  ✅ TERMS_OF_SERVICE.md  - 服务条款")
-    if os.path.exists('PRIVACY_POLICY.md'):
-        print("  ✅ PRIVACY_POLICY.md    - 隐私政策")
+    print("  ✅ 快速上手指南.md      - 快速上手指南")
+    print("  ✅ 使用指南.md          - 详细使用指南")
+    if os.path.exists('LICENSE'):
+        print("  ✅ LICENSE              - 商业软件许可证")
     print("  ✅ _internal/           - PyInstaller依赖库")
     print("  ✅ whisper_models/      - Whisper语音识别模型(打包后复制)")
     print("  ✅ ffmpeg/              - FFmpeg音视频工具(打包后复制)")
     print("  🔄 启动.vbs             - 打包后自动生成（指向exe）")
     print("  🔄 start.bat            - 打包后自动生成（指向exe）")
-    if os.path.exists('.license_verify_key'):
-        print("  ✅ .license_verify_key  - 授权签名验证密钥")
-    else:
-        print("  ⚠️  .license_verify_key  - 缺失！部署服务端后需复制此文件")
+    print("  ✅ .license_verify_pubkey.pem - ECDSA签名验证公钥")
 
     print("\n🚫 排除模块清单 (通过 --exclude-module):")
     for m in ['PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'fastapi', 'uvicorn',
@@ -578,34 +572,23 @@ def _clean_output(output_dir):
             shutil.rmtree(dp, ignore_errors=True)
 
     unwanted_files = [
-        # 安全相关 - 机密文件
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
         'generate_signing_keys.py',
-        # SSH密码管理 - 绝对不能打包
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py', '生成SSH密码.bat',
-        # 源代码和构建脚本
         'run.py', 'run.pyw',
         '01build_exe.py', '02build_exe.py', 'obfuscate_build.py',
         'release_helper.py', 'installer_setup.iss',
         'requirements.txt',
-        # 后台管理系统相关
         '后台管理系统启动器.py', '停止后台管理系统.bat',
-        # 开发和部署脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
-        '!!!首次使用点我.bat',
-        '检查环境.bat', '生成Demo素材.bat', 'check_and_install_deps.bat',
-        # 其他
+        '生成Demo素材.bat', 'check_and_install_deps.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
-    '更新日志.md', '系统要求.md', '!!!首次使用点我.bat',
-        'README.md', 'TERMS_OF_SERVICE.md', 'PRIVACY_POLICY.md',
-        '用户快速开始.md', '开发人员快速参考.md',
         'sync_to_server.py', 'config.json.example',
-        'VideoGenerator.spec', 'obfuscate_build.py',
-        'check_packing_safety.py', 'generate_signing_keys.py',
+        'VideoGenerator.spec', 'check_packing_safety.py',
     ]
     for f in unwanted_files:
         fp = os.path.join(output_dir, f)
@@ -670,17 +653,15 @@ def _verify_output(output_dir):
         '后台管理系统启动器.py', '停止后台管理系统.bat',
         # 其他开发脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
-        '检查环境.bat', '生成Demo素材.bat',
+        '生成Demo素材.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         'sync_to_server.py', 'config.json.example',
         'VideoGenerator.spec', 'check_packing_safety.py',
-        'generate_signing_keys.py',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
-        'generate_signing_keys.py',
         # ⚠️ SSH密码管理 - 绝对不能打包
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py', '生成SSH密码.bat',
@@ -886,6 +867,9 @@ def _post_build(output_dir):
         '    If result = vbNo Then WScript.Quit 0\n'
         'End If\n'
         'shell.CurrentDirectory = appDir\n'
+        'If fso.FileExists(appDir & "\\ffmpeg\\ffmpeg.exe") Then\n'
+        '    shell.Environment("Process").Item("FFMPEG_BINARY") = appDir & "\\ffmpeg\\ffmpeg.exe"\n'
+        'End If\n'
         'shell.Run "短视频生成器.exe", 1, False\n'
     )
     vbs_path = os.path.join(output_dir, "启动.vbs")
@@ -911,6 +895,7 @@ def _post_build(output_dir):
         '    pause\n'
         '    exit /b 1\n'
         ')\n'
+        'if exist "%~dp0ffmpeg\\ffmpeg.exe" set "FFMPEG_BINARY=%~dp0ffmpeg\\ffmpeg.exe"\n'
         'start "" "短视频生成器.exe"\n'
     )
     bat_path = os.path.join(output_dir, "start.bat")
@@ -947,8 +932,10 @@ def _post_build(output_dir):
         shutil.copy2(pubkey_src, os.path.join(internal_dir, ".license_verify_pubkey.pem"))
         print("  ✅ 复制 .license_verify_pubkey.pem (ECDSA 公钥)")
     else:
-        print("  ⚠️  .license_verify_pubkey.pem 缺失，ECDSA 签名验证将不可用")
+        print("  ❌ 错误: .license_verify_pubkey.pem 缺失！ECDSA 签名验证将不可用")
         print("     请运行 python generate_signing_keys.py 生成密钥对")
+        print("     或从服务器复制公钥文件到项目根目录")
+        sys.exit(1)
 
     if not os.path.exists(verify_key_src) and not os.path.exists(pubkey_src):
         print("  ❌ 错误: .license_verify_key 和 .license_verify_pubkey.pem 都缺失！")
@@ -959,27 +946,20 @@ def _post_build(output_dir):
     _copy_ffmpeg(output_dir)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    quick_start = os.path.join(base_dir, "用户快速开始.md")
+    quick_start = os.path.join(base_dir, "快速上手指南.md")
     if os.path.exists(quick_start):
-        shutil.copy2(quick_start, os.path.join(output_dir, "使用说明.md"))
-        print("  ✅ 复制 使用说明.md（快速上手）")
+        shutil.copy2(quick_start, os.path.join(output_dir, "快速上手指南.md"))
+        print("  ✅ 复制 快速上手指南.md")
+    else:
+        print("  ❌ 错误: 快速上手指南.md 缺失！")
+        sys.exit(1)
     detailed_guide = os.path.join(base_dir, "使用指南.md")
     if os.path.exists(detailed_guide):
         shutil.copy2(detailed_guide, os.path.join(output_dir, "使用指南.md"))
-        print("  ✅ 复制 使用指南.md（详细说明）")
-
-    license_file = os.path.join(base_dir, "LICENSE")
-    if os.path.exists(license_file):
-        shutil.copy2(license_file, os.path.join(output_dir, "LICENSE"))
-        print("  ✅ 复制 LICENSE")
-    terms_file = os.path.join(base_dir, "TERMS_OF_SERVICE.md")
-    if os.path.exists(terms_file):
-        shutil.copy2(terms_file, os.path.join(output_dir, "服务条款.md"))
-        print("  ✅ 复制 服务条款.md")
-    privacy_file = os.path.join(base_dir, "PRIVACY_POLICY.md")
-    if os.path.exists(privacy_file):
-        shutil.copy2(privacy_file, os.path.join(output_dir, "隐私政策.md"))
-        print("  ✅ 复制 隐私政策.md")
+        print("  ✅ 复制 使用指南.md")
+    else:
+        print("  ❌ 错误: 使用指南.md 缺失！")
+        sys.exit(1)
 
     icon_src = os.path.join(base_dir, "assets", "icon.ico")
     if os.path.exists(icon_src):
@@ -1011,18 +991,7 @@ def _post_clean_copy(output_dir):
         print("  ✅ 复制 !!!首次使用点我.bat")
     else:
         print("  ⚠️  !!!首次使用点我.bat 缺失")
-    changelog_file = os.path.join(base_dir, "更新日志.md")
-    if os.path.exists(changelog_file):
-        shutil.copy2(changelog_file, os.path.join(output_dir, "更新日志.md"))
-        print("  ✅ 复制 更新日志.md")
-    else:
-        print("  ⚠️  更新日志.md 缺失")
-    sysreq_file = os.path.join(base_dir, "系统要求.md")
-    if os.path.exists(sysreq_file):
-        shutil.copy2(sysreq_file, os.path.join(output_dir, "系统要求.md"))
-        print("  ✅ 复制 系统要求.md")
-    else:
-        print("  ⚠️  系统要求.md 缺失")
+
 
 
 def _generate_checksums(output_dir):
