@@ -794,6 +794,13 @@ class UIInitMixin:
                 if not self._api_heartbeat_running:
                     break
                 self._check_api_heartbeat()
+                try:
+                    from video_generator.license_manager import LicenseManager
+                    mgr = LicenseManager()
+                    if mgr.license_data:
+                        mgr.refresh_license()
+                except Exception:
+                    pass
                 self.root.after(0, self._update_membership_title)
                 self.root.after(0, self._refresh_auth_status_display)
         threading.Thread(target=api_heartbeat, daemon=True).start()
