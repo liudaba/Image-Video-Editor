@@ -5968,7 +5968,7 @@ class ShotsMixin:
                         delattr(self, '_pregenerated_prompts')
                     self.log("✅ 分镜生成任务结束")
                     if not getattr(self, '_auto_mode', False):
-                        self.log("请点击「🎨 生成图片」生成分镜画面，或点击「🎞️ 生成视频」自动生成图片并合成最终视频")
+                        self.log("请点击「🎞️ 生成视频」自动生成图片并合成最终视频")
             
             thread = threading.Thread(target=generate_shots_worker, daemon=True, name="GenerateShotsThread")
             thread.start()
