@@ -473,7 +473,13 @@
 
                 if (!response.ok) {
                     const error = await response.json();
-                    throw new Error(error.detail || '请求失败');
+                    let msg = error.detail || '请求失败';
+                    if (Array.isArray(msg)) {
+                        msg = msg.map(e => e.msg || JSON.stringify(e)).join('; ');
+                    } else if (typeof msg === 'object') {
+                        msg = JSON.stringify(msg);
+                    }
+                    throw new Error(msg);
                 }
 
                 return await response.json();

@@ -27,6 +27,8 @@
                     <tr>
                         <th>订单号</th>
                         <th>用户ID</th>
+                        <th>用户名</th>
+                        <th>邮箱</th>
                         <th>套餐类型</th>
                         <th>支付方式</th>
                         <th>金额</th>
@@ -100,6 +102,8 @@
                 row.innerHTML = `
                     <td><code>${escapeHtml(order.order_no)}</code></td>
                     <td>${order.user_id}</td>
+                    <td>${escapeHtml(order.username) || '-'}</td>
+                    <td>${escapeHtml(order.email) || '-'}</td>
                     <td>${order.plan_type === 'monthly' ? '月付' : order.plan_type === 'quarterly' ? '季付' : order.plan_type === 'yearly' ? '年付' : order.plan_type === 'lifetime' ? '终身' : order.plan_type === 'trial_15d' ? '试用15天' : order.plan_type}</td>
                     <td>${order.payment_method === 'alipay' ? '支付宝' : order.payment_method === 'wechat' ? '微信支付' : order.payment_method || '-'}</td>
                     <td>¥${order.amount}</td>

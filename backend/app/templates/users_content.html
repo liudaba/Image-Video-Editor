@@ -48,6 +48,9 @@
                         <th>用户名</th>
                         <th>邮箱</th>
                         <th>许可证</th>
+                        <th>机器指纹</th>
+                        <th>绑定设备</th>
+                        <th>激活密钥</th>
                         <th>状态</th>
                         <th>最后在线</th>
                         <th>注册时间</th>
@@ -128,6 +131,16 @@
                 const licValid = user.license_is_valid;
                 const lastHb = user.last_heartbeat ? formatDate(user.last_heartbeat) : '-';
                 const expiryStr = user.expiry_date ? formatDate(user.expiry_date) : (user.license_type === 'pro' ? '永久' : '-');
+                const machineFp = user.machine_fingerprint ? `<small title="${escapeHtml(user.machine_fingerprint)}">${escapeHtml(user.machine_fingerprint.substring(0, 12))}...</small>` : '-';
+                const bindingsHtml = user.machine_bindings && user.machine_bindings.length > 0
+                    ? user.machine_bindings.map(b => `<small title="${escapeHtml(b.fingerprint)}">${escapeHtml(b.machine_name || b.fingerprint.substring(0, 12))}...</small>`).join('<br>')
+                    : '-';
+                const keysHtml = user.activated_keys && user.activated_keys.length > 0
+                    ? user.activated_keys.map(k => {
+                        const planLabel = k.plan_type === 'monthly' ? '月付' : k.plan_type === 'quarterly' ? '季付' : k.plan_type === 'yearly' ? '年付' : k.plan_type === 'lifetime' ? '终身' : k.plan_type === 'trial_15d' ? '试用' : k.plan_type;
+                        return `<small><code>${escapeHtml(k.license_key.substring(0, 12))}...</code> <span class="badge bg-info">${planLabel}</span></small>`;
+                    }).join('<br>')
+                    : '-';
                 row.innerHTML = `
                     <td>${user.id}</td>
                     <td>${escapeHtml(user.username)}</td>
@@ -136,6 +149,9 @@
                         <span class="badge ${licValid ? 'bg-info' : 'bg-secondary'}">${licType}</span>
                         <br><small class="text-muted">${expiryStr}</small>
                     </td>
+                    <td>${machineFp}</td>
+                    <td>${bindingsHtml}</td>
+                    <td>${keysHtml}</td>
                     <td>
                         <span class="badge ${user.is_active ? 'bg-success' : 'bg-danger'}">
                             ${user.is_active ? '活跃' : '非活跃'}

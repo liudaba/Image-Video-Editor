@@ -19,6 +19,7 @@
                         <th>状态</th>
                         <th>剩余天数</th>
                         <th>激活用户</th>
+                        <th>激活用户邮箱</th>
                         <th>激活时间</th>
                         <th>创建时间</th>
                         <th>操作</th>
@@ -34,11 +35,10 @@
 
 <script>
     async function loadTrialCodesContent() {
-        await loadTrialCodes();
-        
         document.getElementById('generate-trial-btn').addEventListener('click', () => {
             showGenerateTrialModal();
         });
+        await loadTrialCodes();
     }
 
     async function loadTrialCodes() {
@@ -68,6 +68,7 @@
                     </td>
                     <td><span class="${remainingClass}">${remainingText}</span></td>
                     <td>${escapeHtml(key.activated_by_username) || '-'}</td>
+                    <td>${escapeHtml(key.activated_by_email) || '-'}</td>
                     <td>${key.activated_at ? formatDate(key.activated_at) : '-'}</td>
                     <td>${formatDate(key.created_at)}</td>
                     <td>
@@ -75,7 +76,12 @@
                             <button class="btn btn-sm btn-danger" onclick="revokeTrialCode('${escapeHtml(key.license_key)}')">
                                 <i class="fas fa-ban"></i> 撤销
                             </button>
-                        ` : '-'}
+                        ` : ''}
+                        ${key.status !== 'activated' ? `
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTrialCode('${escapeHtml(key.license_key)}')">
+                                <i class="fas fa-trash"></i> 删除
+                            </button>
+                        ` : ''}
                     </td>
                 `;
                 codesList.appendChild(row);
@@ -130,6 +136,21 @@
         } catch (error) {
             console.error('撤销激活码失败:', error);
             showError(`撤销激活码失败: ${error.message}`);
+        }
+    }
+
+    async function deleteTrialCode(key) {
+        if (!confirm(`确定要删除激活码 ${key} 吗？此操作不可恢复！`)) return;
+        
+        try {
+            await apiRequest(`/api/admin/license_keys/${key}`, {
+                method: 'DELETE'
+            });
+            showSuccess('删除成功');
+            loadTrialCodes();
+        } catch (error) {
+            console.error('删除激活码失败:', error);
+            showError(`删除激活码失败: ${error.message}`);
         }
     }
 </script>

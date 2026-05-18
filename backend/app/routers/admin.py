@@ -7,7 +7,7 @@ from sqlalchemy import select, func, desc, or_
 
 from ..database import get_db
 from ..models import (
-    User, License, Order, AppVersion, HeartbeatLog, AuditLog,
+    User, License, Order, AppVersion, HeartbeatLog, AuditLog, MachineBinding,
     LicenseType, OrderStatus, LicenseKey, LicenseKeyStatus, PlanType,
     validate_order_status_transition,
 )
@@ -40,7 +40,7 @@ class VersionCreate(BaseModel):
 
 
 class LicenseKeyGenerate(BaseModel):
-    plan_type: str = Field("yearly", pattern=r"^(monthly|quarterly|yearly|lifetime)$")
+    plan_type: str = Field("yearly", pattern=r"^(monthly|quarterly|yearly|lifetime|trial_15d)$")
     count: int = Field(1, ge=1, le=50)
 
 
@@ -119,10 +119,48 @@ async def list_users(
     result = await db.execute(query.offset(offset).limit(page_size))
     users = result.scalars().all()
 
+    user_ids = [u.id for u in users]
+
+    lic_map = {}
+    if user_ids:
+        lic_result = await db.execute(select(License).where(License.user_id.in_(user_ids)))
+        for lic in lic_result.scalars().all():
+            lic_map[lic.user_id] = lic
+
+    activated_keys_map = {}
+    if user_ids:
+        ak_result = await db.execute(
+            select(LicenseKey).where(
+                LicenseKey.activated_by.in_(user_ids),
+                LicenseKey.status == LicenseKeyStatus.ACTIVATED
+            )
+        )
+        for ak in ak_result.scalars().all():
+            if ak.activated_by not in activated_keys_map:
+                activated_keys_map[ak.activated_by] = []
+            activated_keys_map[ak.activated_by].append({
+                "license_key": ak.license_key,
+                "plan_type": ak.plan_type.value,
+            })
+
+    bindings_map = {}
+    if user_ids:
+        mb_result = await db.execute(
+            select(MachineBinding).where(MachineBinding.user_id.in_(user_ids))
+        )
+        for mb in mb_result.scalars().all():
+            if mb.user_id not in bindings_map:
+                bindings_map[mb.user_id] = []
+            bindings_map[mb.user_id].append({
+                "fingerprint": mb.fingerprint,
+                "machine_name": mb.machine_name,
+                "bound_at": mb.bound_at.isoformat() if mb.bound_at else None,
+                "last_seen": mb.last_seen.isoformat() if mb.last_seen else None,
+            })
+
     user_list = []
     for u in users:
-        lic_result = await db.execute(select(License).where(License.user_id == u.id))
-        lic = lic_result.scalar_one_or_none()
+        lic = lic_map.get(u.id)
         user_info = {
             "id": u.id,
             "username": u.username,
@@ -134,6 +172,10 @@ async def list_users(
             "license_is_valid": lic.is_valid if lic else None,
             "last_heartbeat": lic.last_heartbeat.isoformat() if lic and lic.last_heartbeat else None,
             "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
+            "machine_fingerprint": lic.machine_fingerprint if lic else None,
+            "heartbeat_fingerprint": lic.heartbeat_fingerprint if lic else None,
+            "activated_keys": activated_keys_map.get(u.id, []),
+            "machine_bindings": bindings_map.get(u.id, []),
         }
         user_list.append(user_info)
 
@@ -287,7 +329,25 @@ async def update_user(
             else:
                 user_license.trial_start = None
                 user_license.trial_end = None
-        await db.flush()
+        activated_keys_result = await db.execute(
+            select(LicenseKey).where(
+                LicenseKey.activated_by == user_id,
+                LicenseKey.status == LicenseKeyStatus.ACTIVATED
+            )
+        )
+        activated_keys = activated_keys_result.scalars().all()
+        plan_to_key_plan = {
+            "trial_15d": PlanType.TRIAL_15D,
+            "monthly": PlanType.MONTHLY,
+            "quarterly": PlanType.QUARTERLY,
+            "yearly": PlanType.YEARLY,
+            "lifetime": PlanType.LIFETIME,
+        }
+        if activated_keys and body.plan_type in plan_to_key_plan:
+            new_key_plan = plan_to_key_plan[body.plan_type]
+            for ak in activated_keys:
+                ak.plan_type = new_key_plan
+            await db.flush()
 
     if body.expiry_date is not None:
         license_result = await db.execute(select(License).where(License.user_id == user_id))
@@ -380,7 +440,13 @@ async def list_orders(
         result = await db.execute(query)
         orders = result.scalars().all()
 
-    # 获取状态对应的中文描述
+    order_user_ids = list(set(o.user_id for o in orders))
+    order_users_map = {}
+    if order_user_ids:
+        ou_result = await db.execute(select(User).where(User.id.in_(order_user_ids)))
+        for ou in ou_result.scalars().all():
+            order_users_map[ou.id] = {"username": ou.username, "email": ou.email}
+
     status_map = {
         OrderStatus.PENDING: "待支付",
         OrderStatus.PAID: "已支付",
@@ -398,6 +464,8 @@ async def list_orders(
                 "id": o.id,
                 "order_no": o.order_no,
                 "user_id": o.user_id,
+                "username": order_users_map.get(o.user_id, {}).get("username"),
+                "email": order_users_map.get(o.user_id, {}).get("email"),
                 "plan_type": o.plan_type.value,
                 "payment_method": o.payment_method,
                 "amount": float(o.amount),
@@ -596,16 +664,24 @@ async def list_trial_codes(
         .order_by(desc(LicenseKey.created_at))
     )
     keys = result.scalars().all()
-    
+
+    tc_user_ids = list(set(k.activated_by for k in keys if k.activated_by))
+    tc_users_map = {}
+    if tc_user_ids:
+        tcu_result = await db.execute(select(User).where(User.id.in_(tc_user_ids)))
+        for tcu in tcu_result.scalars().all():
+            tc_users_map[tcu.id] = {"username": tcu.username, "email": tcu.email}
+
     now = datetime.now(timezone.utc)
     response_keys = []
-    
+
     for k in keys:
         created_at = k.created_at.replace(tzinfo=timezone.utc)
         age_days = (now - created_at).days
         days_remaining = max(0, 15 - age_days)
         is_expired = age_days >= 15
-        
+
+        tc_user_info = tc_users_map.get(k.activated_by, {}) if k.activated_by else {}
         response_keys.append({
             "id": k.id,
             "license_key": k.license_key,
@@ -613,7 +689,8 @@ async def list_trial_codes(
             "is_expired": is_expired,
             "days_remaining": days_remaining,
             "activated_by": k.activated_by,
-            "activated_by_username": (await db.scalar(select(User.username).where(User.id == k.activated_by))) if k.activated_by else None,
+            "activated_by_username": tc_user_info.get("username"),
+            "activated_by_email": tc_user_info.get("email"),
             "activated_at": k.activated_at.isoformat() if k.activated_at else None,
             "created_at": k.created_at.isoformat() if k.created_at else None,
         })
@@ -734,22 +811,48 @@ async def list_license_keys(
 ):
     result = await db.execute(select(LicenseKey).order_by(desc(LicenseKey.created_at)))
     keys = result.scalars().all()
-    
-    return {
-        "keys": [
-            {
-                "id": k.id,
-                "license_key": k.license_key,
-                "plan_type": k.plan_type.value,
-                "status": k.status.value,
-                "activated_by": k.activated_by,
-                "activated_by_username": (await db.scalar(select(User.username).where(User.id == k.activated_by))) if k.activated_by else None,
-                "activated_at": k.activated_at.isoformat() if k.activated_at else None,
-                "created_at": k.created_at.isoformat() if k.created_at else None,
-            }
-            for k in keys
-        ]
+
+    lk_user_ids = list(set(k.activated_by for k in keys if k.activated_by))
+    lk_users_map = {}
+    if lk_user_ids:
+        lku_result = await db.execute(select(User).where(User.id.in_(lk_user_ids)))
+        for lku in lku_result.scalars().all():
+            lk_users_map[lku.id] = {"username": lku.username, "email": lku.email}
+
+    plan_validity_days = {
+        "trial_15d": 15,
+        "monthly": 30,
+        "quarterly": 90,
+        "yearly": 365,
+        "lifetime": None,
     }
+
+    now = datetime.now(timezone.utc)
+    response_keys = []
+    for k in keys:
+        is_expired = False
+        if k.status == LicenseKeyStatus.UNUSED and k.plan_type.value in plan_validity_days:
+            validity = plan_validity_days[k.plan_type.value]
+            if validity is not None and k.created_at:
+                created = k.created_at.replace(tzinfo=timezone.utc) if k.created_at.tzinfo is None else k.created_at
+                is_expired = (now - created).days >= validity
+
+        lk_user_info = lk_users_map.get(k.activated_by, {}) if k.activated_by else {}
+        response_keys.append({
+            "id": k.id,
+            "license_key": k.license_key,
+            "plan_type": k.plan_type.value,
+            "status": k.status.value,
+            "is_expired": is_expired,
+            "activated_by": k.activated_by,
+            "activated_by_username": lk_user_info.get("username"),
+            "activated_by_email": lk_user_info.get("email"),
+            "activated_at": k.activated_at.isoformat() if k.activated_at else None,
+            "expiry_date": k.expiry_date.isoformat() if k.expiry_date else None,
+            "created_at": k.created_at.isoformat() if k.created_at else None,
+        })
+
+    return {"keys": response_keys}
 
 
 @router.post("/license_keys/{license_key}/revoke")
@@ -774,6 +877,28 @@ async def revoke_license_key(
     return {"success": True}
 
 
+@router.delete("/license_keys/{license_key}")
+async def delete_license_key(
+    license_key: str,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(LicenseKey).where(LicenseKey.license_key == license_key))
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="许可证密钥不存在")
+
+    if key.status == LicenseKeyStatus.ACTIVATED and key.activated_by is not None:
+        raise HTTPException(status_code=400, detail="已激活的密钥不能删除，请先撤销")
+
+    await db.delete(key)
+    await db.flush()
+    await _log_audit(db, user, "delete_license_key", f"license_key={license_key}, plan_type={key.plan_type.value}, status={key.status.value}", request)
+    await db.commit()
+    return {"success": True}
+
+
 @router.get("/user_licenses")
 async def list_user_licenses(
     user: User = Depends(require_admin),
@@ -781,17 +906,28 @@ async def list_user_licenses(
 ):
     result = await db.execute(select(License).order_by(desc(License.created_at)))
     licenses = result.scalars().all()
-    
+
+    ul_user_ids = list(set(l.user_id for l in licenses if l.user_id))
+    ul_users_map = {}
+    if ul_user_ids:
+        ulu_result = await db.execute(select(User).where(User.id.in_(ul_user_ids)))
+        for ulu in ulu_result.scalars().all():
+            ul_users_map[ulu.id] = {"username": ulu.username, "email": ulu.email}
+
     return {
         "licenses": [
             {
                 "id": l.id,
                 "user_id": l.user_id,
-                "username": (await db.scalar(select(User.username).where(User.id == l.user_id))) if l.user_id else None,
+                "username": ul_users_map.get(l.user_id, {}).get("username"),
+                "email": ul_users_map.get(l.user_id, {}).get("email"),
                 "license_type": l.license_type.value,
                 "license_key": l.license_key,
                 "is_valid": l.is_valid,
                 "expiry_date": l.expiry_date.isoformat() if l.expiry_date else None,
+                "machine_fingerprint": l.machine_fingerprint,
+                "last_heartbeat": l.last_heartbeat.isoformat() if l.last_heartbeat else None,
+                "heartbeat_fingerprint": l.heartbeat_fingerprint,
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
             for l in licenses

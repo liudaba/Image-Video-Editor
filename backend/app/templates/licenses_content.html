@@ -30,6 +30,9 @@
                                 <th>套餐类型</th>
                                 <th>状态</th>
                                 <th>激活用户</th>
+                                <th>激活用户邮箱</th>
+                                <th>激活时间</th>
+                                <th>到期时间</th>
                                 <th>创建时间</th>
                                 <th>操作</th>
                             </tr>
@@ -55,9 +58,13 @@
                             <tr>
                                 <th>用户ID</th>
                                 <th>用户名</th>
+                                <th>邮箱</th>
                                 <th>许可证类型</th>
+                                <th>激活密钥</th>
                                 <th>状态</th>
                                 <th>到期时间</th>
+                                <th>机器指纹</th>
+                                <th>最后心跳</th>
                                 <th>创建时间</th>
                             </tr>
                         </thead>
@@ -73,12 +80,11 @@
 
 <script>
     async function loadLicensesContent() {
-        await loadLicenseKeys();
-        await loadUserLicenses();
-        
         document.getElementById('generate-keys-btn').addEventListener('click', () => {
             showGenerateKeysModal();
         });
+        await loadLicenseKeys();
+        await loadUserLicenses();
     }
 
     async function loadLicenseKeys() {
@@ -94,18 +100,27 @@
                     <td>${key.plan_type === 'monthly' ? '月付' : key.plan_type === 'quarterly' ? '季付' : key.plan_type === 'yearly' ? '年付' : key.plan_type === 'lifetime' ? '终身' : key.plan_type === 'trial_15d' ? '试用15天' : key.plan_type}</td>
                     <td>
                         <span class="badge ${
+                            key.is_expired ? 'bg-warning text-dark' :
                             key.status === 'unused' ? 'bg-secondary' : 
                             key.status === 'activated' ? 'bg-success' : 'bg-danger'
-                        }">${key.status === 'unused' ? '未使用' : key.status === 'activated' ? '已激活' : '已撤销'}</span>
+                        }">${key.is_expired ? '已过期' : key.status === 'unused' ? '未使用' : key.status === 'activated' ? '已激活' : '已撤销'}</span>
                     </td>
                     <td>${escapeHtml(key.activated_by_username) || '-'}</td>
+                    <td>${escapeHtml(key.activated_by_email) || '-'}</td>
+                    <td>${key.activated_at ? formatDate(key.activated_at) : '-'}</td>
+                    <td>${key.expiry_date ? formatDate(key.expiry_date) : (key.plan_type === 'lifetime' ? '永久' : '-')}</td>
                     <td>${formatDate(key.created_at)}</td>
                     <td>
                         ${key.status === 'unused' ? `
                             <button class="btn btn-sm btn-danger" onclick="revokeKey('${escapeHtml(key.license_key)}')">
                                 <i class="fas fa-ban"></i> 撤销
                             </button>
-                        ` : '-'}
+                        ` : ''}
+                        ${key.status !== 'activated' || !key.activated_by ? `
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteKey('${escapeHtml(key.license_key)}')">
+                                <i class="fas fa-trash"></i> 删除
+                            </button>
+                        ` : ''}
                     </td>
                 `;
                 keysList.appendChild(row);
@@ -127,9 +142,13 @@
                 row.innerHTML = `
                     <td>${license.user_id}</td>
                     <td>${escapeHtml(license.username)}</td>
+                    <td>${escapeHtml(license.email) || '-'}</td>
                     <td><span class="badge ${license.license_type === 'pro' ? 'bg-primary' : 'bg-info'}">${license.license_type === 'pro' ? '专业版' : '试用版'}</span></td>
+                    <td>${license.license_key ? `<code>${escapeHtml(license.license_key)}</code>` : '-'}</td>
                     <td><span class="badge ${license.is_valid ? 'bg-success' : 'bg-danger'}">${license.is_valid ? '有效' : '无效'}</span></td>
                     <td>${license.expiry_date ? formatDate(license.expiry_date) : '永久'}</td>
+                    <td>${license.machine_fingerprint ? `<small title="${escapeHtml(license.machine_fingerprint)}">${escapeHtml(license.machine_fingerprint.substring(0, 16))}...</small>` : '-'}</td>
+                    <td>${license.last_heartbeat ? formatDate(license.last_heartbeat) : '-'}</td>
                     <td>${formatDate(license.created_at)}</td>
                 `;
                 licensesList.appendChild(row);
@@ -220,6 +239,21 @@
         } catch (error) {
             console.error('撤销密钥失败:', error);
             showError(`撤销密钥失败: ${error.message}`);
+        }
+    }
+
+    async function deleteKey(key) {
+        if (!confirm(`确定要删除密钥 ${key} 吗？此操作不可恢复！`)) return;
+        
+        try {
+            await apiRequest(`/api/admin/license_keys/${key}`, {
+                method: 'DELETE'
+            });
+            showSuccess('删除成功');
+            loadLicenseKeys();
+        } catch (error) {
+            console.error('删除密钥失败:', error);
+            showError(`删除密钥失败: ${error.message}`);
         }
     }
 </script>
