@@ -169,6 +169,7 @@ async def list_users(
             "is_admin": u.is_admin,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "license_type": lic.license_type.value if lic else None,
+            "plan_type": lic.plan_type.value if lic and lic.plan_type else None,
             "license_is_valid": lic.is_valid if lic else None,
             "last_heartbeat": lic.last_heartbeat.isoformat() if lic and lic.last_heartbeat else None,
             "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
@@ -202,23 +203,25 @@ async def get_user(
     lic_result = await db.execute(select(License).where(License.user_id == user_id))
     lic = lic_result.scalar_one_or_none()
 
-    current_plan = "trial_15d"
-    if lic:
-        if lic.license_type == LicenseType.PRO:
-            if lic.expiry_date is None:
-                current_plan = "lifetime"
-            elif lic.expiry_date:
-                from datetime import timedelta
-                cur = lic.expiry_date
-                if cur.tzinfo is None:
-                    cur = cur.replace(tzinfo=timezone.utc)
-                remaining = (cur - datetime.now(timezone.utc)).days
-                if remaining <= 30:
-                    current_plan = "monthly"
-                elif remaining <= 90:
-                    current_plan = "quarterly"
-                else:
-                    current_plan = "yearly"
+    current_plan = lic.plan_type.value if lic and lic.plan_type else None
+    if not current_plan:
+        current_plan = "trial_15d"
+        if lic:
+            if lic.license_type == LicenseType.PRO:
+                if lic.expiry_date is None:
+                    current_plan = "lifetime"
+                elif lic.expiry_date:
+                    from datetime import timedelta
+                    cur = lic.expiry_date
+                    if cur.tzinfo is None:
+                        cur = cur.replace(tzinfo=timezone.utc)
+                    remaining = (cur - datetime.now(timezone.utc)).days
+                    if remaining <= 30:
+                        current_plan = "monthly"
+                    elif remaining <= 90:
+                        current_plan = "quarterly"
+                    else:
+                        current_plan = "yearly"
 
     return {
         "id": target_user.id,
@@ -228,6 +231,7 @@ async def get_user(
         "is_admin": target_user.is_admin,
         "created_at": target_user.created_at.isoformat() if target_user.created_at else None,
         "license_type": lic.license_type.value if lic else None,
+        "plan_type": lic.plan_type.value if lic and lic.plan_type else None,
         "license_is_valid": lic.is_valid if lic else None,
         "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
         "current_plan": current_plan,
@@ -305,12 +309,14 @@ async def update_user(
             user_license = License(
                 user_id=user_id,
                 license_type=lic_type,
+                plan_type=PlanType(body.plan_type),
                 is_valid=True,
                 expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
             )
             db.add(user_license)
         else:
             user_license.license_type = lic_type
+            user_license.plan_type = PlanType(body.plan_type)
             user_license.is_valid = True
             if delta is None:
                 user_license.expiry_date = None
@@ -790,6 +796,7 @@ async def create_user(
             new_license = License(
                 user_id=new_user.id,
                 license_type=lic_type,
+                plan_type=PlanType(body.plan_type),
                 is_valid=True,
                 expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
             )
@@ -922,6 +929,7 @@ async def list_user_licenses(
                 "username": ul_users_map.get(l.user_id, {}).get("username"),
                 "email": ul_users_map.get(l.user_id, {}).get("email"),
                 "license_type": l.license_type.value,
+                "plan_type": l.plan_type.value if l.plan_type else None,
                 "license_key": l.license_key,
                 "is_valid": l.is_valid,
                 "expiry_date": l.expiry_date.isoformat() if l.expiry_date else None,

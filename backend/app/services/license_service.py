@@ -1,4 +1,4 @@
-﻿import secrets
+import secrets
 import string
 import hashlib
 import hmac as _hmac
@@ -138,6 +138,7 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
     license_obj = License(
         user_id=user_id,
         license_type="trial",
+        plan_type=PlanType.TRIAL_15D,
         is_valid=True,
         trial_start=trial_start,
         trial_end=trial_end,
@@ -199,6 +200,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     existing_license = existing_result.scalar_one_or_none()
 
     if existing_license:
+        existing_license.plan_type = license_key_obj.plan_type
         if license_key_obj.plan_type == PlanType.LIFETIME:
             existing_license.license_type = "pro"
             existing_license.license_key = license_key
@@ -253,6 +255,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         license_obj = License(
             user_id=user_id,
             license_type=license_type,
+            plan_type=license_key_obj.plan_type,
             license_key=license_key,
             is_valid=True,
             expiry_date=expiry_date,

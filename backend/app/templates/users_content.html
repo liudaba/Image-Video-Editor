@@ -47,7 +47,7 @@
                         <th>ID</th>
                         <th>用户名</th>
                         <th>邮箱</th>
-                        <th>许可证</th>
+                        <th>套餐</th>
                         <th>机器指纹</th>
                         <th>绑定设备</th>
                         <th>激活密钥</th>
@@ -126,8 +126,8 @@
             response.users.forEach(user => {
                 const row = document.createElement('tr');
                 if (!user.is_active) row.classList.add('table-secondary');
-                const licTypeMap = {'trial': '试用', 'pro': '专业版'};
-                const licType = user.license_type ? (licTypeMap[user.license_type] || user.license_type) : '-';
+                const planTypeMap = {'trial_15d': '试用15天', 'monthly': '月付', 'quarterly': '季付', 'yearly': '年付', 'lifetime': '终身'};
+                const planLabel = user.plan_type ? (planTypeMap[user.plan_type] || user.plan_type) : (user.license_type === 'pro' ? '年付' : '试用');
                 const licValid = user.license_is_valid;
                 const lastHb = user.last_heartbeat ? formatDate(user.last_heartbeat) : '-';
                 const expiryStr = user.expiry_date ? formatDate(user.expiry_date) : (user.license_type === 'pro' ? '永久' : '-');
@@ -146,7 +146,7 @@
                     <td>${escapeHtml(user.username)}</td>
                     <td>${escapeHtml(user.email)}</td>
                     <td>
-                        <span class="badge ${licValid ? 'bg-info' : 'bg-secondary'}">${licType}</span>
+                        <span class="badge ${licValid ? 'bg-info' : 'bg-secondary'}">${planLabel}</span>
                         <br><small class="text-muted">${expiryStr}</small>
                     </td>
                     <td>${machineFp}</td>

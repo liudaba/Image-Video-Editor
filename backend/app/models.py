@@ -65,6 +65,7 @@ class License(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     license_type = Column(Enum(LicenseType), default=LicenseType.TRIAL, nullable=False)
+    plan_type = Column(Enum(PlanType), nullable=True)
     license_key = Column(String(100), unique=True, nullable=True, index=True)
     is_valid = Column(Boolean, default=True, nullable=False)
     trial_start = Column(DateTime(timezone=True), nullable=True)
