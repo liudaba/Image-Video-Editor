@@ -927,6 +927,15 @@ class ShotsMixin:
         core_theme = orig_shot.get('core_theme', '')
         visual_tone = orig_shot.get('visual_tone', '')
 
+        model_type = "sd15"
+        if hasattr(self, 'model_var'):
+            mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            try:
+                from video_generator.model_profiles import detect_model_type
+                model_type = detect_model_type(mn)
+            except Exception:
+                pass
+
         angle = self._CAMERA_ANGLES[part_index % len(self._CAMERA_ANGLES)]
         lighting = self._LIGHTING_STYLES[(part_index + 1) % len(self._LIGHTING_STYLES)]
         composition = self._COMPOSITION_TYPES[(part_index + 2) % len(self._COMPOSITION_TYPES)]
@@ -937,6 +946,19 @@ class ShotsMixin:
 
         orig_desc = orig_shot.get('description', '')
         is_desc_different = description != orig_desc and description.strip()
+
+        if model_type == 'flux':
+            desc_en = self._extract_visual_keywords_from_description(description) if is_desc_different else ''
+            tone_str = translated_tone if translated_tone else ''
+            result_parts = [f"A {angle.lower()} scene"]
+            if desc_en:
+                result_parts.append(desc_en.replace(',', ' and'))
+            if tone_str:
+                result_parts.append(tone_str)
+            result_parts.append(f"{lighting.lower()} lighting")
+            result = '. '.join(p.strip() for p in result_parts if p.strip())
+            result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+            return result if result else orig_prompt
 
         existing_lower = set(k.strip().lower() for k in orig_prompt.split(',') if len(k.strip()) > 2)
         camera_lower = {'wide', 'medium', 'close-up', 'close up', 'shot', 'angle', 'view',
@@ -1025,7 +1047,29 @@ class ShotsMixin:
         if translated_tone and re.search(r'[\u4e00-\u9fff]', translated_tone):
             translated_tone = ''
 
+        model_type = "sd15"
+        if hasattr(self, 'model_var'):
+            mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            try:
+                from video_generator.model_profiles import detect_model_type
+                model_type = detect_model_type(mn)
+            except Exception:
+                pass
+
         desc_keywords = self._extract_visual_keywords_from_description(merged_description)
+
+        if model_type == 'flux':
+            result_parts = []
+            if desc_keywords:
+                result_parts.append(desc_keywords.replace(',', ' and'))
+            if keeper_prompt:
+                cleaned_keeper = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), keeper_prompt)
+                result_parts.append(cleaned_keeper.replace(',', ' and'))
+            if translated_tone:
+                result_parts.append(translated_tone)
+            result = '. '.join(p.strip() for p in result_parts if p.strip())
+            result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+            return result if result else keeper_prompt
 
         parts = []
         if desc_keywords:
@@ -3090,10 +3134,16 @@ class ShotsMixin:
         result = self._validate_sd_syntax(result)
         return result
 
-    def _validate_sd_syntax(self, prompt):
+    def _validate_sd_syntax(self, prompt, model_type=None):
         """SD语法后处理验证：修复常见语法问题"""
         if not prompt:
             return prompt
+        if model_type is None:
+            model_type = "sd15"
+            if hasattr(self, 'model_var'):
+                mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                from video_generator.model_profiles import detect_model_type
+                model_type = detect_model_type(mn)
 
         text = prompt
 
@@ -3112,6 +3162,10 @@ class ShotsMixin:
         text = re.sub(r'\s{2,}', ' ', text)
 
         text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
+
+        if model_type == 'flux':
+            text = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), text)
+            return text.strip(', ')
 
         _generic_words = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
         keywords = [k.strip() for k in text.split(',')]
@@ -3244,13 +3298,10 @@ class ShotsMixin:
         
         template_params["context_hint"] = context_hint
         
-        if prompt_type == "ARV写实提示词":
-            template_key = "shot_prompt_sd"
-        else:
-            sd_model_name = ""
-            if hasattr(self, 'model_var'):
-                sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
-            template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
+        sd_model_name = ""
+        if hasattr(self, 'model_var'):
+            sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+        template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
         
         template = PromptTemplates.get_template(template_key, **template_params)
         
