@@ -952,12 +952,17 @@ class ShotsMixin:
             tone_str = translated_tone if translated_tone else ''
             result_parts = [f"A {angle.lower()} scene"]
             if desc_en:
-                result_parts.append(desc_en.replace(',', ' and'))
+                desc_words = [w.strip() for w in desc_en.replace(',', ' and').split(' and') if w.strip()]
+                if desc_words:
+                    result_parts.append(f"showing {' and '.join(desc_words[:5])}")
             if tone_str:
-                result_parts.append(tone_str)
+                result_parts.append(f"with a {tone_str.lower()} atmosphere")
             result_parts.append(f"{lighting.lower()} lighting")
             result = '. '.join(p.strip() for p in result_parts if p.strip())
             result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+            result = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), result)
+            result = re.sub(r'\[([^]]*):[\d.]+\]', r'\1', result)
+            result = re.sub(r'\(\(([^)]+)\)\)', r'\1', result)
             return result if result else orig_prompt
 
         existing_lower = set(k.strip().lower() for k in orig_prompt.split(',') if len(k.strip()) > 2)
@@ -1061,12 +1066,18 @@ class ShotsMixin:
         if model_type == 'flux':
             result_parts = []
             if desc_keywords:
-                result_parts.append(desc_keywords.replace(',', ' and'))
+                desc_words = [w.strip() for w in desc_keywords.replace(',', ' and').split(' and') if w.strip()]
+                if desc_words:
+                    result_parts.append(f"A scene showing {' and '.join(desc_words[:5])}")
             if keeper_prompt:
                 cleaned_keeper = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), keeper_prompt)
-                result_parts.append(cleaned_keeper.replace(',', ' and'))
+                cleaned_keeper = re.sub(r'\[([^]]*):[\d.]+\]', r'\1', cleaned_keeper)
+                cleaned_keeper = re.sub(r'\(\(([^)]+)\)\)', r'\1', cleaned_keeper)
+                keeper_words = [w.strip() for w in cleaned_keeper.replace(',', ' and').split(' and') if w.strip()]
+                if keeper_words:
+                    result_parts.append(f"featuring {' and '.join(keeper_words[:6])}")
             if translated_tone:
-                result_parts.append(translated_tone)
+                result_parts.append(f"with a {translated_tone.lower()} atmosphere")
             result = '. '.join(p.strip() for p in result_parts if p.strip())
             result = re.sub(r'[\u4e00-\u9fff]+', '', result)
             return result if result else keeper_prompt
@@ -2429,14 +2440,16 @@ class ShotsMixin:
         visual_tone = description_parts.get('custom_visual_tone', '')
         theme_elements = description_parts.get('theme_elements', [])
         content_type = description_parts.get('content_type', content_type)
-        
+        visual_style = description_parts.get('visual_style', '')
+
         try:
             return self._generate_prompt_with_llm(
                 dubbing, content_type,
                 prompt_type="ARV写实提示词",
                 core_theme=core_theme,
                 visual_tone=visual_tone,
-                theme_elements=theme_elements
+                theme_elements=theme_elements,
+                visual_style=visual_style
             )
         except Exception as e:
             self._log_exception("⚠️ ARV格式生成失败", e)
@@ -2454,7 +2467,15 @@ class ShotsMixin:
         
         if not hasattr(self, 'ollama_model_var') or not self.ollama_model_var.get():
             if ARV_PROMPTS_AVAILABLE:
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone)
+                _mt = "sd15"
+                if hasattr(self, 'model_var'):
+                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                    try:
+                        from video_generator.model_profiles import detect_model_type
+                        _mt = detect_model_type(_mn)
+                    except Exception:
+                        pass
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type)
         
         return self._generate_prompt_with_llm(
@@ -3202,10 +3223,14 @@ class ShotsMixin:
 
         if model_type == 'flux':
             text = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), text)
+            text = re.sub(r'\[([^]]*):[\d.]+\]', r'\1', text)
+            text = re.sub(r'\(\(([^)]+)\)\)', r'\1', text)
             _flux_generic = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
             flux_kws = [k.strip() for k in text.split(',')]
             flux_kws = [k for k in flux_kws if k.lower().strip() not in _flux_generic]
             text = ', '.join(flux_kws)
+            if text and not re.match(r'^[A-Z]', text):
+                text = text[0].upper() + text[1:] if text else text
             return text.strip(', ')
 
         _generic_words = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
@@ -3245,7 +3270,15 @@ class ShotsMixin:
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                 return self._generate_arv_format_prompt(fallback_parts, content_type, 0)
             elif prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone)
+                _mt = "sd15"
+                if hasattr(self, 'model_var'):
+                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                    try:
+                        from video_generator.model_profiles import detect_model_type
+                        _mt = detect_model_type(_mn)
+                    except Exception:
+                        pass
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
             else:
                 return self._analyze_and_generate_sd_prompt(dubbing, content_type)
             
@@ -3346,6 +3379,17 @@ class ShotsMixin:
         
         template = PromptTemplates.get_template(template_key, **template_params)
         
+        if prompt_type == "ARV写实提示词":
+            arv_instruction = (
+                "\n\n【ARV REALISTIC STYLE OVERRIDE】"
+                "\nThis prompt MUST produce a photorealistic, documentary-style image."
+                "\n- ALWAYS include: RAW photo, photorealistic, DSLR quality"
+                "\n- ALWAYS use: documentary photography, film grain, natural lighting"
+                "\n- NEVER produce: cartoon, anime, painting, illustration, 3D render"
+                "\n- Emphasize: real textures, authentic atmosphere, unposed candid moments"
+            )
+            template["system"] += arv_instruction
+        
         try:
             llm_config = getattr(self, 'current_llm_config', None)
             result_text, _ = call_ollama_single(
@@ -3377,8 +3421,16 @@ class ShotsMixin:
             self._log_exception(f"⚠️ 大模型调用失败，回退到内置逻辑生成基础提示词", e)
             self.log(f"   💡 提示: 回退生成的提示词质量较低，建议检查Ollama服务状态")
             if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
+                _mt = "sd15"
+                if hasattr(self, 'model_var'):
+                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                    try:
+                        from video_generator.model_profiles import detect_model_type
+                        _mt = detect_model_type(_mn)
+                    except Exception:
+                        pass
                 return ARVPromptTemplates.generate_prompt(dubbing, content_type,
-                    core_theme=core_theme, visual_tone=visual_tone)
+                    core_theme=core_theme, visual_tone=visual_tone, model_type=_mt)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
                 custom_theme=core_theme, custom_visual_tone=visual_tone)
 
@@ -3731,7 +3783,26 @@ class ShotsMixin:
         """分析文本语义并生成SD提示词 - 精简版回退方案（Ollama不可用时使用）
 
         改进：基于文本内容生成具有叙事意义的场景描述，而非简单的关键词匹配
+        根据模型类型输出不同格式：Flux/SD3用自然语言，SD15/SDXL用关键词
         """
+        model_type = "sd15"
+        if hasattr(self, 'model_var'):
+            mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            try:
+                from video_generator.model_profiles import detect_model_type
+                model_type = detect_model_type(mn)
+            except Exception:
+                pass
+
+        user_selected_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
+        is_non_realistic = False
+        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
+                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
+                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        if user_selected_styles:
+            style_text_lower = " ".join(user_selected_styles).lower()
+            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+
         keywords = []
         
         if custom_theme:
@@ -3844,7 +3915,28 @@ class ShotsMixin:
         if len(unique_parts) <= 1:
             unique_parts = ['realistic scene', 'detailed environment']
 
-        quality_tags = 'ultra detailed, hyper realistic, photorealistic, cinematic lighting, professional photography'
+        if model_type in ('flux', 'sd3'):
+            sentence_parts = []
+            if camera_keywords:
+                cam = camera_keywords[0] if camera_keywords else ''
+                sentence_parts.append(f"A {cam}" if cam else 'A scene')
+            if scene_keywords:
+                sentence_parts.append(f"depicting {scene_keywords[0]}")
+            desc_phrase = ', '.join(unique_parts[len(camera_keywords):len(camera_keywords)+len(scene_keywords)+3])
+            if desc_phrase:
+                sentence_parts.append(f"featuring {desc_phrase}")
+            if not is_non_realistic:
+                sentence_parts.append("cinematic lighting, high quality")
+            result = '. '.join(p for p in sentence_parts if p)
+            result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+            return result if result else 'A cinematic scene with dramatic lighting'
+
+        if is_non_realistic:
+            quality_tags = 'highly detailed, vibrant colors, artistic style'
+        elif model_type == 'sdxl':
+            quality_tags = 'ultra detailed, photorealistic, cinematic lighting, high quality'
+        else:
+            quality_tags = 'ultra detailed, hyper realistic, photorealistic, cinematic lighting, professional photography'
         return f"{', '.join(unique_parts)}, {quality_tags}"
 
 
@@ -5582,7 +5674,15 @@ class ShotsMixin:
                             if user_prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
                                 pregenerated_prompts[idx] = self._generate_arv_format_prompt(fallback_parts, theme_info.get('content_type', ''), 0)
                             elif user_prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
-                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''))
+                                _mt = "sd15"
+                                if hasattr(self, 'model_var'):
+                                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                                    try:
+                                        from video_generator.model_profiles import detect_model_type
+                                        _mt = detect_model_type(_mn)
+                                    except Exception:
+                                        pass
+                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''), model_type=_mt)
                             else:
                                 pregenerated_prompts[idx] = self._analyze_and_generate_sd_prompt(dubbing, theme_info.get('content_type', ''))
                             if pregenerated_prompts[idx]:

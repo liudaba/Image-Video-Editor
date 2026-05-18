@@ -448,15 +448,23 @@ Output: 中文语义骨架 || English understanding || SD prompt"""
         if not sd_model_name:
             return "shot_prompt_sd"
 
-        model_lower = sd_model_name.lower()
-
-        if any(kw in model_lower for kw in ['sdxl', 'xl']):
-            return "shot_prompt_sdxl"
-        elif any(kw in model_lower for kw in ['flux', 'flx']):
-            return "shot_prompt_flux"
-        elif any(kw in model_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3']):
-            return "shot_prompt_sd3"
-        else:
+        try:
+            from video_generator.model_profiles import detect_model_type, MODEL_TYPE_SDXL, MODEL_TYPE_FLUX, MODEL_TYPE_SD3
+            model_type = detect_model_type(sd_model_name)
+            type_to_template = {
+                MODEL_TYPE_SDXL: "shot_prompt_sdxl",
+                MODEL_TYPE_FLUX: "shot_prompt_flux",
+                MODEL_TYPE_SD3: "shot_prompt_sd3",
+            }
+            return type_to_template.get(model_type, "shot_prompt_sd")
+        except Exception:
+            model_lower = sd_model_name.lower()
+            if any(kw in model_lower for kw in ['sdxl', 'xl']):
+                return "shot_prompt_sdxl"
+            elif any(kw in model_lower for kw in ['flux', 'flx']):
+                return "shot_prompt_flux"
+            elif any(kw in model_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3']):
+                return "shot_prompt_sd3"
             return "shot_prompt_sd"
 
     @classmethod

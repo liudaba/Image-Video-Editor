@@ -161,10 +161,27 @@ def detect_model_type(model_name):
     sdxl_model_hints = [
         'juggernaut', 'dreamshaper', 'realvis', 'dynavision',
         'xlcast', 'xlmore', 'pony', 'animagine',
+        'playground', 'turbo', 'kandinsky', 'sdxl',
+        'zavychroma', 'albedobase', 'jibmix',
+        'protovision', 'cyberrealistic', 'epicrealism',
     ]
     for hint in sdxl_model_hints:
         if hint in name_lower:
             return MODEL_TYPE_SDXL
+
+    flux_model_hints = [
+        'schnell', 'flx', 'fluxfill',
+    ]
+    for hint in flux_model_hints:
+        if hint in name_lower:
+            return MODEL_TYPE_FLUX
+
+    sd3_model_hints = [
+        'sd3.5', 'stable diffusion 3.5',
+    ]
+    for hint in sd3_model_hints:
+        if hint in name_lower:
+            return MODEL_TYPE_SD3
 
     return MODEL_TYPE_SD15
 

@@ -34,12 +34,30 @@ class ARVPromptTemplates:
 
     @classmethod
     def generate_prompt(cls, dubbing_text: str, content_type: str = "general",
-                        core_theme: str = "", visual_tone: str = "") -> str:
+                        core_theme: str = "", visual_tone: str = "",
+                        model_type: str = "sd15") -> str:
         style = cls._select_style(content_type)
         composition = cls._select_composition(content_type)
         lighting = cls._select_lighting(visual_tone)
-        
-        parts = [cls.QUALITY_PREFIX]
+
+        if model_type in ('flux', 'sd3'):
+            parts = []
+            parts.append(cls.STYLE_TAGS.get(style, ""))
+            parts.append(cls.COMPOSITION_TAGS.get(composition, ""))
+            parts.append(cls.LIGHTING_TAGS.get(lighting, ""))
+            if core_theme:
+                parts.append(core_theme)
+            sentence = '. '.join(p.strip() for p in parts if p.strip())
+            if sentence and not sentence[0].isupper():
+                sentence = sentence[0].upper() + sentence[1:]
+            return sentence if sentence else "A cinematic scene"
+
+        if model_type == 'sdxl':
+            quality_prefix = "RAW photo, photorealistic, ultra detailed, 8k"
+        else:
+            quality_prefix = cls.QUALITY_PREFIX
+
+        parts = [quality_prefix]
         parts.append(cls.STYLE_TAGS.get(style, ""))
         parts.append(cls.COMPOSITION_TAGS.get(composition, ""))
         parts.append(cls.LIGHTING_TAGS.get(lighting, ""))
@@ -77,18 +95,3 @@ class ARVPromptTemplates:
 
 def quick_generate_arv_prompt(dubbing_text: str, content_type: str = "general") -> str:
     return ARVPromptTemplates.generate_prompt(dubbing_text, content_type)
-
-
-ARV_OPTIMIZATION_PROMPT = """You are a prompt engineer for absoluteRealisticVision v20 SD model.
-
-STRICT OUTPUT RULES:
-1. Output ONLY English keywords, comma-separated
-2. Start with: (masterpiece, best quality:1.2), RAW photo, (photorealistic:1.3)
-3. Use weight syntax for key subjects: (subject:1.3) for primary, (subject:1.2) for secondary
-4. End with: cinematic lighting, documentary style, (film grain:1.1)
-5. Include: subject, environment, lighting, composition, atmosphere
-6. Total length: 30-60 keywords
-7. NO explanations, NO quotes, NO newlines
-8. MUST accurately reflect the specific content of the Chinese text - each shot must be unique
-
-Convert this Chinese text to ARV SD prompt:"""
