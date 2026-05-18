@@ -41,13 +41,29 @@ class ARVPromptTemplates:
         lighting = cls._select_lighting(visual_tone)
 
         if model_type in ('flux', 'sd3'):
+            import re as _re
+            def _strip_weights(text):
+                text = _re.sub(r'\(([^)]+):[\d.]+\)', r'\1', text)
+                text = _re.sub(r'\[([^]]+):[\d.]+\]', r'\1', text)
+                text = _re.sub(r'\(\(([^)]+)\)\)', r'\1', text)
+                return text
             parts = []
-            parts.append(cls.STYLE_TAGS.get(style, ""))
-            parts.append(cls.COMPOSITION_TAGS.get(composition, ""))
-            parts.append(cls.LIGHTING_TAGS.get(lighting, ""))
+            style_tag = _strip_weights(cls.STYLE_TAGS.get(style, ""))
+            comp_tag = _strip_weights(cls.COMPOSITION_TAGS.get(composition, ""))
+            light_tag = _strip_weights(cls.LIGHTING_TAGS.get(lighting, ""))
+            if style_tag:
+                parts.append(style_tag)
+            if comp_tag:
+                parts.append(comp_tag)
+            if light_tag:
+                parts.append(light_tag)
             if core_theme:
                 parts.append(core_theme)
-            sentence = '. '.join(p.strip() for p in parts if p.strip())
+            if model_type == 'flux':
+                sentence = 'A scene with ' + ', and '.join(p.strip() for p in parts if p.strip())
+                sentence = sentence.rstrip(', and ')
+            else:
+                sentence = '. '.join(p.strip().capitalize() for p in parts if p.strip())
             if sentence and not sentence[0].isupper():
                 sentence = sentence[0].upper() + sentence[1:]
             return sentence if sentence else "A cinematic scene"

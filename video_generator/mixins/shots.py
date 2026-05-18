@@ -3920,6 +3920,8 @@ class ShotsMixin:
             if camera_keywords:
                 cam = camera_keywords[0] if camera_keywords else ''
                 sentence_parts.append(f"A {cam}" if cam else 'A scene')
+            else:
+                sentence_parts.append('A scene')
             if scene_keywords:
                 sentence_parts.append(f"depicting {scene_keywords[0]}")
             desc_phrase = ', '.join(unique_parts[len(camera_keywords):len(camera_keywords)+len(scene_keywords)+3])
@@ -3929,6 +3931,8 @@ class ShotsMixin:
                 sentence_parts.append("cinematic lighting, high quality")
             result = '. '.join(p for p in sentence_parts if p)
             result = re.sub(r'[\u4e00-\u9fff]+', '', result)
+            if result and not result[0].isupper():
+                result = result[0].upper() + result[1:]
             return result if result else 'A cinematic scene with dramatic lighting'
 
         if is_non_realistic:
