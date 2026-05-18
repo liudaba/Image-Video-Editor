@@ -389,6 +389,12 @@ _TRANSLATION_MAPPING = {
     '难民': 'refugee', '流亡': 'exile',
     '审判': 'trial', '司法': 'judiciary',
     '严肃': 'serious, solemn', '紧张': 'tense, intense', '危急': 'critical, urgent', '贪婪': 'greedy, avaricious', '压抑': 'oppressive, stifling', '绝望': 'desperate, hopeless', '阴沉': 'gloomy, sinister', '动荡': 'turbulent, volatile', '悲凉': 'desolate, sorrowful', '算计': 'calculating, scheming', '沉闷': 'dull, stifling', '思辨': 'contemplative, thoughtful', '激昂': 'passionate, stirring',
+    '紧张, 危急': 'critical, urgent', '紧张, 贪婪': 'greedy, intense', '紧张, 压抑': 'oppressive, stifling', '紧张, 绝望': 'desperate, hopeless', '紧张, 阴沉': 'gloomy, sinister', '紧张, 动荡': 'turbulent, volatile', '紧张, 悲凉': 'desolate, sorrowful', '紧张, 算计': 'calculating, scheming', '紧张, 沉闷': 'dull, stifling', '紧张, 思辨': 'contemplative, thoughtful',
+    '严肃, 冷峻': 'stern, austere', '严肃, 庄重': 'solemn, dignified', '严肃, 审慎': 'prudent, measured', '严肃, 沉思': 'pensive, reflective', '严肃, 凛然': 'grave, formidable',
+    '悲壮, 崇高': 'tragic, heroic', '悲壮, 无助': 'helpless, devastated', '悲壮, 凄凉': 'bleak, desolate', '悲壮, 壮烈': 'heroic, valiant',
+    '激昂, 自豪': 'proud, triumphant', '激昂, 热血': 'fervent, passionate', '激昂, 振奋': 'inspiring, uplifting', '激昂, 雄壮': 'majestic, grand',
+    '温馨, 柔和': 'warm, tender', '温馨, 感动': 'touching, heartfelt', '温馨, 喜悦': 'joyful, blissful', '温馨, 宁静': 'serene, peaceful',
+    '沉重, 悲痛': 'grief-stricken, mournful', '沉重, 压抑': 'heavy, oppressive', '沉重, 无奈': 'helpless, resigned', '沉重, 愧疚': 'remorseful, guilty',
     '温馨': 'warm, tender', '轻松': 'relaxed, lighthearted', '悲壮': 'tragic, heroic',
     '沉重': 'heavy, somber', '振奋': 'inspiring, uplifting', '冷静': 'calm, composed',
     '焦虑': 'anxious, worried', '绝望': 'desperate, hopeless', '坚定': 'resolute, determined',
@@ -396,6 +402,7 @@ _TRANSLATION_MAPPING = {
     '激愤': 'indignant, outraged', '沉稳': 'steady, composed', '压抑': 'oppressive, stifling',
     '肃穆': 'solemn, reverent', '凝重': 'grave, dignified', '犀利': 'sharp, incisive',
     '嚴肅': 'serious, solemn', '緊張': 'tense, intense', '危急': 'critical, urgent', '貪婪': 'greedy, avaricious', '壓抑': 'oppressive, stifling', '絕望': 'desperate, hopeless', '陰沉': 'gloomy, sinister', '動蕩': 'turbulent, volatile', '悲涼': 'desolate, sorrowful', '算計': 'calculating, scheming', '沉悶': 'dull, stifling', '思辨': 'contemplative, thoughtful', '激昂': 'passionate, stirring',
+    '緊張, 危急': 'critical, urgent', '緊張, 貪婪': 'greedy, intense', '緊張, 壓抑': 'oppressive, stifling', '緊張, 絕望': 'desperate, hopeless', '緊張, 陰沉': 'gloomy, sinister', '緊張, 動蕩': 'turbulent, volatile', '緊張, 悲涼': 'desolate, sorrowful', '緊張, 算計': 'calculating, scheming', '緊張, 沉悶': 'dull, stifling', '緊張, 思辨': 'contemplative, thoughtful',
     '溫馨': 'warm, tender', '輕鬆': 'relaxed, lighthearted', '冷靜': 'calm, composed',
     '肅穆': 'solemn, reverent', '凝重': 'grave, dignified',
     '赌': 'gambling', '筹码': 'bargaining chip',
@@ -406,7 +413,7 @@ _TRANSLATION_MAPPING = {
 }
 
 _COMMON_ASR_ERROR_DICT = {
-    '委内日拉': '委内瑞拉', '委内日瑞拉': '委内瑞拉',
+    '委内日拉': '委内瑞拉', '委内日瑞拉': '委内瑞拉', '委内瑞士': '委内瑞拉', '委内瑞典': '委内瑞拉',
     '送动': '松动', '宋动': '松动',
     '高枕无优': '高枕无忧',
     '战车尚': '战车上',
@@ -419,10 +426,108 @@ _COMMON_ASR_ERROR_DICT = {
     '博一牌': '博弈牌',
     '松洞': '松动',
     '憲責': '宪责',
-    '護著': '护着',
+    '護著': '护着', '攥著': '攥着', '握著': '握着',
+    '趁著': '趁着', '等著': '等着', '看著': '看着', '走著': '走着', '拿著': '拿着', '站著': '站着',
     '震盪': '震荡',
     '默認': '默认',
+    '巴叙利亚': '西莉亚', '西利亚': '西莉亚',
+    '俄军斯': '俄罗斯',
+    '哥利比亚': '哥伦比亚',
+    '孟加拉加斯': '加拉加斯',
+    '海法': '海牙',
+    '約旦': '一旦',
+    '左歐盟': '左翼盟友', '左欧盟友': '左翼盟友',
+    '防空性': '防守性',
+    '司法国': '司法方面', '司方面': '司法方面', '合法国': '合法性',
+    '底瑞': '底层',
+    '以军舰': '军队', '塞以军': '塞给军队',
+    '朝军舰': '军队', '塞朝军舰': '塞给军队', '压朝军舰': '压在军队',
+    '朝军舰高层': '军队高层', '朝军舰动摇': '军队动摇',
+    '朝军舰觉得': '军队觉得', '朝军舰的': '军队的',
+    '只朝军舰': '只要军队',
+    '乡里': '想来',
+    '退倒': '退',
+    '好赌': '而赌',
+    '南非常': '就非常',
+    '防空间': '的空间',
+    '核武器派': '核武和派',
+    '外号第一战斗机': '外号第一夫人',
+    '支立': '织起',
+    '压以军': '压在军',
+    '塞以': '塞给',
+    '压以': '压在',
+    '海泰国际': '海牙国际', '泰国际': '在国际', '好泰': '好在',
+    '海泰': '海牙',
+    '法国的审判': '法庭的审判',
+    '法国石油': '设法让石油',
+    '想办法国': '想办法让',
+    '去巴西方': '去换西方',
+    '拉美军国': '拉美军事大国', '拉美军一根': '拉美军事一根',
+    '华好的': '最好的',
+    '只以军': '只要军队',
+    '塞以军舰': '塞给军队',
+    '压以军舰': '压在军队',
+    '以军舰的': '军队的',
+    '以军舰觉得': '军队觉得',
+    '以军舰高层': '军队高层',
+    '以军舰动摇': '军队动摇',
+    '法国政党': '方面政党',
+    '熬日本': '熬日子',
+    '的日本也': '的日子也',
+    '变成了异常': '变成了一种病',
+    '海中国际': '海牙国际',
+    '好中国际': '好在国际',
+    '眼中国好': '眼中最好',
+    '约旦失去': '一旦失去',
+    '北韩有着': '北约有着',
+    '两个泰国': '两个大国',
 }
+
+def _levenshtein_distance(s1, s2):
+    if len(s1) < len(s2):
+        return _levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    prev_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+def _auto_correct_asr(text, known_entities):
+    if not text or not known_entities:
+        return text
+    filtered_entities = {e for e in known_entities if len(e) >= 3}
+    if not filtered_entities:
+        return text
+    corrected = text
+    entity_lens = set(len(e) for e in filtered_entities)
+    for elen in sorted(entity_lens, reverse=True):
+        for i in range(len(text) - elen + 1):
+            word = text[i:i+elen]
+            if not re.match(r'^[\u4e00-\u9fff]+$', word):
+                continue
+            if word in filtered_entities:
+                continue
+            for entity in filtered_entities:
+                if len(entity) != elen:
+                    continue
+                dist = _levenshtein_distance(word, entity)
+                if len(entity) <= 3:
+                    max_dist = 1
+                elif len(entity) <= 5:
+                    max_dist = 1
+                else:
+                    max_dist = 2
+                if 0 < dist <= max_dist:
+                    corrected = corrected.replace(word, entity)
+                    break
+    return corrected
 
 def _fix_whisper_repeated_chars(text):
     """修复Whisper语音识别产生的重复字错误
@@ -733,24 +838,98 @@ class ShotsMixin:
         similarity = char_jaccard * 0.3 + ngram_jaccard * 0.3 + topic_overlap * 0.4
         return min(similarity, 1.0)
 
-    def _regenerate_prompt_for_split_shot(self, description, orig_shot, part_index, total_parts):
-        """为拆分后的分镜生成差异化的提示词（轻量方式，不调用LLM）
+    def _split_description_semantic(self, desc, num_parts):
+        if not desc:
+            return [''] * num_parts
+        sentences = re.split(r'([。.！!？?；;])', desc)
+        merged = []
+        buf = ''
+        for seg in sentences:
+            buf += seg
+            if seg in '\u3002.\uff01\uff1f\uff1b' and buf.strip():
+                merged.append(buf.strip())
+                buf = ''
+        if buf.strip():
+            merged.append(buf.strip())
+        if not merged:
+            sub = re.split(r'[，,、]', desc)
+            merged = [s.strip() for s in sub if s.strip()]
+        if not merged:
+            merged = [desc]
+        if len(merged) >= num_parts:
+            sent_lens = [len(s) for s in merged]
+            total_len = sum(sent_lens)
+            target = total_len / num_parts
+            parts = []
+            current_part = []
+            current_len = 0
+            for s in merged:
+                current_part.append(s)
+                current_len += len(s)
+                if current_len >= target and len(parts) < num_parts - 1:
+                    parts.append(''.join(current_part))
+                    current_part = []
+                    current_len = 0
+            if current_part:
+                if parts:
+                    parts.append(''.join(current_part))
+                else:
+                    parts.append(''.join(current_part))
+            while len(parts) < num_parts:
+                parts.append(parts[-1] if parts else desc)
+            return parts[:num_parts]
+        if len(merged) == 1:
+            result = []
+            chunk = max(1, len(merged[0]) // num_parts)
+            for p in range(num_parts):
+                start_c = p * chunk
+                end_c = start_c + chunk if p < num_parts - 1 else len(merged[0])
+                part = merged[0][start_c:end_c].strip()
+                if not part:
+                    part = merged[0]
+                result.append(part)
+            return result
+        while len(merged) < num_parts:
+            longest_idx = max(range(len(merged)), key=lambda i: len(merged[i]))
+            s = merged[longest_idx]
+            mid = len(s) // 2
+            split_pos = mid
+            for ch in '，,、 ':
+                pos = s.find(ch, max(1, mid - 3))
+                if pos != -1 and pos < mid + 3:
+                    split_pos = pos + 1
+                    break
+            merged[longest_idx:longest_idx+1] = [s[:split_pos].strip(), s[split_pos:].strip()]
+        return merged[:num_parts]
 
-        策略：在原prompt基础上添加镜头角度 + 从描述中提取关键词，确保视觉差异
-        """
+    _CAMERA_ANGLES = [
+        'wide establishing shot', 'medium shot', 'close-up shot',
+        'over-the-shoulder shot', 'low angle shot', 'high angle shot',
+        'dutch angle shot', 'extreme close-up', 'full body shot',
+        "bird's eye view shot", 'tracking shot', 'panoramic shot',
+    ]
+    _LIGHTING_STYLES = [
+        'dramatic lighting', 'soft natural lighting',
+        'backlit silhouette', 'golden hour lighting',
+        'harsh shadow lighting', 'diffused overcast lighting',
+        'neon-lit atmosphere', 'candlelight glow', 'spotlight focus',
+        'ambient lighting',
+    ]
+    _COMPOSITION_TYPES = [
+        'rule of thirds composition', 'centered composition',
+        'leading lines', 'symmetrical framing',
+        'negative space', 'layered foreground',
+        'diagonal composition', 'frame within frame',
+    ]
+
+    def _regenerate_prompt_for_split_shot(self, description, orig_shot, part_index, total_parts):
         orig_prompt = orig_shot.get('prompt_en', '')
         core_theme = orig_shot.get('core_theme', '')
         visual_tone = orig_shot.get('visual_tone', '')
 
-        camera_angles = [
-            'wide establishing shot', 'medium shot', 'close-up shot',
-            'over-the-shoulder shot', 'low angle shot', 'high angle shot',
-            'dutch angle shot', 'extreme close-up', 'full body shot',
-            'bird eye view shot',
-        ]
-        shot_angle = camera_angles[part_index % len(camera_angles)]
-
-        desc_keywords = self._extract_visual_keywords_from_description(description)
+        angle = self._CAMERA_ANGLES[part_index % len(self._CAMERA_ANGLES)]
+        lighting = self._LIGHTING_STYLES[(part_index + 1) % len(self._LIGHTING_STYLES)]
+        composition = self._COMPOSITION_TYPES[(part_index + 2) % len(self._COMPOSITION_TYPES)]
 
         translated_tone = self._translate_to_english(visual_tone) if visual_tone else ''
         if translated_tone and re.search(r'[\u4e00-\u9fff]', translated_tone):
@@ -759,31 +938,32 @@ class ShotsMixin:
         orig_desc = orig_shot.get('description', '')
         is_desc_different = description != orig_desc and description.strip()
 
+        existing_lower = set(k.strip().lower() for k in orig_prompt.split(',') if len(k.strip()) > 2)
+        camera_lower = {'wide', 'medium', 'close-up', 'close up', 'shot', 'angle', 'view',
+                        'establishing', 'over-the-shoulder', 'dutch', 'extreme', 'body',
+                        'bird', 'tracking', 'panoramic', 'low', 'high'}
+        core_parts = [p.strip() for p in orig_prompt.split(',') if p.strip()
+                      and not any(kw in p.lower() for kw in camera_lower)]
+
         parts = []
-        parts.append(shot_angle)
+        parts.append(angle)
+        parts.append(lighting)
+        parts.append(composition)
 
         if is_desc_different:
             new_keywords = self._extract_visual_keywords_from_description(description)
-            orig_kw_set = set(k.strip().lower() for k in orig_prompt.split(',') if len(k.strip()) > 2)
             if new_keywords:
                 for kw in new_keywords.split(','):
                     kw = kw.strip()
-                    if kw and kw.lower() not in orig_kw_set:
+                    if kw and kw.lower() not in existing_lower:
                         parts.append(kw)
 
             theme_translated = self._translate_to_english(core_theme) if core_theme else ''
             if theme_translated and not re.search(r'[\u4e00-\u9fff]', theme_translated) and theme_translated.lower() not in orig_prompt.lower():
                 parts.append(theme_translated)
-
-            quality_tags = ['ultra detailed', 'cinematic lighting', 'photorealistic']
-            for qt in quality_tags:
-                if qt.lower() not in orig_prompt.lower():
-                    parts.append(qt)
         else:
-            if desc_keywords:
-                parts.append(desc_keywords)
-            if orig_prompt:
-                parts.append(orig_prompt)
+            if core_parts:
+                parts.extend(core_parts[:8])
 
         if translated_tone and translated_tone.lower() not in ' '.join(parts).lower():
             parts.append(translated_tone)
@@ -890,6 +1070,10 @@ class ShotsMixin:
         merged_desc = keeper.get('description', '')
         if merged_desc:
             keeper['prompt_en'] = self._regenerate_prompt_for_merged_shot(merged_desc, keeper)
+            sd_model_name = ""
+            if hasattr(self, 'model_var'):
+                sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            keeper['prompt_en'] = self._build_final_prompt(keeper['prompt_en'], sd_model_name)
             keeper['prompt_quality'] = self._calculate_prompt_quality(
                 keeper['prompt_en'], merged_desc
             )
@@ -1235,6 +1419,26 @@ class ShotsMixin:
             union = tokens1 | tokens2
             return len(intersection) / len(union) if union else 0.0
         
+        def _select_semantic_alternative(alternatives, description):
+            if not alternatives:
+                return None
+            if not description:
+                import random
+                return random.choice(alternatives)
+            desc_lower = description.lower()
+            scored = []
+            for alt in alternatives:
+                s = 0
+                for kw in alt.lower().split():
+                    if kw in desc_lower:
+                        s += 1
+                scored.append((alt, s))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            if scored and scored[0][1] > 0:
+                return scored[0][0]
+            import random
+            return random.choice(alternatives)
+        
         def _get_visual_elements(prompt):
             if not prompt:
                 return set()
@@ -1328,8 +1532,8 @@ class ShotsMixin:
                 for elem in prev_elements:
                     if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
                         alternatives = VISUAL_ALTERNATIVES[elem]
-                        import random
-                        replacement = random.choice(alternatives)
+                        curr_desc = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ''
+                        replacement = _select_semantic_alternative(alternatives, curr_desc)
                         if replacement.lower() in new_prompt.lower():
                             continue
                         pattern = r'\b' + re.escape(elem) + r'\b'
@@ -1377,8 +1581,8 @@ class ShotsMixin:
                     dup_prompt = pregenerated_prompts.get(dup_idx, "")
                     if dup_prompt and elem in VISUAL_ALTERNATIVES:
                         alternatives = VISUAL_ALTERNATIVES[elem]
-                        import random
-                        replacement = random.choice(alternatives)
+                        dup_desc = final_tasks[dup_idx].get('text', '') if dup_idx < len(final_tasks) else ''
+                        replacement = _select_semantic_alternative(alternatives, dup_desc)
                         if replacement.lower() in dup_prompt.lower():
                             continue
                         pattern = r'\b' + re.escape(elem) + r'\b'
@@ -1416,8 +1620,8 @@ class ShotsMixin:
                     for elem in prev_elements:
                         if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
                             alternatives = VISUAL_ALTERNATIVES[elem]
-                            import random
-                            replacement = random.choice(alternatives)
+                            curr_desc = final_tasks[curr_idx].get('text', '') if curr_idx < len(final_tasks) else ''
+                            replacement = _select_semantic_alternative(alternatives, curr_desc)
                             if replacement.lower() in new_prompt.lower():
                                 continue
                             pattern = r'\b' + re.escape(elem) + r'\b'
@@ -1453,8 +1657,8 @@ class ShotsMixin:
                         for elem in prev_elements:
                             if elem in VISUAL_ALTERNATIVES and elem in new_prompt.lower():
                                 alternatives = VISUAL_ALTERNATIVES[elem]
-                                import random
-                                replacement = random.choice(alternatives)
+                                sk_desc = final_tasks[curr_sk_idx].get('text', '') if curr_sk_idx < len(final_tasks) else ''
+                                replacement = _select_semantic_alternative(alternatives, sk_desc)
                                 pattern = r'\b' + re.escape(elem) + r'\b'
                                 new_prompt = re.sub(pattern, replacement, new_prompt, count=1, flags=re.IGNORECASE)
                         if new_prompt != curr_prompt:
@@ -1517,17 +1721,53 @@ class ShotsMixin:
         
         return ', '.join(unique[:8]) if unique else ""
 
+    _HALLUCINATION_STOPWORDS = {
+        'The', 'This', 'These', 'Those', 'With', 'From', 'Into',
+        'Over', 'Under', 'Between', 'Through', 'During', 'Before',
+        'After', 'Above', 'Below', 'Around', 'Against', 'Within',
+        'And', 'But', 'Not', 'For', 'Are', 'Was', 'Were', 'Has',
+        'Have', 'Had', 'Will', 'Would', 'Could', 'Should', 'May',
+        'Can', 'Its', 'His', 'Her', 'Their', 'Our', 'Your', 'She',
+        'Some', 'More', 'Also', 'Very', 'Just', 'Only', 'Than',
+        'Then', 'When', 'Where', 'What', 'How', 'Why', 'Who',
+        'Which', 'There', 'Here', 'About', 'Like', 'Into', 'Upon',
+    }
+
+    def _detect_hallucinated_names(self, prompt_en, description):
+        if not prompt_en or not description:
+            return set()
+        prompt_names = set(re.findall(r'\b[A-Z][a-z]{2,}\b', prompt_en))
+        prompt_names -= self._HALLUCINATION_STOPWORDS
+        if not prompt_names:
+            return set()
+        known_en_names = set()
+        for length in range(2, 5):
+            for i in range(len(description) - length + 1):
+                substr = description[i:i+length]
+                if not re.match(r'^[\u4e00-\u9fff]+$', substr):
+                    continue
+                en_trans = self._translate_to_english(substr)
+                if en_trans and en_trans != substr:
+                    for part in en_trans.replace(',', ' ').split():
+                        if len(part) > 2 and part[0].isupper():
+                            known_en_names.add(part)
+        potential = prompt_names - known_en_names
+        sd_common = {
+            'Shot', 'Angle', 'View', 'Light', 'Lighting', 'Close',
+            'Wide', 'Medium', 'High', 'Low', 'Full', 'Body', 'Dutch',
+            'Bird', 'Eye', 'Over', 'Golden', 'Hour', 'Night', 'Day',
+            'Film', 'Photo', 'Real', 'Ultra', 'Cinematic', 'Dramatic',
+            'Vivid', 'Detailed', 'Texture', 'Modern', 'Ancient',
+            'Color', 'Black', 'White', 'Digital', 'Art', 'Style',
+            'Quality', 'Resolution', 'Render', 'Scene', 'Image',
+            'Depth', 'Field', 'Rule', 'Thirds', 'Negative', 'Space',
+            'Leading', 'Lines', 'Centered', 'Symmetrical', 'Frame',
+            'Soft', 'Hard', 'Natural', 'Ambient', 'Backlit',
+        }
+        potential -= sd_common
+        return potential
+
     def _calculate_prompt_quality(self, prompt_en, dubbing_text):
-        """计算提示词质量评分（0.0-1.0）- 增强版，更细粒度
-        
-        评分维度：
-        1. 长度适当性（0.20分）：30-200字符为最佳
-        2. 关键词丰富度（0.20分）：逗号分隔的关键词数量
-        3. 无中文污染（0.15分）：不含中文字符
-        4. 语义相关性（0.20分）：提示词与配音文本的实体重叠
-        5. 视觉具体性（0.15分）：包含具体视觉描述词
-        6. 构图多样性（0.10分）：包含镜头/构图关键词
-        """
         if not prompt_en:
             return 0.0
         
@@ -1535,27 +1775,27 @@ class ShotsMixin:
         
         prompt_len = len(prompt_en)
         if 50 <= prompt_len <= 180:
-            score += 0.20
-        elif 30 <= prompt_len < 50:
             score += 0.15
+        elif 30 <= prompt_len < 50:
+            score += 0.10
         elif 180 < prompt_len <= 300:
-            score += 0.12
-        elif 15 <= prompt_len < 30:
             score += 0.08
+        elif 15 <= prompt_len < 30:
+            score += 0.05
         elif prompt_len > 10:
-            score += 0.03
+            score += 0.02
         
         keywords = [k.strip() for k in prompt_en.split(',') if k.strip()]
         if 10 <= len(keywords) <= 22:
-            score += 0.20
-        elif 7 <= len(keywords) < 10:
             score += 0.15
+        elif 7 <= len(keywords) < 10:
+            score += 0.10
         elif 22 < len(keywords) <= 30:
-            score += 0.12
-        elif 4 <= len(keywords) < 7:
             score += 0.08
+        elif 4 <= len(keywords) < 7:
+            score += 0.05
         elif len(keywords) >= 3:
-            score += 0.04
+            score += 0.02
         
         has_chinese = bool(re.search(r'[\u4e00-\u9fff]', prompt_en))
         if not has_chinese:
@@ -1563,9 +1803,9 @@ class ShotsMixin:
         else:
             chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', prompt_en))
             if chinese_chars <= 2:
-                score += 0.08
+                score += 0.06
             elif chinese_chars <= 5:
-                score += 0.03
+                score += 0.02
         
         if dubbing_text and ENHANCED_RECOGNITION_AVAILABLE:
             try:
@@ -1580,45 +1820,92 @@ class ShotsMixin:
                                 entity_hits += 1
                                 break
                 if entity_hits >= 2:
-                    score += 0.20
+                    score += 0.15
                 elif entity_hits == 1:
-                    score += 0.12
+                    score += 0.08
             except ImportError:
                 pass
+        
+        if dubbing_text:
+            desc_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', dubbing_text))
+            translated = set()
+            for kw in desc_keywords:
+                en = self._translate_to_english(kw)
+                if en and en != kw:
+                    translated.update(en.lower().split())
+            prompt_lower = prompt_en.lower()
+            if translated:
+                covered = sum(1 for t in translated if t in prompt_lower)
+                coverage = covered / len(translated)
+                score += 0.10 * coverage
         
         visual_specificity_words = [
             'close-up', 'wide shot', 'medium shot', 'establishing shot', 'aerial',
             'silhouette', 'reflection', 'shadow', 'backlit', 'golden hour',
             'dramatic', 'vivid', 'intricate', 'detailed', 'textured',
             'glowing', 'illuminated', 'weathered', 'ancient', 'modern',
+            'lighting', 'composition', 'atmosphere', 'mood', 'depth', 'contrast',
         ]
         prompt_lower = prompt_en.lower()
         visual_hits = sum(1 for w in visual_specificity_words if w in prompt_lower)
-        if visual_hits >= 3:
+        if visual_hits >= 4:
             score += 0.15
+        elif visual_hits >= 3:
+            score += 0.12
         elif visual_hits >= 2:
-            score += 0.10
+            score += 0.08
         elif visual_hits >= 1:
-            score += 0.05
+            score += 0.04
         
         composition_words = [
             'close-up', 'wide', 'medium', 'establishing', 'overhead',
             'low angle', 'high angle', 'bird\'s eye', 'panoramic', 'portrait',
             'landscape', 'split', 'symmetrical', 'depth of field',
+            'rule of thirds', 'centered', 'leading lines', 'negative space',
         ]
         comp_hits = sum(1 for w in composition_words if w in prompt_lower)
-        if comp_hits >= 1:
+        if comp_hits >= 2:
             score += 0.10
-        elif comp_hits == 0:
+        elif comp_hits >= 1:
+            score += 0.08
+        else:
             score += 0.02
         
-        return round(min(1.0, score), 2)
+        _generic_words = {
+            'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something',
+            'area', 'place', 'part', 'aspect', 'element', 'factor', 'point',
+            'people', 'group', 'scene', 'image', 'picture', 'photo',
+        }
+        keyword_set = set(k.strip().lower() for k in keywords if k.strip())
+        generic_count = len(keyword_set & _generic_words)
+        if generic_count >= 3:
+            score -= 0.15
+        elif generic_count >= 2:
+            score -= 0.10
+        elif generic_count >= 1:
+            score -= 0.05
 
-    def _diversify_visual_tone(self, description, base_tone):
-        """Based on description content, enrich visual tone to avoid all shots having the same tone"""
-        if not base_tone or base_tone not in ('紧张', '緊張'):
-            return base_tone
-        tone_variants = {
+        _meaningful_keywords = [k.strip().lower() for k in keywords if k.strip() and k.strip().lower() not in _generic_words]
+        if len(_meaningful_keywords) < 4:
+            score -= 0.10
+        elif len(_meaningful_keywords) < 6:
+            score -= 0.05
+
+        seen_kw = set()
+        dup_count = 0
+        for kw in keyword_set:
+            if kw in seen_kw:
+                dup_count += 1
+            seen_kw.add(kw)
+        if dup_count >= 2:
+            score -= 0.08
+        elif dup_count >= 1:
+            score -= 0.04
+
+        return round(max(0.0, min(1.0, score)), 2)
+
+    _TONE_VARIANTS = {
+        '紧张': {
             '战争|战斗|导弹|坦克|武装|枪杆|军心|倒戈': '紧张, 危急',
             '石油|矿产|能源|油价|金山|肥差|利益': '紧张, 贪婪',
             '制裁|安理会|否决权|国际|外交|谈判': '紧张, 压抑',
@@ -1629,22 +1916,67 @@ class ShotsMixin:
             '博弈|棋局|筹码|赌|牌': '紧张, 算计',
             '平衡|稳定|喘息|拉锯|维持': '紧张, 沉闷',
             '救|救赎|深思|问题': '紧张, 思辨',
-        }
-        for pattern, variant in tone_variants.items():
+        },
+        '緊張': {
+            '戰爭|戰鬥|導彈|坦克|武裝|軍心|倒戈': '緊張, 危急',
+            '石油|礦產|能源|油價|金山|肥差|利益': '緊張, 貪婪',
+            '制裁|安理會|否決權|國際|外交|談判': '緊張, 壓抑',
+            '審判|海牙|逮捕|流亡|後路|崩盤': '緊張, 絕望',
+            '難民|邊境|底層': '緊張, 悲涼',
+            '博弈|棋局|籌碼': '緊張, 算計',
+        },
+        '严肃': {
+            '经济|金融|股市|崩盘|危机': '严肃, 冷峻',
+            '法律|审判|法庭|判决|司法': '严肃, 庄重',
+            '调查|报告|数据|研究|分析': '严肃, 审慎',
+            '历史|纪念|回顾|反思|教训': '严肃, 沉思',
+            '责任|追责|问责|监管|合规': '严肃, 凛然',
+        },
+        '嚴肅': {
+            '經濟|金融|股市|崩盤|危機': '嚴肅, 冷峻',
+            '法律|審判|法庭|判決|司法': '嚴肅, 莊重',
+            '調查|報告|數據|研究|分析': '嚴肅, 審慎',
+        },
+        '悲壮': {
+            '牺牲|殉难|英雄|烈士|捐躯': '悲壮, 崇高',
+            '灾难|地震|洪水|疫情|伤亡': '悲壮, 无助',
+            '流离|难民|逃亡|流亡|背井': '悲壮, 凄凉',
+            '抵抗|抗争|坚守|不屈|奋战': '悲壮, 壮烈',
+        },
+        '激昂': {
+            '胜利|突破|成就|夺冠|成功': '激昂, 自豪',
+            '革命|起义|反抗|推翻|变革': '激昂, 热血',
+            '科技|创新|发现|发明|进步': '激昂, 振奋',
+            '崛起|复兴|腾飞|跨越|腾跃': '激昂, 雄壮',
+        },
+        '温馨': {
+            '家庭|团聚|亲情|温暖|关怀': '温馨, 柔和',
+            '救援|互助|善举|慈善|捐助': '温馨, 感动',
+            '丰收|庆祝|节日|欢聚|喜悦': '温馨, 喜悦',
+            '成长|教育|陪伴|守护|呵护': '温馨, 宁静',
+        },
+        '沉重': {
+            '死亡|逝去|告别|哀悼|悼念': '沉重, 悲痛',
+            '失败|挫折|困境|低谷|崩溃': '沉重, 压抑',
+            '损失|代价|牺牲|付出|承受': '沉重, 无奈',
+            '反思|忏悔|自责|悔恨|遗憾': '沉重, 愧疚',
+        },
+    }
+
+    def _diversify_visual_tone(self, description, base_tone):
+        if not base_tone:
+            return '严肃'
+        variants = self._TONE_VARIANTS.get(base_tone)
+        if not variants:
+            return base_tone
+        for pattern, variant in variants.items():
             if re.search(pattern, description):
                 return variant
-        return base_tone
+        tones = list(variants.values())
+        return tones[hash(description) % len(tones)]
 
     def _extract_shot_theme_elements(self, shot_text, global_elements):
-        """从分镜文案中提取相关的主题元素 - 增强版
-        
-        策略：
-        1. 精确匹配：元素直接出现在分镜文案中
-        2. 关键词关联匹配：通过语义关联词映射
-        3. 动态提取：从分镜文本中提取关键名词/概念
-        4. 兜底：如果无匹配，返回空列表（不注入无关元素）
-        """
-        if not global_elements or not shot_text:
+        if not shot_text:
             return []
 
         semantic_map = {
@@ -1666,13 +1998,14 @@ class ShotsMixin:
         }
 
         matched_elements = []
-        for elem in global_elements:
-            if elem in shot_text:
-                matched_elements.append(elem)
-                continue
-            keywords = semantic_map.get(elem, [])
-            if any(kw in shot_text for kw in keywords):
-                matched_elements.append(elem)
+        if global_elements:
+            for elem in global_elements:
+                if elem in shot_text:
+                    matched_elements.append(elem)
+                    continue
+                keywords = semantic_map.get(elem, [])
+                if any(kw in shot_text for kw in keywords):
+                    matched_elements.append(elem)
 
         if not matched_elements:
             dynamic_keywords = []
@@ -1712,6 +2045,25 @@ class ShotsMixin:
         
         # 确保繁体字转为简体
         cleaned_sentence = _ensure_simplified_chinese(cleaned_sentence)
+        
+        # ASR纠错安全网：确保_COMMON_ASR_ERROR_DICT纠错一定生效
+        for wrong, correct in sorted(_COMMON_ASR_ERROR_DICT.items(), key=lambda x: len(x[0]), reverse=True):
+            if wrong in cleaned_sentence:
+                cleaned_sentence = cleaned_sentence.replace(wrong, correct)
+        
+        # ASR动态纠错：基于LLM主题元素的编辑距离纠错
+        if theme_elements:
+            dynamic_entities = set()
+            for elem in theme_elements:
+                if elem and len(elem) >= 2:
+                    dynamic_entities.add(elem)
+            if core_theme and len(core_theme) >= 2:
+                for part in re.split(r'[，、,的与和及]', core_theme):
+                    p = part.strip()
+                    if p and len(p) >= 2:
+                        dynamic_entities.add(p)
+            if dynamic_entities:
+                cleaned_sentence = _auto_correct_asr(cleaned_sentence, dynamic_entities)
         
         # 清洗和修正文本，修正错别字和语句不通顺的地方
         cleaned_sentence = self.clean_text(cleaned_sentence)
@@ -1784,8 +2136,47 @@ class ShotsMixin:
                 if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
                     optimized_prompt = fallback
                     prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
+
+        prompt_quality = self._calculate_prompt_quality(optimized_prompt, description_parts.get('dubbing', ''))
+        quality_retries = 0
+        max_quality_retries = 2
+        min_prompt_words = 5
+        while (prompt_quality < 0.4 or len(optimized_prompt.split(',')) < min_prompt_words) and quality_retries < max_quality_retries:
+            dubbing_text = description_parts.get('dubbing', '')
+            if dubbing_text:
+                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type)
+                if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
+                    optimized_prompt = fallback
+                    prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
+            quality_retries += 1
+
+        hallucinated_names = self._detect_hallucinated_names(optimized_prompt, cleaned_sentence)
+        if hallucinated_names:
+            for name in hallucinated_names:
+                optimized_prompt = re.sub(r'\b' + re.escape(name) + r'\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
+            optimized_prompt = re.sub(r'^\s*,|,\s*$', '', optimized_prompt)
+            prompt_quality = self._calculate_prompt_quality(optimized_prompt, description_parts.get('dubbing', ''))
         
-        # 修复：使用Decimal进行高精度时间戳计算，确保duration = end - start
+        optimized_prompt = re.sub(r'\(\s*:\s*[\d.]+\s*\)', '', optimized_prompt)
+        optimized_prompt = re.sub(r'\(\s*\)', '', optimized_prompt)
+        def _fix_semi_empty_final(t):
+            def _repl(m):
+                kw = m.group(1).strip()
+                wt = m.group(2)
+                if len(kw) <= 1:
+                    return ''
+                return f'({kw}:{wt})'
+            return re.sub(r'\(\s+([a-zA-Z][a-zA-Z\s]*?)\s*:\s*([\d.]+)\s*\)', _repl, t)
+        optimized_prompt = _fix_semi_empty_final(optimized_prompt)
+        optimized_prompt = re.sub(r'[。！？、；：]', ',', optimized_prompt)
+        optimized_prompt = re.sub(r'[，]', ',', optimized_prompt)
+        optimized_prompt = re.sub(r'  +', ' ', optimized_prompt)
+        optimized_prompt = re.sub(r'\s+,', ',', optimized_prompt)
+        optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
+        optimized_prompt = re.sub(r'^\s*,|,\s*$', '', optimized_prompt)
+        optimized_prompt = optimized_prompt.strip()
+        
         from decimal import Decimal, ROUND_HALF_UP
         
         start_dec = Decimal(str(start_time)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -2043,16 +2434,36 @@ class ShotsMixin:
         if '||' in text:
             parts = text.split('||')
             if len(parts) >= 3:
-                last_part = parts[-1].strip()
-                if last_part and last_part.lower() not in ('sd prompt', 'prompt', 'english prompt', 'stable diffusion prompt'):
-                    text = last_part
+                best_part = ''
+                best_score = -1
+                for part in parts:
+                    p = part.strip().strip(',').strip()
+                    if not p:
+                        continue
+                    score = 0
+                    score += len(p)
+                    sd_weight_count = len(re.findall(r'\([^)]*:\s*1\.\d+\)', p))
+                    score += sd_weight_count * 50
+                    comma_keywords = [k.strip() for k in p.split(',') if len(k.strip()) > 2]
+                    score += len(comma_keywords) * 5
+                    if p.lower() in ('sd prompt', 'prompt', 'english prompt', 'stable diffusion prompt'):
+                        score -= 200
+                    if score > best_score:
+                        best_score = score
+                        best_part = p
+                if best_part:
+                    text = best_part
                 else:
-                    mid_part = parts[-2].strip() if len(parts) >= 3 else ''
-                    if mid_part and len(mid_part) > 10:
-                        text = mid_part
+                    last_part = parts[-1].strip()
+                    if last_part and last_part.lower() not in ('sd prompt', 'prompt', 'english prompt', 'stable diffusion prompt'):
+                        text = last_part
                     else:
-                        first_part = parts[0].strip()
-                        text = first_part if first_part and len(first_part) > 10 else ''
+                        mid_part = parts[-2].strip() if len(parts) >= 3 else ''
+                        if mid_part and len(mid_part) > 10:
+                            text = mid_part
+                        else:
+                            first_part = parts[0].strip()
+                            text = first_part if first_part and len(first_part) > 10 else ''
                 _three_part_format = True
             elif len(parts) == 2:
                 last_part = parts[-1].strip()
@@ -2373,8 +2784,10 @@ class ShotsMixin:
         # SD权重语法中冒号后必须是 1.X 格式的数字，否则替换为默认1.3
         def _fix_corrupted_weights(t):
             def _replace_bad_weight(m):
-                keyword = m.group(1)
+                keyword = m.group(1).strip()
                 weight_str = m.group(2)
+                if not keyword or not re.search(r'[a-zA-Z]', keyword):
+                    return ''
                 try:
                     weight = float(weight_str)
                     if 0.5 <= weight <= 2.0:
@@ -2433,8 +2846,41 @@ class ShotsMixin:
         
         # Remove empty parentheses: () or ( :1.2) or (,)
         text = re.sub(r'\(\s*\)', '', text)
-        text = re.sub(r'\(\s*:[\d.]+\s*\)', '', text)
+        text = re.sub(r'\(\s*:\s*[\d.]+\s*\)', '', text)
         text = re.sub(r'\(\s*,\s*\)', '', text)
+        text = re.sub(r'\(\s*:\s*1\.\d+\)', '', text)
+        # Fix semi-empty weights: "( diplomat:1.3)" → "(diplomat:1.3)"
+        # Remove leading spaces inside weight parens, then drop if keyword too short
+        def _fix_semi_empty_weights(t):
+            def _replacer(m):
+                kw = m.group(1).strip()
+                wt = m.group(2)
+                if len(kw) <= 1:
+                    return ''
+                return f'({kw}:{wt})'
+            return re.sub(r'\(\s+([a-zA-Z][a-zA-Z\s]*?)\s*:\s*([\d.]+)\s*\)', _replacer, t)
+        text = _fix_semi_empty_weights(text)
+        
+        # Clean LLM leak phrases within prompt text
+        text = re.sub(r'\bSD prompt\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bEnglish prompt[:\s]*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bStable Diffusion prompt\b', '', text, flags=re.IGNORECASE)
+        
+        # Clean Chinese punctuation in English prompt
+        text = re.sub(r'[、；：。！？]', ',', text)
+        text = re.sub(r'[（]', '(', text)
+        text = re.sub(r'[）]', ')', text)
+        text = re.sub(r'[，]', ',', text)
+        
+        text = re.sub(r",?\s*'s\s+", ', ', text)
+        text = re.sub(r"\b's\b", '', text)
+        
+        # Clean double spaces (LLM output with deleted/missing words)
+        text = re.sub(r'  +', ' ', text)
+        # Clean orphaned commas after word deletion: "word , word" → "word, word"
+        text = re.sub(r'\s+,', ',', text)
+        text = re.sub(r',\s*,', ',', text)
+        text = re.sub(r'^\s*,|,\s*$', '', text)
         
         if len(text.strip()) < 10:
             fallback = self._generate_fallback_prompt(raw_output)
@@ -2664,6 +3110,17 @@ class ShotsMixin:
         text = re.sub(r'\(\s*:\s*[\d.]+\s*\)', '', text)
 
         text = re.sub(r'\s{2,}', ' ', text)
+
+        # Deduplicate consecutive identical words
+        keywords = [k.strip() for k in text.split(',')]
+        seen = set()
+        deduped = []
+        for kw in keywords:
+            kw_lower = kw.lower().strip()
+            if kw_lower not in seen:
+                seen.add(kw_lower)
+                deduped.append(kw)
+        text = ', '.join(deduped)
 
         return text.strip(', ')
 
@@ -3798,6 +4255,9 @@ class ShotsMixin:
                                     skipped_noop += 1
                                     continue
                                 if old_simplified != new_simplified:
+                                    if new_simplified.startswith(old_simplified) and len(new_simplified) > len(old_simplified):
+                                        skipped_noop += 1
+                                        continue
                                     correction_dict[old_simplified] = new_simplified
                                     if old_simplified != old or new_simplified != new:
                                         self.log(f"   🔄 纠错项繁→简: {old}→{new} ⇒ {old_simplified}→{new_simplified}")
@@ -4680,9 +5140,29 @@ class ShotsMixin:
                     if correction_dict:
                         for old, new in correction_dict.items():
                             text = text.replace(old, new)
-                    for wrong, correct in _COMMON_ASR_ERROR_DICT.items():
+                    for wrong, correct in sorted(_COMMON_ASR_ERROR_DICT.items(), key=lambda x: len(x[0]), reverse=True):
                         if wrong in text:
                             text = text.replace(wrong, correct)
+                    known_entities = set()
+                    if ENHANCED_RECOGNITION_AVAILABLE:
+                        try:
+                            from video_generator.enhanced_content_recognition import COUNTRY_MAPPING, ORGANIZATION_MAPPING, MILITARY_MAPPING
+                            for mapping in [COUNTRY_MAPPING, ORGANIZATION_MAPPING, MILITARY_MAPPING]:
+                                for cn_name in mapping:
+                                    known_entities.add(cn_name)
+                        except ImportError:
+                            pass
+                    if theme_info and theme_info.get('theme_elements'):
+                        for elem in theme_info['theme_elements']:
+                            if elem and len(elem) >= 2:
+                                known_entities.add(elem)
+                    if theme_info and theme_info.get('core_theme') and len(theme_info['core_theme']) >= 2:
+                        for part in re.split(r'[，、,的与和及]', theme_info['core_theme']):
+                            p = part.strip()
+                            if p and len(p) >= 2:
+                                known_entities.add(p)
+                    if known_entities:
+                        text = _auto_correct_asr(text, known_entities)
                     text = _fix_whisper_repeated_chars(text)
                     text = _ensure_simplified_chinese(text)
                     final_tasks.append({
@@ -5160,49 +5640,7 @@ class ShotsMixin:
                     part_dur = orig_dur / num_parts
                     orig_shot = shots[i].copy()
                     desc = orig_shot.get('description', '')
-                    desc_parts = []
-                    if desc:
-                        sentences = re.split(r'([。.！!？?；;])', desc)
-                        merged = []
-                        buf = ''
-                        for seg in sentences:
-                            buf += seg
-                            if seg in '\u3002.\uff01\uff1f\uff1b' and buf.strip():
-                                merged.append(buf.strip())
-                                buf = ''
-                        if buf.strip():
-                            merged.append(buf.strip())
-                        if not merged:
-                            sentences2 = re.split(r'[，,、\s]', desc)
-                            merged = [s.strip() for s in sentences2 if s.strip()]
-                        if len(merged) >= num_parts:
-                            per_part = len(merged) // num_parts
-                            for p in range(num_parts):
-                                start_idx = p * per_part
-                                end_idx = start_idx + per_part if p < num_parts - 1 else len(merged)
-                                desc_parts.append(''.join(merged[start_idx:end_idx]))
-                        elif len(merged) >= 2:
-                            chunk_size = max(1, len(merged) // num_parts)
-                            for p in range(num_parts):
-                                start_idx = min(p * chunk_size, len(merged))
-                                end_idx = min(start_idx + chunk_size, len(merged)) if p < num_parts - 1 else len(merged)
-                                part = ''.join(merged[start_idx:end_idx])
-                                if not part:
-                                    part = ''.join(merged[max(0, start_idx - 1):start_idx + 1])
-                                desc_parts.append(part if part else desc)
-                            while len(desc_parts) < num_parts:
-                                desc_parts.append(desc_parts[-1] if desc_parts else desc)
-                        else:
-                            chars_per_part = max(1, len(desc) // num_parts)
-                            for p in range(num_parts):
-                                start_c = p * chars_per_part
-                                end_c = start_c + chars_per_part if p < num_parts - 1 else len(desc)
-                                part = desc[start_c:end_c].strip()
-                                if not part:
-                                    part = desc
-                                desc_parts.append(part)
-                    else:
-                        desc_parts = [''] * num_parts
+                    desc_parts = self._split_description_semantic(desc, num_parts)
 
                     new_shots = []
                     for p in range(num_parts):
@@ -5214,6 +5652,10 @@ class ShotsMixin:
                         new_shot['prompt_en'] = self._regenerate_prompt_for_split_shot(
                             new_shot['description'], orig_shot, p, num_parts
                         )
+                        sd_model_name = ""
+                        if hasattr(self, 'model_var'):
+                            sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                        new_shot['prompt_en'] = self._build_final_prompt(new_shot['prompt_en'], sd_model_name)
                         new_shot['prompt_quality'] = self._calculate_prompt_quality(
                             new_shot['prompt_en'], new_shot['description']
                         )
@@ -5228,6 +5670,53 @@ class ShotsMixin:
             if split_count > 0:
                 self.log(f"   🔧 已拆分 {split_count} 个超长分镜（> {max_shot_dur}秒）")
             
+            _prefix_fixed = 0
+            _sd_model_name = ""
+            if hasattr(self, 'model_var'):
+                _sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            for s in shots:
+                p = s.get('prompt_en', '')
+                if p and 'masterpiece' not in p.lower() and 'best quality' not in p.lower():
+                    s['prompt_en'] = self._build_final_prompt(p, _sd_model_name)
+                    _prefix_fixed += 1
+            if _prefix_fixed > 0:
+                self.log(f"   🔧 已补全 {_prefix_fixed} 个分镜的质量前缀")
+
+            _broken_possessive = 0
+            for s in shots:
+                p = s.get('prompt_en', '')
+                if p:
+                    p = re.sub(r",?\s*'s\s+", ', ', p)
+                    p = re.sub(r",?\s*\b's\b", '', p)
+                    p = re.sub(r',\s*,', ',', p)
+                    p = re.sub(r'^\s*,|,\s*$', '', p)
+                    if p != s.get('prompt_en', ''):
+                        s['prompt_en'] = p
+                        _broken_possessive += 1
+            if _broken_possessive > 0:
+                self.log(f"   🔧 已修复 {_broken_possessive} 个破损所有格模式")
+
+            _syntax_fixed = 0
+            for s in shots:
+                p = s.get('prompt_en', '')
+                if p:
+                    fixed = self._validate_sd_syntax(p)
+                    if fixed != p:
+                        s['prompt_en'] = fixed
+                        _syntax_fixed += 1
+            if _syntax_fixed > 0:
+                self.log(f"   🔧 已修复 {_syntax_fixed} 个分镜的语法问题")
+
+            _quality_recalculated = 0
+            for s in shots:
+                old_q = s.get('prompt_quality', 0)
+                new_q = self._calculate_prompt_quality(s.get('prompt_en', ''), s.get('description', ''))
+                if abs(new_q - old_q) > 0.01:
+                    s['prompt_quality'] = new_q
+                    _quality_recalculated += 1
+            if _quality_recalculated > 0:
+                self.log(f"   🔧 已重算 {_quality_recalculated} 个分镜的质量评分")
+
             # 确保首尾覆盖整个音频时长
             if shots and audio_total_duration > 0:
                 if shots[0]['start'] > 0.1:
