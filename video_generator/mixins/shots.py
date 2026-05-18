@@ -3111,15 +3111,23 @@ class ShotsMixin:
 
         text = re.sub(r'\s{2,}', ' ', text)
 
-        # Deduplicate consecutive identical words
+        text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
+
+        _generic_words = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
         keywords = [k.strip() for k in text.split(',')]
-        seen = set()
+        seen_bases = set()
         deduped = []
         for kw in keywords:
-            kw_lower = kw.lower().strip()
-            if kw_lower not in seen:
-                seen.add(kw_lower)
-                deduped.append(kw)
+            kw_stripped = kw.strip()
+            if not kw_stripped:
+                continue
+            base = re.match(r'\(?\s*([^:()]+?)\s*(?::[\d.]+)?\s*\)?$', kw_stripped)
+            base_text = base.group(1).strip().lower() if base else kw_stripped.lower()
+            if base_text in _generic_words:
+                continue
+            if base_text not in seen_bases:
+                seen_bases.add(base_text)
+                deduped.append(kw_stripped)
         text = ', '.join(deduped)
 
         return text.strip(', ')
@@ -4308,6 +4316,68 @@ class ShotsMixin:
 
         except Exception as e:
             self._log_exception("⚠️ 提取主题信息时出错", e)
+
+        if theme_info:
+            try:
+                import unicodedata
+                _t2s_map = str.maketrans({
+                    '亞': '亚', '羅': '罗', '權': '权', '軍': '军', '戰': '战',
+                    '國': '国', '際': '际', '濟': '济', '製': '制', '歷': '历',
+                    '運': '运', '動': '动', '黨': '党', '選': '选', '舉': '举',
+                    '議': '议', '題': '题', '驗': '验', '經': '经', '營': '营',
+                    '業': '业', '農': '农', '產': '产', '點': '点', '從': '从',
+                    '過': '过', '還': '还', '進': '进', '開': '开', '關': '关',
+                    '無': '无', '與': '与', '區': '区', '時': '时', '說': '说',
+                    '長': '长', '門': '门', '問': '问', '馬': '马', '車': '车',
+                    '將': '将', '對': '对', '學': '学', '樣': '样', '現': '现',
+                    '來': '来', '發': '发', '書': '书', '見': '见', '話': '话',
+                    '會': '会', '機': '机', '壓': '压', '總': '总', '體': '体',
+                    '條': '条', '達': '达', '讓': '让', '著': '着', '裡': '里',
+                    '準': '准', '強': '强', '團': '团', '處': '处', '據': '据',
+                    '認': '认', '為': '为', '個': '个', '層': '层', '級': '级',
+                    '導': '导', '實': '实', '記': '记', '計': '计', '劃': '划',
+                    '設': '设', '備': '备', '務': '务', '職': '职', '費': '费',
+                    '質': '质', '網': '网',
+                })
+                _simplified_fields = {}
+                for key in ['core_theme', 'visual_tone', 'content_type']:
+                    val = theme_info.get(key, '')
+                    if val and re.search(r'[\u4e00-\u9fff]', val):
+                        new_val = val.translate(_t2s_map)
+                        if new_val != val:
+                            _simplified_fields[key] = (val, new_val)
+                            theme_info[key] = new_val
+                elems = theme_info.get('theme_elements', [])
+                if elems:
+                    new_elems = []
+                    changed = False
+                    for e in elems:
+                        ne = e.translate(_t2s_map)
+                        if ne != e:
+                            changed = True
+                        new_elems.append(ne)
+                    if changed:
+                        _simplified_fields['theme_elements'] = (elems, new_elems)
+                        theme_info['theme_elements'] = new_elems
+                if _simplified_fields:
+                    self.log(f"   🔄 主题元素繁体→简体: {_simplified_fields}")
+                elems = theme_info.get('theme_elements', [])
+                if elems:
+                    asr_fixed = []
+                    asr_changed = False
+                    for e in elems:
+                        fe = e
+                        for wrong, correct in sorted(_COMMON_ASR_ERROR_DICT.items(), key=lambda x: len(x[0]), reverse=True):
+                            if wrong in fe:
+                                fe = fe.replace(wrong, correct)
+                        if fe != e:
+                            asr_changed = True
+                        asr_fixed.append(fe)
+                    if asr_changed:
+                        self.log(f"   🔄 主题元素ASR纠错: {elems} → {asr_fixed}")
+                        theme_info['theme_elements'] = asr_fixed
+            except Exception:
+                pass
 
         return theme_info
 
