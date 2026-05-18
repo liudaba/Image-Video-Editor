@@ -19,11 +19,36 @@ from .auth_core import LicenseManager, _get_verify_secret
 
 def _bind_entry_context_menu(entry):
     menu = tk.Menu(entry, tearoff=0)
-    menu.add_command(label="粘贴 Ctrl+V", command=lambda: entry.event_generate("<<Paste>>"))
-    menu.add_command(label="复制 Ctrl+C", command=lambda: entry.event_generate("<<Copy>>"))
-    menu.add_command(label="剪切 Ctrl+X", command=lambda: entry.event_generate("<<Cut>>"))
+    def _paste():
+        try:
+            entry.delete("sel.first", "sel.last")
+        except Exception:
+            pass
+        try:
+            entry.insert("insert", entry.clipboard_get())
+        except Exception:
+            pass
+    def _copy():
+        try:
+            entry.clipboard_clear()
+            entry.clipboard_append(entry.get("sel.first", "sel.last"))
+        except Exception:
+            pass
+    def _cut():
+        try:
+            entry.clipboard_clear()
+            entry.clipboard_append(entry.get("sel.first", "sel.last"))
+            entry.delete("sel.first", "sel.last")
+        except Exception:
+            pass
+    def _select_all():
+        entry.select_range(0, tk.END)
+        entry.icursor(tk.END)
+    menu.add_command(label="粘贴 Ctrl+V", command=_paste)
+    menu.add_command(label="复制 Ctrl+C", command=_copy)
+    menu.add_command(label="剪切 Ctrl+X", command=_cut)
     menu.add_separator()
-    menu.add_command(label="全选 Ctrl+A", command=lambda: entry.select_range(0, tk.END))
+    menu.add_command(label="全选 Ctrl+A", command=_select_all)
     menu.add_command(label="清空", command=lambda: entry.delete(0, tk.END))
     def _show_menu(event):
         try:
@@ -31,6 +56,11 @@ def _bind_entry_context_menu(entry):
         finally:
             menu.grab_release()
     entry.bind("<Button-3>", _show_menu)
+    def _ctrl_a(event):
+        entry.select_range(0, tk.END)
+        entry.icursor(tk.END)
+        return "break"
+    entry.bind("<Control-a>", _ctrl_a)
     return entry
 
 class LoginDialog(tk.Toplevel):
@@ -212,28 +242,81 @@ class LoginDialog(tk.Toplevel):
         )
 
     def _make_entry(self, parent, variable, show=None, placeholder=""):
-        entry = tk.Entry(
-            parent,
-            textvariable=variable,
-            font=("Microsoft YaHei", 13),
-            bg=self._INPUT_BG,
-            fg=self._INPUT_FG,
-            insertbackground=self._INPUT_FG,
-            insertwidth=2,
-            relief=tk.FLAT,
-            bd=0,
-            show=show if show else "",
-            highlightthickness=2,
-            highlightcolor=self._INPUT_FOCUS,
-            highlightbackground=self._INPUT_BORDER,
-        )
-        _bind_entry_context_menu(entry)
-        if placeholder:
-            entry.insert(0, placeholder)
-            entry.configure(fg=self._HINT_FG)
-            entry.bind("<FocusIn>", self._clear_placeholder(entry, placeholder))
-            entry.bind("<FocusOut>", self._restore_placeholder(entry, placeholder))
-        return entry
+        if show:
+            frame = tk.Frame(parent, bg=self._INPUT_BORDER, bd=0,
+                             highlightthickness=2,
+                             highlightcolor=self._INPUT_FOCUS,
+                             highlightbackground=self._INPUT_BORDER)
+            frame.pack_configure = None
+            entry = tk.Entry(
+                frame,
+                textvariable=variable,
+                font=("Microsoft YaHei", 13),
+                bg=self._INPUT_BG,
+                fg=self._INPUT_FG,
+                insertbackground=self._INPUT_FG,
+                insertwidth=2,
+                relief=tk.FLAT,
+                bd=0,
+                show=show,
+                highlightthickness=0,
+            )
+            entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, ipady=6, padx=(2, 0))
+
+            eye_btn = tk.Label(
+                frame,
+                text="\u25d0",
+                font=("Segoe UI", 14),
+                bg=self._INPUT_BG,
+                fg=self._HINT_FG,
+                cursor="hand2",
+                bd=0,
+                padx=8,
+            )
+            eye_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4), pady=2)
+
+            _show_char = show
+            _visible = [False]
+
+            def _toggle_visibility(event=None):
+                if _visible[0]:
+                    entry.configure(show=_show_char)
+                    eye_btn.configure(text="\u25d0", fg=self._HINT_FG)
+                    _visible[0] = False
+                else:
+                    entry.configure(show="")
+                    eye_btn.configure(text="\u25c9", fg=self._ACCENT_LIGHT)
+                    _visible[0] = True
+
+            eye_btn.bind("<Button-1>", _toggle_visibility)
+            _bind_entry_context_menu(entry)
+
+            frame._inner_entry = entry
+            frame._is_password_frame = True
+            return frame
+        else:
+            entry = tk.Entry(
+                parent,
+                textvariable=variable,
+                font=("Microsoft YaHei", 13),
+                bg=self._INPUT_BG,
+                fg=self._INPUT_FG,
+                insertbackground=self._INPUT_FG,
+                insertwidth=2,
+                relief=tk.FLAT,
+                bd=0,
+                show="",
+                highlightthickness=2,
+                highlightcolor=self._INPUT_FOCUS,
+                highlightbackground=self._INPUT_BORDER,
+            )
+            _bind_entry_context_menu(entry)
+            if placeholder:
+                entry.insert(0, placeholder)
+                entry.configure(fg=self._HINT_FG)
+                entry.bind("<FocusIn>", self._clear_placeholder(entry, placeholder))
+                entry.bind("<FocusOut>", self._restore_placeholder(entry, placeholder))
+            return entry
 
     def _clear_placeholder(self, entry, placeholder):
         def handler(event):
@@ -339,7 +422,7 @@ class LoginDialog(tk.Toplevel):
         self._login_password_entry = self._make_entry(
             card, self._login_password_var, show="\u25cf"
         )
-        self._login_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
+        self._login_password_entry.pack(fill=tk.X, pady=(0, 10))
 
         self._save_pass_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -379,14 +462,14 @@ class LoginDialog(tk.Toplevel):
         self._reg_password_entry = self._make_entry(
             card, self._reg_password_var, show="\u25cf"
         )
-        self._reg_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
+        self._reg_password_entry.pack(fill=tk.X, pady=(0, 10))
 
         self._reg_confirm_var = tk.StringVar()
         self._make_label(card, "确认密码").pack(anchor=tk.W, pady=(0, 4))
         self._reg_confirm_entry = self._make_entry(
             card, self._reg_confirm_var, show="\u25cf"
         )
-        self._reg_confirm_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
+        self._reg_confirm_entry.pack(fill=tk.X, pady=(0, 10))
 
         self._agree_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -414,7 +497,7 @@ class LoginDialog(tk.Toplevel):
         self._activate_password_entry = self._make_entry(
             card, self._activate_password_var, show="\u25cf"
         )
-        self._activate_password_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
+        self._activate_password_entry.pack(fill=tk.X, pady=(0, 10))
 
         self._activate_code_var = tk.StringVar()
         self._make_label(card, "激活码").pack(anchor=tk.W, pady=(0, 4))
@@ -703,23 +786,75 @@ class PasswordResetDialog(tk.Toplevel):
         )
 
     def _make_entry(self, parent, variable, show=None):
-        entry = tk.Entry(
-            parent,
-            textvariable=variable,
-            font=("Microsoft YaHei", 13),
-            bg=self._INPUT_BG,
-            fg=self._INPUT_FG,
-            insertbackground=self._INPUT_FG,
-            insertwidth=2,
-            relief=tk.FLAT,
-            bd=0,
-            show=show if show else "",
-            highlightthickness=2,
-            highlightcolor=self._ACCENT,
-            highlightbackground=self._INPUT_BORDER,
-        )
-        _bind_entry_context_menu(entry)
-        return entry
+        if show:
+            frame = tk.Frame(parent, bg=self._INPUT_BORDER, bd=0,
+                             highlightthickness=2,
+                             highlightcolor=self._ACCENT,
+                             highlightbackground=self._INPUT_BORDER)
+            entry = tk.Entry(
+                frame,
+                textvariable=variable,
+                font=("Microsoft YaHei", 13),
+                bg=self._INPUT_BG,
+                fg=self._INPUT_FG,
+                insertbackground=self._INPUT_FG,
+                insertwidth=2,
+                relief=tk.FLAT,
+                bd=0,
+                show=show,
+                highlightthickness=0,
+            )
+            entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, ipady=8, padx=(2, 0))
+
+            eye_btn = tk.Label(
+                frame,
+                text="\u25d0",
+                font=("Segoe UI", 14),
+                bg=self._INPUT_BG,
+                fg=self._HINT_FG,
+                cursor="hand2",
+                bd=0,
+                padx=8,
+            )
+            eye_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4), pady=2)
+
+            _show_char = show
+            _visible = [False]
+
+            def _toggle_visibility(event=None):
+                if _visible[0]:
+                    entry.configure(show=_show_char)
+                    eye_btn.configure(text="\u25d0", fg=self._HINT_FG)
+                    _visible[0] = False
+                else:
+                    entry.configure(show="")
+                    eye_btn.configure(text="\u25c9", fg=self._ACCENT_LIGHT)
+                    _visible[0] = True
+
+            eye_btn.bind("<Button-1>", _toggle_visibility)
+            _bind_entry_context_menu(entry)
+
+            frame._inner_entry = entry
+            frame._is_password_frame = True
+            return frame
+        else:
+            entry = tk.Entry(
+                parent,
+                textvariable=variable,
+                font=("Microsoft YaHei", 13),
+                bg=self._INPUT_BG,
+                fg=self._INPUT_FG,
+                insertbackground=self._INPUT_FG,
+                insertwidth=2,
+                relief=tk.FLAT,
+                bd=0,
+                show="",
+                highlightthickness=2,
+                highlightcolor=self._ACCENT,
+                highlightbackground=self._INPUT_BORDER,
+            )
+            _bind_entry_context_menu(entry)
+            return entry
 
     def _make_label(self, parent, text):
         return tk.Label(
@@ -772,14 +907,14 @@ class PasswordResetDialog(tk.Toplevel):
         self.new_pass_entry = self._make_entry(
             main, self.new_pass_var, show="\u25cf"
         )
-        self.new_pass_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+        self.new_pass_entry.pack(fill=tk.X, pady=(0, 14))
 
         self._make_label(main, "确认新密码").pack(anchor=tk.W, pady=(0, 4))
         self.confirm_pass_var = tk.StringVar()
         self.confirm_pass_entry = self._make_entry(
             main, self.confirm_pass_var, show="\u25cf"
         )
-        self.confirm_pass_entry.pack(fill=tk.X, ipady=8, pady=(0, 14))
+        self.confirm_pass_entry.pack(fill=tk.X, pady=(0, 14))
 
         self._reset_btn = ttk.Button(
             main,
