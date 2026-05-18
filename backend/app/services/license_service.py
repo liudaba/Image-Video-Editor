@@ -220,7 +220,11 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
                     current_expiry = current_expiry.replace(tzinfo=timezone.utc)
                 now = datetime.now(timezone.utc)
                 remaining = max(current_expiry - now, timedelta(0))
-                expiry_date = now + remaining + expiry_delta
+                max_total = expiry_delta * 3
+                if remaining + expiry_delta > max_total:
+                    expiry_date = now + max_total
+                else:
+                    expiry_date = now + remaining + expiry_delta
             else:
                 expiry_date = datetime.now(timezone.utc) + expiry_delta
             existing_license.trial_end = expiry_date
@@ -233,7 +237,15 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
                     current_expiry = current_expiry.replace(tzinfo=timezone.utc)
                 now = datetime.now(timezone.utc)
                 remaining = max(current_expiry - now, timedelta(0))
-                expiry_date = now + remaining + expiry_delta
+                same_plan = (existing_license.plan_type == license_key_obj.plan_type)
+                if same_plan:
+                    max_total = expiry_delta * 3
+                    if remaining + expiry_delta > max_total:
+                        expiry_date = now + max_total
+                    else:
+                        expiry_date = now + remaining + expiry_delta
+                else:
+                    expiry_date = now + expiry_delta
             else:
                 expiry_date = datetime.now(timezone.utc) + expiry_delta
 
