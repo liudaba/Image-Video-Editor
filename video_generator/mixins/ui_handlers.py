@@ -513,9 +513,13 @@ class UIHandlersMixin:
                 pass
 
         if hasattr(self, 'root') and self.root:
-            elapsed = now - self._last_progress_time
-            delay = max(0, int((self._PROGRESS_THROTTLE_SEC - elapsed) * 1000))
-            self.root.after(delay, _update)
+            _is_critical = any(kw in message for kw in ['取消', '失败', '错误', '完成', '就绪'])
+            if _is_critical:
+                self.root.after(0, _update)
+            else:
+                elapsed = now - self._last_progress_time
+                delay = max(0, int((self._PROGRESS_THROTTLE_SEC - elapsed) * 1000))
+                self.root.after(delay, _update)
     
     
     

@@ -412,7 +412,7 @@ class ResourceMixin:
             os.makedirs(trash_dir, exist_ok=True)
 
             if trash_session_dir is None:
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
                 trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
             os.makedirs(trash_session_dir, exist_ok=True)
             
@@ -439,7 +439,7 @@ class ResourceMixin:
                 trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
             os.makedirs(trash_dir, exist_ok=True)
 
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
             trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
 
             if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):

@@ -1828,29 +1828,63 @@ class ShotsMixin:
         
         score = 0.0
         
+        _model_type = "sd15"
+        if hasattr(self, 'model_var'):
+            _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            try:
+                from video_generator.model_profiles import detect_model_type
+                _model_type = detect_model_type(_mn)
+            except Exception:
+                pass
+        
         prompt_len = len(prompt_en)
-        if 50 <= prompt_len <= 180:
-            score += 0.15
-        elif 30 <= prompt_len < 50:
-            score += 0.10
-        elif 180 < prompt_len <= 300:
-            score += 0.08
-        elif 15 <= prompt_len < 30:
-            score += 0.05
-        elif prompt_len > 10:
-            score += 0.02
+        if _model_type in ('flux', 'sd3'):
+            if 80 <= prompt_len <= 400:
+                score += 0.15
+            elif 50 <= prompt_len < 80:
+                score += 0.10
+            elif 400 < prompt_len <= 600:
+                score += 0.08
+            elif 30 <= prompt_len < 50:
+                score += 0.05
+            elif prompt_len > 10:
+                score += 0.02
+        else:
+            if 50 <= prompt_len <= 180:
+                score += 0.15
+            elif 30 <= prompt_len < 50:
+                score += 0.10
+            elif 180 < prompt_len <= 300:
+                score += 0.08
+            elif 15 <= prompt_len < 30:
+                score += 0.05
+            elif prompt_len > 10:
+                score += 0.02
         
         keywords = [k.strip() for k in prompt_en.split(',') if k.strip()]
-        if 10 <= len(keywords) <= 22:
-            score += 0.15
-        elif 7 <= len(keywords) < 10:
-            score += 0.10
-        elif 22 < len(keywords) <= 30:
-            score += 0.08
-        elif 4 <= len(keywords) < 7:
-            score += 0.05
-        elif len(keywords) >= 3:
-            score += 0.02
+        if _model_type in ('flux', 'sd3'):
+            words = prompt_en.split()
+            if 20 <= len(words) <= 80:
+                score += 0.15
+            elif 10 <= len(words) < 20:
+                score += 0.10
+            elif 80 < len(words) <= 120:
+                score += 0.08
+            elif 5 <= len(words) < 10:
+                score += 0.05
+            elif len(words) >= 3:
+                score += 0.02
+        else:
+            if 10 <= len(keywords) <= 22:
+                score += 0.15
+            elif 7 <= len(keywords) < 10:
+                score += 0.10
+            elif 22 < len(keywords) <= 30:
+                score += 0.08
+            elif 4 <= len(keywords) < 7:
+                score += 0.05
+            elif len(keywords) >= 3:
+                score += 0.02
         
         has_chinese = bool(re.search(r'[\u4e00-\u9fff]', prompt_en))
         if not has_chinese:
@@ -2143,8 +2177,26 @@ class ShotsMixin:
             description_parts['custom_theme'] = effective_theme
         if effective_visual_tone:
             description_parts['custom_visual_tone'] = effective_visual_tone
-        # 添加主题元素列表
         if theme_elements:
+            validated_elements = []
+            for elem in theme_elements:
+                if not elem or len(elem) < 2:
+                    continue
+                if elem in cleaned_sentence or elem in (effective_theme or ''):
+                    validated_elements.append(elem)
+                elif len(elem) >= 2:
+                    _has_substring_match = False
+                    for i in range(len(elem) - 1):
+                        if elem[i:i+2] in cleaned_sentence:
+                            _has_substring_match = True
+                            break
+                    if _has_substring_match:
+                        validated_elements.append(elem)
+            if validated_elements != theme_elements:
+                removed = [e for e in theme_elements if e not in validated_elements]
+                if removed:
+                    self.log(f"   🔍 分镜{shot_id+1} 过滤无关主题元素: {removed}")
+            theme_elements = validated_elements if validated_elements else theme_elements
             description_parts['theme_elements'] = theme_elements
         
         # 视觉基调差异化：根据每个分镜的配音内容，将全局基调细分为更精准的子基调
@@ -2169,6 +2221,25 @@ class ShotsMixin:
                 prompt_en = self._generate_arv_prompt(description_parts, content_type, shot_id)
             else:
                 prompt_en = self._generate_sd_prompt(description_parts, content_type, shot_id)
+        
+        if not prompt_en or len(prompt_en.strip()) < 10:
+            self.log(f"⚠️ 分镜{shot_id+1} 提示词为空或过短，尝试重新生成")
+            dubbing_text = description_parts.get('dubbing', '')
+            if dubbing_text:
+                prompt_en = self._generate_prompt_with_llm(
+                    dubbing_text, content_type,
+                    prompt_type=prompt_type,
+                    core_theme=effective_theme,
+                    visual_tone=effective_visual_tone,
+                    theme_elements=theme_elements,
+                    visual_style=description_parts.get('visual_style', ''),
+                    shot_index=shot_id
+                )
+            if not prompt_en or len(prompt_en.strip()) < 10:
+                prompt_en = self._fallback_generate_prompt(
+                    description_parts.get('dubbing', ''), content_type, prompt_type,
+                    effective_theme, effective_visual_tone, theme_elements
+                )
         
         prompt_quality = self._calculate_prompt_quality(prompt_en, description_parts.get('dubbing', ''))
         optimized_prompt = prompt_en
@@ -2198,11 +2269,32 @@ class ShotsMixin:
         min_prompt_words = 5
         while (prompt_quality < 0.4 or len(optimized_prompt.split(',')) < min_prompt_words) and quality_retries < max_quality_retries:
             dubbing_text = description_parts.get('dubbing', '')
+            if dubbing_text and quality_retries == 0 and is_llm_available():
+                retry_prompt = self._generate_prompt_with_llm(
+                    dubbing_text, content_type,
+                    prompt_type=prompt_type,
+                    core_theme=effective_theme,
+                    visual_tone=effective_visual_tone,
+                    theme_elements=theme_elements,
+                    visual_style=description_parts.get('visual_style', ''),
+                    shot_index=shot_id
+                )
+                if retry_prompt and len(retry_prompt.strip()) > 10:
+                    retry_quality = self._calculate_prompt_quality(retry_prompt, dubbing_text)
+                    if retry_quality > prompt_quality:
+                        optimized_prompt = retry_prompt
+                        prompt_quality = retry_quality
+                        self.log(f"   📈 分镜{shot_id+1} 质量提升: {prompt_quality:.2f} → {retry_quality:.2f}")
+                        quality_retries += 1
+                        continue
             if dubbing_text:
-                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type)
+                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type,
+                    custom_theme=effective_theme, custom_visual_tone=effective_visual_tone)
                 if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
-                    optimized_prompt = fallback
-                    prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
+                    fb_quality = self._calculate_prompt_quality(fallback, dubbing_text)
+                    if fb_quality > prompt_quality:
+                        optimized_prompt = fallback
+                        prompt_quality = fb_quality
             quality_retries += 1
 
         hallucinated_names = self._detect_hallucinated_names(optimized_prompt, cleaned_sentence)
@@ -2250,6 +2342,61 @@ class ShotsMixin:
         optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
         optimized_prompt = re.sub(r'^\s*,|,\s*$', '', optimized_prompt)
         optimized_prompt = optimized_prompt.strip()
+        
+        def _strip_quality_tags_for_compare(p):
+            _q = ['masterpiece', 'best quality', 'RAW photo', 'raw photo', 'photorealistic',
+                  'ultra detailed', '8k', '8K', 'HDR', 'DSLR', 'high resolution',
+                  'cinematic lighting', 'film grain', 'professional photography',
+                  'documentary photography', 'photojournalism', 'high quality']
+            t = p.lower()
+            for q in _q:
+                t = re.sub(r',?\s*\(' + re.escape(q.lower()) + r'(?::[\d.]+)?\)\s*,?', ',', t)
+                t = re.sub(r',?\s*' + re.escape(q.lower()) + r'\s*,?', ',', t)
+            t = re.sub(r',\s*,+', ',', t).strip(', ')
+            return t
+        
+        if hasattr(self, '_recent_scene_keywords'):
+            _scene_only = _strip_quality_tags_for_compare(optimized_prompt)
+            _current_kws = set(k.strip().lower() for k in _scene_only.split(',') if len(k.strip()) > 2)
+            for _prev_id, _prev_kws in self._recent_scene_keywords:
+                _overlap = _current_kws & _prev_kws
+                _union = _current_kws | _prev_kws
+                _jaccard = len(_overlap) / max(1, len(_union))
+                if _jaccard > 0.7 and len(_current_kws) >= 3:
+                    self.log(f"⚠️ 分镜{shot_id+1} 与分镜{_prev_id+1} 提示词重复度 {_jaccard:.0%}，尝试差异化重新生成")
+                    dubbing_text = description_parts.get('dubbing', '')
+                    if dubbing_text:
+                        _diverse_hint = f"CRITICAL: The previous shot used a very similar scene. You MUST create a COMPLETELY DIFFERENT scene with different camera angle, different location, different focal point. Previous similar keywords to AVOID: {', '.join(list(_overlap)[:8])}\n"
+                        _retry_prompt = self._generate_prompt_with_llm(
+                            dubbing_text, content_type,
+                            prompt_type=prompt_type,
+                            core_theme=effective_theme,
+                            visual_tone=effective_visual_tone,
+                            theme_elements=theme_elements,
+                            visual_style=description_parts.get('visual_style', ''),
+                            shot_index=shot_id
+                        )
+                        if _retry_prompt and len(_retry_prompt.strip()) > 10:
+                            _retry_scene = _strip_quality_tags_for_compare(_retry_prompt)
+                            _retry_kws = set(k.strip().lower() for k in _retry_scene.split(',') if len(k.strip()) > 2)
+                            _retry_overlap = _retry_kws & _prev_kws
+                            _retry_union = _retry_kws | _prev_kws
+                            _retry_jaccard = len(_retry_overlap) / max(1, len(_retry_union))
+                            if _retry_jaccard < _jaccard:
+                                optimized_prompt = _retry_prompt
+                                prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
+                                self.log(f"   ✅ 差异化成功，重复度 {_jaccard:.0%} → {_retry_jaccard:.0%}")
+                            else:
+                                self.log(f"   ⚠️ 重试仍相似 ({_retry_jaccard:.0%})，保留原提示词")
+                    break
+        
+        if not hasattr(self, '_recent_scene_keywords'):
+            self._recent_scene_keywords = []
+        _scene_for_compare = _strip_quality_tags_for_compare(optimized_prompt)
+        _kws_for_compare = set(k.strip().lower() for k in _scene_for_compare.split(',') if len(k.strip()) > 2)
+        self._recent_scene_keywords.append((shot_id, _kws_for_compare))
+        if len(self._recent_scene_keywords) > 6:
+            self._recent_scene_keywords.pop(0)
         
         from decimal import Decimal, ROUND_HALF_UP
         
@@ -2476,7 +2623,8 @@ class ShotsMixin:
                     except Exception:
                         pass
                 return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
-            return self._analyze_and_generate_sd_prompt(dubbing, content_type)
+            return self._analyze_and_generate_sd_prompt(dubbing, content_type,
+                custom_theme=core_theme, custom_visual_tone=visual_tone)
         
         return self._generate_prompt_with_llm(
             dubbing, content_type, 
@@ -2884,6 +3032,36 @@ class ShotsMixin:
             return re.sub(r'\(([^)]*?):\s*([^,)]*?)\)', _replace_bad_weight, t)
         text = _fix_corrupted_weights(text)
 
+        _MEANINGLESS_WEIGHT_WORDS = {
+            'and', 'or', 'but', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
+            'has', 'have', 'had', 'do', 'does', 'did', 'not', 'no', 'nor',
+            'this', 'that', 'these', 'those', 'it', 'its', 'as', 'if', 'so',
+            'than', 'then', 'very', 'too', 'also', 'just', 'only', 'even',
+            'still', 'already', 'yet', 'now', 'here', 'there', 'where', 'when',
+            'how', 'what', 'which', 'who', 'whom', 'whose', 'why',
+            'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might',
+            'must', 'need', 'into', 'about', 'over', 'under', 'between',
+            'through', 'during', 'before', 'after', 'above', 'below',
+            'up', 'down', 'out', 'off', 'more', 'most', 'some', 'any',
+            'all', 'each', 'every', 'both', 'few', 'many', 'much', 'own',
+            'other', 'such', 'same', 'being', 'having', 'doing',
+            'however', 'therefore', 'although', 'because', 'since', 'while',
+            'unless', 'until', 'whether', 'though', 'else', 'instead',
+        }
+        def _remove_meaningless_weights(t):
+            def _check_weight(m):
+                keyword = m.group(1).strip()
+                if keyword.lower().strip() in _MEANINGLESS_WEIGHT_WORDS:
+                    return ''
+                if len(keyword) <= 1:
+                    return ''
+                if not re.search(r'[a-zA-Z]{2,}', keyword):
+                    return ''
+                return m.group(0)
+            return re.sub(r'\(([^)]*?):\s*([\d.]+)\)', _check_weight, t)
+        text = _remove_meaningless_weights(text)
+
         # 清理截断残留: "Maduro's 3," 或 "3, a general examining" 中的孤立数字3
         # 这是LLM输出被截断后的残留token，常见模式: "xxx 3, yyy" 或 "xxx's 3, yyy"
         text = re.sub(r"\b3\s*,\s*(?=[a-z])", '', text)
@@ -3188,7 +3366,10 @@ class ShotsMixin:
         if suffix:
             parts.append(suffix)
 
-        result = ', '.join(parts)
+        if model_type in ('flux', 'sd3') and len(parts) > 1:
+            result = '. '.join(p for p in parts if p)
+        else:
+            result = ', '.join(parts)
         result = self._validate_sd_syntax(result, model_type)
         return result
 
@@ -3227,8 +3408,15 @@ class ShotsMixin:
             text = re.sub(r'\(\(([^)]+)\)\)', r'\1', text)
             _flux_generic = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
             flux_kws = [k.strip() for k in text.split(',')]
-            flux_kws = [k for k in flux_kws if k.lower().strip() not in _flux_generic]
-            text = ', '.join(flux_kws)
+            flux_kws = [k for k in flux_kws if k.lower().strip() not in _flux_generic and len(k.strip()) > 1]
+            if flux_kws:
+                has_sentence = any('.' in k or len(k.split()) > 4 for k in flux_kws)
+                if not has_sentence and len(flux_kws) >= 3:
+                    main_subject = flux_kws[0]
+                    details = ', '.join(flux_kws[1:])
+                    text = f"A {main_subject}, with {details}"
+                else:
+                    text = ', '.join(flux_kws)
             if text and not re.match(r'^[A-Z]', text):
                 text = text[0].upper() + text[1:] if text else text
             return text.strip(', ')
@@ -3253,34 +3441,52 @@ class ShotsMixin:
         return text.strip(', ')
 
 
+    def _fallback_generate_prompt(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None):
+        if theme_elements is None:
+            theme_elements = []
+        fallback_parts = {
+            'dubbing': dubbing,
+            'content_type': content_type,
+            'custom_theme': core_theme,
+            'custom_visual_tone': visual_tone,
+            'theme_elements': theme_elements,
+        }
+        if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
+            return self._generate_arv_format_prompt(fallback_parts, content_type, 0)
+        elif prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
+            _mt = "sd15"
+            if hasattr(self, 'model_var'):
+                _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                try:
+                    from video_generator.model_profiles import detect_model_type
+                    _mt = detect_model_type(_mn)
+                except Exception:
+                    pass
+            return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
+        else:
+            return self._analyze_and_generate_sd_prompt(dubbing, content_type,
+                custom_theme=core_theme, custom_visual_tone=visual_tone)
+
+
     def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text="", shot_index=-1):
         """使用大模型生成提示词 - 只给规则不给案例，让大模型自主创作"""
         if theme_elements is None:
             theme_elements = []
         
         if not is_llm_available():
-            self.log("⚠️ 大模型不可用，使用内置逻辑生成提示词")
-            fallback_parts = {
-                'dubbing': dubbing,
-                'content_type': content_type,
-                'custom_theme': core_theme,
-                'custom_visual_tone': visual_tone,
-                'theme_elements': theme_elements,
-            }
-            if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
-                return self._generate_arv_format_prompt(fallback_parts, content_type, 0)
-            elif prompt_type == "SD提示词" and ARV_PROMPTS_AVAILABLE:
-                _mt = "sd15"
-                if hasattr(self, 'model_var'):
-                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
-                    try:
-                        from video_generator.model_profiles import detect_model_type
-                        _mt = detect_model_type(_mn)
-                    except Exception:
-                        pass
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
-            else:
-                return self._analyze_and_generate_sd_prompt(dubbing, content_type)
+            self.log("⚠️ 大模型不可用，尝试重启Ollama服务...")
+            try:
+                from video_generator.ollama_client import restart_ollama_service
+                if restart_ollama_service(log_callback=self.log):
+                    set_ollama_available_global(True)
+                    self.log("✅ Ollama服务已重启，继续生成提示词")
+                    time.sleep(2)
+                else:
+                    self.log("❌ Ollama服务重启失败，使用内置逻辑生成提示词")
+                    return self._fallback_generate_prompt(dubbing, content_type, prompt_type, core_theme, visual_tone, theme_elements)
+            except Exception:
+                self.log("❌ 重启Ollama异常，使用内置逻辑生成提示词")
+                return self._fallback_generate_prompt(dubbing, content_type, prompt_type, core_theme, visual_tone, theme_elements)
             
         model = self._get_current_model()
         if not model:
@@ -3388,20 +3594,46 @@ class ShotsMixin:
                 "\n- NEVER produce: cartoon, anime, painting, illustration, 3D render"
                 "\n- Emphasize: real textures, authentic atmosphere, unposed candid moments"
             )
+            try:
+                from video_generator.model_profiles import detect_model_type, MODEL_TYPE_FLUX, MODEL_TYPE_SD3
+                _arv_model_type = detect_model_type(sd_model_name)
+                if _arv_model_type in (MODEL_TYPE_FLUX, MODEL_TYPE_SD3):
+                    arv_instruction += (
+                        "\n- OUTPUT FORMAT: Write natural language scene descriptions, NOT comma-separated keywords"
+                        "\n- Describe the scene as if writing a photo caption: who, what, where, lighting, mood"
+                    )
+            except Exception:
+                pass
             template["system"] += arv_instruction
         
         try:
-            llm_config = getattr(self, 'current_llm_config', None)
-            result_text, _ = call_ollama_single(
-                model=model,
-                system_prompt=template["system"],
-                user_prompt=template["user"],
-                log_callback=self.log,
-                num_predict=512,
-                num_ctx=2560,
-                llm_config=llm_config,
-                timeout=Config.API_TIMEOUT_LLM_PROMPT
-            )
+            _prompt_hb_stop = threading.Event()
+            def _prompt_heartbeat():
+                wait_sec = 0
+                while not _prompt_hb_stop.is_set() and self.task_running:
+                    _prompt_hb_stop.wait(8)
+                    wait_sec += 8
+                    if not _prompt_hb_stop.is_set() and self.task_running:
+                        self.log(f"   ⏳ 提示词生成中... 已等待 {wait_sec}秒")
+            
+            hb_t = threading.Thread(target=_prompt_heartbeat, daemon=True)
+            hb_t.start()
+            
+            try:
+                llm_config = getattr(self, 'current_llm_config', None)
+                result_text, _ = call_ollama_single(
+                    model=model,
+                    system_prompt=template["system"],
+                    user_prompt=template["user"],
+                    log_callback=self.log,
+                    num_predict=512,
+                    num_ctx=2560,
+                    llm_config=llm_config,
+                    timeout=Config.API_TIMEOUT_LLM_PROMPT
+                )
+            finally:
+                _prompt_hb_stop.set()
+                hb_t.join(timeout=2)
             
             if result_text:
                 raw_output = result_text.strip()
@@ -3420,19 +3652,7 @@ class ShotsMixin:
         except Exception as e:
             self._log_exception(f"⚠️ 大模型调用失败，回退到内置逻辑生成基础提示词", e)
             self.log(f"   💡 提示: 回退生成的提示词质量较低，建议检查Ollama服务状态")
-            if prompt_type == "ARV写实提示词" and ARV_OPTIMIZATION_AVAILABLE:
-                _mt = "sd15"
-                if hasattr(self, 'model_var'):
-                    _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
-                    try:
-                        from video_generator.model_profiles import detect_model_type
-                        _mt = detect_model_type(_mn)
-                    except Exception:
-                        pass
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type,
-                    core_theme=core_theme, visual_tone=visual_tone, model_type=_mt)
-            return self._analyze_and_generate_sd_prompt(dubbing, content_type,
-                custom_theme=core_theme, custom_visual_tone=visual_tone)
+            return self._fallback_generate_prompt(dubbing, content_type, prompt_type, core_theme, visual_tone, theme_elements)
 
     def _generate_prompts_batch(self, batch_items, theme_info, user_prompt_type,
                                  user_style_override, full_text):
@@ -3449,6 +3669,21 @@ class ShotsMixin:
         """
         if not batch_items:
             return {}
+
+        if not is_llm_available():
+            self.log(f"   ⚠️ 大模型不可用，尝试重启Ollama服务...")
+            try:
+                from video_generator.ollama_client import restart_ollama_service
+                if restart_ollama_service(log_callback=self.log):
+                    set_ollama_available_global(True)
+                    self.log("✅ Ollama服务已重启，继续批量生成")
+                    time.sleep(2)
+                else:
+                    self.log("❌ Ollama服务重启失败，批次将使用回退生成")
+                    return {idx: "" for idx, _ in batch_items}
+            except Exception as e:
+                self.log(f"❌ 重启Ollama异常: {e}，批次将使用回退生成")
+                return {idx: "" for idx, _ in batch_items}
 
         model = self._get_current_model()
         if not model:
@@ -3468,7 +3703,10 @@ class ShotsMixin:
         }
 
         if user_prompt_type == "ARV写实提示词":
-            template_key = "shot_prompt_sd"
+            sd_model_name = ""
+            if hasattr(self, 'model_var'):
+                sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+            template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
         else:
             sd_model_name = ""
             if hasattr(self, 'model_var'):
@@ -3560,16 +3798,32 @@ class ShotsMixin:
         num_ctx = min(2560 + 256 * batch_size, 8192)
 
         try:
-            result_text, _ = call_ollama_single(
-                model=model,
-                system_prompt=batch_template["system"],
-                user_prompt=batch_template["user"],
-                log_callback=self.log,
-                num_predict=num_predict,
-                num_ctx=num_ctx,
-                llm_config=getattr(self, 'current_llm_config', None),
-                timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size // 2)
-            )
+            _batch_hb_stop = threading.Event()
+            def _batch_heartbeat():
+                wait_sec = 0
+                while not _batch_hb_stop.is_set() and self.task_running:
+                    _batch_hb_stop.wait(8)
+                    wait_sec += 8
+                    if not _batch_hb_stop.is_set() and self.task_running:
+                        self.log(f"   ⏳ 批量提示词生成中（{batch_size}个分镜）... 已等待 {wait_sec}秒")
+            
+            _batch_hb_t = threading.Thread(target=_batch_heartbeat, daemon=True)
+            _batch_hb_t.start()
+            
+            try:
+                result_text, _ = call_ollama_single(
+                    model=model,
+                    system_prompt=batch_template["system"],
+                    user_prompt=batch_template["user"],
+                    log_callback=self.log,
+                    num_predict=num_predict,
+                    num_ctx=num_ctx,
+                    llm_config=getattr(self, 'current_llm_config', None),
+                    timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size // 2)
+                )
+            finally:
+                _batch_hb_stop.set()
+                _batch_hb_t.join(timeout=2)
 
             if not result_text:
                 self.log(f"   ⚠️ 批量生成返回为空（批次大小: {batch_size}）")
@@ -4947,11 +5201,30 @@ class ShotsMixin:
                                 gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
                                 self.log(f"🖥️ 加载Whisper到GPU: {gpu_name} ({gpu_mem:.1f}GB, CUDA)")
                                 self.log(f"   使用模型: Whisper {whisper_model_size}")
+                                self.update_task_progress(f"正在加载Whisper {whisper_model_size}模型...", 22)
                                 local_model = get_whisper_model_path(whisper_model_size)
                                 model_arg = local_model if local_model else whisper_model_size
                                 if local_model:
                                     self.log(f"   使用本地模型: {local_model}")
-                                self.whisper_model = whisper.load_model(model_arg, device="cuda")
+                                
+                                _whisper_load_hb_stop = threading.Event()
+                                def _whisper_load_heartbeat():
+                                    wait_sec = 0
+                                    while not _whisper_load_hb_stop.is_set() and self.task_running:
+                                        _whisper_load_hb_stop.wait(3)
+                                        wait_sec += 3
+                                        if not _whisper_load_hb_stop.is_set() and self.task_running:
+                                            self.log(f"   ⏳ 模型加载中... 已等待 {wait_sec}秒")
+                                
+                                _whisper_load_hb_t = threading.Thread(target=_whisper_load_heartbeat, daemon=True)
+                                _whisper_load_hb_t.start()
+                                
+                                try:
+                                    self.whisper_model = whisper.load_model(model_arg, device="cuda")
+                                finally:
+                                    _whisper_load_hb_stop.set()
+                                    _whisper_load_hb_t.join(timeout=2)
+                                
                                 self._whisper_model_size = whisper_model_size
                                 whisper_model_loaded = True
                                 self._whisper_on_gpu = True
@@ -4960,6 +5233,7 @@ class ShotsMixin:
                             else:
                                 self.log(f"🖥️ 使用CPU模式 (GPU不可用)")
                                 self.log(f"   使用模型: Whisper {whisper_model_size}")
+                                self.update_task_progress(f"正在加载Whisper {whisper_model_size}模型...", 22)
                                 local_model = get_whisper_model_path(whisper_model_size)
                                 model_arg = local_model if local_model else whisper_model_size
                                 if local_model:
@@ -4991,17 +5265,37 @@ class ShotsMixin:
                         if not self.task_running:
                             self.log("❌ 任务已被取消")
                             return
-                        result = self.whisper_model.transcribe(
-                            self.audio_path,
-                            language="zh",
-                            word_timestamps=True,
-                            fp16=False,
-                            verbose=False,
-                            condition_on_previous_text=False,
-                            no_speech_threshold=0.3
-                        )
+                        
+                        _whisper_hb_stop = threading.Event()
+                        _whisper_start_time = time.time()
+                        def _whisper_heartbeat():
+                            wait_sec = 0
+                            while not _whisper_hb_stop.is_set() and self.task_running:
+                                _whisper_hb_stop.wait(5)
+                                wait_sec += 5
+                                if not _whisper_hb_stop.is_set() and self.task_running:
+                                    self.log(f"   ⏳ 语音识别进行中... 已等待 {wait_sec}秒")
+                        
+                        _whisper_hb_thread = threading.Thread(target=_whisper_heartbeat, daemon=True)
+                        _whisper_hb_thread.start()
+                        
+                        try:
+                            result = self.whisper_model.transcribe(
+                                self.audio_path,
+                                language="zh",
+                                word_timestamps=True,
+                                fp16=False,
+                                verbose=False,
+                                condition_on_previous_text=False,
+                                no_speech_threshold=0.3
+                            )
+                        finally:
+                            _whisper_hb_stop.set()
+                            _whisper_hb_thread.join(timeout=2)
+                        
+                        whisper_elapsed = time.time() - _whisper_start_time
                         segments = result.get("segments", [])
-                        self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段")
+                        self.log(f"✅ 语音识别完成，共 {len(segments)} 个片段（耗时 {whisper_elapsed:.1f}秒）")
                         if len(segments) < 50:
                             avg_duration = sum(s.get('end', 0) - s.get('start', 0) for s in segments) / len(segments) if segments else 0
                             self.log(f"   ℹ️ 平均片段时长: {avg_duration:.1f}秒，如需要更细分镜可减小停顿检测阈值")
@@ -5158,34 +5452,20 @@ class ShotsMixin:
                             except ImportError:
                                 pass
                             
+                            user_model = self._get_current_model()
                             if _cloud_llm_active:
                                 candidate_models = ["cloud"]
                                 self.log("🤖 启动云端大模型分析...")
                             else:
-                                user_model = self._get_current_model()
-                                model_priority_list = [
-                                    ("qwen3:8b", 5, "阿里通用模型，推荐首选"),
-                                    ("qwen2.5:7b", 5, "阿里通用模型，性能优秀"),
-                                    ("gemma3:4b", 4, "Google通用模型，推荐"),
-                                    ("qwen3:4b", 4, "阿里通用模型"),
-                                    ("llama3.2:3b", 3, "Meta轻量级模型"),
-                                    ("deepseek-r1:8b", 2, "推理模型，不推荐用于提示词生成"),
-                                    ("gemma3:1b", 1, "轻量级模型，速度快但能力有限"),
-                                ]
                                 available_models = get_available_models()
-                                candidate_models = []
                                 if user_model in available_models:
-                                    candidate_models.append(user_model)
-                                for model_name, size, desc in model_priority_list:
-                                    if model_name in available_models and model_name not in candidate_models:
-                                        candidate_models.append(model_name)
-                                if not candidate_models:
-                                    candidate_models = ["gemma3:4b", "gemma3:1b", "deepseek-r1:8b", "mistral", "llama3"]
-                                    self.log("⚠️ 未检测到本地模型，使用默认候选列表")
+                                    candidate_models = [user_model]
+                                else:
+                                    candidate_models = [user_model]
+                                    self.log(f"⚠️ 用户指定的模型 {user_model} 不在可用列表中，仍将尝试使用")
                                 self.log(f"🤖 启动本地大模型分析...")
-                                self.log(f"   用户指定模型: {user_model}")
+                                self.log(f"   使用模型: {user_model}")
                                 self.log(f"   可用模型数: {len(available_models)}个")
-                                self.log(f"   候选模型数: {len(candidate_models)}个")
                             
                             self.log(f"   文本长度: {len(full_text)} 字符")
                             self.log(f"   提示词类型: {prompt_type}")
@@ -5205,11 +5485,20 @@ class ShotsMixin:
                             
                             def call_ollama_with_model(model_name):
                                 """使用指定模型调用Ollama - 通篇分析提取主题"""
+                                _heartbeat_stop = threading.Event()
+                                
+                                def _heartbeat():
+                                    wait_sec = 0
+                                    while not _heartbeat_stop.is_set() and self.task_running:
+                                        _heartbeat_stop.wait(5)
+                                        wait_sec += 5
+                                        if not _heartbeat_stop.is_set() and self.task_running:
+                                            self.log(f"   ⏳ 模型思考中... 已等待 {wait_sec}秒")
+                                
                                 try:
                                     custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
                                     custom_visual_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
                                     
-                                    # 使用新的主题分析模板
                                     template = PromptTemplates.get_template("theme_analysis", text=full_text)
                                     
                                     if custom_theme or custom_visual_tone:
@@ -5221,16 +5510,23 @@ class ShotsMixin:
                                         system_content = template["system"]
                                         user_content = template["user"]
                                     
-                                    result_content, _ = call_ollama_single(
-                                        model=model_name,
-                                        system_prompt=system_content,
-                                        user_prompt=user_content,
-                                        log_callback=self.log,
-                                        num_predict=2000,
-                                        num_ctx=8192,
-                                        llm_config=getattr(self, 'current_llm_config', None),
-                                        timeout=Config.API_TIMEOUT_LLM_ANALYSIS
-                                    )
+                                    hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+                                    hb_thread.start()
+                                    
+                                    try:
+                                        result_content, _ = call_ollama_single(
+                                            model=model_name,
+                                            system_prompt=system_content,
+                                            user_prompt=user_content,
+                                            log_callback=self.log,
+                                            num_predict=2000,
+                                            num_ctx=8192,
+                                            llm_config=getattr(self, 'current_llm_config', None),
+                                            timeout=Config.API_TIMEOUT_LLM_ANALYSIS
+                                        )
+                                    finally:
+                                        _heartbeat_stop.set()
+                                        hb_thread.join(timeout=2)
                                     
                                     if not result_content:
                                         raise Exception(f"大模型 {model_name} 主题分析返回为空")
@@ -5241,66 +5537,78 @@ class ShotsMixin:
                                     
                                     return result_content
                                 except Exception as e:
+                                    _heartbeat_stop.set()
                                     raise e
                             
-                            # 尝试调用模型，失败时自动切换
                             analysis_result = ""
-                            current_model_index = 0
-                            max_retries = len(candidate_models)
+                            selected_model = candidate_models[0] if candidate_models else user_model
+                            _retry_count = 0
+                            _max_retries = 1 if _cloud_llm_active else 2
                             
-                            try:
-                                while current_model_index < max_retries and not analysis_result:
-                                    current_model = candidate_models[current_model_index]
-                                    
-                                    self.log(f"\n   [{current_model_index + 1}/{max_retries}] 尝试使用模型: {current_model}")
-                                    
-                                    try:
+                            while _retry_count < _max_retries and not analysis_result:
+                                _retry_count += 1
+                                is_retry = _retry_count > 1
+                                
+                                try:
+                                    if is_retry:
+                                        self.log(f"\n   🔄 第 {_retry_count} 次尝试（重启Ollama后重试）...")
+                                        try:
+                                            from video_generator.ollama_client import restart_ollama_service, is_ollama_available
+                                            if restart_ollama_service(log_callback=self.log):
+                                                set_ollama_available_global(True)
+                                                self.log("✅ Ollama服务已重启，重新尝试调用模型")
+                                                time.sleep(2)
+                                            else:
+                                                self.log("❌ Ollama服务重启失败")
+                                                break
+                                        except Exception as restart_err:
+                                            self.log(f"❌ 重启Ollama异常: {restart_err}")
+                                            break
+                                    else:
                                         self.log(f"   等待模型分析中...")
+                                    
+                                    start_time = time.time()
+                                    analysis_result = call_ollama_with_model(selected_model)
+                                    elapsed_time = time.time() - start_time
+                                    
+                                    if analysis_result:
+                                        self.log(f"✅ 模型 {selected_model} 分析完毕！")
+                                        self.log(f"   响应时间: {elapsed_time:.1f}秒")
+                                        self.log(f"   响应长度: {len(analysis_result)} 字符")
+                                        self.log(f"   响应内容预览: {analysis_result[:100]}...")
+                                    else:
+                                        self.log(f"⚠️ 模型 {selected_model} 返回空结果")
+                                        if _retry_count < _max_retries:
+                                            self.log(f"   将重启Ollama后重试...")
                                         
-                                        start_time = time.time()
-                                        analysis_result = call_ollama_with_model(current_model)
-                                        elapsed_time = time.time() - start_time
-                                        
-                                        if analysis_result:
-                                            self.log(f"✅ 模型 {current_model} 分析完毕！")
-                                            self.log(f"   响应时间: {elapsed_time:.1f}秒")
-                                            self.log(f"   响应长度: {len(analysis_result)} 字符")
-                                            self.log(f"   响应内容预览: {analysis_result[:100]}...")
-                                            
-                                            if current_model != user_model:
-                                                self.log(f"⚠️ 提醒: 已自动切换到备用模型 {current_model}")
-                                                self.log(f"   原因: 用户指定的模型 {user_model} 无响应或调用失败")
-                                            break
+                                except Exception as e:
+                                    error_msg = str(e).lower()
+                                    self._log_exception(f"⚠️ 模型 {selected_model} 调用失败", e)
+                                    
+                                    if "timeout" in error_msg or "timed out" in error_msg:
+                                        self.log(f"   ❌ 模型响应超时（当前超时设置: {Config.API_TIMEOUT_LLM_ANALYSIS}秒）")
+                                        if _retry_count < _max_retries:
+                                            self.log(f"   将重启Ollama后重试...")
                                         else:
-                                            self.log(f"⚠️ 模型 {current_model} 返回空结果")
-                                            self.log(f"   🔍 请检查上方的调试日志以了解详情")
-                                            current_model_index += 1
-                                            
-                                    except Exception as e:
-                                        error_msg = str(e).lower()
-                                        self._log_exception(f"⚠️ 模型 {current_model} 调用失败", e)
-                                        
-                                        if "connection" in error_msg or "refused" in error_msg:
-                                            self.log(f"   ❌ Ollama服务连接失败，停止尝试")
-                                            break
-                                        
-                                        current_model_index += 1
-                                        
-                                        if current_model_index < max_retries:
-                                            next_model = candidate_models[current_model_index]
-                                            self.log(f"   自动切换到下一个模型: {next_model}")
-                                            time.sleep(0.5)
-                            except Exception as e:
-                                self._log_exception("⚠️ 分析步骤异常", e)
+                                            self.log(f"   💡 建议: 1) 在设置中切换更小的模型  2) 检查GPU显存是否充足  3) 关闭其他占用GPU的程序")
+                                    elif "connection" in error_msg or "refused" in error_msg:
+                                        self.log(f"   ❌ Ollama服务连接失败")
+                                        if _retry_count < _max_retries:
+                                            self.log(f"   将重启Ollama后重试...")
+                                        else:
+                                            self.log(f"   💡 请检查Ollama是否正常运行")
+                                    else:
+                                        if _retry_count < _max_retries:
+                                            self.log(f"   将重启Ollama后重试...")
+                                        else:
+                                            self.log(f"   💡 请检查Ollama服务是否正常运行，或更换模型重试")
                             
-                            # 如果所有模型都失败
                             if not analysis_result:
-                                self.log(f"\n❌ 所有候选模型均调用失败（共尝试 {max_retries} 个模型）")
-                                self.log(f"   候选模型列表: {', '.join(candidate_models)}")
-                                self.log(f"   建议: 请检查Ollama服务是否正常运行，或安装上述模型")
+                                self.log(f"\n❌ 模型 {selected_model} 调用失败（已重试 {_max_retries} 次）")
+                                self.log(f"   💡 请在设置中切换其他模型后重试")
                                 set_ollama_available_global(False)
                                 self.log("🧹 Ollama标记为不可用，GPU显存将在空闲时自动释放")
-                                analysis_result = ""
+                                _ollama_model_already_loaded = False
                             
                             # 缓存分析结果（即使是空结果也缓存，避免重复失败）
                             if analysis_result:
@@ -5310,7 +5618,8 @@ class ShotsMixin:
                             # 解析分析结果 - 只提取主题信息，不生成分镜
                             self.update_task_progress("正在提取分析结果...", 55)
                             
-                            self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
+                            if analysis_result:
+                                self.log(f"📝 大模型返回内容预览: {analysis_result[:500]}...")
                             
                             theme_info = self.extract_theme_info(analysis_result)
                             
@@ -5360,9 +5669,11 @@ class ShotsMixin:
                             if theme_info.get('correction_dict'):
                                 self.log(f"🔧 大模型纠错结果: {theme_info['correction_dict']}")
                                 self.log("✅ 主题分析完成，纠错结果将应用到分镜文本")
-                            else:
+                            elif analysis_result:
                                 self.log("✅ 主题分析完成，文本无需纠错")
-                            _ollama_model_already_loaded = True
+                            
+                            if analysis_result:
+                                _ollama_model_already_loaded = True
                         
                         except Exception as e:
                             self._log_exception(f"   ⚠️ 大模型分析过程出错", e)
@@ -6298,14 +6609,19 @@ class ShotsMixin:
                     except Exception:
                         pass
                     with self.task_lock:
+                        was_cancelled = not self.task_running
                         self.task_running = False
                         self.current_task_thread = None
                     self._set_action_buttons_state("normal")
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
-                    self.log("✅ 分镜生成任务结束")
-                    if not getattr(self, '_auto_mode', False):
-                        self.log("请点击「🎞️ 生成视频」自动生成图片并合成最终视频")
+                    if was_cancelled:
+                        self.log("⏹️ 分镜生成任务已取消")
+                        self.update_task_progress("任务已取消")
+                    else:
+                        self.log("✅ 分镜生成任务结束")
+                        if not getattr(self, '_auto_mode', False):
+                            self.log("请点击「🎞️ 生成视频」自动生成图片并合成最终视频")
             
             thread = threading.Thread(target=generate_shots_worker, daemon=True, name="GenerateShotsThread")
             thread.start()

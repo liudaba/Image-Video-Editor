@@ -6,6 +6,7 @@ services:
       POSTGRES_DB: videogen
       POSTGRES_USER: videogen
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      TZ: Asia/Shanghai
     volumes:
       - pgdata:/var/lib/postgresql/data
     expose:
@@ -54,6 +55,7 @@ services:
     env_file: .env
     environment:
       VIDEOGEN_ENV: production
+      TZ: Asia/Shanghai
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -88,6 +90,7 @@ services:
     restart: always
     environment:
       PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      TZ: Asia/Shanghai
     volumes:
       - ./backups:/backups
     entrypoint: >

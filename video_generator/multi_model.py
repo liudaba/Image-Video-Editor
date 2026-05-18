@@ -27,7 +27,7 @@ class LLMPerformanceOptimizer:
                 "duration": duration,
                 "success": success,
                 "token_count": token_count,
-                "timestamp": datetime.datetime.now()
+                "timestamp": datetime.datetime.now(datetime.timezone.utc)
             })
             if len(self.call_history) > self.max_history:
                 self.call_history.pop(0)

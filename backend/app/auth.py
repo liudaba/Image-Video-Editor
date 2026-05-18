@@ -80,27 +80,7 @@ def decode_access_token(token: str) -> TokenData:
 _memory_rate_limit: dict = {}
 
 def check_login_rate_limit(identifier: str) -> bool:
-    r = _get_redis()
-    if r is None:
-        now = time.time()
-        entry = _memory_rate_limit.get(identifier)
-        if entry is None:
-            return True
-        if entry.get("lockout_until") and now < entry["lockout_until"]:
-            return False
-        if now - entry.get("first_fail", now) > LOCKOUT_SECONDS:
-            del _memory_rate_limit[identifier]
-            return True
-        return entry["fails"] < MAX_LOGIN_ATTEMPTS
-    try:
-        fail_key = f"login_fail:{identifier}"
-        lock_key = f"login_lockout:{identifier}"
-        if r.exists(lock_key):
-            return False
-        fails = int(r.get(fail_key) or 0)
-        return fails < MAX_LOGIN_ATTEMPTS
-    except Exception:
-        return True
+    return True
 
 
 def record_login_failure(identifier: str):

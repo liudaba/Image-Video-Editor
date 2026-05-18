@@ -776,14 +776,7 @@ class LicenseManager:
                     from datetime import timezone as _tz
 
                     now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
-                    if (
-                        last_hb.tzinfo is None
-                        and "+" not in last_heartbeat_str
-                        and last_heartbeat_str.endswith("Z") is False
-                    ):
-                        now_for_compare = datetime.now().replace(tzinfo=None)
-                    else:
-                        now_for_compare = now_utc
+                    now_for_compare = now_utc
                     offline_hours = (
                         now_for_compare - last_hb
                     ).total_seconds() / 3600

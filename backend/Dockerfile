@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo Asia/Shanghai > /etc/timezone
+
 RUN groupadd -r videogen && useradd -r -g videogen videogen
 
 WORKDIR /app

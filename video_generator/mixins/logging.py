@@ -32,7 +32,7 @@ def _get_file_logger(base_dir):
         if logger.handlers:
             _file_logger = logger
             return _file_logger
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         fh = logging.FileHandler(
             os.path.join(log_dir, f"app_{today}.log"),
             encoding="utf-8",
@@ -115,7 +115,7 @@ class LoggingMixin:
         GUI日志：通过Queue批量刷新，减少root.after调度，智能滚动，行数上限保护
         控制台：完整输出所有日志，线程安全，顺序与GUI一致
         """
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
 
         with _print_lock:

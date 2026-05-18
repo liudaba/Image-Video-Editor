@@ -110,6 +110,18 @@ D. 语句通顺：读起来语义不通的可能是识别错误
         "- \"金山银山\" = vast wealth -> show 'generals surrounded by oil contracts and gold', NOT 'mountain of coins'\n"
         "- \"高枕无忧\" = carefree security -> show 'false sense of security, hidden threats', NOT 'pillow'\n"
         "- \"垃圾站\" = miserable situation -> show 'deteriorating living conditions', NOT 'garbage dump'\n"
+        "- \"宝座\"/\"王座\" = power position -> show 'leader on ornate chair in palace, surrounded by guards', NOT 'a throne in empty room'\n"
+        "- \"肥差\" = lucrative position -> show 'official distributing resources with wealth visible', NOT 'fat on a plate'\n"
+        "- \"枪杆子\" = military power -> show 'armed soldiers enforcing control, weapons prominently displayed', NOT 'a gun barrel'\n"
+        "- \"秤砣\" = decisive weight -> show 'military tipping the balance of power', NOT 'a weight on a scale'\n"
+        "- \"纸片\" = worthless paper -> show 'ballot papers scattered and ignored on the ground', NOT 'a piece of paper'\n"
+        "- \"冰山一角\" = tip of the iceberg -> show 'visible corruption with more hidden below surface', NOT 'an iceberg'\n"
+        "- \"墙倒众人推\" = falling from power -> show 'abandoned leader, former allies turning away', NOT 'people pushing a wall'\n"
+        "- \"树倒猢狲散\" = collapse of patronage -> show 'allies fleeing a fallen leader', NOT 'monkeys scattering'\n"
+        "- \"风雨飘摇\" = instability -> show 'precarious situation, structure barely holding together', NOT 'wind and rain'\n"
+        "- \"暗流涌动\" = hidden forces -> show 'surface calm with tension underneath', NOT 'underwater current'\n"
+        "- \"一损俱损\" = shared fate -> show 'linked interests, if one falls all fall together', NOT 'dominoes'\n"
+        "- \"遮羞布\" = facade -> show 'thin veneer of legitimacy over corruption', NOT 'a piece of cloth'\n"
         "- RULE: When you encounter ANY Chinese metaphor, ask: 'What REAL SCENE does this describe in context?' Depict THAT scene. NEVER depict literal imagery.\n"
     )
 
