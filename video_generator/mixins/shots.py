@@ -3131,7 +3131,7 @@ class ShotsMixin:
             parts.append(suffix)
 
         result = ', '.join(parts)
-        result = self._validate_sd_syntax(result)
+        result = self._validate_sd_syntax(result, model_type)
         return result
 
     def _validate_sd_syntax(self, prompt, model_type=None):
@@ -3165,6 +3165,10 @@ class ShotsMixin:
 
         if model_type == 'flux':
             text = re.sub(r'\([^)]*:[\d.]+\)', lambda m: m.group(0).split(':')[0].strip('()'), text)
+            _flux_generic = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
+            flux_kws = [k.strip() for k in text.split(',')]
+            flux_kws = [k for k in flux_kws if k.lower().strip() not in _flux_generic]
+            text = ', '.join(flux_kws)
             return text.strip(', ')
 
         _generic_words = {'person', 'thing', 'object', 'item', 'stuff', 'someone', 'something'}
@@ -5818,10 +5822,18 @@ class ShotsMixin:
                 self.log(f"   🔧 已修复 {_broken_possessive} 个破损所有格模式")
 
             _syntax_fixed = 0
+            _sd_mt = "sd15"
+            if hasattr(self, 'model_var'):
+                _mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                try:
+                    from video_generator.model_profiles import detect_model_type as _dmt
+                    _sd_mt = _dmt(_mn)
+                except Exception:
+                    pass
             for s in shots:
                 p = s.get('prompt_en', '')
                 if p:
-                    fixed = self._validate_sd_syntax(p)
+                    fixed = self._validate_sd_syntax(p, _sd_mt)
                     if fixed != p:
                         s['prompt_en'] = fixed
                         _syntax_fixed += 1
