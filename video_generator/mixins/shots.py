@@ -5793,11 +5793,6 @@ class ShotsMixin:
                 self.log(f"   🎨 基调变体: {', '.join(_tone_variants[:8])}")
             self.log(f"   ⏱️ 总耗时: {_shots_min}分{_shots_sec}秒 ({_shots_elapsed:.1f}s)")
             self.log(f"   📁 保存位置: {shots_file}")
-            if not auto_mode:
-                self.log("")
-                self.log("📋 下一步操作：")
-                self.log("   1. 点击「🎨 生成图片」生成分镜画面")
-                self.log("   2. 点击「🎞️ 生成视频」合成最终视频")
             self.log("=" * 50)
             
             # 显示分镜内容到脚本区域（已移除脚本窗口，仅记录到日志）
@@ -5972,6 +5967,8 @@ class ShotsMixin:
                     if hasattr(self, '_pregenerated_prompts'):
                         delattr(self, '_pregenerated_prompts')
                     self.log("✅ 分镜生成任务结束")
+                    if not getattr(self, '_auto_mode', False):
+                        self.log("请点击「🎨 生成图片」生成分镜画面，或点击「🎞️ 生成视频」自动生成图片并合成最终视频")
             
             thread = threading.Thread(target=generate_shots_worker, daemon=True, name="GenerateShotsThread")
             thread.start()
