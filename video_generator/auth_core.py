@@ -960,7 +960,8 @@ class LicenseManager:
                 timeout=15,
             )
             if response.status_code == 200:
-                return True, "密码重置成功,请使用新密码登录"
+                self.clear_login_credentials()
+                return True, "密码重置成功,请使用新密码登录" 
             else:
                 error_msg = response.json().get("detail", "重置失败")
                 return False, error_msg

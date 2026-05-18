@@ -2198,6 +2198,25 @@ class ShotsMixin:
         if hallucinated_names:
             for name in hallucinated_names:
                 optimized_prompt = re.sub(r'\b' + re.escape(name) + r'\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bbetween\s+and\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bof\s+on\b', 'on', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bwith\s+and\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bfrom\s+to\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\band\s*,', ',', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r',\s*\band\s+', ', ', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'(^|[\s,(])-\w{2,}', r'\1', optimized_prompt)
+            optimized_prompt = re.sub(r'\b\w*ousne\b', '', optimized_prompt)
+            optimized_prompt = re.sub(r'\b\w*icne\b', '', optimized_prompt)
+            optimized_prompt = re.sub(r'\b\w*fulne\b', '', optimized_prompt)
+            optimized_prompt = re.sub(r'\b\w*lessne\b', '', optimized_prompt)
+            optimized_prompt = re.sub(r'\bemphas\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\b\w*ominou\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\b\w*debri\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bof\s+and\b', '', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\bof\s+(\w+ing)\b', r'\1', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'\b(?:of|in|at|on|for|to|from|by|with)\s*,', ',', optimized_prompt, flags=re.IGNORECASE)
+            optimized_prompt = re.sub(r'  +', ' ', optimized_prompt)
+            optimized_prompt = re.sub(r'\s+,', ',', optimized_prompt)
             optimized_prompt = re.sub(r',\s*,', ',', optimized_prompt)
             optimized_prompt = re.sub(r'^\s*,|,\s*$', '', optimized_prompt)
             prompt_quality = self._calculate_prompt_quality(optimized_prompt, description_parts.get('dubbing', ''))
@@ -2918,6 +2937,24 @@ class ShotsMixin:
         
         text = re.sub(r",?\s*'s\s+", ', ', text)
         text = re.sub(r"\b's\b", '', text)
+        
+        text = re.sub(r'\bbetween\s+and\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bof\s+on\b', 'on', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bwith\s+and\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bfrom\s+to\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\band\s*,', ',', text, flags=re.IGNORECASE)
+        text = re.sub(r',\s*\band\s+', ', ', text, flags=re.IGNORECASE)
+        text = re.sub(r'(^|[\s,(])-\w{2,}', r'\1', text)
+        text = re.sub(r'\b\w*ousne\b', '', text)
+        text = re.sub(r'\b\w*icne\b', '', text)
+        text = re.sub(r'\b\w*fulne\b', '', text)
+        text = re.sub(r'\b\w*lessne\b', '', text)
+        text = re.sub(r'\bemphas\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b\w*ominou\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b\w*debri\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bof\s+and\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bof\s+(\w+ing)\b', r'\1', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b(?:of|in|at|on|for|to|from|by|with)\s*,', ',', text, flags=re.IGNORECASE)
         
         # Clean double spaces (LLM output with deleted/missing words)
         text = re.sub(r'  +', ' ', text)
@@ -4319,6 +4356,15 @@ class ShotsMixin:
                                     continue
                                 if old_simplified != new_simplified:
                                     if new_simplified.startswith(old_simplified) and len(new_simplified) > len(old_simplified):
+                                        skipped_noop += 1
+                                        continue
+                                    if old_simplified.startswith(new_simplified) and len(old_simplified) > len(new_simplified):
+                                        skipped_noop += 1
+                                        continue
+                                    if new_simplified in old_simplified and len(new_simplified) < len(old_simplified):
+                                        skipped_noop += 1
+                                        continue
+                                    if len(old_simplified) == 2 and len(new_simplified) == 2 and old_simplified[0] == new_simplified[0] and old_simplified[1] != new_simplified[1]:
                                         skipped_noop += 1
                                         continue
                                     correction_dict[old_simplified] = new_simplified
@@ -5821,6 +5867,38 @@ class ShotsMixin:
             if _broken_possessive > 0:
                 self.log(f"   🔧 已修复 {_broken_possessive} 个破损所有格模式")
 
+            _grammar_broken = 0
+            for s in shots:
+                p = s.get('prompt_en', '')
+                if p:
+                    orig_p = p
+                    p = re.sub(r'\bbetween\s+and\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\bof\s+on\b', 'on', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\bwith\s+and\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\bfrom\s+to\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\band\s*,', ',', p, flags=re.IGNORECASE)
+                    p = re.sub(r',\s*\band\s+', ', ', p, flags=re.IGNORECASE)
+                    p = re.sub(r'(^|[\s,(])-\w{2,}', r'\1', p)
+                    p = re.sub(r'\b\w*ousne\b', '', p)
+                    p = re.sub(r'\b\w*icne\b', '', p)
+                    p = re.sub(r'\b\w*fulne\b', '', p)
+                    p = re.sub(r'\b\w*lessne\b', '', p)
+                    p = re.sub(r'\bemphas\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\b\w*ominou\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\b\w*debri\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\bof\s+and\b', '', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\bof\s+(\w+ing)\b', r'\1', p, flags=re.IGNORECASE)
+                    p = re.sub(r'\b(?:of|in|at|on|for|to|from|by|with)\s*,', ',', p, flags=re.IGNORECASE)
+                    p = re.sub(r'  +', ' ', p)
+                    p = re.sub(r'\s+,', ',', p)
+                    p = re.sub(r',\s*,', ',', p)
+                    p = re.sub(r'^\s*,|,\s*$', '', p)
+                    if p != orig_p:
+                        s['prompt_en'] = p
+                        _grammar_broken += 1
+            if _grammar_broken > 0:
+                self.log(f"   🔧 已修复 {_grammar_broken} 个语法破损短语")
+
             _syntax_fixed = 0
             _sd_mt = "sd15"
             if hasattr(self, 'model_var'):
@@ -5839,6 +5917,28 @@ class ShotsMixin:
                         _syntax_fixed += 1
             if _syntax_fixed > 0:
                 self.log(f"   🔧 已修复 {_syntax_fixed} 个分镜的语法问题")
+
+            _exact_dedup = 0
+            _prompt_to_indices = {}
+            for _di, s in enumerate(shots):
+                p = s.get('prompt_en', '')
+                if p:
+                    key = p.strip().lower()
+                    if key not in _prompt_to_indices:
+                        _prompt_to_indices[key] = []
+                    _prompt_to_indices[key].append(_di)
+            for key, indices in _prompt_to_indices.items():
+                if len(indices) > 1:
+                    for dup_i, shot_idx in enumerate(indices[1:], 1):
+                        s = shots[shot_idx]
+                        new_prompt = self._regenerate_prompt_for_split_shot(
+                            s.get('description', ''), s, dup_i, len(indices)
+                        )
+                        if new_prompt and new_prompt.strip().lower() != key:
+                            s['prompt_en'] = self._build_final_prompt(new_prompt, _sd_model_name)
+                            _exact_dedup += 1
+            if _exact_dedup > 0:
+                self.log(f"   🔧 已去重 {_exact_dedup} 个跨分镜重复提示词")
 
             _quality_recalculated = 0
             for s in shots:

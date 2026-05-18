@@ -887,6 +887,7 @@ class PasswordResetDialog(tk.Toplevel):
         threading.Thread(target=do_reset, daemon=True).start()
 
     def _on_reset_success(self, message):
+        LicenseManager().clear_login_credentials()
         messagebox.showinfo("成功", message, parent=self)
         self.destroy()
 
