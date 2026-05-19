@@ -14,15 +14,16 @@ from ..models import (
     OrderStatus,
 )
 from .license_service import cleanup_expired_license_keys
+from ..config import settings
 
 logger = logging.getLogger("videogen")
 
-AUDIT_LOG_RETENTION_DAYS = 90
-PAYMENT_NOTIFY_RETENTION_DAYS = 90
-EXPIRED_ORDER_RETENTION_DAYS = 30
-HEARTBEAT_RETENTION_DAYS = 30
+AUDIT_LOG_RETENTION_DAYS = settings.AUDIT_LOG_RETENTION_DAYS
+PAYMENT_NOTIFY_RETENTION_DAYS = settings.PAYMENT_NOTIFY_RETENTION_DAYS
+EXPIRED_ORDER_RETENTION_DAYS = settings.EXPIRED_ORDER_RETENTION_DAYS
+HEARTBEAT_RETENTION_DAYS = settings.HEARTBEAT_RETENTION_DAYS
 PENDING_ORDER_EXPIRE_HOURS = 2
-CLEANUP_INTERVAL_HOURS = 6
+CLEANUP_INTERVAL_HOURS = settings.CLEANUP_INTERVAL_HOURS
 
 
 async def run_database_cleanup():
@@ -72,7 +73,11 @@ async def run_database_cleanup():
             await db.commit()
 
             try:
-                await db.execute(text("VACUUM (ANALYZE)"))
+                # VACUUM 不能在事务内执行，需要使用 autocommit 连接
+                from ..database import engine
+                async with engine.connect() as conn:
+                    await conn.execute(text("VACUUM (ANALYZE)"))
+                    await conn.commit()
             except Exception:
                 pass
 

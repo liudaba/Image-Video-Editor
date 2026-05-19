@@ -8,7 +8,7 @@ from typing import Dict, Any
 import json
 
 from ..database import get_db
-from ..models import Order, User, License, LicenseKey, OrderStatus, PlanType, LicenseKeyStatus, PaymentNotifyLog, validate_order_status_transition
+from ..models import Order, User, License, LicenseKey, OrderStatus, PlanType, LicenseType, LicenseKeyStatus, PaymentNotifyLog, validate_order_status_transition
 from ..auth import require_admin, get_current_user
 from ..schemas import PaymentCreateOrder, OrderResponse
 from ..services.payment_service import (
@@ -171,7 +171,8 @@ async def alipay_callback(
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:
-                existing_license.license_type = "pro"
+                existing_license.license_type = LicenseType.PRO
+                existing_license.plan_type = order.plan_type
                 existing_license.is_valid = True
                 from datetime import timedelta
                 plan_deltas = {
@@ -273,7 +274,8 @@ async def wechat_callback(
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:
-                existing_license.license_type = "pro"
+                existing_license.license_type = LicenseType.PRO
+                existing_license.plan_type = order.plan_type
                 existing_license.is_valid = True
                 from datetime import timedelta
                 plan_deltas = {

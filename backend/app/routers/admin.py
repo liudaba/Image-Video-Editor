@@ -3,7 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, or_
+from sqlalchemy import select, func, desc, or_, delete, update
 
 from ..database import get_db
 from ..models import (
@@ -404,6 +404,17 @@ async def delete_user(
     if target.id == user.id:
         raise HTTPException(status_code=400, detail="不能删除自己的账户")
     
+    # 级联删除关联数据
+    await db.execute(delete(HeartbeatLog).where(HeartbeatLog.user_id == user_id))
+    await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
+    await db.execute(delete(License).where(License.user_id == user_id))
+    # 将该用户激活的密钥状态重置为未使用
+    await db.execute(
+        update(LicenseKey)
+        .where(LicenseKey.activated_by == user_id, LicenseKey.status == LicenseKeyStatus.ACTIVATED)
+        .values(status=LicenseKeyStatus.UNUSED, activated_by=None, activated_at=None)
+    )
+    
     await db.delete(target)
     await db.flush()
     await _log_audit(db, user, "delete_user", f"user_id={user_id}", request)
@@ -559,16 +570,7 @@ async def refund_order(
         select(License).where(License.user_id == order.user_id)
     )
     user_license = license_result.scalar_one_or_none()
-    if user_license and user_license.license_key == order.order_no:
-        user_license.is_valid = False
-        user_license.license_type = LicenseType.TRIAL
-        from datetime import timedelta as _td
-        now = datetime.now(timezone.utc)
-        user_license.expiry_date = now + _td(days=7)
-        user_license.trial_start = now
-        user_license.trial_end = user_license.expiry_date
-        await db.flush()
-    elif user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
+    if user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
         user_license.is_valid = False
         user_license.license_type = LicenseType.TRIAL
         from datetime import timedelta as _td

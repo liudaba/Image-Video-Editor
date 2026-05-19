@@ -23,14 +23,13 @@ engine = create_async_engine(
     **_engine_kwargs,
 )
 
-# 创建会话工厂
-AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# 创建会话工厂（统一使用 async_sessionmaker）
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionFactory() as session:
+    async with async_session() as session:
         yield session
 
 async def init_db():

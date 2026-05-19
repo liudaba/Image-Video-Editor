@@ -146,7 +146,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return True
 
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _get_real_ip(request)
         if not self._check_redis_rate(client_ip, request.url.path):
             return JSONResponse(status_code=429, content={"detail": "请求过于频繁,请稍后再试"})
         return await call_next(request)
@@ -190,6 +190,7 @@ app = FastAPI(
 
 @app.exception_handler(sqlalchemy.exc.IntegrityError)
 async def integrity_error_handler(request: Request, exc: sqlalchemy.exc.IntegrityError):
+    logger.error(f"IntegrityError: {exc}", exc_info=True)
     return JSONResponse(status_code=409, content={"detail": "数据冲突,请检查输入"})
 
 
@@ -283,10 +284,11 @@ async def health_check():
         pass
 
     try:
-        import redis as _redis
-        r = _redis.from_url(settings.REDIS_URL, socket_timeout=2)
-        r.ping()
-        redis_ok = True
+        from .auth import _get_redis
+        r = _get_redis()
+        if r:
+            r.ping()
+            redis_ok = True
     except Exception:
         pass
 
@@ -339,6 +341,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
     access_token = create_access_token(data={"user_id": user.id, "username": user.username})
     csrf_token = secrets.token_hex(32)
     response = JSONResponse(content={"success": True, "access_token": access_token, "csrf_token": csrf_token})
+    is_secure = request.url.scheme == "https"
     response.set_cookie(
         key="admin_session",
         value=access_token,
@@ -346,7 +349,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
         samesite="lax",
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
-        secure=False,
+        secure=is_secure,
     )
     response.set_cookie(
         key="csrf_token",
@@ -355,7 +358,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
         samesite="lax",
         max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
-        secure=False,
+        secure=is_secure,
     )
     return response
 

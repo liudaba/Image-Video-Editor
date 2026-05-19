@@ -38,21 +38,11 @@ _RESET_CODE_TTL = 600
 _RESET_CODE_MAX_ATTEMPTS = 5
 
 
-_reset_redis_pool = None
-
 def _get_redis_for_reset():
-    global _reset_redis_pool
-    if _reset_redis_pool is None:
-        try:
-            import redis
-            _reset_redis_pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL, socket_timeout=2, max_connections=5
-            )
-        except Exception:
-            return None
+    """复用 auth 模块的全局 Redis 连接池，避免创建额外连接池"""
     try:
-        import redis
-        return redis.Redis(connection_pool=_reset_redis_pool)
+        from ..auth import _get_redis
+        return _get_redis()
     except Exception:
         return None
 

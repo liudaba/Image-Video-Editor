@@ -66,7 +66,8 @@ services:
     volumes:
       - ./keys:/app/keys
       - ./logs:/app/logs
-      - ./app:/app/app
+      # 开发调试用：挂载源码实时生效。生产环境应注释下行，依赖镜像构建
+      # - ./app:/app/app
     mem_limit: 1g
     cpus: 2
     stop_grace_period: 45s
