@@ -341,7 +341,7 @@ async def admin_login(request: Request, db=Depends(get_db)):
     access_token = create_access_token(data={"user_id": user.id, "username": user.username})
     csrf_token = secrets.token_hex(32)
     response = JSONResponse(content={"success": True, "access_token": access_token, "csrf_token": csrf_token})
-    is_secure = request.url.scheme == "https"
+    is_secure = request.url.scheme == "https" or request.headers.get("X-Forwarded-Proto") == "https"
     response.set_cookie(
         key="admin_session",
         value=access_token,

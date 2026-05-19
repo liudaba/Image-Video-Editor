@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from ..config import settings
-from ..models import License, LicenseKey, User, LicenseKeyStatus, PlanType
+from ..models import License, LicenseKey, User, LicenseKeyStatus, LicenseType, PlanType
 from ..schemas import LicenseData
 
 _SIG_KEY = "_sig"
@@ -137,7 +137,7 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
 
     license_obj = License(
         user_id=user_id,
-        license_type="trial",
+        license_type=LicenseType.TRIAL,
         plan_type=PlanType.TRIAL_15D,
         is_valid=True,
         trial_start=trial_start,
@@ -177,10 +177,10 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
 
     if license_key_obj.plan_type == PlanType.LIFETIME:
         expiry_date = None
-        license_type = "pro"
+        license_type = LicenseType.PRO
     elif license_key_obj.plan_type == PlanType.TRIAL_15D:
         expiry_delta = timedelta(days=15)
-        license_type = "trial"
+        license_type = LicenseType.TRIAL
     else:
         if license_key_obj.plan_type == PlanType.MONTHLY:
             expiry_delta = timedelta(days=30)
@@ -192,7 +192,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             expiry_delta = timedelta(days=30)
 
         expiry_date = datetime.now(timezone.utc) + expiry_delta
-        license_type = "pro"
+        license_type = LicenseType.PRO
 
     existing_result = await db.execute(
         select(License).where(License.user_id == user_id)
@@ -202,7 +202,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     if existing_license:
         existing_license.plan_type = license_key_obj.plan_type
         if license_key_obj.plan_type == PlanType.LIFETIME:
-            existing_license.license_type = "pro"
+            existing_license.license_type = LicenseType.PRO
             existing_license.license_key = license_key
             existing_license.is_valid = True
             existing_license.expiry_date = None
@@ -210,7 +210,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             await db.commit()
             return existing_license
         elif license_key_obj.plan_type == PlanType.TRIAL_15D:
-            if existing_license.license_type in ("pro",) and not existing_license.expiry_date:
+            if existing_license.license_type == LicenseType.PRO and not existing_license.expiry_date:
                 await db.flush()
                 await db.commit()
                 return existing_license
@@ -249,7 +249,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             else:
                 expiry_date = datetime.now(timezone.utc) + expiry_delta
 
-        if license_key_obj.plan_type != PlanType.TRIAL_15D or existing_license.license_type not in ("pro",):
+        if license_key_obj.plan_type != PlanType.TRIAL_15D or existing_license.license_type != LicenseType.PRO:
             existing_license.license_type = license_type
         existing_license.license_key = license_key
         existing_license.is_valid = True
@@ -271,8 +271,8 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             license_key=license_key,
             is_valid=True,
             expiry_date=expiry_date,
-            trial_start=datetime.now(timezone.utc) if license_type == "trial" else None,
-            trial_end=expiry_date if license_type == "trial" else None,
+            trial_start=datetime.now(timezone.utc) if license_type == LicenseType.TRIAL else None,
+            trial_end=expiry_date if license_type == LicenseType.TRIAL else None,
         )
         db.add(license_obj)
         await db.flush()
@@ -348,6 +348,7 @@ def encode_license_data(license: License, username: str) -> LicenseData:
     data_without_sig = {
         "username": username,
         "license_type": license.license_type if isinstance(license.license_type, str) else license.license_type.value,
+        "plan_type": license.plan_type.value if license.plan_type else None,
         "is_valid": license.is_valid,
         "days_left": days_left,
         "trial_start": trial_start_str,
@@ -363,6 +364,7 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         sig_ver=sig_ver,
         username=username,
         license_type=license.license_type if isinstance(license.license_type, str) else license.license_type.value,
+        plan_type=license.plan_type.value if license.plan_type else None,
         is_valid=license.is_valid,
         days_left=days_left,
         trial_start=trial_start_str,

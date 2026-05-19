@@ -73,11 +73,11 @@ async def run_database_cleanup():
             await db.commit()
 
             try:
-                # VACUUM 不能在事务内执行，需要使用 autocommit 连接
+                # VACUUM 不能在事务内执行，需要使用 autocommit isolation level
                 from ..database import engine
                 async with engine.connect() as conn:
+                    await conn.execution_options(isolation_level="AUTOCOMMIT")
                     await conn.execute(text("VACUUM (ANALYZE)"))
-                    await conn.commit()
             except Exception:
                 pass
 

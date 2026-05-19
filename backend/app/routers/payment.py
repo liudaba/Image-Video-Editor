@@ -26,13 +26,14 @@ router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 def _check_callback_ip(request: Request) -> bool:
     from ..config import settings
+    from ..main import _get_real_ip
     allowed_str = settings.PAYMENT_CALLBACK_ALLOWED_IPS
     if not allowed_str or not allowed_str.strip():
         return True
     allowed = [ip.strip() for ip in allowed_str.split(",") if ip.strip()]
     if not allowed:
         return True
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_real_ip(request)
     return client_ip in allowed
 
 

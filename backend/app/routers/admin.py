@@ -18,12 +18,16 @@ router = APIRouter(prefix="/api/admin", tags=["管理后台"])
 
 
 async def _log_audit(db: AsyncSession, admin: User, action: str, detail: str = None, request: Request = None):
+    ip_address = None
+    if request:
+        from ..main import _get_real_ip
+        ip_address = _get_real_ip(request)
     log = AuditLog(
         operator_id=admin.id,
         operator_name=admin.username,
         action=action,
         detail=detail,
-        ip_address=request.client.host if request and request.client else None,
+        ip_address=ip_address,
     )
     db.add(log)
     await db.flush()
@@ -524,7 +528,8 @@ async def confirm_payment(
     )
     existing_license = license_result.scalar_one_or_none()
     if existing_license:
-        existing_license.license_type = "pro"
+        existing_license.license_type = LicenseType.PRO
+        existing_license.plan_type = order.plan_type
         existing_license.is_valid = True
         from datetime import timedelta
         plan_deltas = {
@@ -573,6 +578,7 @@ async def refund_order(
     if user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
         user_license.is_valid = False
         user_license.license_type = LicenseType.TRIAL
+        user_license.plan_type = PlanType.TRIAL_15D
         from datetime import timedelta as _td
         now = datetime.now(timezone.utc)
         user_license.expiry_date = now + _td(days=7)

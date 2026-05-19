@@ -11,7 +11,7 @@ import time
 from typing import Optional
 
 from ..database import get_db
-from ..models import User, MachineBinding, License
+from ..models import User, MachineBinding, License, LicenseType
 from ..schemas import UserRegister, UserLogin, LoginResponse, PasswordResetRequest, PasswordResetConfirm
 from ..auth import (
     get_current_user,
@@ -225,7 +225,7 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
             .join(MachineBinding, MachineBinding.user_id == License.user_id)
             .where(
                 MachineBinding.fingerprint == user_data.fingerprint,
-                License.license_type == "trial",
+                License.license_type == LicenseType.TRIAL,
                 License.is_valid == True,
             )
         )

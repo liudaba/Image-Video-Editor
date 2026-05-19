@@ -80,40 +80,70 @@ def decode_access_token(token: str) -> TokenData:
 _memory_rate_limit: dict = {}
 
 def check_login_rate_limit(identifier: str) -> bool:
+    r = _get_redis()
+    if r is not None:
+        try:
+            lock_key = f"login_lockout:{identifier}"
+            if r.exists(lock_key):
+                return False
+            fail_key = f"login_fail:{identifier}"
+            fails = int(r.get(fail_key) or 0)
+            if fails >= MAX_LOGIN_ATTEMPTS:
+                r.setex(lock_key, LOCKOUT_SECONDS, "1")
+                r.delete(fail_key)
+                return False
+            return True
+        except Exception:
+            pass
+    # Fallback to in-memory rate limiting
+    now = time.time()
+    entry = _memory_rate_limit.get(identifier)
+    if entry is None:
+        return True
+    lockout_until = entry.get("lockout_until")
+    if lockout_until and now < lockout_until:
+        return False
+    if lockout_until and now >= lockout_until:
+        del _memory_rate_limit[identifier]
+        return True
+    fails = entry.get("fails", 0)
+    if fails >= MAX_LOGIN_ATTEMPTS:
+        entry["lockout_until"] = now + LOCKOUT_SECONDS
+        return False
     return True
 
 
 def record_login_failure(identifier: str):
     r = _get_redis()
-    if r is None:
-        now = time.time()
-        entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
-        entry["fails"] += 1
-        if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
-            entry["lockout_until"] = now + LOCKOUT_SECONDS
-        _memory_rate_limit[identifier] = entry
-        return
-    try:
-        fail_key = f"login_fail:{identifier}"
-        lock_key = f"login_lockout:{identifier}"
-        fails = r.incr(fail_key)
-        r.expire(fail_key, LOCKOUT_SECONDS)
-        if fails >= MAX_LOGIN_ATTEMPTS:
-            r.setex(lock_key, LOCKOUT_SECONDS, "1")
-    except Exception:
-        pass
+    if r is not None:
+        try:
+            fail_key = f"login_fail:{identifier}"
+            lock_key = f"login_lockout:{identifier}"
+            fails = r.incr(fail_key)
+            r.expire(fail_key, LOCKOUT_SECONDS)
+            if fails >= MAX_LOGIN_ATTEMPTS:
+                r.setex(lock_key, LOCKOUT_SECONDS, "1")
+            return
+        except Exception:
+            pass
+    # Fallback to in-memory
+    now = time.time()
+    entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
+    entry["fails"] += 1
+    if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
+        entry["lockout_until"] = now + LOCKOUT_SECONDS
+    _memory_rate_limit[identifier] = entry
 
 
 def clear_login_failures(identifier: str):
     r = _get_redis()
-    if r is None:
-        _memory_rate_limit.pop(identifier, None)
-        return
-    try:
-        r.delete(f"login_fail:{identifier}")
-        r.delete(f"login_lockout:{identifier}")
-    except Exception:
-        pass
+    if r is not None:
+        try:
+            r.delete(f"login_fail:{identifier}")
+            r.delete(f"login_lockout:{identifier}")
+        except Exception:
+            pass
+    _memory_rate_limit.pop(identifier, None)
 
 
 async def get_current_user(
