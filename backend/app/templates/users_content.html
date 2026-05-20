@@ -38,12 +38,19 @@
                     <button class="btn btn-sm btn-primary" id="add-user-btn">
                         <i class="fas fa-plus"></i> 添加用户
                     </button>
+                    <button class="btn btn-sm btn-warning" id="batch-disable-btn" style="display:none">
+                        <i class="fas fa-ban"></i> 批量禁用
+                    </button>
+                    <button class="btn btn-sm btn-success" id="batch-enable-btn" style="display:none">
+                        <i class="fas fa-check"></i> 批量启用
+                    </button>
                 </div>
             </div>
             
             <table class="table table-bordered" id="users-table" width="100%" cellspacing="0">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="select-all-users"></th>
                         <th>ID</th>
                         <th>用户名</th>
                         <th>邮箱</th>
@@ -106,6 +113,28 @@
         document.getElementById('add-user-btn').addEventListener('click', () => {
             showAddUserModal();
         });
+        
+        // 全选/取消全选
+        document.getElementById('select-all-users').addEventListener('change', function() {
+            document.querySelectorAll('.user-checkbox').forEach(cb => cb.checked = this.checked);
+            updateBatchButtons();
+        });
+        
+        // 批量禁用
+        document.getElementById('batch-disable-btn').addEventListener('click', async () => {
+            const ids = getSelectedUserIds();
+            if (ids.length === 0) return;
+            if (!confirm(`确定要禁用选中的 ${ids.length} 个用户吗？`)) return;
+            await batchToggleUsers(ids, true);
+        });
+        
+        // 批量启用
+        document.getElementById('batch-enable-btn').addEventListener('click', async () => {
+            const ids = getSelectedUserIds();
+            if (ids.length === 0) return;
+            if (!confirm(`确定要启用选中的 ${ids.length} 个用户吗？`)) return;
+            await batchToggleUsers(ids, false);
+        });
     }
 
     // 加载用户列表
@@ -142,6 +171,7 @@
                     }).join('<br>')
                     : '-';
                 row.innerHTML = `
+                    <td><input type="checkbox" class="user-checkbox" data-user-id="${user.id}" onchange="updateBatchButtons()"></td>
                     <td>${user.id}</td>
                     <td>${escapeHtml(user.username)}</td>
                     <td>${escapeHtml(user.email)}</td>
@@ -371,6 +401,13 @@
                         <input type="datetime-local" class="form-control" id="edit-expiry-date">
                         <small class="text-muted">留空则不修改；选择后将覆盖自动计算的到期时间</small>
                     </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">设备心跳记录</label>
+                        <div id="user-heartbeat-history" style="max-height:200px;overflow-y:auto;">
+                            <small class="text-muted">加载中...</small>
+                        </div>
+                    </div>
                 </form>
             `;
             
@@ -379,6 +416,9 @@
             
             const modal = new bootstrap.Modal(document.getElementById('commonModal'));
             modal.show();
+            
+            // 加载心跳历史
+            loadUserHeartbeatHistory(userId);
             
             document.getElementById('confirmModalBtn').onclick = async function() {
                 try {
@@ -452,5 +492,57 @@
                 showError(`删除用户失败: ${error.message}`);
             }
         };
+    }
+    // 获取选中的用户ID
+    function getSelectedUserIds() {
+        return Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.dataset.userId));
+    }
+    
+    // 更新批量操作按钮显示状态
+    function updateBatchButtons() {
+        const ids = getSelectedUserIds();
+        document.getElementById('batch-disable-btn').style.display = ids.length > 0 ? '' : 'none';
+        document.getElementById('batch-enable-btn').style.display = ids.length > 0 ? '' : 'none';
+    }
+    
+    // 批量切换用户状态
+    async function batchToggleUsers(userIds, disable) {
+        let successCount = 0;
+        let failCount = 0;
+        for (const uid of userIds) {
+            try {
+                await apiRequest(`/api/admin/users/${uid}/toggle_active`, { method: 'POST' });
+                successCount++;
+            } catch (e) {
+                failCount++;
+            }
+        }
+        showSuccess(`${disable ? '禁用' : '启用'}完成：成功 ${successCount} 个${failCount > 0 ? '，失败 ' + failCount + ' 个' : ''}`);
+        loadUsers(usersCurrentPage);
+    }
+    
+    // 加载用户心跳历史
+    async function loadUserHeartbeatHistory(userId) {
+        const container = document.getElementById('user-heartbeat-history');
+        if (!container) return;
+        try {
+            const data = await apiRequest(`/api/admin/users/${userId}/heartbeat_history?page=1&page_size=10`);
+            if (!data.logs || data.logs.length === 0) {
+                container.innerHTML = '<small class="text-muted">暂无心跳记录</small>';
+                return;
+            }
+            let html = '<table class="table table-sm table-bordered" style="font-size:0.8em"><thead><tr><th>时间</th><th>指纹</th><th>版本</th><th>IP</th></tr></thead><tbody>';
+            data.logs.forEach(log => {
+                const fp = log.fingerprint ? log.fingerprint.substring(0, 12) + '...' : '-';
+                html += `<tr><td>${formatDate(log.created_at)}</td><td title="${escapeHtml(log.fingerprint || '')}">${fp}</td><td>${escapeHtml(log.app_version || '-')}</td><td>${escapeHtml(log.ip_address || '-')}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            if (data.total > 10) {
+                html += `<small class="text-muted">共 ${data.total} 条记录，显示最近10条</small>`;
+            }
+            container.innerHTML = html;
+        } catch (error) {
+            container.innerHTML = '<small class="text-danger">加载失败</small>';
+        }
     }
 </script>

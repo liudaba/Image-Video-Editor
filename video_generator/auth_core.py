@@ -479,6 +479,12 @@ class LicenseManager:
             if not self.license_data:
                 return
             if not self._check_fingerprint_elastic():
+                # 授权失效，先尝试静默重登录自动恢复
+                if self._try_silent_relogin():
+                    self._consecutive_failures = 0
+                    self._current_heartbeat_interval = _HEARTBEAT_INTERVAL
+                    self._revoked_notified = False
+                    return
                 signed_data = self.license_data.get("signed", self.license_data)
                 signed_data["is_valid"] = False
                 self._save_signed_license(

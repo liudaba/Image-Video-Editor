@@ -344,6 +344,28 @@ async def list_orders(
     }
 
 
+@router.get("/order-status/{order_id}", summary="查询订单状态")
+async def get_order_status(
+    order_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(Order).where(Order.id == order_id, Order.user_id == current_user.id)
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "status": order.status.value,
+        "plan_type": order.plan_type.value if order.plan_type else None,
+        "amount": float(order.amount),
+        "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+    }
+
+
 @router.get("/methods", summary="获取支持的支付方式")
 async def get_payment_methods():
     from ..services.payment_service import _get_alipay_instance, _get_wechat_client

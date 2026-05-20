@@ -1461,7 +1461,52 @@ class PurchaseDialog(tk.Toplevel):
         if qr_code:
             pay_name = "支付宝" if payment_method == "alipay" else "微信"
             info += f"\n请使用{pay_name}扫描以下二维码支付:\n{qr_code}"
+        info += "\n\n支付完成后将自动检测..."
         messagebox.showinfo("订单创建成功", info, parent=self)
+        # 启动订单状态轮询
+        if order_id:
+            self._poll_order_status(order_id)
+
+    def _poll_order_status(self, order_id, attempt=0, max_attempts=60):
+        """轮询订单状态，支付成功后自动刷新授权"""
+        if attempt >= max_attempts:
+            return
+        if not self.winfo_exists():
+            return
+
+        def _check():
+            try:
+                mgr = LicenseManager()
+                token = mgr._get_token()
+                if not token:
+                    return
+                from .config import get_api_base_url, get_http_session
+                response = get_http_session().get(
+                    f"{get_api_base_url()}/api/payment/order-status/{order_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "paid":
+                        # 支付成功，刷新授权
+                        mgr.refresh_license()
+                        self.after(0, lambda: self._safe_call(lambda: self._on_payment_confirmed()))
+                        return
+            except Exception:
+                pass
+            # 继续轮询，间隔3秒
+            self.after(3000, lambda: self._poll_order_status(order_id, attempt + 1, max_attempts))
+
+        if attempt == 0:
+            # 首次等待5秒再开始轮询
+            self.after(5000, lambda: threading.Thread(target=_check, daemon=True).start())
+        else:
+            threading.Thread(target=_check, daemon=True).start()
+
+    def _on_payment_confirmed(self):
+        messagebox.showinfo("支付成功", "支付已确认，专业版已开通！", parent=self)
+        self.destroy()
 
     def _on_purchase_failure(self, result, payment_method):
         self._alipay_btn.configure(state=tk.NORMAL, text="支付宝支付")

@@ -4,7 +4,7 @@
 </div>
 
 <div class="row mb-4">
-    <div class="col-xl-3 col-md-6 mb-4">
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
         <div class="card stat-card border-start-primary shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
@@ -19,8 +19,24 @@
             </div>
         </div>
     </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
+
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
+        <div class="card stat-card border-start-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">今日新增</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="today-new-users">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-user-plus fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
         <div class="card stat-card border-start-success shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
@@ -35,29 +51,45 @@
             </div>
         </div>
     </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stat-card border-start-info shadow h-100 py-2">
+
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
+        <div class="card stat-card border-start-warning shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">付费订单</div>
-                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="paid-orders">-</span></div>
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">即将到期(7天)</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="expiring-soon">-</span></div>
                     </div>
                     <div class="col-auto">
-                        <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                        <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <div class="col-xl-3 col-md-6 mb-4">
-        <div class="card stat-card border-start-warning shadow h-100 py-2">
+
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
+        <div class="card stat-card border-start-cyan shadow h-100 py-2">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
-                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">总收入</div>
+                        <div class="text-xs font-weight-bold text-cyan text-uppercase mb-1">在线设备(24h)</div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800"><span id="online-devices">-</span></div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-desktop fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-md-4 col-sm-6 mb-4">
+        <div class="card stat-card border-start-danger shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">总收入</div>
                         <div class="h5 mb-0 font-weight-bold text-gray-800">¥<span id="total-revenue">-</span></div>
                     </div>
                     <div class="col-auto">
@@ -120,13 +152,44 @@
     </div>
 </div>
 
+<!-- 到期预警区域 -->
+<div class="row mb-4" id="expiry-warning-section" style="display:none">
+    <div class="col-12">
+        <div class="card shadow border-warning mb-4">
+            <div class="card-header py-3 bg-warning text-dark">
+                <h6 class="m-0 font-weight-bold"><i class="fas fa-exclamation-triangle me-2"></i>到期预警（7天内到期）</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm" width="100%">
+                        <thead>
+                            <tr>
+                                <th>用户名</th>
+                                <th>邮箱</th>
+                                <th>套餐</th>
+                                <th>剩余天数</th>
+                                <th>到期时间</th>
+                                <th>最后在线</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expiring-users-list">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     async function loadDashboardContent() {
         try {
             const stats = await apiRequest('/api/admin/stats');
             document.getElementById('total-users').textContent = stats.total_users;
+            document.getElementById('today-new-users').textContent = stats.today_new_users;
             document.getElementById('active-licenses').textContent = stats.active_licenses;
-            document.getElementById('paid-orders').textContent = stats.paid_orders;
+            document.getElementById('expiring-soon').textContent = stats.expiring_soon;
+            document.getElementById('online-devices').textContent = stats.online_devices;
             document.getElementById('total-revenue').textContent = stats.total_revenue.toFixed(2);
 
             const usersRes = await apiRequest('/api/admin/users?page=1&page_size=5');
@@ -168,6 +231,32 @@
                 const row = document.createElement('tr');
                 row.innerHTML = '<td colspan="4" class="text-center">暂无订单数据</td>';
                 ordersList.appendChild(row);
+            }
+
+            // 加载到期预警
+            if (stats.expiring_soon > 0) {
+                try {
+                    const expiringRes = await apiRequest('/api/admin/expiring_users?days=7');
+                    const expiringList = document.getElementById('expiring-users-list');
+                    expiringList.innerHTML = '';
+                    const planTypeMap = {'trial_15d': '试用', 'monthly': '月付', 'quarterly': '季付', 'yearly': '年付', 'lifetime': '终身'};
+                    expiringRes.users.forEach(u => {
+                        const row = document.createElement('tr');
+                        const urgencyClass = u.days_remaining <= 1 ? 'text-danger fw-bold' : u.days_remaining <= 3 ? 'text-warning' : '';
+                        row.innerHTML = `
+                            <td>${escapeHtml(u.username)}</td>
+                            <td>${escapeHtml(u.email || '-')}</td>
+                            <td><span class="badge bg-info">${planTypeMap[u.plan_type] || u.plan_type || '-'}</span></td>
+                            <td class="${urgencyClass}">${u.days_remaining} 天</td>
+                            <td>${formatDate(u.expiry_date)}</td>
+                            <td>${u.last_heartbeat ? formatDate(u.last_heartbeat) : '-'}</td>
+                        `;
+                        expiringList.appendChild(row);
+                    });
+                    document.getElementById('expiry-warning-section').style.display = '';
+                } catch (e) {
+                    console.error('加载到期预警失败:', e);
+                }
             }
         } catch (error) {
             console.error('加载仪表盘数据失败:', error);

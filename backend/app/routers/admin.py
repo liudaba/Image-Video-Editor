@@ -78,6 +78,33 @@ async def get_stats(
         select(func.coalesce(func.sum(Order.amount), 0)).where(Order.status == OrderStatus.PAID)
     )
 
+    # 今日新增用户
+    from datetime import timedelta
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_new_users = await db.scalar(
+        select(func.count(User.id)).where(User.created_at >= today_start)
+    )
+
+    # 即将到期用户（7天内到期）
+    expiry_warning_date = datetime.now(timezone.utc) + timedelta(days=7)
+    expiring_soon = await db.scalar(
+        select(func.count(License.id)).where(
+            License.is_valid == True,
+            License.expiry_date != None,
+            License.expiry_date <= expiry_warning_date,
+            License.expiry_date > datetime.now(timezone.utc),
+        )
+    )
+
+    # 在线设备数（24小时内有心跳）
+    online_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    online_devices = await db.scalar(
+        select(func.count(License.id)).where(
+            License.last_heartbeat != None,
+            License.last_heartbeat >= online_cutoff,
+        )
+    )
+
     return {
         "total_users": total_users,
         "active_licenses": active_licenses,
@@ -85,6 +112,9 @@ async def get_stats(
         "pro_users": pro_users,
         "paid_orders": paid_orders,
         "total_revenue": float(total_revenue),
+        "today_new_users": today_new_users or 0,
+        "expiring_soon": expiring_soon or 0,
+        "online_devices": online_devices or 0,
     }
 
 
@@ -1148,6 +1178,106 @@ async def list_audit_logs(
                 "operator_name": l.operator_name,
                 "action": l.action,
                 "detail": l.detail,
+                "ip_address": l.ip_address,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
+    }
+
+
+@router.get("/expiring_users")
+async def list_expiring_users(
+    days: int = 7,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """即将到期的用户列表，方便运营提前介入"""
+    from datetime import timedelta
+    days = max(1, min(days, 30))
+    now = datetime.now(timezone.utc)
+    expiry_cutoff = now + timedelta(days=days)
+
+    result = await db.execute(
+        select(License, User)
+        .join(User, User.id == License.user_id)
+        .where(
+            License.is_valid == True,
+            License.expiry_date != None,
+            License.expiry_date > now,
+            License.expiry_date <= expiry_cutoff,
+        )
+        .order_by(License.expiry_date.asc())
+    )
+    rows = result.scalars().all()
+
+    # 需要重新查询获取User信息
+    expiring_list = []
+    lic_result = await db.execute(
+        select(License, User)
+        .join(User, User.id == License.user_id)
+        .where(
+            License.is_valid == True,
+            License.expiry_date != None,
+            License.expiry_date > now,
+            License.expiry_date <= expiry_cutoff,
+        )
+        .order_by(License.expiry_date.asc())
+    )
+    for lic, u in lic_result:
+        exp = lic.expiry_date
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        days_remaining = (exp - now).days
+        expiring_list.append({
+            "user_id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "license_type": lic.license_type.value,
+            "plan_type": lic.plan_type.value if lic.plan_type else None,
+            "expiry_date": lic.expiry_date.isoformat() if lic.expiry_date else None,
+            "days_remaining": days_remaining,
+            "last_heartbeat": lic.last_heartbeat.isoformat() if lic.last_heartbeat else None,
+        })
+
+    return {"users": expiring_list, "total": len(expiring_list)}
+
+
+@router.get("/users/{user_id}/heartbeat_history")
+async def get_user_heartbeat_history(
+    user_id: int,
+    page: int = 1,
+    page_size: int = 20,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """查看用户心跳历史，了解设备使用情况"""
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    offset = (page - 1) * page_size
+
+    count_query = select(func.count(HeartbeatLog.id)).where(HeartbeatLog.user_id == user_id)
+    total = await db.scalar(count_query)
+
+    result = await db.execute(
+        select(HeartbeatLog)
+        .where(HeartbeatLog.user_id == user_id)
+        .order_by(desc(HeartbeatLog.created_at))
+        .offset(offset)
+        .limit(page_size)
+    )
+    logs = result.scalars().all()
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "logs": [
+            {
+                "id": l.id,
+                "fingerprint": l.fingerprint,
+                "app_version": l.app_version,
+                "license_type": l.license_type,
                 "ip_address": l.ip_address,
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
