@@ -49,6 +49,15 @@ def _get_redis_for_reset():
 
 _memory_reset_codes = {}
 
+
+def _cleanup_expired_reset_codes():
+    """清理过期的内存验证码，防止内存泄漏"""
+    now = time.time()
+    expired = [k for k, (_, _, expire_at) in _memory_reset_codes.items() if now > expire_at]
+    for k in expired:
+        del _memory_reset_codes[k]
+
+
 def _store_reset_code(email: str, code: str) -> bool:
     r = _get_redis_for_reset()
     if r:
@@ -58,6 +67,7 @@ def _store_reset_code(email: str, code: str) -> bool:
             return True
         except Exception:
             pass
+    _cleanup_expired_reset_codes()
     _memory_reset_codes[email] = (code, 0, time.time() + _RESET_CODE_TTL)
     return True
 

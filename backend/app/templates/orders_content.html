@@ -12,8 +12,6 @@
                 <option value="pending">待支付</option>
                 <option value="paid">已支付</option>
                 <option value="expired">已过期</option>
-                <option value="refunded">已退款</option>
-                <option value="cancelled">已取消</option>
             </select>
             <button class="btn btn-sm btn-outline-secondary" id="refresh-orders">
                 <i class="fas fa-refresh"></i> 刷新
@@ -80,21 +78,11 @@
             response.orders.forEach(order => {
                 const row = document.createElement('tr');
                 let actionHtml = '-';
-                if (order.status === 'paid') {
-                    actionHtml = `
-                        <div class="table-actions">
-                            <button class="btn btn-sm btn-info" onclick="refundOrder(${order.id}, '${escapeHtml(order.order_no)}')" title="退款">
-                                <i class="fas fa-undo"></i> 退款
-                            </button>
-                        </div>`;
-                } else if (order.status === 'pending') {
+                if (order.status === 'pending') {
                     actionHtml = `
                         <div class="table-actions">
                             <button class="btn btn-sm btn-success" onclick="confirmPayment(${order.id}, '${escapeHtml(order.order_no)}')" title="确认支付">
                                 <i class="fas fa-check"></i> 确认
-                            </button>
-                            <button class="btn btn-sm btn-warning" onclick="cancelOrder(${order.id}, '${escapeHtml(order.order_no)}')" title="取消">
-                                <i class="fas fa-times"></i> 取消
                             </button>
                         </div>`;
                 }
@@ -111,8 +99,7 @@
                         <span class="badge ${
                             order.status === 'paid' ? 'bg-success' : 
                             order.status === 'pending' ? 'bg-warning' : 
-                            order.status === 'cancelled' ? 'bg-secondary' : 
-                            order.status === 'refunded' ? 'bg-info' : 'bg-danger'
+                            order.status === 'expired' ? 'bg-secondary' : 'bg-danger'
                         }">${escapeHtml(order.status_text)}</span>
                     </td>
                     <td>${order.paid_at ? formatDate(order.paid_at) : '-'}</td>
@@ -145,46 +132,6 @@
                 loadOrders(ordersCurrentPage);
             } catch (error) {
                 showError('确认支付失败: ' + error.message);
-            }
-        };
-    }
-
-    async function refundOrder(orderId, orderNo) {
-        const modalBody = document.getElementById('commonModalBody');
-        modalBody.innerHTML = `<p>确定要对订单 "<strong>${escapeHtml(orderNo)}</strong>" 进行退款吗？退款后订单状态将变为"已退款"。</p>`;
-        document.getElementById('commonModalLabel').textContent = '退款确认';
-        document.getElementById('confirmModalBtn').textContent = '确认退款';
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
-        modal.show();
-
-        document.getElementById('confirmModalBtn').onclick = async function() {
-            try {
-                await apiRequest(`/api/admin/orders/${orderId}/refund`, { method: 'POST' });
-                showSuccess('退款成功');
-                modal.hide();
-                loadOrders(ordersCurrentPage);
-            } catch (error) {
-                showError('退款失败: ' + error.message);
-            }
-        };
-    }
-
-    async function cancelOrder(orderId, orderNo) {
-        const modalBody = document.getElementById('commonModalBody');
-        modalBody.innerHTML = `<p>确定要取消订单 "<strong>${escapeHtml(orderNo)}</strong>" 吗？</p>`;
-        document.getElementById('commonModalLabel').textContent = '取消订单确认';
-        document.getElementById('confirmModalBtn').textContent = '确认取消';
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
-        modal.show();
-
-        document.getElementById('confirmModalBtn').onclick = async function() {
-            try {
-                await apiRequest(`/api/admin/orders/${orderId}/cancel`, { method: 'POST' });
-                showSuccess('取消成功');
-                modal.hide();
-                loadOrders(ordersCurrentPage);
-            } catch (error) {
-                showError('取消失败: ' + error.message);
             }
         };
     }

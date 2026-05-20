@@ -241,6 +241,14 @@ class LoginDialog(tk.Toplevel):
             borderwidth=0,
         )
 
+    def _safe_call(self, func):
+        """安全调用UI函数，窗口已销毁时忽略"""
+        try:
+            if self.winfo_exists():
+                func()
+        except Exception:
+            pass
+
     def _make_entry(self, parent, variable, show=None, placeholder=""):
         if show:
             frame = tk.Frame(parent, bg=self._INPUT_BORDER, bd=0,
@@ -531,9 +539,9 @@ class LoginDialog(tk.Toplevel):
             success, message = mgr.login_user(username, password)
             if success:
                 mgr.save_login_credentials(username, password, True, self._save_pass_var.get())
-                self.after(0, lambda: self._on_login_success(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_login_success(message)))
             else:
-                self.after(0, lambda: self._on_login_failure(message, login_btn))
+                self.after(0, lambda: self._safe_call(lambda: self._on_login_failure(message, login_btn)))
 
         threading.Thread(target=do_login, daemon=True).start()
 
@@ -575,6 +583,9 @@ class LoginDialog(tk.Toplevel):
         if len(password) < 8:
             messagebox.showwarning("提示", "密码至少8位", parent=self)
             return
+        if len(password) > 72:
+            messagebox.showwarning("提示", "密码不能超过72位", parent=self)
+            return
         if not re.search(r"[A-Z]", password):
             messagebox.showwarning(
                 "提示", "密码必须包含至少一个大写字母", parent=self
@@ -613,9 +624,9 @@ class LoginDialog(tk.Toplevel):
         def do_register():
             success, message = LicenseManager().register_user(username, email, password)
             if success:
-                self.after(0, lambda: self._on_register_success(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_register_success(message)))
             else:
-                self.after(0, lambda: self._on_register_failure(message, reg_btn))
+                self.after(0, lambda: self._safe_call(lambda: self._on_register_failure(message, reg_btn)))
 
         threading.Thread(target=do_register, daemon=True).start()
 
@@ -653,14 +664,14 @@ class LoginDialog(tk.Toplevel):
             mgr = LicenseManager()
             success, message = mgr.login_user(username, password)
             if not success:
-                self.after(0, lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn))
+                self.after(0, lambda: self._safe_call(lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn)))
                 return
             success2, message2 = mgr.activate_pro_license(code)
             if success2:
                 mgr.save_login_credentials(username, password, True, False)
-                self.after(0, lambda: self._on_activate_success())
+                self.after(0, lambda: self._safe_call(lambda: self._on_activate_success()))
             else:
-                self.after(0, lambda: self._on_activate_partial(message2, activate_btn))
+                self.after(0, lambda: self._safe_call(lambda: self._on_activate_partial(message2, activate_btn)))
 
         threading.Thread(target=do_activate, daemon=True).start()
 
@@ -672,7 +683,10 @@ class LoginDialog(tk.Toplevel):
     def _on_activate_partial(self, message, btn):
         if btn and btn.winfo_exists():
             btn.configure(state=tk.NORMAL, text="登录并激活")
-        messagebox.showerror("错误", f"激活失败: {message}", parent=self)
+        # 登录已成功但激活失败，用户已处于登录状态，关闭对话框让用户重试
+        messagebox.showerror("错误", f"激活失败: {message}\n您已登录成功，可稍后点击「购买会员」→「激活码」重新激活。", parent=self)
+        self.result = True
+        self.destroy()
 
     def _on_activate_failure(self, message, btn):
         if btn and btn.winfo_exists():
@@ -784,6 +798,14 @@ class PasswordResetDialog(tk.Toplevel):
             foreground=self._TEXT_FG,
             font=("Microsoft YaHei", 11),
         )
+
+    def _safe_call(self, func):
+        """安全调用UI函数，窗口已销毁时忽略"""
+        try:
+            if self.winfo_exists():
+                func()
+        except Exception:
+            pass
 
     def _make_entry(self, parent, variable, show=None):
         if show:
@@ -946,9 +968,9 @@ class PasswordResetDialog(tk.Toplevel):
             success, message = LicenseManager().request_password_reset(email)
             if success:
                 self._code_sent = True
-                self.after(0, lambda: self._on_send_code_success(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_send_code_success(message)))
             else:
-                self.after(0, lambda: self._on_send_code_failure(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_send_code_failure(message)))
 
         threading.Thread(target=do_send, daemon=True).start()
 
@@ -987,6 +1009,9 @@ class PasswordResetDialog(tk.Toplevel):
         if len(new_pass) < 8:
             messagebox.showwarning("提示", "新密码至少8位", parent=self)
             return
+        if len(new_pass) > 72:
+            messagebox.showwarning("提示", "新密码不能超过72位", parent=self)
+            return
         if not re.search(r"[A-Z]", new_pass):
             messagebox.showwarning(
                 "提示", "新密码必须包含至少一个大写字母", parent=self
@@ -1015,9 +1040,9 @@ class PasswordResetDialog(tk.Toplevel):
                 email, code, new_pass
             )
             if success:
-                self.after(0, lambda: self._on_reset_success(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_reset_success(message)))
             else:
-                self.after(0, lambda: self._on_reset_failure(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_reset_failure(message)))
 
         threading.Thread(target=do_reset, daemon=True).start()
 
@@ -1142,6 +1167,14 @@ class PurchaseDialog(tk.Toplevel):
             foreground=self._TEXT_FG,
             font=("Microsoft YaHei", 11),
         )
+
+    def _safe_call(self, func):
+        """安全调用UI函数，窗口已销毁时忽略"""
+        try:
+            if self.winfo_exists():
+                func()
+        except Exception:
+            pass
 
     def _make_entry(self, parent, variable, show=None):
         entry = tk.Entry(
@@ -1364,15 +1397,21 @@ class PurchaseDialog(tk.Toplevel):
                 "提示", "请输入正确的激活码", parent=self
             )
             return
+        mgr = LicenseManager()
+        if not mgr._get_token():
+            messagebox.showwarning(
+                "提示", "请先登录后再激活", parent=self
+            )
+            return
         self._activate_btn.configure(state=tk.DISABLED, text="激活中...")
 
         def do_activate():
             mgr = LicenseManager()
             success, message = mgr.activate_pro_license(code)
             if success:
-                self.after(0, lambda: self._on_purchase_activate_success(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_purchase_activate_success(message)))
             else:
-                self.after(0, lambda: self._on_purchase_activate_failure(message))
+                self.after(0, lambda: self._safe_call(lambda: self._on_purchase_activate_failure(message)))
 
         threading.Thread(target=do_activate, daemon=True).start()
 
@@ -1384,12 +1423,16 @@ class PurchaseDialog(tk.Toplevel):
         if hasattr(self, '_activate_btn') and self._activate_btn.winfo_exists():
             self._activate_btn.configure(state=tk.NORMAL, text="激活")
         messagebox.showerror(
-            "提示", "请输入正确的激活码", parent=self
+            "提示", f"激活失败: {message}", parent=self
         )
 
     def _do_purchase(self, payment_method):
         if not self._selected_plan:
             messagebox.showwarning("提示", "请先选择套餐", parent=self)
+            return
+        mgr = LicenseManager()
+        if not mgr._get_token():
+            messagebox.showwarning("提示", "请先登录后再购买", parent=self)
             return
         pay_btn = self._alipay_btn if payment_method == "alipay" else self._wechat_btn
         pay_btn.configure(state=tk.DISABLED, text="请求中...")
@@ -1400,9 +1443,9 @@ class PurchaseDialog(tk.Toplevel):
                 self._selected_plan, payment_method
             )
             if success:
-                self.after(0, lambda: self._on_purchase_success(result, payment_method))
+                self.after(0, lambda: self._safe_call(lambda: self._on_purchase_success(result, payment_method)))
             else:
-                self.after(0, lambda: self._on_purchase_failure(result, payment_method))
+                self.after(0, lambda: self._safe_call(lambda: self._on_purchase_failure(result, payment_method)))
 
         threading.Thread(target=do_purchase, daemon=True).start()
 
@@ -1432,55 +1475,46 @@ class PurchaseDialog(tk.Toplevel):
 def check_and_show_login(parent=None):
     license_mgr = LicenseManager()
     license_status = license_mgr.check_license()
-    if not license_status["valid"]:
-        if license_mgr._try_silent_relogin():
-            license_status = license_mgr.check_license()
-            if license_status["valid"]:
-                if not license_mgr.verify_with_server():
-                    license_status = license_mgr.check_license()
-                    if not license_status["valid"]:
-                        dialog = LoginDialog(parent)
-                        dialog.wait_window()
-                        if dialog.result:
-                            license_status = license_mgr.check_license()
-                            if license_status["valid"]:
-                                license_mgr.start_heartbeat()
-                                return license_status
-                            return license_status
-                        return {"valid": False, "message": "用户取消登录"}
-                license_mgr.start_heartbeat()
-                return license_status
+
+    # 辅助函数：尝试登录对话框并返回结果
+    def _try_login_dialog():
         dialog = LoginDialog(parent)
         dialog.wait_window()
         if dialog.result:
-            license_status = license_mgr.check_license()
-            if license_status["valid"]:
-                if not license_mgr.verify_with_server():
-                    license_status = license_mgr.check_license()
-                    if not license_status["valid"]:
-                        return license_status
+            status = license_mgr.check_license()
+            if status["valid"]:
                 license_mgr.start_heartbeat()
-                return license_status
+                return status
             verify_secret = _get_verify_secret()
             if not verify_secret:
                 return {
                     "valid": False,
                     "message": "授权验证组件缺失(.license_verify_key)，请联系客服",
                 }
-            return license_status
-        else:
-            return {"valid": False, "message": "用户取消登录"}
+            return status
+        return {"valid": False, "message": "用户取消登录"}
+
+    # 主流程
+    if not license_status["valid"]:
+        # 本地授权无效，尝试静默重登录
+        if license_mgr._try_silent_relogin():
+            license_status = license_mgr.check_license()
+            if license_status["valid"]:
+                # 重登录成功，验证服务器
+                if not license_mgr.verify_with_server():
+                    license_status = license_mgr.check_license()
+                    if not license_status["valid"]:
+                        return _try_login_dialog()
+                license_mgr.start_heartbeat()
+                return license_status
+        # 静默重登录失败或授权仍无效，弹出登录框
+        return _try_login_dialog()
+
+    # 本地授权有效，验证服务器
     if not license_mgr.verify_with_server():
         license_status = license_mgr.check_license()
         if not license_status["valid"]:
-            dialog = LoginDialog(parent)
-            dialog.wait_window()
-            if dialog.result:
-                license_status = license_mgr.check_license()
-                if license_status["valid"]:
-                    license_mgr.start_heartbeat()
-                    return license_status
-                return license_status
-            return {"valid": False, "message": "用户取消登录"}
+            return _try_login_dialog()
+
     license_mgr.start_heartbeat()
     return license_status

@@ -555,62 +555,6 @@ async def confirm_payment(
     return {"success": True, "message": "订单已手动确认支付"}
 
 
-@router.post("/orders/{order_id}/refund")
-async def refund_order(
-    order_id: int,
-    request: Request,
-    user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status != OrderStatus.PAID:
-        raise HTTPException(status_code=400, detail="只能退款已支付的订单")
-    order.status = OrderStatus.REFUNDED
-    await db.flush()
-
-    license_result = await db.execute(
-        select(License).where(License.user_id == order.user_id)
-    )
-    user_license = license_result.scalar_one_or_none()
-    if user_license and user_license.is_valid and user_license.license_type == LicenseType.PRO:
-        user_license.is_valid = False
-        user_license.license_type = LicenseType.TRIAL
-        user_license.plan_type = PlanType.TRIAL_15D
-        from datetime import timedelta as _td
-        now = datetime.now(timezone.utc)
-        user_license.expiry_date = now + _td(days=7)
-        user_license.trial_start = now
-        user_license.trial_end = user_license.expiry_date
-        await db.flush()
-
-    await _log_audit(db, user, "refund_order", f"order_id={order_id}, amount={order.amount}, license_revoked=True", request)
-    await db.commit()
-    return {"success": True}
-
-
-@router.post("/orders/{order_id}/cancel")
-async def cancel_order(
-    order_id: int,
-    request: Request,
-    user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status not in (OrderStatus.PENDING, OrderStatus.PAID):
-        raise HTTPException(status_code=400, detail="只能取消待支付或已支付的订单")
-    order.status = OrderStatus.CANCELLED
-    await db.flush()
-    await _log_audit(db, user, "cancel_order", f"order_id={order_id}", request)
-    await db.commit()
-    return {"success": True}
-
-
 @router.post("/generate_license_keys")
 async def admin_generate_license_keys(
     body: LicenseKeyGenerate,

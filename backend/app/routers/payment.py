@@ -194,7 +194,11 @@ async def alipay_callback(
                     existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
                 await db.flush()
 
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to commit alipay callback for order {order_no}: {e}")
+                return {"code": "FAIL", "msg": "数据库提交失败"}
     
     return {"code": "SUCCESS", "msg": "OK"}
 
@@ -297,7 +301,11 @@ async def wechat_callback(
                     existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
                 await db.flush()
 
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to commit wechat callback for order {order_no}: {e}")
+                return {"code": "FAIL", "msg": "数据库提交失败"}
     
     return {"code": "SUCCESS", "msg": "OK"}
 

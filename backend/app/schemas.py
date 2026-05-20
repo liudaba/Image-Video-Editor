@@ -48,6 +48,7 @@ class LicenseData(BaseModel):
     sig_ver: Optional[int] = Field(None, alias="_sig_ver")
     username: str
     license_type: str
+    plan_type: Optional[str] = None
     is_valid: bool
     days_left: int
     trial_start: Optional[str] = None

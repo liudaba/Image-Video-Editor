@@ -13,11 +13,14 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from .config import get_http_session, get_api_base_url
 from .auth_fingerprint import (
@@ -226,6 +229,9 @@ class LicenseManager:
             return False
 
     def verify_with_server(self):
+        if _check_clock_rollback():
+            logger.warning("Clock rollback detected during server verification")
+            return False
         try:
             token = self._get_token()
             if not token:
@@ -322,8 +328,6 @@ class LicenseManager:
         self._heartbeat_thread.start()
 
     def stop_heartbeat(self):
-        if not self._stopping:
-            return
         self._heartbeat_stop.set()
 
     def set_auth_revoked_callback(self, callback):
@@ -353,6 +357,10 @@ class LicenseManager:
     def _do_heartbeat(self):
         if not self.license_data:
             return
+        if _check_clock_rollback():
+            logger.warning("Clock rollback detected, skipping heartbeat")
+            self._on_heartbeat_failure()
+            return
         token = self._get_token()
         if not token:
             return
@@ -377,9 +385,10 @@ class LicenseManager:
                 self._current_heartbeat_interval = _HEARTBEAT_INTERVAL
 
                 if not data.get("is_valid", False):
-                    self.license_data["signed"]["is_valid"] = False
+                    signed_data = self.license_data.get("signed", self.license_data)
+                    signed_data["is_valid"] = False
                     self._save_signed_license(
-                        self.license_data["signed"],
+                        signed_data,
                         token=self._get_token(),
                         last_heartbeat=datetime.now(timezone.utc).isoformat(),
                     )
@@ -400,7 +409,13 @@ class LicenseManager:
                                 last_heartbeat=datetime.now(timezone.utc).isoformat(),
                             )
                         else:
-                            self._on_heartbeat_failure()
+                            # 签名验证失败不等于心跳失败，保留本地授权继续使用
+                            logger.warning("Remote license signature verification failed, keeping local license")
+                            self._save_signed_license(
+                                self.license_data.get("signed", self.license_data),
+                                token=self._get_token(),
+                                last_heartbeat=datetime.now(timezone.utc).isoformat(),
+                            )
                     else:
                         self._save_signed_license(
                             self.license_data.get("signed", self.license_data),
@@ -461,6 +476,8 @@ class LicenseManager:
         )
 
         if self._consecutive_failures >= _HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+            if not self.license_data:
+                return
             if not self._check_fingerprint_elastic():
                 signed_data = self.license_data.get("signed", self.license_data)
                 signed_data["is_valid"] = False
@@ -545,34 +562,38 @@ class LicenseManager:
         except Exception:
             return "unknown"
 
+    _file_lock = threading.Lock()
+
     def load_license(self):
-        try:
-            license_file = self.get_license_path()
-            if os.path.exists(license_file):
-                with open(license_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                signed_part = data.get("signed", data)
-                if not _verify_signature(signed_part):
+        with self._file_lock:
+            try:
+                license_file = self.get_license_path()
+                if os.path.exists(license_file):
+                    with open(license_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    signed_part = data.get("signed", data)
+                    if not _verify_signature(signed_part):
+                        self.license_data = None
+                        return
+                    self.license_data = data
+                    if "fingerprint_components" in data:
+                        self._registered_components = data["fingerprint_components"]
+                else:
                     self.license_data = None
-                    return
-                self.license_data = data
-                if "fingerprint_components" in data:
-                    self._registered_components = data["fingerprint_components"]
-            else:
+            except Exception:
                 self.license_data = None
-        except Exception:
-            self.license_data = None
 
     def save_license(self, license_data):
-        try:
-            license_file = self.get_license_path()
-            os.makedirs(os.path.dirname(license_file), exist_ok=True)
-            with open(license_file, "w", encoding="utf-8") as f:
-                json.dump(license_data, f, indent=2, ensure_ascii=False)
-            self.license_data = license_data
-            return True
-        except Exception:
-            return False
+        with self._file_lock:
+            try:
+                license_file = self.get_license_path()
+                os.makedirs(os.path.dirname(license_file), exist_ok=True)
+                with open(license_file, "w", encoding="utf-8") as f:
+                    json.dump(license_data, f, indent=2, ensure_ascii=False)
+                self.license_data = license_data
+                return True
+            except Exception:
+                return False
 
     def _get_token(self):
         raw = self.license_data.get("token", "") if self.license_data else ""
@@ -602,8 +623,11 @@ class LicenseManager:
                 save_data["token"] = encrypted_token if encrypted_token else token
             except Exception:
                 save_data["token"] = token
+        # 保留已有的指纹组件数据，防止被心跳返回的无指纹数据覆盖
         if self._registered_components is not None:
             save_data["fingerprint_components"] = self._registered_components
+        elif self.license_data and self.license_data.get("fingerprint_components"):
+            save_data["fingerprint_components"] = self.license_data["fingerprint_components"]
         if username:
             save_data["username"] = username
         elif self.license_data and self.license_data.get("username"):
@@ -782,7 +806,10 @@ class LicenseManager:
                     ).total_seconds() / 3600
 
                     license_type = signed_data.get("license_type", "trial")
-                    tolerance = _get_offline_tolerance_hours(license_type)
+                    plan_type = signed_data.get("plan_type", "")
+                    # 优先使用plan_type确定离线容忍时间，pro用户按套餐类型区分
+                    tolerance_key = plan_type if plan_type and plan_type in _OFFLINE_TOLERANCE else license_type
+                    tolerance = _get_offline_tolerance_hours(tolerance_key)
 
                     offline_until_str = signed_data.get("offline_until")
                     if offline_until_str:
@@ -842,6 +869,7 @@ class LicenseManager:
             }
 
         if license_type == "pro":
+            plan_type = signed_data.get("plan_type", "")
             expiry_str = signed_data.get("expiry_date")
             if expiry_str:
                 expiry_date = _parse_iso_to_naive(expiry_str)
@@ -856,14 +884,16 @@ class LicenseManager:
                         }
                     else:
                         return {"valid": False, "message": "专业版已过期,请续费继续使用"}
-            if not expiry_str:
+            # 无expiry_date时，根据plan_type判断
+            if plan_type == "lifetime":
                 return {
                     "valid": True,
                     "type": "pro",
                     "days_left": 9999,
                     "message": "终身会员",
                 }
-            return {"valid": False, "message": "授权已过期,请购买专业版继续使用"}
+            # 非终身会员但缺少expiry_date，数据异常，需要重新验证
+            return {"valid": False, "message": "授权数据异常,请重新登录"}
 
         return {"valid": False, "message": "未知的授权类型,请重新登录"}
 

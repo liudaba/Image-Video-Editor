@@ -13,6 +13,7 @@
 
 import hashlib
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def _get_mac_address():
         lines = [
             l.strip()
             for l in result.stdout.strip().split("\n")
-            if l.strip() and "MACAddress" not in l and l.strip()
+            if l.strip() and "MACAddress" not in l
         ]
         if lines:
             return lines[0]
@@ -128,14 +129,24 @@ def _get_bios_uuid():
 
 
 def get_fingerprint_components():
-    """采集所有硬件组件信息，返回字典"""
-    return {
-        "machine_guid": _get_machine_guid(),
-        "disk_serial": _get_disk_serial(),
-        "cpu_id": _get_cpu_id(),
-        "mac_address": _get_mac_address(),
-        "bios_uuid": _get_bios_uuid(),
+    """采集所有硬件组件信息，返回字典（并行采集）"""
+    collectors = {
+        "machine_guid": _get_machine_guid,
+        "disk_serial": _get_disk_serial,
+        "cpu_id": _get_cpu_id,
+        "mac_address": _get_mac_address,
+        "bios_uuid": _get_bios_uuid,
     }
+    results = {name: "" for name in collectors}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fn): name for name, fn in collectors.items()}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result(timeout=8)
+            except Exception:
+                results[name] = ""
+    return results
 
 
 def get_machine_fingerprint():
@@ -198,6 +209,10 @@ def verify_fingerprint(current_components, registered_components):
             - changed: list
             - action: "pass" / "auto_update" / "rebind" / "reject"
     """
+    # 空注册组件视为首次注册，自动通过
+    if not registered_components:
+        return {"match": True, "score": 100, "changed": [], "action": "auto_update"}
+
     score, changed = compute_fingerprint_score(current_components, registered_components)
 
     if score >= MATCH_THRESHOLD:

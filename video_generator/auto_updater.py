@@ -253,6 +253,14 @@ class UpdateManager:
 
 def hmac_compare_digest(a, b):
     import hmac as _hmac
+    a = a.strip().lower()
+    b = b.strip().lower()
+    # 去除可能的前缀（如 "sha256:"）
+    for prefix in ("sha256:", "sha1:"):
+        if a.startswith(prefix):
+            a = a[len(prefix):]
+        if b.startswith(prefix):
+            b = b[len(prefix):]
     if len(a) != len(b):
         return False
     return _hmac.compare_digest(a.encode('utf-8'), b.encode('utf-8'))

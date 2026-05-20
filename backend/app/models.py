@@ -18,8 +18,8 @@ class OrderStatus(str, enum.Enum):
 
 
 VALID_ORDER_TRANSITIONS = {
-    OrderStatus.PENDING: {OrderStatus.PAID, OrderStatus.EXPIRED, OrderStatus.CANCELLED},
-    OrderStatus.PAID: {OrderStatus.REFUNDED},
+    OrderStatus.PENDING: {OrderStatus.PAID, OrderStatus.EXPIRED},
+    OrderStatus.PAID: set(),
     OrderStatus.EXPIRED: set(),
     OrderStatus.REFUNDED: set(),
     OrderStatus.CANCELLED: set(),

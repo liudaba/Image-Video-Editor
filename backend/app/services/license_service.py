@@ -180,6 +180,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         license_type = LicenseType.PRO
     elif license_key_obj.plan_type == PlanType.TRIAL_15D:
         expiry_delta = timedelta(days=15)
+        expiry_date = datetime.now(timezone.utc) + expiry_delta
         license_type = LicenseType.TRIAL
     else:
         if license_key_obj.plan_type == PlanType.MONTHLY:
@@ -340,6 +341,8 @@ def encode_license_data(license: License, username: str) -> LicenseData:
             from datetime import timezone as _tz
             exp = exp.replace(tzinfo=_tz.utc)
         days_left = max(0, (exp - now).days)
+    elif license.plan_type == PlanType.LIFETIME:
+        days_left = 9999
 
     expiry_str = license.expiry_date.strftime("%Y-%m-%dT%H:%M:%SZ") if license.expiry_date else None
     trial_start_str = license.trial_start.strftime("%Y-%m-%dT%H:%M:%SZ") if license.trial_start else None

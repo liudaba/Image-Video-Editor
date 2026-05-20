@@ -35,8 +35,10 @@ async def heartbeat(
         return HeartbeatResponse(is_valid=False, reason="未找到许可证", timestamp=time.time())
 
     is_valid = license_obj.is_valid
+    reason = None
     if not current_user.is_active:
         is_valid = False
+        reason = "账户已被禁用"
     if license_obj.expiry_date:
         expiry = license_obj.expiry_date
         if expiry.tzinfo is None:
@@ -44,6 +46,7 @@ async def heartbeat(
         now = datetime.now(timezone.utc)
         if expiry < now:
             is_valid = False
+            reason = reason or "许可证已过期"
             license_obj.is_valid = False
 
     if is_valid and req.fingerprint:
@@ -73,7 +76,7 @@ async def heartbeat(
 
     license_data = encode_license_data(license_obj, current_user.username) if is_valid else None
 
-    return HeartbeatResponse(is_valid=is_valid, license=license_data, timestamp=time.time())
+    return HeartbeatResponse(is_valid=is_valid, license=license_data, reason=reason, timestamp=time.time())
 
 
 @router.get("/license_status", response_model=LicenseStatusResponse, summary="获取许可证状态")
@@ -211,7 +214,20 @@ async def delete_user(
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="不能删除自己的账户")
 
-    await db.execute(delete(User).where(User.id == user_id))
+    # 级联删除关联数据
+    await db.execute(delete(HeartbeatLog).where(HeartbeatLog.user_id == user_id))
+    from ..models import MachineBinding, License, LicenseKey, LicenseKeyStatus
+    await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
+    await db.execute(delete(License).where(License.user_id == user_id))
+    # 将该用户激活的密钥状态重置为未使用
+    from sqlalchemy import update
+    await db.execute(
+        update(LicenseKey)
+        .where(LicenseKey.activated_by == user_id, LicenseKey.status == LicenseKeyStatus.ACTIVATED)
+        .values(status=LicenseKeyStatus.UNUSED, activated_by=None, activated_at=None)
+    )
+
+    await db.delete(user)
 
     audit_log = AuditLog(
         operator_id=current_user.id,

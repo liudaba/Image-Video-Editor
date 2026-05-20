@@ -89,6 +89,11 @@ async def validate_heartbeat(
     if license_obj is None:
         return None
 
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user and not user.is_active:
+        return None
+
     if is_license_expired(license_obj):
         license_obj.is_valid = False
         await db.flush()
@@ -103,8 +108,6 @@ async def validate_heartbeat(
     license_obj.heartbeat_fingerprint = fingerprint
     await db.flush()
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
     username = user.username if user else "unknown"
 
     return build_license_response(license_obj, username)

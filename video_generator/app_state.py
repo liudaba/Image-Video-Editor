@@ -34,6 +34,7 @@ GPUtil = None
 
 
 def lazy_import():
+    """延迟加载性能监控依赖（psutil, GPUtil）"""
     global PERFORMANCE_MONITOR_AVAILABLE, psutil, GPUtil
     try:
         try:

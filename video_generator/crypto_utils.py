@@ -11,6 +11,7 @@ import os
 
 _SALT_FILE = ".key_salt"
 _SALT_SIZE = 32
+_fernet_cache = {}  # 缓存 Fernet 实例，避免重复 PBKDF2 派生
 
 
 def _get_machine_user_fingerprint():
@@ -76,8 +77,14 @@ def _derive_fernet_key(base_dir):
 
 def _get_fernet(base_dir):
     from cryptography.fernet import Fernet
+    # 使用缓存避免重复 PBKDF2 派生（每次约 200ms）
+    cache_key = base_dir
+    if cache_key in _fernet_cache:
+        return _fernet_cache[cache_key]
     key = _derive_fernet_key(base_dir)
-    return Fernet(key)
+    f = Fernet(key)
+    _fernet_cache[cache_key] = f
+    return f
 
 
 def encrypt_value(plaintext, base_dir):
