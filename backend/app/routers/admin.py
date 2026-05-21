@@ -438,7 +438,15 @@ async def update_user(
     )
     
     await db.commit()
-    return {"success": True}
+
+    # 如果管理员修改了自己的密码，返回新Token避免被踢出
+    response_data = {"success": True}
+    if body.password is not None and user_id == user.id:
+        from ..auth import create_access_token
+        new_token = create_access_token(data={"sub": user.username})
+        response_data["new_token"] = new_token
+
+    return response_data
 
 
 @router.delete("/users/{user_id}")

@@ -445,10 +445,15 @@
                         userData.expiry_date = expiryDate + ':00Z';
                     }
                     
-                    await apiRequest(`/api/admin/users/${userId}`, {
+                    const result = await apiRequest(`/api/admin/users/${userId}`, {
                         method: 'PUT',
                         body: JSON.stringify(userData)
                     });
+                    
+                    // 如果管理员修改了自己的密码，更新Token避免被踢出
+                    if (result && result.new_token) {
+                        localStorage.setItem('token', result.new_token);
+                    }
                     
                     showSuccess('更新用户成功');
                     modal.hide();
