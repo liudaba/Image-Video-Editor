@@ -156,10 +156,10 @@
                 const row = document.createElement('tr');
                 if (!user.is_active) row.classList.add('table-secondary');
                 const planTypeMap = {'trial_15d': '试用15天', 'monthly': '月付', 'quarterly': '季付', 'yearly': '年付', 'lifetime': '终身'};
-                const planLabel = user.plan_type ? (planTypeMap[user.plan_type] || user.plan_type) : (user.license_type === 'pro' ? '年付' : '试用');
+                const planLabel = user.plan_type ? (planTypeMap[user.plan_type] || user.plan_type) : (user.license_type === 'pro' ? '专业版' : user.license_type === 'trial' ? '试用' : '未设置');
                 const licValid = user.license_is_valid;
                 const lastHb = user.last_heartbeat ? formatDate(user.last_heartbeat) : '-';
-                const expiryStr = user.expiry_date ? formatDate(user.expiry_date) : (user.license_type === 'pro' ? '永久' : '-');
+                const expiryStr = user.expiry_date ? formatDate(user.expiry_date) : (user.plan_type === 'lifetime' ? '永久' : '-');
                 const machineFp = user.machine_fingerprint ? `<small title="${escapeHtml(user.machine_fingerprint)}">${escapeHtml(user.machine_fingerprint.substring(0, 12))}...</small>` : '-';
                 const bindingsHtml = user.machine_bindings && user.machine_bindings.length > 0
                     ? user.machine_bindings.map(b => `<small title="${escapeHtml(b.fingerprint)}">${escapeHtml(b.machine_name || b.fingerprint.substring(0, 12))}...</small>`).join('<br>')
@@ -397,9 +397,9 @@
                         <small class="text-muted">选择后将叠加到现有有效期之上</small>
                     </div>
                     <div class="mb-3">
-                        <label for="edit-expiry-date" class="form-label">自定义到期时间</label>
+                        <label for="edit-expiry-date" class="form-label">自定义到期时间（UTC）</label>
                         <input type="datetime-local" class="form-control" id="edit-expiry-date">
-                        <small class="text-muted">留空则不修改；选择后将覆盖自动计算的到期时间</small>
+                        <small class="text-muted">留空则不修改；请输入UTC时间，选择后将覆盖自动计算的到期时间</small>
                     </div>
                     <hr>
                     <div class="mb-3">
@@ -441,7 +441,8 @@
                     
                     const expiryDate = document.getElementById('edit-expiry-date').value;
                     if (expiryDate) {
-                        userData.expiry_date = new Date(expiryDate).toISOString();
+                        // datetime-local返回本地时间如"2024-01-15T10:30"，直接追加Z标记为UTC
+                        userData.expiry_date = expiryDate + ':00Z';
                     }
                     
                     await apiRequest(`/api/admin/users/${userId}`, {
@@ -507,17 +508,15 @@
     
     // 批量切换用户状态
     async function batchToggleUsers(userIds, disable) {
-        let successCount = 0;
-        let failCount = 0;
-        for (const uid of userIds) {
-            try {
-                await apiRequest(`/api/admin/users/${uid}/toggle_active`, { method: 'POST' });
-                successCount++;
-            } catch (e) {
-                failCount++;
-            }
+        try {
+            const result = await apiRequest('/api/admin/users/batch_status', {
+                method: 'POST',
+                body: JSON.stringify({ user_ids: userIds, is_active: !disable })
+            });
+            showSuccess(`${disable ? '禁用' : '启用'}完成：成功 ${result.success_count} 个${result.fail_count > 0 ? '，失败 ' + result.fail_count + ' 个' : ''}`);
+        } catch (error) {
+            showError(`${disable ? '禁用' : '启用'}失败: ${error.message}`);
         }
-        showSuccess(`${disable ? '禁用' : '启用'}完成：成功 ${successCount} 个${failCount > 0 ? '，失败 ' + failCount + ' 个' : ''}`);
         loadUsers(usersCurrentPage);
     }
     

@@ -53,6 +53,7 @@ class UserCreate(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     is_admin: bool = False
+    is_active: bool = True
     plan_type: Optional[str] = None
 
 
@@ -62,8 +63,12 @@ async def get_stats(
     db: AsyncSession = Depends(get_db),
 ):
     total_users = await db.scalar(select(func.count(User.id)))
+    # 活跃许可证：is_valid=True 且未过期（或无过期时间即终身）
     active_licenses = await db.scalar(
-        select(func.count(License.id)).where(License.is_valid == True)
+        select(func.count(License.id)).where(
+            License.is_valid == True,
+            or_(License.expiry_date == None, License.expiry_date > datetime.now(timezone.utc))
+        )
     )
     trial_users = await db.scalar(
         select(func.count(License.id)).where(License.license_type == LicenseType.TRIAL)
@@ -238,24 +243,26 @@ async def get_user(
     lic = lic_result.scalar_one_or_none()
 
     current_plan = lic.plan_type.value if lic and lic.plan_type else None
+    if not current_plan and lic:
+        if lic.license_type == LicenseType.PRO:
+            if lic.expiry_date is None:
+                current_plan = "lifetime"
+            else:
+                from datetime import timedelta
+                cur = lic.expiry_date
+                if cur.tzinfo is None:
+                    cur = cur.replace(tzinfo=timezone.utc)
+                remaining = (cur - datetime.now(timezone.utc)).days
+                if remaining <= 30:
+                    current_plan = "monthly"
+                elif remaining <= 90:
+                    current_plan = "quarterly"
+                else:
+                    current_plan = "yearly"
+        elif lic.license_type == LicenseType.TRIAL:
+            current_plan = "trial_15d"
     if not current_plan:
         current_plan = "trial_15d"
-        if lic:
-            if lic.license_type == LicenseType.PRO:
-                if lic.expiry_date is None:
-                    current_plan = "lifetime"
-                elif lic.expiry_date:
-                    from datetime import timedelta
-                    cur = lic.expiry_date
-                    if cur.tzinfo is None:
-                        cur = cur.replace(tzinfo=timezone.utc)
-                    remaining = (cur - datetime.now(timezone.utc)).days
-                    if remaining <= 30:
-                        current_plan = "monthly"
-                    elif remaining <= 90:
-                        current_plan = "quarterly"
-                    else:
-                        current_plan = "yearly"
 
     return {
         "id": target_user.id,
@@ -269,6 +276,8 @@ async def get_user(
         "license_is_valid": lic.is_valid if lic else None,
         "expiry_date": lic.expiry_date.isoformat() if lic and lic.expiry_date else None,
         "current_plan": current_plan,
+        "last_heartbeat": lic.last_heartbeat.isoformat() if lic and lic.last_heartbeat else None,
+        "machine_fingerprint": lic.machine_fingerprint if lic else None,
     }
 
 
@@ -312,6 +321,7 @@ async def update_user(
         target_user.email = body.email
     if body.password is not None:
         target_user.hashed_password = hash_password(body.password)
+        target_user.password_changed_at = datetime.now(timezone.utc)
     if body.is_active is not None and body.is_active is False and target_user.id == user.id:
         raise HTTPException(status_code=400, detail="不能禁用自己")
 
@@ -320,7 +330,11 @@ async def update_user(
         license_result = await db.execute(select(License).where(License.user_id == user_id))
         user_license = license_result.scalar_one_or_none()
         if user_license:
-            user_license.is_valid = body.is_active
+            if body.is_active:
+                from ..services.license_service import is_license_time_expired
+                user_license.is_valid = not is_license_time_expired(user_license)
+            else:
+                user_license.is_valid = False
             await db.flush()
     if body.is_admin is not None:
         target_user.is_admin = body.is_admin
@@ -340,54 +354,46 @@ async def update_user(
         license_result = await db.execute(select(License).where(License.user_id == user_id))
         user_license = license_result.scalar_one_or_none()
         if not user_license:
+            now = datetime.now(timezone.utc)
             user_license = License(
                 user_id=user_id,
                 license_type=lic_type,
                 plan_type=PlanType(body.plan_type),
-                is_valid=True,
-                expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
+                is_valid=target_user.is_active,
+                expiry_date=None if delta is None else now + delta,
+                trial_start=now if lic_type.value == "trial" else None,
+                trial_end=(now + delta) if lic_type.value == "trial" and delta else None,
             )
             db.add(user_license)
         else:
+            # 终身会员只能升级（维持终身），不允许降级
+            if user_license.plan_type == PlanType.LIFETIME and body.plan_type != "lifetime":
+                raise HTTPException(status_code=400, detail="终身会员不允许降级为其他套餐")
             user_license.license_type = lic_type
             user_license.plan_type = PlanType(body.plan_type)
-            user_license.is_valid = True
+            # 根据用户状态设置is_valid
+            if target_user.is_active:
+                user_license.is_valid = True
+            else:
+                user_license.is_valid = False
             if delta is None:
                 user_license.expiry_date = None
+            elif body.plan_type == "trial_15d":
+                # 试用码续费走activate_license的叠加逻辑（含3倍上限）
+                from ..services.license_service import calc_renewal_expiry
+                user_license.expiry_date = calc_renewal_expiry(user_license.expiry_date, PlanType(body.plan_type))
             else:
-                now = datetime.now(timezone.utc)
-                remaining = timedelta(0)
-                if user_license.expiry_date:
-                    cur = user_license.expiry_date
-                    if cur.tzinfo is None:
-                        cur = cur.replace(tzinfo=timezone.utc)
-                    remaining = max(cur - now, timedelta(0))
-                user_license.expiry_date = now + remaining + delta
+                # 付费套餐续费也走统一的3倍上限逻辑
+                from ..services.license_service import calc_renewal_expiry
+                user_license.expiry_date = calc_renewal_expiry(user_license.expiry_date, PlanType(body.plan_type))
             if lic_type.value == "trial":
                 user_license.trial_start = datetime.now(timezone.utc)
                 user_license.trial_end = user_license.expiry_date
             else:
                 user_license.trial_start = None
                 user_license.trial_end = None
-        activated_keys_result = await db.execute(
-            select(LicenseKey).where(
-                LicenseKey.activated_by == user_id,
-                LicenseKey.status == LicenseKeyStatus.ACTIVATED
-            )
-        )
-        activated_keys = activated_keys_result.scalars().all()
-        plan_to_key_plan = {
-            "trial_15d": PlanType.TRIAL_15D,
-            "monthly": PlanType.MONTHLY,
-            "quarterly": PlanType.QUARTERLY,
-            "yearly": PlanType.YEARLY,
-            "lifetime": PlanType.LIFETIME,
-        }
-        if activated_keys and body.plan_type in plan_to_key_plan:
-            new_key_plan = plan_to_key_plan[body.plan_type]
-            for ak in activated_keys:
-                ak.plan_type = new_key_plan
-            await db.flush()
+        # 注意：不修改已激活密钥的plan_type，密钥的套餐类型是创建时确定的
+        # 修改用户套餐只影响用户的License记录，不影响密钥记录
 
     if body.expiry_date is not None:
         license_result = await db.execute(select(License).where(License.user_id == user_id))
@@ -396,16 +402,29 @@ async def update_user(
             user_license = License(
                 user_id=user_id,
                 license_type=LicenseType.PRO,
-                is_valid=True,
+                plan_type=PlanType.LIFETIME if body.expiry_date == "never" else None,
+                is_valid=target_user.is_active,
+                expiry_date=None if body.expiry_date == "never" else None,
             )
             db.add(user_license)
             await db.flush()
         if body.expiry_date == "never":
             user_license.expiry_date = None
+            user_license.plan_type = PlanType.LIFETIME
+            user_license.license_type = LicenseType.PRO
+            if target_user.is_active:
+                user_license.is_valid = True
+            else:
+                user_license.is_valid = False
         else:
             try:
                 parsed = datetime.fromisoformat(body.expiry_date.replace("Z", "+00:00"))
                 user_license.expiry_date = parsed
+                if target_user.is_active:
+                    from ..services.license_service import is_license_time_expired
+                    user_license.is_valid = not is_license_time_expired(user_license)
+                else:
+                    user_license.is_valid = False
             except (ValueError, AttributeError):
                 raise HTTPException(status_code=400, detail="无效的到期时间格式")
         await db.flush()
@@ -442,11 +461,12 @@ async def delete_user(
     await db.execute(delete(HeartbeatLog).where(HeartbeatLog.user_id == user_id))
     await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
     await db.execute(delete(License).where(License.user_id == user_id))
-    # 将该用户激活的密钥状态重置为未使用
+    await db.execute(delete(Order).where(Order.user_id == user_id))
+    # 将该用户关联的所有密钥状态设为已撤销（包括已激活和未使用的）
     await db.execute(
         update(LicenseKey)
-        .where(LicenseKey.activated_by == user_id, LicenseKey.status == LicenseKeyStatus.ACTIVATED)
-        .values(status=LicenseKeyStatus.UNUSED, activated_by=None, activated_at=None)
+        .where(LicenseKey.activated_by == user_id, LicenseKey.status.in_([LicenseKeyStatus.ACTIVATED, LicenseKeyStatus.UNUSED]))
+        .values(status=LicenseKeyStatus.REVOKED)
     )
     
     await db.delete(target)
@@ -558,26 +578,43 @@ async def confirm_payment(
     )
     existing_license = license_result.scalar_one_or_none()
     if existing_license:
-        existing_license.license_type = LicenseType.PRO
-        existing_license.plan_type = order.plan_type
-        existing_license.is_valid = True
-        from datetime import timedelta
-        plan_deltas = {
-            PlanType.MONTHLY: timedelta(days=30),
-            PlanType.QUARTERLY: timedelta(days=90),
-            PlanType.YEARLY: timedelta(days=365),
-        }
+        # 终身会员不允许被任何订单降级
+        if existing_license.plan_type == PlanType.LIFETIME:
+            await _log_audit(db, user, "confirm_payment", f"order_id={order_id}, order_no={order.order_no}, SKIPPED: user already lifetime member", request)
+            await db.commit()
+            return {"success": True, "message": "订单已确认支付，但用户已是终身会员，许可证未变更"}
+        else:
+            existing_license.license_type = LicenseType.PRO
+            existing_license.plan_type = order.plan_type
+            # 检查用户是否被禁用
+            target_user_result = await db.execute(select(User).where(User.id == order.user_id))
+            target_user_obj = target_user_result.scalar_one_or_none()
+            existing_license.is_valid = target_user_obj.is_active if target_user_obj else True
+            existing_license.trial_start = None
+            existing_license.trial_end = None
+            from ..services.license_service import calc_renewal_expiry
+            existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+        await db.flush()
+    else:
+        # 用户没有 License 记录，创建新的
+        from ..services.license_service import PLAN_DELTAS
+        now = datetime.now(timezone.utc)
+        expiry = None
         if order.plan_type == PlanType.LIFETIME:
-            existing_license.expiry_date = None
-        elif order.plan_type in plan_deltas:
-            now = datetime.now(timezone.utc)
-            remaining = timedelta(0)
-            if existing_license.expiry_date:
-                cur = existing_license.expiry_date
-                if cur.tzinfo is None:
-                    cur = cur.replace(tzinfo=timezone.utc)
-                remaining = max(cur - now, timedelta(0))
-            existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
+            expiry = None
+        elif order.plan_type in PLAN_DELTAS:
+            expiry = now + PLAN_DELTAS[order.plan_type]
+        # 检查用户是否被禁用
+        target_user_result = await db.execute(select(User).where(User.id == order.user_id))
+        target_user_obj = target_user_result.scalar_one_or_none()
+        new_license = License(
+            user_id=order.user_id,
+            license_type=LicenseType.PRO,
+            plan_type=order.plan_type,
+            is_valid=target_user_obj.is_active if target_user_obj else True,
+            expiry_date=expiry,
+        )
+        db.add(new_license)
         await db.flush()
 
     await _log_audit(db, user, "confirm_payment", f"order_id={order_id}, order_no={order.order_no}, amount={order.amount}, plan={order.plan_type.value}", request)
@@ -641,15 +678,23 @@ async def admin_generate_trial_codes(
 
 @router.get("/trial_codes")
 async def list_trial_codes(
+    page: int = 1,
+    page_size: int = 20,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     from datetime import datetime, timedelta, timezone
     
+    # 分页查询
+    total = await db.scalar(
+        select(func.count(LicenseKey.id)).where(LicenseKey.plan_type == PlanType.TRIAL_15D)
+    )
+    offset = (page - 1) * page_size
     result = await db.execute(
         select(LicenseKey)
         .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
         .order_by(desc(LicenseKey.created_at))
+        .offset(offset).limit(page_size)
     )
     keys = result.scalars().all()
 
@@ -664,10 +709,17 @@ async def list_trial_codes(
     response_keys = []
 
     for k in keys:
-        created_at = k.created_at.replace(tzinfo=timezone.utc)
-        age_days = (now - created_at).days
-        days_remaining = max(0, 15 - age_days)
-        is_expired = age_days >= 15
+        # 只有已激活的试用码才计算过期时间（从激活时间算起15天）
+        # 未激活的试用码永不过期
+        if k.status == LicenseKeyStatus.ACTIVATED and k.activated_at:
+            activated_at = k.activated_at.replace(tzinfo=timezone.utc) if k.activated_at.tzinfo is None else k.activated_at
+            age_days = (now - activated_at).days
+            days_remaining = max(0, 15 - age_days)
+            is_expired = age_days >= 15
+        else:
+            # 未激活或已撤销的试用码不计算过期
+            days_remaining = 15
+            is_expired = False
 
         tc_user_info = tc_users_map.get(k.activated_by, {}) if k.activated_by else {}
         response_keys.append({
@@ -684,7 +736,10 @@ async def list_trial_codes(
         })
     
     return {
-        "keys": response_keys
+        "keys": response_keys,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     }
 
 
@@ -709,12 +764,56 @@ async def toggle_user_active(
     license_result = await db.execute(select(License).where(License.user_id == user_id))
     user_license = license_result.scalar_one_or_none()
     if user_license:
-        user_license.is_valid = target.is_active
+        if target.is_active:
+            # 重新启用时，仅检查过期时间（不检查is_valid，因为当前is_valid=False会导致死锁）
+            from ..services.license_service import is_license_time_expired
+            user_license.is_valid = not is_license_time_expired(user_license)
+        else:
+            user_license.is_valid = False
         await db.flush()
 
     await _log_audit(db, user, "toggle_user_active", f"user_id={user_id}, is_active={target.is_active}, license_synced=True", request)
     await db.commit()
     return {"success": True, "is_active": target.is_active}
+
+
+class BatchUserStatus(BaseModel):
+    user_ids: list[int]
+    is_active: bool
+
+
+@router.post("/users/batch_status")
+async def batch_set_user_status(
+    body: BatchUserStatus,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..services.license_service import is_license_time_expired
+    success_count = 0
+    fail_count = 0
+    for uid in body.user_ids:
+        if uid == user.id:
+            fail_count += 1
+            continue
+        result = await db.execute(select(User).where(User.id == uid))
+        target = result.scalar_one_or_none()
+        if not target:
+            fail_count += 1
+            continue
+        target.is_active = body.is_active
+        license_result = await db.execute(select(License).where(License.user_id == uid))
+        user_license = license_result.scalar_one_or_none()
+        if user_license:
+            if body.is_active:
+                user_license.is_valid = not is_license_time_expired(user_license)
+            else:
+                user_license.is_valid = False
+        success_count += 1
+    await db.flush()
+    await _log_audit(db, user, "batch_set_user_status", f"user_ids={body.user_ids}, is_active={body.is_active}, success={success_count}, fail={fail_count}", request)
+    await db.commit()
+    return {"success": True, "success_count": success_count, "fail_count": fail_count}
 
 
 @router.post("/versions")
@@ -737,7 +836,7 @@ async def create_version(
     await db.flush()
     await _log_audit(db, user, "create_version", f"version={body.version}", request)
     await db.commit()
-    return {"success": True, "version": body.version}
+    return {"success": True, "version": {"id": new_version.id, "version": new_version.version}}
 
 
 @router.post("/users")
@@ -758,7 +857,7 @@ async def create_user(
         username=body.username,
         email=body.email,
         hashed_password=hash_password(body.password),
-        is_active=True,
+        is_active=body.is_active,
         is_admin=body.is_admin,
     )
     db.add(new_user)
@@ -779,7 +878,7 @@ async def create_user(
                 user_id=new_user.id,
                 license_type=lic_type,
                 plan_type=PlanType(body.plan_type),
-                is_valid=True,
+                is_valid=new_user.is_active,
                 expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
             )
             if lic_type.value == "trial":
@@ -787,18 +886,30 @@ async def create_user(
                 new_license.trial_end = new_license.expiry_date
             db.add(new_license)
             await db.flush()
+    else:
+        # 未指定套餐时自动创建试用License，否则用户无法登录
+        from ..services.license_service import create_trial_license
+        await create_trial_license(db, new_user.id)
 
     await _log_audit(db, user, "create_user", f"username={body.username}, is_admin={body.is_admin}, plan_type={body.plan_type}", request)
     await db.commit()
-    return {"success": True}
+    return {"success": True, "user": {"id": new_user.id, "username": new_user.username, "email": new_user.email}}
 
 
 @router.get("/license_keys")
 async def list_license_keys(
+    page: int = 1,
+    page_size: int = 20,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(LicenseKey).order_by(desc(LicenseKey.created_at)))
+    # 分页查询
+    total = await db.scalar(select(func.count(LicenseKey.id)))
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(LicenseKey).order_by(desc(LicenseKey.created_at))
+        .offset(offset).limit(page_size)
+    )
     keys = result.scalars().all()
 
     lk_user_ids = list(set(k.activated_by for k in keys if k.activated_by))
@@ -820,11 +931,14 @@ async def list_license_keys(
     response_keys = []
     for k in keys:
         is_expired = False
-        if k.status == LicenseKeyStatus.UNUSED and k.plan_type.value in plan_validity_days:
+        if k.plan_type.value in plan_validity_days:
             validity = plan_validity_days[k.plan_type.value]
-            if validity is not None and k.created_at:
-                created = k.created_at.replace(tzinfo=timezone.utc) if k.created_at.tzinfo is None else k.created_at
-                is_expired = (now - created).days >= validity
+            if validity is not None:
+                if k.status == LicenseKeyStatus.ACTIVATED and k.activated_at:
+                    # 已激活的密钥：从激活时间算起
+                    activated = k.activated_at.replace(tzinfo=timezone.utc) if k.activated_at.tzinfo is None else k.activated_at
+                    is_expired = (now - activated).days >= validity
+                # 未使用的密钥不算过期（长期未激活的试用码90天后才清理）
 
         lk_user_info = lk_users_map.get(k.activated_by, {}) if k.activated_by else {}
         response_keys.append({
@@ -841,7 +955,7 @@ async def list_license_keys(
             "created_at": k.created_at.isoformat() if k.created_at else None,
         })
 
-    return {"keys": response_keys}
+    return {"keys": response_keys, "total": total, "page": page, "page_size": page_size}
 
 
 @router.post("/license_keys/{license_key}/revoke")
@@ -856,12 +970,33 @@ async def revoke_license_key(
     if not key:
         raise HTTPException(status_code=404, detail="许可证密钥不存在")
     
-    if key.status != LicenseKeyStatus.UNUSED:
-        raise HTTPException(status_code=400, detail="只能撤销未使用的密钥")
-    
+    if key.status == LicenseKeyStatus.REVOKED:
+        raise HTTPException(status_code=400, detail="密钥已被撤销")
+
+    # 撤销已激活的密钥时，检查用户是否还有其他有效密钥
+    previous_status = key.status.value
+    if key.status == LicenseKeyStatus.ACTIVATED and key.activated_by:
+        # 查找该用户的其他有效密钥（排除当前密钥）
+        other_keys_result = await db.execute(
+            select(LicenseKey).where(
+                LicenseKey.activated_by == key.activated_by,
+                LicenseKey.status == LicenseKeyStatus.ACTIVATED,
+                LicenseKey.license_key != license_key,
+            )
+        )
+        other_active_keys = other_keys_result.scalars().all()
+        # 如果没有其他有效密钥，根据许可证过期时间决定is_valid
+        if not other_active_keys:
+            lic_result = await db.execute(select(License).where(License.user_id == key.activated_by))
+            user_lic = lic_result.scalar_one_or_none()
+            if user_lic:
+                from ..services.license_service import is_license_time_expired
+                user_lic.is_valid = not is_license_time_expired(user_lic)
+                await db.flush()
+
     key.status = LicenseKeyStatus.REVOKED
     await db.flush()
-    await _log_audit(db, user, "revoke_license_key", f"license_key={license_key}", request)
+    await _log_audit(db, user, "revoke_license_key", f"license_key={license_key}, previous_status={previous_status}", request)
     await db.commit()
     return {"success": True}
 
@@ -890,10 +1025,18 @@ async def delete_license_key(
 
 @router.get("/user_licenses")
 async def list_user_licenses(
+    page: int = 1,
+    page_size: int = 20,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(License).order_by(desc(License.created_at)))
+    # 分页查询
+    total = await db.scalar(select(func.count(License.id)))
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(License).order_by(desc(License.created_at))
+        .offset(offset).limit(page_size)
+    )
     licenses = result.scalars().all()
 
     ul_user_ids = list(set(l.user_id for l in licenses if l.user_id))
@@ -921,16 +1064,26 @@ async def list_user_licenses(
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
             for l in licenses
-        ]
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     }
 
 
 @router.get("/versions")
 async def list_versions(
+    page: int = 1,
+    page_size: int = 20,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(AppVersion))
+    total = await db.scalar(select(func.count(AppVersion.id)))
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(AppVersion).order_by(desc(AppVersion.created_at))
+        .offset(offset).limit(page_size)
+    )
     versions = list(result.scalars().all())
 
     def _version_key(v):
@@ -957,7 +1110,10 @@ async def list_versions(
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             }
             for v in versions
-        ]
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     }
 
 
@@ -1228,7 +1384,8 @@ async def list_expiring_users(
         exp = lic.expiry_date
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
-        days_remaining = (exp - now).days
+        delta = exp - now
+        days_remaining = delta.days + (1 if delta.seconds > 0 else 0)
         expiring_list.append({
             "user_id": u.id,
             "username": u.username,

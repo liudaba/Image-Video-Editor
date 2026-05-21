@@ -128,7 +128,7 @@
             
             document.getElementById('weekly-users').textContent = analytics.weekly_new_users;
             document.getElementById('weekly-orders').textContent = analytics.weekly_orders;
-            document.getElementById('weekly-revenue').textContent = analytics.weekly_revenue.toFixed(2);
+            document.getElementById('weekly-revenue').textContent = Number(analytics.weekly_revenue || 0).toFixed(2);
             document.getElementById('active-pro-licenses').textContent = analytics.active_pro_licenses;
             
             renderCharts(analytics);

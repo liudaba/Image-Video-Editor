@@ -44,7 +44,11 @@ async def create_payment_order_route(
     db: AsyncSession = Depends(get_db)
 ):
     if order_data.payment_method.lower() not in ["alipay", "wechat"]:
-        raise HTTPException(status_code=400, detail="不支持的支付方式")
+        raise HTTPException(status_code=422, detail="不支持的支付方式")
+    
+    # 检查用户是否被禁用
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="账户已被禁用，无法创建订单")
     
     result = await create_payment_order(
         db,
@@ -172,26 +176,40 @@ async def alipay_callback(
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:
-                existing_license.license_type = LicenseType.PRO
-                existing_license.plan_type = order.plan_type
-                existing_license.is_valid = True
-                from datetime import timedelta
-                plan_deltas = {
-                    PlanType.MONTHLY: timedelta(days=30),
-                    PlanType.QUARTERLY: timedelta(days=90),
-                    PlanType.YEARLY: timedelta(days=365),
-                }
+                # 终身会员不允许被任何支付降级
+                if existing_license.plan_type == PlanType.LIFETIME:
+                    logger.info(f"User {order.user_id} is lifetime member, skipping license downgrade from alipay order {order_no}")
+                else:
+                    existing_license.license_type = LicenseType.PRO
+                    existing_license.plan_type = order.plan_type
+                    # 检查用户是否被禁用
+                    order_user_result = await db.execute(select(User).where(User.id == order.user_id))
+                    order_user = order_user_result.scalar_one_or_none()
+                    existing_license.is_valid = order_user.is_active if order_user else True
+                    existing_license.trial_start = None
+                    existing_license.trial_end = None
+                    from ..services.license_service import calc_renewal_expiry
+                    existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+                await db.flush()
+            else:
+                from ..services.license_service import PLAN_DELTAS
+                now = datetime.now(timezone.utc)
+                expiry = None
                 if order.plan_type == PlanType.LIFETIME:
-                    existing_license.expiry_date = None
-                elif order.plan_type in plan_deltas:
-                    now = datetime.now(timezone.utc)
-                    remaining = timedelta(0)
-                    if existing_license.expiry_date:
-                        cur = existing_license.expiry_date
-                        if cur.tzinfo is None:
-                            cur = cur.replace(tzinfo=timezone.utc)
-                        remaining = max(cur - now, timedelta(0))
-                    existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
+                    expiry = None
+                elif order.plan_type in PLAN_DELTAS:
+                    expiry = now + PLAN_DELTAS[order.plan_type]
+                # 检查用户是否被禁用
+                order_user_result2 = await db.execute(select(User).where(User.id == order.user_id))
+                order_user2 = order_user_result2.scalar_one_or_none()
+                new_license = License(
+                    user_id=order.user_id,
+                    license_type=LicenseType.PRO,
+                    plan_type=order.plan_type,
+                    is_valid=order_user2.is_active if order_user2 else True,
+                    expiry_date=expiry,
+                )
+                db.add(new_license)
                 await db.flush()
 
             try:
@@ -218,6 +236,14 @@ async def wechat_callback(
     
     try:
         data = json.loads(body.decode('utf-8'))
+        # 微信V3 JSON格式，检查是否包含必要字段
+        if 'trade_state' not in data and 'out_trade_no' not in data:
+            # 可能是嵌套结构（V3 resource），尝试提取
+            resource = data.get('resource', {})
+            if isinstance(resource, dict):
+                for key in ['trade_state', 'out_trade_no']:
+                    if key in resource and key not in data:
+                        data[key] = resource[key]
     except json.JSONDecodeError:
         from defusedxml.ElementTree import fromstring as safe_fromstring
         root = safe_fromstring(body)
@@ -279,26 +305,40 @@ async def wechat_callback(
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:
-                existing_license.license_type = LicenseType.PRO
-                existing_license.plan_type = order.plan_type
-                existing_license.is_valid = True
-                from datetime import timedelta
-                plan_deltas = {
-                    PlanType.MONTHLY: timedelta(days=30),
-                    PlanType.QUARTERLY: timedelta(days=90),
-                    PlanType.YEARLY: timedelta(days=365),
-                }
+                # 终身会员不允许被任何支付降级
+                if existing_license.plan_type == PlanType.LIFETIME:
+                    logger.info(f"User {order.user_id} is lifetime member, skipping license downgrade from wechat order {order_no}")
+                else:
+                    existing_license.license_type = LicenseType.PRO
+                    existing_license.plan_type = order.plan_type
+                    # 检查用户是否被禁用
+                    order_user_result = await db.execute(select(User).where(User.id == order.user_id))
+                    order_user = order_user_result.scalar_one_or_none()
+                    existing_license.is_valid = order_user.is_active if order_user else True
+                    existing_license.trial_start = None
+                    existing_license.trial_end = None
+                    from ..services.license_service import calc_renewal_expiry
+                    existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+                await db.flush()
+            else:
+                from ..services.license_service import PLAN_DELTAS
+                now = datetime.now(timezone.utc)
+                expiry = None
                 if order.plan_type == PlanType.LIFETIME:
-                    existing_license.expiry_date = None
-                elif order.plan_type in plan_deltas:
-                    now = datetime.now(timezone.utc)
-                    remaining = timedelta(0)
-                    if existing_license.expiry_date:
-                        cur = existing_license.expiry_date
-                        if cur.tzinfo is None:
-                            cur = cur.replace(tzinfo=timezone.utc)
-                        remaining = max(cur - now, timedelta(0))
-                    existing_license.expiry_date = now + remaining + plan_deltas[order.plan_type]
+                    expiry = None
+                elif order.plan_type in PLAN_DELTAS:
+                    expiry = now + PLAN_DELTAS[order.plan_type]
+                # 检查用户是否被禁用
+                order_user_result2 = await db.execute(select(User).where(User.id == order.user_id))
+                order_user2 = order_user_result2.scalar_one_or_none()
+                new_license = License(
+                    user_id=order.user_id,
+                    license_type=LicenseType.PRO,
+                    plan_type=order.plan_type,
+                    is_valid=order_user2.is_active if order_user2 else True,
+                    expiry_date=expiry,
+                )
+                db.add(new_license)
                 await db.flush()
 
             try:

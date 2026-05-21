@@ -485,7 +485,6 @@
                 return await response.json();
             } catch (error) {
                 console.error('API请求错误:', error);
-                showError(error.message);
                 throw error;
             }
         }

@@ -39,6 +39,7 @@ async def heartbeat(
     if not current_user.is_active:
         is_valid = False
         reason = "账户已被禁用"
+        license_obj.is_valid = False
     if license_obj.expiry_date:
         expiry = license_obj.expiry_date
         if expiry.tzinfo is None:
@@ -52,24 +53,38 @@ async def heartbeat(
     if is_valid and req.fingerprint:
         can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)
         if not can_bind:
-            return HeartbeatResponse(
-                is_valid=False,
-                reason="设备绑定数量已达上限(最多3台)",
-                timestamp=time.time()
-            )
+            is_valid = False
+            reason = "设备绑定数量已达上限(最多3台)"
+            # 设备绑定限制是运行时限制，不修改数据库is_valid
+            # 用户在其他设备解绑后，此设备应能正常使用
 
-    heartbeat_log = HeartbeatLog(
-        user_id=current_user.id,
-        fingerprint=req.fingerprint,
-        app_version=req.app_version,
-        license_type=license_obj.license_type.value,
-        ip_address=client_ip
-    )
-    db.add(heartbeat_log)
+    # 只有许可证有效时才更新心跳字段，避免无效许可证显示"在线"
+    if is_valid:
+        heartbeat_log = HeartbeatLog(
+            user_id=current_user.id,
+            fingerprint=req.fingerprint,
+            app_version=req.app_version,
+            license_type=license_obj.license_type.value,
+            ip_address=client_ip
+        )
+        db.add(heartbeat_log)
 
-    license_obj.last_heartbeat = datetime.now(timezone.utc)
-    if req.fingerprint:
-        license_obj.heartbeat_fingerprint = req.fingerprint
+        license_obj.last_heartbeat = datetime.now(timezone.utc)
+        if req.fingerprint:
+            license_obj.heartbeat_fingerprint = req.fingerprint
+            # 首次心跳时记录machine_fingerprint
+            if not license_obj.machine_fingerprint:
+                license_obj.machine_fingerprint = req.fingerprint
+    else:
+        # 即使无效也记录心跳日志（用于审计），但不更新last_heartbeat
+        heartbeat_log = HeartbeatLog(
+            user_id=current_user.id,
+            fingerprint=req.fingerprint,
+            app_version=req.app_version,
+            license_type=license_obj.license_type.value,
+            ip_address=client_ip
+        )
+        db.add(heartbeat_log)
 
     await db.flush()
     await db.commit()
@@ -94,8 +109,24 @@ async def get_license_status(
     if not license_obj:
         return LicenseStatusResponse(license=None)
 
+    from ..services.license_service import is_license_expired
+    # 如果许可证已过期但is_valid仍为True，同步更新数据库
+    reason = None
+    if license_obj.is_valid and is_license_expired(license_obj):
+        license_obj.is_valid = False
+        reason = "许可证已过期"
+        await db.flush()
+    # 如果is_valid=False，判断具体原因
+    if not license_obj.is_valid and not reason:
+        if not current_user.is_active:
+            reason = "账户已被禁用"
+        else:
+            reason = "许可证已失效"
     license_data = encode_license_data(license_obj, current_user.username)
-    return LicenseStatusResponse(license=license_data)
+    # 二次确保：如果is_valid为False，签名数据中也必须为False
+    if not license_obj.is_valid:
+        license_data.is_valid = False
+    return LicenseStatusResponse(license=license_data, reason=reason)
 
 
 @router.get("/", summary="获取用户列表（仅管理员）")
@@ -175,7 +206,11 @@ async def update_user(
         license_result = await db.execute(select(LicenseModel).where(LicenseModel.user_id == user_id))
         user_license = license_result.scalar_one_or_none()
         if user_license:
-            user_license.is_valid = is_active
+            if is_active:
+                from ..services.license_service import is_license_time_expired
+                user_license.is_valid = not is_license_time_expired(user_license)
+            else:
+                user_license.is_valid = False
             await db.flush()
     if is_admin is not None:
         user.is_admin = is_admin
@@ -219,12 +254,12 @@ async def delete_user(
     from ..models import MachineBinding, License, LicenseKey, LicenseKeyStatus
     await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
     await db.execute(delete(License).where(License.user_id == user_id))
-    # 将该用户激活的密钥状态重置为未使用
+    # 将该用户激活的密钥状态设为已撤销（已使用的密钥不应被重复使用）
     from sqlalchemy import update
     await db.execute(
         update(LicenseKey)
         .where(LicenseKey.activated_by == user_id, LicenseKey.status == LicenseKeyStatus.ACTIVATED)
-        .values(status=LicenseKeyStatus.UNUSED, activated_by=None, activated_at=None)
+        .values(status=LicenseKeyStatus.REVOKED)
     )
 
     await db.delete(user)

@@ -223,9 +223,14 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
 
     if user_data.fingerprint:
         from sqlalchemy import func as sa_func
-        fp_user_count = await db.execute(
-            select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
-        )
+        from ..database import engine
+        use_for_update = not str(engine.url).startswith("sqlite")
+
+        # 使用SELECT FOR UPDATE防止并发注册绕过设备限制
+        fp_query = select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
+        if use_for_update:
+            fp_query = fp_query.with_for_update()
+        fp_user_count = await db.execute(fp_query)
         fp_count = fp_user_count.scalar() or 0
         if fp_count >= 3:
             raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")
@@ -313,6 +318,10 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
 
     license_data = None
     if license_obj:
+        from ..services.license_service import is_license_expired
+        if is_license_expired(license_obj) and license_obj.is_valid:
+            license_obj.is_valid = False
+            await db.flush()
         license_data = encode_license_data(license_obj, user.username)
 
     # 清除登录失败记录
@@ -360,7 +369,10 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
     
     license_data = None
     if license_obj:
-        from ..services.license_service import encode_license_data
+        from ..services.license_service import is_license_expired
+        if is_license_expired(license_obj) and license_obj.is_valid:
+            license_obj.is_valid = False
+            await db.flush()
         license_data = encode_license_data(license_obj, user.username)
     
     return LoginResponse(access_token=new_token, license=license_data)

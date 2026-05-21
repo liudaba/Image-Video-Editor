@@ -104,17 +104,82 @@ def verify_signature(data: dict, signature: str) -> bool:
 
 
 def is_license_expired(license_obj: License) -> bool:
-    if license_obj.expiry_date is not None:
-        now = datetime.now(timezone.utc)
-        if license_obj.expiry_date.tzinfo is None:
-            from datetime import timezone as _tz
-            license_obj.expiry_date = license_obj.expiry_date.replace(tzinfo=_tz.utc)
-        if license_obj.expiry_date < now:
-            return True
-        return False
+    """判断许可证是否已失效（过期或被标记无效）
+
+    注意：此函数同时检查is_valid状态和过期时间，
+    如果需要仅检查过期时间，请使用 is_license_time_expired()
+    """
     if not license_obj.is_valid:
         return True
+    if license_obj.expiry_date is not None:
+        now = datetime.now(timezone.utc)
+        exp = license_obj.expiry_date
+        if exp.tzinfo is None:
+            from datetime import timezone as _tz
+            exp = exp.replace(tzinfo=_tz.utc)
+        if exp < now:
+            return True
     return False
+
+
+def is_license_time_expired(license_obj: License) -> bool:
+    """仅判断许可证是否已过期（不检查is_valid状态）"""
+    if license_obj.expiry_date is None:
+        return False
+    now = datetime.now(timezone.utc)
+    exp = license_obj.expiry_date
+    if exp.tzinfo is None:
+        from datetime import timezone as _tz
+        exp = exp.replace(tzinfo=_tz.utc)
+    return exp < now
+
+
+# 套餐对应的有效期增量
+PLAN_DELTAS = {
+    PlanType.MONTHLY: timedelta(days=30),
+    PlanType.QUARTERLY: timedelta(days=90),
+    PlanType.YEARLY: timedelta(days=365),
+    PlanType.TRIAL_15D: timedelta(days=15),
+}
+
+# 续费最大叠加倍数（防止无限叠加有效期）
+MAX_STACK_MULTIPLIER = 3
+
+
+def calc_renewal_expiry(existing_expiry_date, plan_type: PlanType) -> Optional[datetime]:
+    """计算续费后的到期时间，带3倍上限保护
+
+    Args:
+        existing_expiry_date: 当前许可证的到期时间（可为None表示终身）
+        plan_type: 新购买的套餐类型
+
+    Returns:
+        新的到期时间，终身返回None
+    """
+    if plan_type == PlanType.LIFETIME:
+        return None
+
+    delta = PLAN_DELTAS.get(plan_type)
+    if delta is None:
+        # 未知套餐类型，无法计算
+        return None
+
+    now = datetime.now(timezone.utc)
+    remaining = timedelta(0)
+    if existing_expiry_date:
+        cur = existing_expiry_date
+        if cur.tzinfo is None:
+            cur = cur.replace(tzinfo=timezone.utc)
+        remaining = max(cur - now, timedelta(0))
+    # 如果现有到期时间为None（终身会员），视为剩余时间为0
+    # 终身会员不应通过支付回调降级，但此处仅计算到期时间
+    # 调用方应在调用前检查终身会员保护
+
+    max_total = delta * MAX_STACK_MULTIPLIER
+    if remaining + delta > max_total:
+        return now + max_total
+    else:
+        return now + remaining + delta
 
 
 def build_license_response(license_obj: License, username: str) -> LicenseData:
@@ -131,7 +196,7 @@ def generate_license_key(length: int = 32) -> str:
 
 
 async def create_trial_license(db: AsyncSession, user_id: int) -> License:
-    trial_days = settings.TRIAL_DAYS
+    trial_days = 15  # 试用天数与plan_type=TRIAL_15D保持一致
     trial_start = datetime.now(timezone.utc)
     trial_end = trial_start + timedelta(days=trial_days)
 
@@ -171,6 +236,25 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     if license_key_obj.status == LicenseKeyStatus.ACTIVATED:
         return None
 
+    # 检查用户是否已是PRO会员，如果是则拒绝激活试用码（避免浪费）
+    if license_key_obj.plan_type == PlanType.TRIAL_15D:
+        existing_check = await db.execute(select(License).where(License.user_id == user_id))
+        existing_check_lic = existing_check.scalar_one_or_none()
+        if existing_check_lic and existing_check_lic.license_type == LicenseType.PRO:
+            return "already_pro"
+
+    # 终身会员不允许被任何激活码降级
+    existing_check2 = await db.execute(select(License).where(License.user_id == user_id))
+    existing_check_lic2 = existing_check2.scalar_one_or_none()
+    if existing_check_lic2 and existing_check_lic2.plan_type == PlanType.LIFETIME:
+        return "already_lifetime"
+
+    # 检查用户是否被禁用，禁用用户不允许激活
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user_obj = user_result.scalar_one_or_none()
+    if user_obj and not user_obj.is_active:
+        return "user_disabled"
+
     license_key_obj.status = LicenseKeyStatus.ACTIVATED
     license_key_obj.activated_at = datetime.now(timezone.utc)
     license_key_obj.activated_by = user_id
@@ -205,16 +289,12 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         if license_key_obj.plan_type == PlanType.LIFETIME:
             existing_license.license_type = LicenseType.PRO
             existing_license.license_key = license_key
-            existing_license.is_valid = True
+            existing_license.is_valid = user_obj.is_active if user_obj else True
             existing_license.expiry_date = None
             await db.flush()
             await db.commit()
             return existing_license
         elif license_key_obj.plan_type == PlanType.TRIAL_15D:
-            if existing_license.license_type == LicenseType.PRO and not existing_license.expiry_date:
-                await db.flush()
-                await db.commit()
-                return existing_license
             if existing_license.expiry_date:
                 current_expiry = existing_license.expiry_date
                 if current_expiry.tzinfo is None:
@@ -246,14 +326,14 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
                     else:
                         expiry_date = now + remaining + expiry_delta
                 else:
-                    expiry_date = now + expiry_delta
+                    # 不同套餐升级时，保留原有剩余时间
+                    expiry_date = now + remaining + expiry_delta
             else:
                 expiry_date = datetime.now(timezone.utc) + expiry_delta
 
-        if license_key_obj.plan_type != PlanType.TRIAL_15D or existing_license.license_type != LicenseType.PRO:
-            existing_license.license_type = license_type
+        existing_license.license_type = license_type
         existing_license.license_key = license_key
-        existing_license.is_valid = True
+        existing_license.is_valid = user_obj.is_active if user_obj else True
         existing_license.expiry_date = expiry_date
         if license_key_obj.plan_type != PlanType.TRIAL_15D:
             existing_license.trial_start = None
@@ -270,7 +350,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             license_type=license_type,
             plan_type=license_key_obj.plan_type,
             license_key=license_key,
-            is_valid=True,
+            is_valid=user_obj.is_active if user_obj else True,
             expiry_date=expiry_date,
             trial_start=datetime.now(timezone.utc) if license_type == LicenseType.TRIAL else None,
             trial_end=expiry_date if license_type == LicenseType.TRIAL else None,
@@ -282,18 +362,28 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
 
 
 async def cleanup_expired_license_keys(db: AsyncSession) -> int:
-    cutoff_time = datetime.now(timezone.utc) - timedelta(days=15)
+    # 清理已激活且过期的试用码（激活后15天过期）
+    activated_cutoff = datetime.now(timezone.utc) - timedelta(days=15)
+    result = await db.execute(
+        select(LicenseKey)
+        .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
+        .where(LicenseKey.status == LicenseKeyStatus.ACTIVATED)
+        .where(LicenseKey.activated_at < activated_cutoff)
+    )
+    expired_activated = result.scalars().all()
 
+    # 清理超过90天未使用的试用码（长期未激活的码才清理，给用户足够的使用窗口）
+    unused_cutoff = datetime.now(timezone.utc) - timedelta(days=90)
     result = await db.execute(
         select(LicenseKey)
         .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
         .where(LicenseKey.status == LicenseKeyStatus.UNUSED)
-        .where(LicenseKey.created_at < cutoff_time)
+        .where(LicenseKey.created_at < unused_cutoff)
     )
-    expired_keys = result.scalars().all()
+    expired_unused = result.scalars().all()
 
     count = 0
-    for key in expired_keys:
+    for key in expired_activated + expired_unused:
         key.status = LicenseKeyStatus.REVOKED
         count += 1
 
@@ -340,13 +430,34 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         if exp.tzinfo is None:
             from datetime import timezone as _tz
             exp = exp.replace(tzinfo=_tz.utc)
-        days_left = max(0, (exp - now).days)
-    elif license.plan_type == PlanType.LIFETIME:
+        delta = exp - now
+        # 向上取整：不足1天算1天，确保用户看到的天数不会少
+        days_left = max(0, delta.days + (1 if delta.seconds > 0 else 0))
+    elif license.plan_type == PlanType.LIFETIME or (license.license_type == LicenseType.PRO and license.expiry_date is None):
         days_left = 9999
 
     expiry_str = license.expiry_date.strftime("%Y-%m-%dT%H:%M:%SZ") if license.expiry_date else None
     trial_start_str = license.trial_start.strftime("%Y-%m-%dT%H:%M:%SZ") if license.trial_start else None
     trial_end_str = license.trial_end.strftime("%Y-%m-%dT%H:%M:%SZ") if license.trial_end else None
+
+    # 计算离线容忍截止时间
+    offline_until_str = None
+    if license.is_valid:
+        from ..config import settings
+        now = datetime.now(timezone.utc)
+        plan_type_val = license.plan_type.value if license.plan_type else None
+        license_type_val = license.license_type.value if isinstance(license.license_type, str) else license.license_type.value
+        # 离线容忍时长（小时），与客户端_OFFLINE_TOLERANCE保持一致
+        offline_hours_map = {
+            "trial": 4, "trial_15d": 4,
+            "monthly": 24, "quarterly": 48,
+            "yearly": 72, "annual": 72,
+            "lifetime": 168, "pro": 72,
+        }
+        tolerance_key = plan_type_val if plan_type_val and plan_type_val in offline_hours_map else license_type_val
+        tolerance_hours = offline_hours_map.get(tolerance_key, 4)
+        offline_until_dt = now + timedelta(hours=tolerance_hours)
+        offline_until_str = offline_until_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     data_without_sig = {
         "username": username,
@@ -358,6 +469,7 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         "trial_end": trial_end_str,
         "expiry_date": expiry_str,
         "license_key": license.license_key,
+        "offline_until": offline_until_str,
     }
 
     sig, sig_ver = sign_license_data(data_without_sig)
@@ -374,4 +486,5 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         trial_end=trial_end_str,
         expiry_date=expiry_str,
         license_key=license.license_key,
+        offline_until=offline_until_str,
     )

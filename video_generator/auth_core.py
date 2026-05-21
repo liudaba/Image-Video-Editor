@@ -30,7 +30,6 @@ from .auth_fingerprint import (
 )
 
 _HMAC_KEY = "_sig"
-_TRIAL_DAYS = 15
 _GRACE_HOURS = 2
 
 _HEARTBEAT_INTERVAL = 180
@@ -40,6 +39,7 @@ _HEARTBEAT_BACKOFF_MAX_INTERVAL = 86400
 
 _OFFLINE_TOLERANCE = {
     "trial": 4,
+    "trial_15d": 4,
     "monthly": 24,
     "quarterly": 48,
     "annual": 72,
@@ -62,11 +62,24 @@ def _get_verify_secret():
     if _HMAC_VERIFY_SECRET is not None:
         return _HMAC_VERIFY_SECRET
     try:
-        base_dir = _get_data_dir()
-        key_file = os.path.join(base_dir, ".license_verify_key")
-        if os.path.exists(key_file):
-            with open(key_file, "r") as f:
-                _HMAC_VERIFY_SECRET = f.read().strip().encode("utf-8")
+        search_dirs = [_get_data_dir()]
+        parent_dir = os.path.dirname(_get_data_dir())
+        if parent_dir and parent_dir not in search_dirs:
+            search_dirs.append(parent_dir)
+        # 搜索 keys 子目录（Docker 部署时密钥文件可能在此）
+        keys_dir = os.path.join(_get_data_dir(), "keys")
+        if os.path.isdir(keys_dir) and keys_dir not in search_dirs:
+            search_dirs.append(keys_dir)
+        # Docker部署时 /app/keys/ 目录
+        for app_dir in ["/app", "/app/keys"]:
+            if os.path.isdir(app_dir) and app_dir not in search_dirs:
+                search_dirs.append(app_dir)
+        for search_dir in search_dirs:
+            key_file = os.path.join(search_dir, ".license_verify_key")
+            if os.path.exists(key_file):
+                with open(key_file, "r") as f:
+                    _HMAC_VERIFY_SECRET = f.read().strip().encode("utf-8")
+                break
     except Exception:
         pass
     return _HMAC_VERIFY_SECRET
@@ -82,6 +95,14 @@ def _get_ecdsa_public_key():
         parent_dir = os.path.dirname(_get_data_dir())
         if parent_dir and parent_dir not in search_dirs:
             search_dirs.append(parent_dir)
+        # 搜索 keys 子目录（Docker 部署时密钥文件可能在此）
+        keys_dir = os.path.join(_get_data_dir(), "keys")
+        if os.path.isdir(keys_dir) and keys_dir not in search_dirs:
+            search_dirs.append(keys_dir)
+        # Docker部署时 /app/keys/ 目录
+        for app_dir in ["/app", "/app/keys"]:
+            if os.path.isdir(app_dir) and app_dir not in search_dirs:
+                search_dirs.append(app_dir)
         for search_dir in search_dirs:
             pubkey_file = os.path.join(search_dir, ".license_verify_pubkey.pem")
             if os.path.exists(pubkey_file):
@@ -91,6 +112,14 @@ def _get_ecdsa_public_key():
     except Exception:
         pass
     return _ECDSA_PUBLIC_KEY
+
+
+def _calc_days_left(expiry_dt, now_dt):
+    """计算剩余天数，向上取整（不足1天算1天），确保用户看到的天数不会少"""
+    delta = expiry_dt - now_dt
+    if delta.total_seconds() <= 0:
+        return 0
+    return max(0, delta.days + (1 if delta.seconds > 0 else 0))
 
 
 def _verify_signature(data: dict) -> bool:
@@ -387,6 +416,10 @@ class LicenseManager:
                 if not data.get("is_valid", False):
                     signed_data = self.license_data.get("signed", self.license_data)
                     signed_data["is_valid"] = False
+                    # 保存失效原因供UI展示
+                    reason = data.get("reason", "")
+                    if reason:
+                        signed_data["invalid_reason"] = reason
                     self._save_signed_license(
                         signed_data,
                         token=self._get_token(),
@@ -396,7 +429,7 @@ class LicenseManager:
                         self._revoked_notified = True
                         if self._auth_revoked_callback:
                             try:
-                                self._auth_revoked_callback()
+                                self._auth_revoked_callback(reason)
                             except Exception:
                                 pass
                 else:
@@ -515,6 +548,7 @@ class LicenseManager:
                     if self.license_data:
                         signed_data = self.license_data.get("signed", self.license_data)
                         signed_data["is_valid"] = False
+                        signed_data["invalid_reason"] = "账户不可用"
                         self._save_signed_license(
                             signed_data,
                             token=self._get_token(),
@@ -638,6 +672,8 @@ class LicenseManager:
             save_data["username"] = username
         elif self.license_data and self.license_data.get("username"):
             save_data["username"] = self.license_data["username"]
+        elif signed_license.get("username"):
+            save_data["username"] = signed_license["username"]
         self.save_license(save_data)
 
     def get_license_path(self):
@@ -747,8 +783,6 @@ class LicenseManager:
                             True,
                             "登录成功!试用期已结束,请购买专业版继续使用",
                         )
-                    elif days_left >= _TRIAL_DAYS:
-                        return True, f"登录成功!您有{_TRIAL_DAYS}天免费试用期"
                     else:
                         return True, f"登录成功!试用期剩余{days_left}天"
                 elif license_type == "pro":
@@ -775,7 +809,32 @@ class LicenseManager:
 
         is_valid = signed_data.get("is_valid", False)
         if not is_valid:
-            return {"valid": False, "message": "授权已失效,请重新登录"}
+            # is_valid=False时，检查offline_until是否仍有效
+            # 如果离线容忍期未过，临时视为有效并触发心跳验证
+            offline_until_str = signed_data.get("offline_until")
+            if offline_until_str:
+                try:
+                    offline_until = _parse_iso_to_naive(offline_until_str)
+                    if offline_until:
+                        from datetime import timezone as _tz
+                        now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                        if now_utc <= offline_until:
+                            # 离线容忍期内，临时视为有效，触发心跳验证
+                            is_valid = True
+                            if not self._stopping and not (self._heartbeat_thread and self._heartbeat_thread.is_alive()):
+                                self.start_heartbeat()
+                        else:
+                            return {"valid": False, "message": "离线授权已过期,请连接网络验证授权"}
+                    else:
+                        return {"valid": False, "message": "授权已失效,请重新登录"}
+                except (ValueError, TypeError):
+                    return {"valid": False, "message": "授权已失效,请重新登录"}
+            else:
+                # 没有offline_until，根据invalid_reason提供具体信息
+                invalid_reason = signed_data.get("invalid_reason", "")
+                if invalid_reason:
+                    return {"valid": False, "message": f"授权已失效: {invalid_reason}"}
+                return {"valid": False, "message": "授权已失效,请重新登录"}
 
         has_signature = _HMAC_KEY in signed_data
         if has_signature and not _verify_signature(signed_data):
@@ -820,24 +879,14 @@ class LicenseManager:
                     offline_until_str = signed_data.get("offline_until")
                     if offline_until_str:
                         offline_until = _parse_iso_to_naive(offline_until_str)
-                        if offline_until:
-                            from datetime import timezone as _tz
-
-                            check_time = datetime.now(_tz.utc).replace(
-                                tzinfo=None
-                            )
-                            if check_time > offline_until:
-                                return {
-                                    "valid": False,
-                                    "message": f"离线授权已过期,请连接网络验证授权",
-                                }
-                        else:
-                            if offline_hours > tolerance:
-                                return {
-                                    "valid": False,
-                                    "message": f"已离线超过{tolerance}小时,请连接网络验证授权",
-                                }
+                        if offline_until and now_for_compare > offline_until:
+                            return {
+                                "valid": False,
+                                "message": f"离线授权已过期,请连接网络验证授权",
+                            }
+                        # offline_until未过期时，跳过离线时长检查
                     else:
+                        # 无offline_until字段时，使用离线容忍时长
                         if offline_hours > tolerance:
                             return {
                                 "valid": False,
@@ -857,7 +906,7 @@ class LicenseManager:
                 trial_end = _parse_iso_to_naive(trial_end_str)
                 if trial_end:
                     if now_utc <= trial_end + timedelta(hours=_GRACE_HOURS):
-                        days_left = max(0, (trial_end - now_utc).days)
+                        days_left = _calc_days_left(trial_end, now_utc)
                         return {
                             "valid": True,
                             "type": "trial",
@@ -881,7 +930,7 @@ class LicenseManager:
                 expiry_date = _parse_iso_to_naive(expiry_str)
                 if expiry_date:
                     if now_utc <= expiry_date + timedelta(hours=_GRACE_HOURS):
-                        days_left = max(0, (expiry_date - now_utc).days)
+                        days_left = _calc_days_left(expiry_date, now_utc)
                         return {
                             "valid": True,
                             "type": "pro",
@@ -898,7 +947,15 @@ class LicenseManager:
                     "days_left": 9999,
                     "message": "终身会员",
                 }
-            # 非终身会员但缺少expiry_date，数据异常，需要重新验证
+            # 非终身会员但缺少expiry_date：签名验证已通过且is_valid=True，
+            # 信任服务器判定（管理员账号或特殊授权可能无expiry_date）
+            if is_valid:
+                return {
+                    "valid": True,
+                    "type": "pro",
+                    "days_left": days_left if days_left and days_left > 0 else 9999,
+                    "message": "专业版授权有效",
+                }
             return {"valid": False, "message": "授权数据异常,请重新登录"}
 
         return {"valid": False, "message": "未知的授权类型,请重新登录"}
@@ -916,7 +973,9 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    self._save_signed_license(signed_license, token=token)
+                    current_username = self.license_data.get("username", "") if self.license_data else ""
+                    self._save_signed_license(signed_license, token=token, username=current_username,
+                                              last_heartbeat=datetime.now(timezone.utc).isoformat())
                     if not (self._heartbeat_thread and self._heartbeat_thread.is_alive()):
                         self.start_heartbeat()
                 else:
@@ -1011,7 +1070,8 @@ class LicenseManager:
                 data = response.json()
                 signed_license = data.get("license", {})
                 if signed_license and _verify_signature(signed_license):
-                    self._save_signed_license(signed_license, token=token)
+                    current_username = self.license_data.get("username", "") if self.license_data else ""
+                    self._save_signed_license(signed_license, token=token, username=current_username)
                     return True
             return False
         except Exception:
@@ -1032,23 +1092,22 @@ class LicenseManager:
             if trial_end_str:
                 trial_end = _parse_iso_to_naive(trial_end_str)
                 if trial_end:
-                    days_left = max(0, (trial_end - now_utc).days)
+                    days_left = _calc_days_left(trial_end, now_utc)
                     if days_left > 0:
                         return f"试用剩余{days_left}天"
                     return "试用已到期"
         expiry_str = signed_data.get("expiry_date")
+        plan_type = signed_data.get("plan_type", "")
+        if plan_type == "lifetime":
+            return "终身会员"
         if expiry_str:
             expiry_date = _parse_iso_to_naive(expiry_str)
             if expiry_date:
-                days_left = max(0, (expiry_date - now_utc).days)
-                if license_type == "pro" and days_left > 3650:
-                    return "终身会员"
+                days_left = _calc_days_left(expiry_date, now_utc)
                 if days_left > 0:
                     return f"会员还剩{days_left}天到期"
                 return "会员已到期"
         days_left = signed_data.get("days_left", 0)
-        if license_type == "pro" and days_left > 3650:
-            return "终身会员"
         if days_left > 0:
             return f"会员还剩{days_left}天到期"
         return ""
@@ -1087,35 +1146,41 @@ class LicenseManager:
                 if trial_end:
                     from datetime import timezone as _tz
                     now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
-                    info["days_left"] = max(0, (trial_end - now_utc).days)
+                    info["days_left"] = _calc_days_left(trial_end, now_utc)
             else:
                 info["days_left"] = signed_data.get("days_left", 0)
             return info
-        if signed_data.get("activation_code") or signed_data.get("license_key"):
-            info["membership_type_name"] = "激活码会员"
-            info["days_left"] = signed_data.get("days_left", 0)
-            if info["days_left"] > 3650 or not signed_data.get("expiry_date"):
-                info["is_lifetime"] = True
-                info["membership_type_name"] = "终身会员"
-            return info
         if license_type == "pro":
             plan_type = signed_data.get("plan_type", "")
-            if plan_type:
+            if plan_type == "lifetime" or not signed_data.get("expiry_date"):
+                info["is_lifetime"] = True
+                info["membership_type_name"] = "终身会员"
+                info["days_left"] = 9999
+            elif plan_type:
                 plan_map = {
                     "monthly": "月卡会员",
                     "quarterly": "季卡会员",
                     "yearly": "年卡会员",
                     "annual": "年卡会员",
-                    "lifetime": "终身会员",
                 }
-                info["membership_type_name"] = plan_map.get(plan_type, "会员")
-                if plan_type == "lifetime":
-                    info["is_lifetime"] = True
+                info["membership_type_name"] = plan_map.get(plan_type, "专业版会员")
+                expiry_str = signed_data.get("expiry_date")
+                if expiry_str:
+                    expiry_date = _parse_iso_to_naive(expiry_str)
+                    if expiry_date:
+                        from datetime import timezone as _tz
+                        now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
+                        info["days_left"] = _calc_days_left(expiry_date, now_utc)
+                    else:
+                        info["days_left"] = signed_data.get("days_left", 0)
+                else:
+                    info["days_left"] = signed_data.get("days_left", 0)
             else:
                 if not signed_data.get("expiry_date"):
                     info["is_lifetime"] = True
                     info["membership_type_name"] = "终身会员"
                 else:
+                    info["membership_type_name"] = "专业版会员"
                     days_left = 0
                     expiry_str = signed_data.get("expiry_date")
                     if expiry_str:
@@ -1123,19 +1188,11 @@ class LicenseManager:
                         if expiry_date:
                             from datetime import timezone as _tz
                             now_utc = datetime.now(_tz.utc).replace(tzinfo=None)
-                            days_left = max(0, (expiry_date - now_utc).days)
+                            info["days_left"] = _calc_days_left(expiry_date, now_utc)
+                        else:
+                            info["days_left"] = signed_data.get("days_left", 0)
                     else:
-                        days_left = signed_data.get("days_left", 0)
-                    info["days_left"] = days_left
-                    if days_left > 3650:
-                        info["is_lifetime"] = True
-                        info["membership_type_name"] = "终身会员"
-                    else:
-                        info["membership_type_name"] = "会员"
-            if info["is_lifetime"]:
-                info["days_left"] = 9999
-            elif info["days_left"] == 0:
-                info["days_left"] = signed_data.get("days_left", 0)
+                        info["days_left"] = signed_data.get("days_left", 0)
             return info
         return info
 

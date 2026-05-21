@@ -190,7 +190,7 @@
             document.getElementById('active-licenses').textContent = stats.active_licenses;
             document.getElementById('expiring-soon').textContent = stats.expiring_soon;
             document.getElementById('online-devices').textContent = stats.online_devices;
-            document.getElementById('total-revenue').textContent = stats.total_revenue.toFixed(2);
+            document.getElementById('total-revenue').textContent = Number(stats.total_revenue || 0).toFixed(2);
 
             const usersRes = await apiRequest('/api/admin/users?page=1&page_size=5');
             const usersList = document.getElementById('recent-users-list');

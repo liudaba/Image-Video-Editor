@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import AppVersion
@@ -7,6 +8,30 @@ from ..auth import require_admin, get_current_user_optional
 from ..schemas import VersionInfo
 
 router = APIRouter(prefix="/api/version", tags=["version"])
+
+
+def _parse_release_date(release_date_str):
+    """将release_date字符串解析为datetime对象，None则返回当前UTC时间"""
+    if release_date_str is None:
+        return datetime.now(timezone.utc)
+    if isinstance(release_date_str, datetime):
+        if release_date_str.tzinfo is None:
+            return release_date_str.replace(tzinfo=timezone.utc)
+        return release_date_str
+    try:
+        from dateutil.parser import isoparse
+        dt = isoparse(release_date_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        try:
+            dt = datetime.fromisoformat(release_date_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return datetime.now(timezone.utc)
 
 
 @router.post("/", summary="创建或更新版本信息（仅管理员）")
@@ -23,27 +48,27 @@ async def create_version(
     
     if existing_version:
         # 更新现有版本
-        existing_version.release_date = version_info.release_date
+        existing_version.release_date = _parse_release_date(version_info.release_date)
         existing_version.changelog = "\n".join(version_info.changelog) if version_info.changelog else ""
         existing_version.download_url = version_info.download_url
         existing_version.file_hash = version_info.file_hash
         existing_version.file_size = version_info.file_size
-        existing_version.priority = version_info.priority or "normal"
-        existing_version.force_update = version_info.force_update or False
-        existing_version.is_active = version_info.is_active or False
+        existing_version.priority = version_info.priority if version_info.priority is not None else "normal"
+        existing_version.force_update = version_info.force_update if version_info.force_update is not None else False
+        existing_version.is_active = version_info.is_active if version_info.is_active is not None else True
         await db.flush()
     else:
         # 创建新版本
         version = AppVersion(
             version=version_info.version,
-            release_date=version_info.release_date,
+            release_date=_parse_release_date(version_info.release_date),
             changelog="\n".join(version_info.changelog) if version_info.changelog else "",
             download_url=version_info.download_url,
             file_hash=version_info.file_hash,
             file_size=version_info.file_size,
-            priority=version_info.priority or "normal",
-            force_update=version_info.force_update or False,
-            is_active=version_info.is_active or False,
+            priority=version_info.priority if version_info.priority is not None else "normal",
+            force_update=version_info.force_update if version_info.force_update is not None else False,
+            is_active=version_info.is_active if version_info.is_active is not None else True,
         )
         db.add(version)
     

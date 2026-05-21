@@ -93,6 +93,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._fallback_requests = {}
         self._redis_pool = None
         self._last_cleanup = time.time()
+        self._redis_available = None  # None=未检测, True=可用, False=不可用
+        self._redis_check_time = 0
+        self._lock = None  # 延迟初始化线程锁
+
+    def _get_lock(self):
+        if self._lock is None:
+            import threading
+            self._lock = threading.Lock()
+        return self._lock
 
     def _cleanup_stale_entries(self):
         now = time.time()
@@ -107,14 +116,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             del self._fallback_requests[k]
 
     def _get_redis_pool(self):
+        # 每30秒最多检测一次Redis可用性
+        now = time.time()
+        if self._redis_available is False and now - self._redis_check_time < 30:
+            return None
         if self._redis_pool is None:
             try:
                 import redis
                 self._redis_pool = redis.ConnectionPool.from_url(
-                    settings.REDIS_URL, socket_timeout=1, max_connections=10
+                    settings.REDIS_URL, socket_timeout=0.5, socket_connect_timeout=0.5, max_connections=10
                 )
+                # 测试连接
+                test_conn = redis.Redis(connection_pool=self._redis_pool)
+                test_conn.ping()
+                self._redis_available = True
             except Exception:
-                pass
+                self._redis_pool = None
+                self._redis_available = False
+                self._redis_check_time = now
         return self._redis_pool
 
     def _check_redis_rate(self, client_ip: str, path: str) -> bool:
@@ -123,7 +142,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pool = self._get_redis_pool()
             if pool is None:
                 return self._check_memory_rate(client_ip, path)
-            r = redis.Redis(connection_pool=pool)
+            r = redis.Redis(connection_pool=pool, socket_timeout=0.5)
             now = int(time.time())
             window_key = f"ratelimit:{client_ip}:{path}:{now // 60}"
             count = r.incr(window_key)
@@ -131,18 +150,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 r.expire(window_key, 120)
             return count <= self.rate_limit
         except Exception:
+            self._redis_available = False
+            self._redis_check_time = time.time()
             return self._check_memory_rate(client_ip, path)
 
     def _check_memory_rate(self, client_ip: str, path: str) -> bool:
         now = time.time()
         key = f"{client_ip}:{path}"
-        if key not in self._fallback_requests:
-            self._fallback_requests[key] = []
-        self._fallback_requests[key] = [t for t in self._fallback_requests[key] if now - t < 60]
-        if len(self._fallback_requests[key]) >= self.rate_limit:
-            return False
-        self._fallback_requests[key].append(now)
-        self._cleanup_stale_entries()
+        with self._get_lock():
+            if key not in self._fallback_requests:
+                self._fallback_requests[key] = []
+            self._fallback_requests[key] = [t for t in self._fallback_requests[key] if now - t < 60]
+            if len(self._fallback_requests[key]) >= self.rate_limit:
+                return False
+            self._fallback_requests[key].append(now)
+            self._cleanup_stale_entries()
         return True
 
     async def dispatch(self, request: Request, call_next):
@@ -338,6 +360,18 @@ async def admin_login(request: Request, db=Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账户已被禁用")
     clear_login_failures(f"admin:{username}")
+    # 记录管理员登录审计日志
+    from .models import AuditLog
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    audit_log = AuditLog(
+        operator_id=user.id,
+        operator_name=user.username,
+        action="admin_login",
+        detail=f"username={username}, ip={client_ip}",
+        ip_address=client_ip,
+    )
+    db.add(audit_log)
+    await db.commit()
     access_token = create_access_token(data={"user_id": user.id, "username": user.username})
     csrf_token = secrets.token_hex(32)
     response = JSONResponse(content={"success": True, "access_token": access_token, "csrf_token": csrf_token})

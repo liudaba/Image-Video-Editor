@@ -22,22 +22,37 @@ LOCKOUT_SECONDS = 900
 
 
 _redis_pool = None
-
+_redis_available = None  # None=未检测, True=可用, False=不可用
+_redis_check_time = 0
 
 def _get_redis():
-    global _redis_pool
+    global _redis_pool, _redis_available, _redis_check_time
+    now = time.time()
+    # 如果Redis不可用且距上次检测不到30秒，直接返回None
+    if _redis_available is False and now - _redis_check_time < 30:
+        return None
     if _redis_pool is None:
         try:
             import redis
             _redis_pool = redis.ConnectionPool.from_url(
-                settings.REDIS_URL, socket_timeout=2, max_connections=10
+                settings.REDIS_URL, socket_timeout=0.5, socket_connect_timeout=0.5, max_connections=10
             )
+            # 测试连接
+            test_conn = redis.Redis(connection_pool=_redis_pool)
+            test_conn.ping()
+            _redis_available = True
         except Exception:
+            _redis_pool = None
+            _redis_available = False
+            _redis_check_time = now
             return None
     try:
         import redis
-        return redis.Redis(connection_pool=_redis_pool)
+        conn = redis.Redis(connection_pool=_redis_pool, socket_timeout=0.5)
+        return conn
     except Exception:
+        _redis_available = False
+        _redis_check_time = now
         return None
 
 
@@ -171,7 +186,12 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户已被禁用")
     if user.password_changed_at:
         token_issued = token_data.exp - settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        if token_issued < user.password_changed_at.timestamp():
+        # SQLite不保留时区信息，需要确保naive datetime按UTC处理
+        pw_changed = user.password_changed_at
+        if pw_changed.tzinfo is None:
+            pw_changed = pw_changed.replace(tzinfo=timezone.utc)
+        # 加1秒缓冲，避免浮点精度导致密码修改后旧token仍被认为有效
+        if token_issued < pw_changed.timestamp() - 1:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="密码已修改,请重新登录")
     return user
 

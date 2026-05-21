@@ -55,6 +55,7 @@ class LicenseData(BaseModel):
     trial_end: Optional[str] = None
     expiry_date: Optional[str] = None
     license_key: Optional[str] = None
+    offline_until: Optional[str] = None
 
 
 class LoginResponse(BaseModel):
@@ -69,6 +70,7 @@ class ActivateResponse(BaseModel):
 
 class LicenseStatusResponse(BaseModel):
     license: Optional[LicenseData] = None
+    reason: Optional[str] = None
 
 
 class HeartbeatResponse(BaseModel):
@@ -96,6 +98,7 @@ class VersionInfo(BaseModel):
     download_url: Optional[str] = None
     priority: Optional[str] = "normal"
     force_update: Optional[bool] = False
+    is_active: Optional[bool] = True
 
 
 class TokenData(BaseModel):

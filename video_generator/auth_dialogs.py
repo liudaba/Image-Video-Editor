@@ -12,12 +12,31 @@ UI层只负责显示和用户交互，业务逻辑通过 auth_core.LicenseManage
 
 import re
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox
 
 from .auth_core import LicenseManager, _get_verify_secret
 
+# tkinter 延迟导入：无GUI环境（如Docker容器）中tkinter不可用
+# 仅在实际需要创建对话框时才导入
+tk = None
+ttk = None
+messagebox = None
+
+def _ensure_tkinter():
+    """确保tkinter可用，不可用时抛出ImportError"""
+    global tk, ttk, messagebox
+    if tk is None:
+        try:
+            import tkinter as _tk
+            from tkinter import ttk as _ttk, messagebox as _mb
+            tk = _tk
+            ttk = _ttk
+            messagebox = _mb
+        except ImportError:
+            raise ImportError("tkinter不可用，当前环境不支持GUI操作。请在有图形界面的环境中运行。")
+    return tk, ttk, messagebox
+
 def _bind_entry_context_menu(entry):
+    _ensure_tkinter()
     menu = tk.Menu(entry, tearoff=0)
     def _paste():
         try:
@@ -63,7 +82,26 @@ def _bind_entry_context_menu(entry):
     entry.bind("<Control-a>", _ctrl_a)
     return entry
 
-class LoginDialog(tk.Toplevel):
+# 延迟基类：tkinter不可用时使用占位基类，实际使用时通过_ensure_tkinter()确保可用
+# 占位基类的__init__接受任意参数，避免object.__init__()参数错误
+class _PlaceholderBase:
+    """tkinter不可用时的占位基类，确保super().__init__()不会因参数报错"""
+    def __init__(self, *args, **kwargs):
+        pass
+
+_ToplevelBase = None
+
+def _get_toplevel_base():
+    global _ToplevelBase
+    if _ToplevelBase is None:
+        try:
+            import tkinter as _tk
+            _ToplevelBase = _tk.Toplevel
+        except ImportError:
+            _ToplevelBase = _PlaceholderBase
+    return _ToplevelBase
+
+class LoginDialog(_get_toplevel_base()):
     _BG = "#0f1923"
     _PANEL_BG = "#162231"
     _CARD_BG = "#1b2d3e"
@@ -89,6 +127,7 @@ class LoginDialog(tk.Toplevel):
     _SHADOW = "#0a1018"
 
     def __init__(self, parent=None):
+        _ensure_tkinter()
         super().__init__(parent)
         self.result = None
         self.title("用户登录")
@@ -495,10 +534,16 @@ class LoginDialog(tk.Toplevel):
         ).pack(fill=tk.X)
 
     def _build_activate_tab(self, card):
-        self._activate_username_var = tk.StringVar()
+        # 检查是否已登录，如果已登录则自动填充用户名
+        mgr = LicenseManager()
+        existing_username = mgr.license_data.get("username", "") if mgr.license_data else ""
+
+        self._activate_username_var = tk.StringVar(value=existing_username)
         self._make_label(card, "用户名").pack(anchor=tk.W, pady=(0, 4))
         self._activate_username_entry = self._make_entry(card, self._activate_username_var)
         self._activate_username_entry.pack(fill=tk.X, ipady=6, pady=(0, 10))
+        if existing_username:
+            self._activate_username_entry.configure(state=tk.DISABLED)
 
         self._activate_password_var = tk.StringVar()
         self._make_label(card, "密码").pack(anchor=tk.W, pady=(0, 4))
@@ -506,15 +551,26 @@ class LoginDialog(tk.Toplevel):
             card, self._activate_password_var, show="\u25cf"
         )
         self._activate_password_entry.pack(fill=tk.X, pady=(0, 10))
+        if existing_username:
+            self._activate_password_entry.configure(state=tk.DISABLED)
+            hint = tk.Label(
+                card,
+                text="已登录，直接输入激活码即可",
+                font=("Microsoft YaHei", 8),
+                bg=self._BG,
+                fg=self._TEXT_SECONDARY,
+            )
+            hint.pack(anchor=tk.W, pady=(0, 4))
 
         self._activate_code_var = tk.StringVar()
         self._make_label(card, "激活码").pack(anchor=tk.W, pady=(0, 4))
         self._activate_code_entry = self._make_entry(card, self._activate_code_var)
         self._activate_code_entry.pack(fill=tk.X, ipady=6, pady=(0, 14))
 
+        btn_text = "激  活" if existing_username else "登录并激活"
         ttk.Button(
             card,
-            text="登录并激活",
+            text=btn_text,
             command=self._handle_activate,
             style="Login.Primary.TButton",
         ).pack(fill=tk.X)
@@ -645,9 +701,13 @@ class LoginDialog(tk.Toplevel):
         password = self._activate_password_var.get().strip()
         code = self._activate_code_var.get().strip()
 
-        if not username or not password:
-            messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
-            return
+        mgr = LicenseManager()
+        already_logged_in = bool(mgr.license_data and mgr.license_data.get("username"))
+
+        if not already_logged_in:
+            if not username or not password:
+                messagebox.showwarning("提示", "请填写用户名和密码", parent=self)
+                return
         if not code:
             messagebox.showwarning("提示", "请输入激活码", parent=self)
             return
@@ -661,14 +721,14 @@ class LoginDialog(tk.Toplevel):
             activate_btn.configure(state=tk.DISABLED, text="激活中...")
 
         def do_activate():
-            mgr = LicenseManager()
-            success, message = mgr.login_user(username, password)
-            if not success:
-                self.after(0, lambda: self._safe_call(lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn)))
-                return
+            if not already_logged_in:
+                success, message = mgr.login_user(username, password)
+                if not success:
+                    self.after(0, lambda: self._safe_call(lambda: self._on_activate_failure(f"登录失败: {message}", activate_btn)))
+                    return
             success2, message2 = mgr.activate_pro_license(code)
             if success2:
-                mgr.save_login_credentials(username, password, True, False)
+                mgr.save_login_credentials(username or mgr.license_data.get("username", ""), password, True, False)
                 self.after(0, lambda: self._safe_call(lambda: self._on_activate_success()))
             else:
                 self.after(0, lambda: self._safe_call(lambda: self._on_activate_partial(message2, activate_btn)))
@@ -723,7 +783,7 @@ class LoginDialog(tk.Toplevel):
         if event.widget is self and self.result is None:
             self.result = False
 
-class PasswordResetDialog(tk.Toplevel):
+class PasswordResetDialog(_get_toplevel_base()):
     _BG = "#0f1923"
     _CARD_BG = "#1b2d3e"
     _TEXT_FG = "#e8edf2"
@@ -737,6 +797,7 @@ class PasswordResetDialog(tk.Toplevel):
     _DIVIDER = "#2d4a5f"
 
     def __init__(self, parent):
+        _ensure_tkinter()
         super().__init__(parent)
         self.title("密码找回")
         self.geometry("480x540")
@@ -1061,7 +1122,7 @@ class PasswordResetDialog(tk.Toplevel):
             self.after_cancel(self._countdown_id)
         super().destroy()
 
-class PurchaseDialog(tk.Toplevel):
+class PurchaseDialog(_get_toplevel_base()):
     _BG = "#0f1923"
     _CARD_BG = "#1b2d3e"
     _TEXT_FG = "#e8edf2"
@@ -1106,6 +1167,7 @@ class PurchaseDialog(tk.Toplevel):
     ]
 
     def __init__(self, parent):
+        _ensure_tkinter()
         super().__init__(parent)
         self.title("购买会员")
         self.geometry("560x640")
@@ -1518,6 +1580,7 @@ class PurchaseDialog(tk.Toplevel):
         )
 
 def check_and_show_login(parent=None):
+    _ensure_tkinter()
     license_mgr = LicenseManager()
     license_status = license_mgr.check_license()
 

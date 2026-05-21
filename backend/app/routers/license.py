@@ -19,9 +19,27 @@ async def activate_license_endpoint(
 ):
     from sqlalchemy import select
 
+    # 先检查密钥状态，给出更具体的错误信息
+    key_result = await db.execute(
+        select(LicenseKey).where(LicenseKey.license_key == license_data.license_key)
+    )
+    key_obj = key_result.scalar_one_or_none()
+    if not key_obj:
+        raise HTTPException(status_code=400, detail="密钥不存在，请检查输入")
+    if key_obj.status == LicenseKeyStatus.REVOKED:
+        raise HTTPException(status_code=400, detail="密钥已被撤销，请联系客服")
+    if key_obj.status == LicenseKeyStatus.ACTIVATED:
+        raise HTTPException(status_code=400, detail="密钥已被使用，每个密钥只能激活一次")
+
     activated = await activate_license(db, current_user.id, license_data.license_key)
+    if activated == "already_pro":
+        raise HTTPException(status_code=400, detail="您已是专业版会员，无需激活试用码")
+    if activated == "already_lifetime":
+        raise HTTPException(status_code=400, detail="您已是终身会员，无需再激活其他密钥")
+    if activated == "user_disabled":
+        raise HTTPException(status_code=403, detail="账户已被禁用，无法激活密钥")
     if not activated:
-        raise HTTPException(status_code=400, detail="许可证激活失败，可能密钥无效或已被使用")
+        raise HTTPException(status_code=400, detail="许可证激活失败，请检查密钥是否正确")
 
     license_result = await db.execute(
         select(License).filter(License.user_id == current_user.id)
