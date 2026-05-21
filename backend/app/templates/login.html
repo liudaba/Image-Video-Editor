@@ -172,8 +172,15 @@
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            const btn = this.querySelector('button[type="submit"]');
+            if (btn.disabled) return;
+            
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            
+            // 防重复提交 + loading状态
+            btn.disabled = true;
+            btn.textContent = '登录中...';
             
             try {
                 const response = await fetch('/auth/login', {
@@ -197,10 +204,14 @@
                 } else {
                     document.getElementById('errorMessage').textContent = data.detail || '登录失败';
                     document.getElementById('errorMessage').style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = '登录';
                 }
             } catch (error) {
                 document.getElementById('errorMessage').textContent = '网络错误，请稍后重试';
                 document.getElementById('errorMessage').style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = '登录';
             }
         });
     </script>
