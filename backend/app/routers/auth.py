@@ -288,17 +288,22 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
 async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
     from ..main import _get_real_ip
     client_ip = _get_real_ip(request)
-    if not check_login_rate_limit(user_data.username):
-        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
-    if not check_login_rate_limit(f"ip:{client_ip}"):
-        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
-
-    # 检查用户是否存在
+    # 管理员账号跳过登录限流检查
     result = await db.execute(select(User).filter(User.username == user_data.username))
     user = result.scalar_one_or_none()
+    is_admin_user = user and user.is_admin
+
+    if not is_admin_user:
+        if not check_login_rate_limit(user_data.username):
+            raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
+        if not check_login_rate_limit(f"ip:{client_ip}"):
+            raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
+
+    # 检查用户是否存在
     if not user or not verify_password(user_data.password, user.hashed_password):
-        record_login_failure(user_data.username)
-        record_login_failure(f"ip:{client_ip}")
+        if not is_admin_user:
+            record_login_failure(user_data.username)
+            record_login_failure(f"ip:{client_ip}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     if not user.is_active:
