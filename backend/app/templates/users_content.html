@@ -287,7 +287,10 @@
                 </div>
                 <div class="mb-3">
                     <label for="new-password" class="form-label">密码</label>
-                    <input type="password" class="form-control" id="new-password" required>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="new-password" required>
+                        <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
+                    </div>
                 </div>
                 <div class="mb-3">
                     <label for="new-role" class="form-label">角色</label>
@@ -363,7 +366,10 @@
                     </div>
                     <div class="mb-3">
                         <label for="edit-password" class="form-label">新密码（留空则不修改）</label>
-                        <input type="password" class="form-control" id="edit-password">
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="edit-password">
+                            <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="edit-role" class="form-label">角色</label>
@@ -549,4 +555,18 @@
             container.innerHTML = '<small class="text-danger">加载失败</small>';
         }
     }
+
+    // 密码显示/隐藏切换
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('toggle-pwd')) {
+            const input = e.target.parentElement.querySelector('input');
+            if (input.type === 'password') {
+                input.type = 'text';
+                e.target.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                e.target.textContent = '👁';
+            }
+        }
+    });
 </script>
