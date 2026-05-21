@@ -101,9 +101,28 @@
             background-color: #c82333;
             border-color: #bd2130;
         }
+        /* Toast通知 */
+        .toast-container {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            z-index: 9999;
+        }
+        .toast-container .toast {
+            min-width: 280px;
+            margin-bottom: 8px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
     </style>
 </head>
 <body>
+    <!-- Toast通知容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
     <nav class="top-navbar">
         <h4 class="mb-0">短视频生成器 - 管理后台</h4>
         <div class="d-flex align-items-center">
@@ -224,15 +243,24 @@
                     <form id="changePwdForm">
                         <div class="mb-3">
                             <label for="old-password" class="form-label">原密码</label>
-                            <input type="password" class="form-control" id="old-password" required>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="old-password" required>
+                                <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label for="new-password" class="form-label">新密码</label>
-                            <input type="password" class="form-control" id="new-password" required>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="new-password" required>
+                                <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label for="confirm-password" class="form-label">确认新密码</label>
-                            <input type="password" class="form-control" id="confirm-password" required>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="confirm-password" required>
+                                <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -434,11 +462,62 @@
         }
 
         function showError(message) {
-            alert('错误: ' + message);
+            showToast(message, 'danger');
         }
 
         function showSuccess(message) {
-            alert('成功: ' + message);
+            showToast(message, 'success');
+        }
+
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
+            const iconMap = { success: 'fa-check-circle', danger: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
+            const bgMap = { success: 'bg-success', danger: 'bg-danger', warning: 'bg-warning text-dark', info: 'bg-info' };
+            const icon = iconMap[type] || iconMap.info;
+            const bg = bgMap[type] || bgMap.info;
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-white ${bg} border-0`;
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body"><i class="fas ${icon} me-2"></i>${escapeHtml(message)}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+            container.appendChild(toast);
+            const bsToast = new bootstrap.Toast(toast, { delay: 3000 });
+            toast.addEventListener('hidden.bs.toast', () => toast.remove());
+            bsToast.show();
+        }
+
+        // 全局密码显示/隐藏切换
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('toggle-pwd')) {
+                const input = e.target.parentElement.querySelector('input');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    e.target.textContent = '🙈';
+                } else {
+                    input.type = 'password';
+                    e.target.textContent = '👁';
+                }
+            }
+        });
+
+        // 全局一键复制
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('已复制到剪贴板', 'success');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('已复制到剪贴板', 'success');
+            });
         }
 
         function getCsrfToken() {

@@ -17,15 +17,21 @@
         <div class="card shadow mt-4">
             <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
                 <h6 class="m-0 font-weight-bold text-primary">许可证密钥列表</h6>
-                <button class="btn btn-sm btn-primary" id="generate-keys-btn">
-                    <i class="fas fa-plus"></i> 生成密钥
-                </button>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-danger" id="batch-delete-keys-btn" style="display:none">
+                        <i class="fas fa-trash"></i> 批量删除
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="generate-keys-btn">
+                        <i class="fas fa-plus"></i> 生成密钥
+                    </button>
+                </div>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-bordered" id="license-keys-table" width="100%" cellspacing="0">
                         <thead>
                             <tr>
+                                <th><input type="checkbox" id="select-all-keys"></th>
                                 <th>密钥</th>
                                 <th>套餐类型</th>
                                 <th>状态</th>
@@ -99,8 +105,31 @@
         document.getElementById('generate-keys-btn').addEventListener('click', () => {
             showGenerateKeysModal();
         });
+        document.getElementById('select-all-keys').addEventListener('change', function() {
+            document.querySelectorAll('.key-checkbox').forEach(cb => cb.checked = this.checked);
+            updateKeysBatchBtn();
+        });
+        document.getElementById('batch-delete-keys-btn').addEventListener('click', async () => {
+            const keys = Array.from(document.querySelectorAll('.key-checkbox:checked')).map(cb => cb.dataset.key);
+            if (keys.length === 0) return;
+            if (!confirm(`确定要删除选中的 ${keys.length} 个密钥吗？此操作不可恢复！`)) return;
+            let success = 0, fail = 0;
+            for (const key of keys) {
+                try {
+                    await apiRequest(`/api/admin/license_keys/${key}`, { method: 'DELETE' });
+                    success++;
+                } catch(e) { fail++; }
+            }
+            showSuccess(`删除完成：成功 ${success} 个${fail > 0 ? '，失败 ' + fail + ' 个' : ''}`);
+            loadLicenseKeys();
+        });
         await loadLicenseKeys();
         await loadUserLicenses();
+    }
+
+    function updateKeysBatchBtn() {
+        const checked = document.querySelectorAll('.key-checkbox:checked').length;
+        document.getElementById('batch-delete-keys-btn').style.display = checked > 0 ? '' : 'none';
     }
 
     // 通用分页渲染函数
@@ -187,7 +216,8 @@
             response.keys.forEach(key => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td><code>${escapeHtml(key.license_key)}</code></td>
+                    <td><input type="checkbox" class="key-checkbox" data-key="${escapeHtml(key.license_key)}"></td>
+                    <td><code>${escapeHtml(key.license_key)}</code> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyToClipboard('${escapeHtml(key.license_key)}')" title="复制"><i class="fas fa-copy"></i></button></td>
                     <td>${key.plan_type === 'monthly' ? '月付' : key.plan_type === 'quarterly' ? '季付' : key.plan_type === 'yearly' ? '年付' : key.plan_type === 'lifetime' ? '终身' : key.plan_type === 'trial_15d' ? '试用15天' : key.plan_type}</td>
                     <td>
                         <span class="badge ${
@@ -220,6 +250,12 @@
             // 渲染分页
             const totalPages = Math.ceil(response.total / keysPageSize);
             renderPagination('keys-pagination', keysCurrentPage, totalPages, (p) => loadLicenseKeys(p));
+
+            // 绑定checkbox变化事件
+            document.querySelectorAll('.key-checkbox').forEach(cb => {
+                cb.addEventListener('change', updateKeysBatchBtn);
+            });
+            updateKeysBatchBtn();
         } catch (error) {
             console.error('加载许可证密钥失败:', error);
             showError('加载许可证密钥失败: ' + error.message);
@@ -240,7 +276,7 @@
                     <td>${escapeHtml(license.username)}</td>
                     <td>${escapeHtml(license.email) || '-'}</td>
                     <td><span class="badge ${license.plan_type === 'lifetime' ? 'bg-warning' : license.plan_type === 'yearly' ? 'bg-primary' : license.plan_type === 'quarterly' ? 'bg-info' : license.plan_type === 'monthly' ? 'bg-success' : 'bg-secondary'}">${license.plan_type === 'monthly' ? '月付' : license.plan_type === 'quarterly' ? '季付' : license.plan_type === 'yearly' ? '年付' : license.plan_type === 'lifetime' ? '终身' : license.plan_type === 'trial_15d' ? '试用15天' : license.license_type === 'pro' ? '专业版' : '试用'}</span></td>
-                    <td>${license.license_key ? `<code>${escapeHtml(license.license_key)}</code>` : '-'}</td>
+                    <td>${license.license_key ? `<code>${escapeHtml(license.license_key)}</code> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyToClipboard('${escapeHtml(license.license_key)}')" title="复制"><i class="fas fa-copy"></i></button>` : '-'}</td>
                     <td><span class="badge ${license.is_valid ? 'bg-success' : 'bg-danger'}">${license.is_valid ? '有效' : '无效'}</span></td>
                     <td>${license.expiry_date ? formatDate(license.expiry_date) : (license.plan_type === 'lifetime' ? '永久' : '-')}</td>
                     <td>${license.machine_fingerprint ? `<small title="${escapeHtml(license.machine_fingerprint)}">${escapeHtml(license.machine_fingerprint.substring(0, 16))}...</small>` : '-'}</td>

@@ -167,7 +167,7 @@
                 const keysHtml = user.activated_keys && user.activated_keys.length > 0
                     ? user.activated_keys.map(k => {
                         const planLabel = k.plan_type === 'monthly' ? '月付' : k.plan_type === 'quarterly' ? '季付' : k.plan_type === 'yearly' ? '年付' : k.plan_type === 'lifetime' ? '终身' : k.plan_type === 'trial_15d' ? '试用' : k.plan_type;
-                        return `<small><code>${escapeHtml(k.license_key.substring(0, 12))}...</code> <span class="badge bg-info">${planLabel}</span></small>`;
+                        return `<small><code>${escapeHtml(k.license_key.substring(0, 12))}...</code> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyToClipboard('${escapeHtml(k.license_key)}')" title="复制完整密钥"><i class="fas fa-copy"></i></button> <span class="badge bg-info">${planLabel}</span></small>`;
                     }).join('<br>')
                     : '-';
                 row.innerHTML = `
@@ -555,18 +555,4 @@
             container.innerHTML = '<small class="text-danger">加载失败</small>';
         }
     }
-
-    // 密码显示/隐藏切换
-    document.addEventListener('click', function(e) {
-        if (e.target.classList.contains('toggle-pwd')) {
-            const input = e.target.parentElement.querySelector('input');
-            if (input.type === 'password') {
-                input.type = 'text';
-                e.target.textContent = '🙈';
-            } else {
-                input.type = 'password';
-                e.target.textContent = '👁';
-            }
-        }
-    });
 </script>

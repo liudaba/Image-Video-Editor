@@ -6,15 +6,21 @@
 <div class="card shadow mt-4">
     <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
         <h6 class="m-0 font-weight-bold text-primary">15天试用激活码列表</h6>
-        <button class="btn btn-sm btn-primary" id="generate-trial-btn">
-            <i class="fas fa-plus"></i> 生成20个激活码
-        </button>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-danger" id="batch-delete-trial-btn" style="display:none">
+                <i class="fas fa-trash"></i> 批量删除
+            </button>
+            <button class="btn btn-sm btn-primary" id="generate-trial-btn">
+                <i class="fas fa-plus"></i> 生成20个激活码
+            </button>
+        </div>
     </div>
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-bordered" id="trial-codes-table" width="100%" cellspacing="0">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="select-all-trial"></th>
                         <th>激活码</th>
                         <th>状态</th>
                         <th>剩余天数</th>
@@ -46,7 +52,30 @@
         document.getElementById('generate-trial-btn').addEventListener('click', () => {
             showGenerateTrialModal();
         });
+        document.getElementById('select-all-trial').addEventListener('change', function() {
+            document.querySelectorAll('.trial-checkbox').forEach(cb => cb.checked = this.checked);
+            updateTrialBatchBtn();
+        });
+        document.getElementById('batch-delete-trial-btn').addEventListener('click', async () => {
+            const keys = Array.from(document.querySelectorAll('.trial-checkbox:checked')).map(cb => cb.dataset.key);
+            if (keys.length === 0) return;
+            if (!confirm(`确定要删除选中的 ${keys.length} 个激活码吗？此操作不可恢复！`)) return;
+            let success = 0, fail = 0;
+            for (const key of keys) {
+                try {
+                    await apiRequest(`/api/admin/license_keys/${key}`, { method: 'DELETE' });
+                    success++;
+                } catch(e) { fail++; }
+            }
+            showSuccess(`删除完成：成功 ${success} 个${fail > 0 ? '，失败 ' + fail + ' 个' : ''}`);
+            loadTrialCodes();
+        });
         await loadTrialCodes();
+    }
+
+    function updateTrialBatchBtn() {
+        const checked = document.querySelectorAll('.trial-checkbox:checked').length;
+        document.getElementById('batch-delete-trial-btn').style.display = checked > 0 ? '' : 'none';
     }
 
     // 通用分页渲染函数
@@ -143,7 +172,8 @@
                                        key.days_remaining <= 3 ? 'text-warning' : 'text-info';
                 
                 row.innerHTML = `
-                    <td><code>${escapeHtml(key.license_key)}</code></td>
+                    <td><input type="checkbox" class="trial-checkbox" data-key="${escapeHtml(key.license_key)}"></td>
+                    <td><code>${escapeHtml(key.license_key)}</code> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyToClipboard('${escapeHtml(key.license_key)}')" title="复制"><i class="fas fa-copy"></i></button></td>
                     <td>
                         <span class="badge ${
                             isExpired ? 'bg-danger' :
@@ -175,6 +205,12 @@
             // 渲染分页
             const totalPages = Math.ceil(response.total / trialCodesPageSize);
             renderTrialPagination(trialCodesCurrentPage, totalPages);
+
+            // 绑定checkbox变化事件
+            document.querySelectorAll('.trial-checkbox').forEach(cb => {
+                cb.addEventListener('change', updateTrialBatchBtn);
+            });
+            updateTrialBatchBtn();
         } catch (error) {
             console.error('加载试用激活码失败:', error);
             showError('加载试用激活码失败: ' + error.message);

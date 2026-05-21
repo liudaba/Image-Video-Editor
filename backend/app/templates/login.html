@@ -141,7 +141,10 @@
                 </div>
                 <div class="form-group">
                     <label for="password" class="form-label">密码</label>
-                    <input type="password" class="form-control" id="password" placeholder="请输入密码" required>
+                    <div style="position:relative">
+                        <input type="password" class="form-control" id="password" placeholder="请输入密码" required style="padding-right:45px">
+                        <button type="button" id="toggle-login-pwd" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.2rem;color:#a0aec0" tabindex="-1">&#128065;</button>
+                    </div>
                 </div>
                 <button type="submit" class="btn-primary">登录</button>
             </form>
@@ -154,6 +157,18 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // 密码显示/隐藏
+        document.getElementById('toggle-login-pwd').addEventListener('click', function() {
+            const input = document.getElementById('password');
+            if (input.type === 'password') {
+                input.type = 'text';
+                this.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                this.textContent = '👁';
+            }
+        });
+
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
