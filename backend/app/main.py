@@ -167,10 +167,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._cleanup_stale_entries()
         return True
 
+    def _is_admin_request(self, request: Request) -> bool:
+        """检查请求是否来自管理员，管理员跳过限流"""
+        try:
+            from .auth import decode_access_token
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                token = auth[7:]
+                token_data = decode_access_token(token)
+                if token_data and token_data.username == "admin":
+                    return True
+        except Exception:
+            pass
+        return False
+
     async def dispatch(self, request: Request, call_next):
-        client_ip = _get_real_ip(request)
-        if not self._check_redis_rate(client_ip, request.url.path):
-            return JSONResponse(status_code=429, content={"detail": "请求过于频繁,请稍后再试"})
+        # 管理员跳过限流
+        if not self._is_admin_request(request):
+            client_ip = _get_real_ip(request)
+            if not self._check_redis_rate(client_ip, request.url.path):
+                return JSONResponse(status_code=429, content={"detail": "请求过于频繁,请稍后再试"})
         return await call_next(request)
 
 
