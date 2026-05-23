@@ -98,7 +98,39 @@ def decode_access_token(token: str) -> TokenData:
 
 _memory_rate_limit: dict = {}
 
+
+def _memory_rate_limit_check(identifier: str) -> bool:
+    """内存限流检查（单进程快速路径）"""
+    now = time.time()
+    entry = _memory_rate_limit.get(identifier)
+    if entry is None:
+        return True
+    lockout_until = entry.get("lockout_until")
+    if lockout_until and now < lockout_until:
+        return False
+    if lockout_until and now >= lockout_until:
+        del _memory_rate_limit[identifier]
+        return True
+    return True
+
+
+def _memory_record_failure(identifier: str):
+    """内存记录登录失败"""
+    now = time.time()
+    entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
+    entry["fails"] += 1
+    if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
+        entry["lockout_until"] = now + LOCKOUT_SECONDS
+    _memory_rate_limit[identifier] = entry
+
+
+def _memory_clear_failures(identifier: str):
+    """内存清除登录失败记录"""
+    _memory_rate_limit.pop(identifier, None)
+
+
 def check_login_rate_limit(identifier: str) -> bool:
+    """检查登录限流：Redis > 内存"""
     r = _get_redis()
     if r is not None:
         try:
@@ -114,25 +146,11 @@ def check_login_rate_limit(identifier: str) -> bool:
             return True
         except Exception:
             pass
-    # Fallback to in-memory rate limiting
-    now = time.time()
-    entry = _memory_rate_limit.get(identifier)
-    if entry is None:
-        return True
-    lockout_until = entry.get("lockout_until")
-    if lockout_until and now < lockout_until:
-        return False
-    if lockout_until and now >= lockout_until:
-        del _memory_rate_limit[identifier]
-        return True
-    fails = entry.get("fails", 0)
-    if fails >= MAX_LOGIN_ATTEMPTS:
-        entry["lockout_until"] = now + LOCKOUT_SECONDS
-        return False
-    return True
+    return _memory_rate_limit_check(identifier)
 
 
 def record_login_failure(identifier: str):
+    """记录登录失败：Redis > 内存"""
     r = _get_redis()
     if r is not None:
         try:
@@ -145,16 +163,11 @@ def record_login_failure(identifier: str):
             return
         except Exception:
             pass
-    # Fallback to in-memory
-    now = time.time()
-    entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
-    entry["fails"] += 1
-    if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
-        entry["lockout_until"] = now + LOCKOUT_SECONDS
-    _memory_rate_limit[identifier] = entry
+    _memory_record_failure(identifier)
 
 
 def clear_login_failures(identifier: str):
+    """清除登录失败记录：Redis + 内存"""
     r = _get_redis()
     if r is not None:
         try:
@@ -162,7 +175,7 @@ def clear_login_failures(identifier: str):
             r.delete(f"login_lockout:{identifier}")
         except Exception:
             pass
-    _memory_rate_limit.pop(identifier, None)
+    _memory_clear_failures(identifier)
 
 
 async def get_current_user(
@@ -186,7 +199,7 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户已被禁用")
     if user.password_changed_at:
         token_issued = token_data.exp - settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        # SQLite不保留时区信息，需要确保naive datetime按UTC处理
+        # PostgreSQL保留时区信息，确保naive datetime按UTC处理
         pw_changed = user.password_changed_at
         if pw_changed.tzinfo is None:
             pw_changed = pw_changed.replace(tzinfo=timezone.utc)

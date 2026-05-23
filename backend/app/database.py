@@ -5,18 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from typing import AsyncGenerator
 import os
 
-# 修复模块导入路径
-from .config import settings  # 使用相对导入
+from .config import settings
 
-# 创建异步引擎
 _engine_kwargs = {
     "pool_recycle": 3600,
     "pool_pre_ping": True,
+    "pool_size": 10,
+    "max_overflow": 20,
 }
-
-if not settings.DATABASE_URL.startswith("sqlite"):
-    _engine_kwargs["pool_size"] = 10
-    _engine_kwargs["max_overflow"] = 20
 
 engine = create_async_engine(
     settings.DATABASE_URL,

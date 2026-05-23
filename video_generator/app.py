@@ -4,13 +4,11 @@ This file contains module-level setup (console, imports) and the entry point.
 All business logic lives in video_generator/mixins/ modules.
 """
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
 import os
 import sys
 import datetime
 import warnings
 import ctypes
-from ctypes import wintypes
 
 # ============ Sub-module imports ============
 
@@ -35,8 +33,20 @@ _is_pythonw = sys.executable.lower().endswith('pythonw.exe')
 _has_no_console = sys.stdout is None or sys.stderr is None
 _console_allocated = False
 
-# 仅在非打包的开发模式下才显示控制台，打包后完全无控制台
-_should_show_console = not getattr(sys, 'frozen', False)
+# 检测是否为便携版（内嵌Python模式）
+_is_portable = False
+if not getattr(sys, 'frozen', False):
+    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _embedded_python = os.path.join(_project_root, 'python', 'python.exe')
+    _is_portable = os.path.exists(_embedded_python)
+
+# 仅在开发模式下显示控制台；便携版和PyInstaller打包版不显示
+# 便携版通过start.bat(python.exe)启动时已有控制台，不需要额外分配
+# 便携版通过start.vbs(pythonw.exe)启动时不应该分配控制台
+if _is_portable:
+    _should_show_console = False  # 便携版：依赖启动方式决定是否有控制台
+else:
+    _should_show_console = not getattr(sys, 'frozen', False)
 
 if sys.platform == "win32" and _should_show_console:
     if _is_pythonw or _has_no_console:
@@ -145,18 +155,25 @@ def _check_critical_files(app_dir):
 
     internal_dir = os.path.join(app_dir, "_internal")
     critical = {
-        "config.json": os.path.join(app_dir, "config.json"),
-        ".license_verify_pubkey.pem": os.path.join(internal_dir, ".license_verify_pubkey.pem"),
+        "config.json": [
+            os.path.join(app_dir, "config.json"),
+            os.path.join(internal_dir, "config.json"),
+        ],
+        ".license_verify_pubkey.pem": [
+            os.path.join(app_dir, ".license_verify_pubkey.pem"),
+            os.path.join(internal_dir, ".license_verify_pubkey.pem"),
+        ],
     }
     missing = []
-    for name, path in critical.items():
-        if not os.path.exists(path):
-            alt_path = os.path.join(internal_dir, name)
-            if os.path.exists(alt_path):
-                logger.info(f"FOUND in _internal/: {name}")
-            else:
-                missing.append(name)
-                logger.warning(f"MISSING: {name}")
+    for name, paths in critical.items():
+        found = False
+        for path in paths:
+            if os.path.exists(path):
+                found = True
+                break
+        if not found:
+            missing.append(name)
+            logger.warning(f"MISSING: {name}")
 
     if missing:
         logger.error(f"Critical files missing: {', '.join(missing)}")

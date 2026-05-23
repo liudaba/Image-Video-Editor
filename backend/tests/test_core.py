@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_videogen.db")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://videogen:videogen@localhost:5432/videogen_test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-for-unit-tests-only-64chars")
 os.environ.setdefault("HMAC_SIGN_KEY", "test-hmac-sign-key-for-unit-tests-only")
 os.environ.setdefault("VIDEOGEN_ENV", "test")
@@ -15,7 +15,7 @@ os.environ.setdefault("VIDEOGEN_ENV", "test")
 from app.database import Base, engine, async_session
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
 from app.services.license_service import (
-    sign_license_data, verify_signature, build_license_response,
+    sign_license_data, verify_signature,
     create_trial_license, generate_license_key, is_license_expired,
 )
 from app.models import User, License, LicenseType
@@ -120,17 +120,6 @@ class TestLicenseService:
     def test_generate_license_key_unique(self):
         keys = {generate_license_key() for _ in range(100)}
         assert len(keys) == 100
-
-    @pytest.mark.asyncio
-    async def test_build_license_response(self, db, sample_user, sample_license):
-        db.add(sample_user)
-        db.add(sample_license)
-        await db.commit()
-        await db.refresh(sample_license)
-        response = build_license_response(sample_license, "testuser")
-        assert response.username == "testuser"
-        assert response.license_type == "trial"
-        assert response._sig is not None
 
     def test_is_license_expired_valid_trial(self):
         from datetime import datetime, timezone, timedelta

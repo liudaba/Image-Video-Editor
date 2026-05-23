@@ -144,8 +144,7 @@ class MachineBinding(Base):
 class AppVersion(Base):
     __tablename__ = "app_versions"
     __table_args__ = (
-        # 同一版本号可以有full+patch多条记录，但 (version, update_type, from_version) 组合唯一
-        # 注意：SQLite不支持部分索引，这里用UniqueConstraint近似
+        # (version, update_type, from_version) 组合唯一
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)

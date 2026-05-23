@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
 
 from ..database import get_db
 from ..models import LicenseKey, License, User, LicenseKeyStatus, PlanType
 from ..auth import require_admin, get_current_user
 from ..services.license_service import generate_license_key, encode_license_data, activate_license
-from ..schemas import LicenseStatusResponse, LicenseActivate, ActivateResponse
+from ..schemas import LicenseActivate, ActivateResponse
 
 router = APIRouter(prefix="/api/license", tags=["license"])
 

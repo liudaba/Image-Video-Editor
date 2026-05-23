@@ -1,14 +1,10 @@
 import logging
-import random
 import secrets
-from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
-from fastapi.security import HTTPBearer
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import asyncio
 import time
-from typing import Optional
 
 from ..database import get_db
 from ..models import User, MachineBinding, License, LicenseType
@@ -31,8 +27,6 @@ from ..config import settings
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-security = HTTPBearer()
 
 _RESET_CODE_TTL = 600
 _RESET_CODE_MAX_ATTEMPTS = 5
@@ -230,14 +224,11 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
 
     if user_data.fingerprint:
         from sqlalchemy import func as sa_func
-        from ..database import engine
-        use_for_update = not str(engine.url).startswith("sqlite")
 
-        # 使用SELECT FOR UPDATE防止并发注册绕过设备限制
-        fp_query = select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
-        if use_for_update:
-            fp_query = fp_query.with_for_update()
-        fp_user_count = await db.execute(fp_query)
+        # 查询设备绑定数量（不能用FOR UPDATE + 聚合函数，PostgreSQL不支持）
+        fp_user_count = await db.execute(
+            select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
+        )
         fp_count = fp_user_count.scalar() or 0
         if fp_count >= 3:
             raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")

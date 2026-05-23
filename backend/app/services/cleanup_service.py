@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import async_session
+from ..database import async_session, engine
 from ..models import (
     AuditLog,
     HeartbeatLog,
@@ -73,8 +73,7 @@ async def run_database_cleanup():
             await db.commit()
 
             try:
-                # VACUUM 不能在事务内执行，需要使用 autocommit isolation level
-                from ..database import engine
+                # PostgreSQL VACUUM ANALYZE 回收空间并更新统计信息
                 async with engine.connect() as conn:
                     await conn.execution_options(isolation_level="AUTOCOMMIT")
                     await conn.execute(text("VACUUM (ANALYZE)"))

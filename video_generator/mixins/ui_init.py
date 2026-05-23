@@ -1,4 +1,4 @@
-﻿"""UI initialization mixin - window setup, variables, system services."""
+"""UI initialization mixin - window setup, variables, system services."""
 import os
 import sys
 import time
@@ -363,7 +363,12 @@ class UIInitMixin:
                 mgr = LicenseManager()
                 license_status = mgr.check_license()
                 if license_status["valid"]:
-                    mgr.verify_with_server()
+                    server_ok = mgr.verify_with_server()
+                    if not server_ok:
+                        license_status = mgr.check_license()
+                        if not license_status["valid"]:
+                            self.root.after(0, self._on_auth_invalid)
+                            return
                     mgr.start_heartbeat()
                     mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
                     mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
@@ -403,8 +408,10 @@ class UIInitMixin:
 
         if is_lifetime:
             self._update_auth_status_label("✅ 终身", "#FFD700", "#0d2137")
-        elif is_trial:
+        elif is_trial and days_left > 0:
             self._update_auth_status_label(f"⏳ 试用期剩余{days_left}天", "#f59e0b", "#1a2744")
+        elif is_trial and days_left <= 0:
+            self._update_auth_status_label("⚠️ 试用已过期", "#ef4444", "#2d1215")
         elif days_left > 0:
             self._update_auth_status_label(f"⏳ 剩余{days_left}天", "#f59e0b", "#1a2744")
         else:
@@ -424,8 +431,10 @@ class UIInitMixin:
             days_left = account_info.get("days_left", 0)
             if is_lifetime:
                 self._update_auth_status_label("✅ 终身", "#FFD700", "#0d2137")
-            elif is_trial:
+            elif is_trial and days_left > 0:
                 self._update_auth_status_label(f"⏳ 试用期剩余{days_left}天", "#f59e0b", "#1a2744")
+            elif is_trial and days_left <= 0:
+                self._update_auth_status_label("⚠️ 试用已过期", "#ef4444", "#2d1215")
             elif days_left > 0:
                 self._update_auth_status_label(f"⏳ 剩余{days_left}天", "#f59e0b", "#1a2744")
             else:
@@ -438,16 +447,28 @@ class UIInitMixin:
         self._set_action_buttons_state("disabled")
         self._update_auth_status_label("未登录 - 点击登录", "#f59e0b", "#1a2744")
         self._update_membership_title()
+        # 首次启动时自动弹出登录框，提升首次使用体验
+        if not getattr(self, '_login_shown', False):
+            self._login_shown = True
+            self.root.after(500, self._show_login_dialog)
 
     def _on_auth_revoked(self):
         try:
             from video_generator.license_manager import LicenseManager
             mgr = LicenseManager()
-            license_status = mgr.check_license()
-            if license_status.get("valid"):
+            # 心跳连续失败触发，尝试向服务器验证一次
+            # 如果服务器确认有效，则恢复；否则标记失效
+            try:
                 server_ok = mgr.verify_with_server()
                 if server_ok:
                     self._on_auth_recovered()
+                    return
+            except Exception:
+                # 网络异常，无法验证服务器，保持当前状态
+                # 不弹出授权失效提示，避免网络波动误判
+                license_status = mgr.check_license()
+                if license_status.get("valid"):
+                    # 本地缓存仍有效，可能是网络波动，不强制登出
                     return
         except Exception:
             pass
@@ -753,7 +774,6 @@ class UIInitMixin:
                 self._api_heartbeat_event.clear()
                 if not self._api_heartbeat_running:
                     break
-                self._check_api_heartbeat()
                 try:
                     from video_generator.license_manager import LicenseManager
                     mgr = LicenseManager()
@@ -761,8 +781,11 @@ class UIInitMixin:
                         mgr.verify_with_server()
                 except Exception:
                     pass
-                self.root.after(0, self._update_membership_title)
-                self.root.after(0, self._refresh_auth_status_display)
+                try:
+                    self.root.after(0, self._update_membership_title)
+                    self.root.after(0, self._refresh_auth_status_display)
+                except Exception:
+                    pass
         threading.Thread(target=api_heartbeat, daemon=True).start()
 
     def _show_readiness_summary(self):
@@ -835,5 +858,64 @@ class UIInitMixin:
                 self.log(f"     → 配置文件异常：请检查 config.json")
 
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
+
+    def on_close(self):
+        """窗口关闭处理 - 快速释放所有资源"""
+        # 防止重复调用
+        if getattr(self, '_closing', False):
+            return
+        self._closing = True
+
+        # 1. 停止任务
+        if getattr(self, 'task_running', False):
+            self.task_running = False
+
+        # 2. 停止心跳线程
+        try:
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            mgr.stop_heartbeat()
+        except Exception:
+            pass
+
+        # 3. 停止API心跳循环
+        self._api_heartbeat_running = False
+        if hasattr(self, '_api_heartbeat_event'):
+            self._api_heartbeat_event.set()
+
+        # 4. 终止视频渲染子进程
+        try:
+            if self.video_renderer:
+                self.video_renderer.cancel_render()
+        except Exception:
+            pass
+
+        # 5. 关闭并行提示词生成器线程池
+        try:
+            if hasattr(self, '_parallel_generator') and self._parallel_generator:
+                self._parallel_generator.shutdown()
+        except Exception:
+            pass
+
+        # 6. 关闭资源管理器中的线程池
+        try:
+            if hasattr(self, 'resource_manager') and self.resource_manager:
+                self.resource_manager.shutdown_all_pools(wait=False)
+        except Exception:
+            pass
+
+        # 7. 关闭HTTP Session（释放连接池）
+        try:
+            from video_generator.config import _http_session, _http_session_lock
+            with _http_session_lock:
+                if _http_session is not None:
+                    _http_session.close()
+        except Exception:
+            pass
+
+        # 8. 销毁窗口
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 

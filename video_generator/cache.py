@@ -27,7 +27,7 @@ class SmartCache:
 
     def _generate_key(self, *args, **kwargs):
         key_data = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True, default=str)
-        return hashlib.md5(key_data.encode()).hexdigest()
+        return hashlib.sha256(key_data.encode()).hexdigest()
 
     def get(self, key):
         with self._lock:

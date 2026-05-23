@@ -123,45 +123,6 @@ async def create_order(
     return order
 
 
-def get_payment_callback_url(method: str) -> str:
-    """获取支付回调地址"""
-    base_url = _get_site_base_url()
-    return f"{base_url}/api/payment/callback/{method}"
-
-
-def verify_alipay_signature(params: Dict, alipay_public_key: str) -> bool:
-    try:
-        alipay = _get_alipay_instance()
-        if alipay is None:
-            return False
-
-        verify_data = {k: v for k, v in params.items() if k not in ("sign", "sign_type")}
-        signature = params.get("sign")
-        return alipay.verify(verify_data, signature)
-    except Exception:
-        return False
-
-
-def verify_wechat_signature(params: Dict, wechat_api_key: str) -> bool:
-    try:
-        if not settings.WECHAT_API_KEY:
-            return False
-
-        sign = params.get('sign')
-        if not sign:
-            return False
-
-        filtered = {k: v for k, v in params.items() if k != 'sign' and v}
-        sign_str = "&".join(f"{k}={v}" for k, v in sorted(filtered.items()))
-        sign_str += f"&key={settings.WECHAT_API_KEY}"
-        computed_sign = hashlib.sha256(sign_str.encode("utf-8")).hexdigest().upper()
-
-        import hmac as _hmac
-        return _hmac.compare_digest(computed_sign, sign)
-    except Exception:
-        return False
-
-
 async def create_alipay_order(order_no: str, plan_type: str, user_id: int) -> Dict[str, Any]:
     """创建支付宝订单（支持扫码支付）"""
     base_url = _get_site_base_url()

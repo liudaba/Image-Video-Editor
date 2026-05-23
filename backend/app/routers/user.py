@@ -2,12 +2,11 @@ import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
 
 from ..database import get_db
 from ..models import User, License, AuditLog, HeartbeatLog
 from ..auth import require_admin, get_current_user
-from ..schemas import UserRegister, HeartbeatRequest, HeartbeatResponse, LicenseStatusResponse
+from ..schemas import HeartbeatRequest, HeartbeatResponse, LicenseStatusResponse
 from ..services.license_service import encode_license_data
 
 router = APIRouter(prefix="/api/user", tags=["user"])
@@ -89,13 +88,21 @@ async def heartbeat(
     await db.flush()
     await db.commit()
 
-    license_data = encode_license_data(license_obj, current_user.username) if is_valid else None
+    # 生成签名数据前，确保license_obj.is_valid与实际状态一致
+    # 设备绑定限制是运行时限制，不修改数据库is_valid，但签名必须反映实际状态
+    original_db_is_valid = license_obj.is_valid
+    if not is_valid:
+        license_obj.is_valid = False
+    license_data = encode_license_data(license_obj, current_user.username)
+    # 恢复数据库中的is_valid（设备绑定限制不应修改数据库）
+    license_obj.is_valid = original_db_is_valid
 
     return HeartbeatResponse(is_valid=is_valid, license=license_data, reason=reason, timestamp=time.time())
 
 
 @router.get("/license_status", response_model=LicenseStatusResponse, summary="获取许可证状态")
 async def get_license_status(
+    fingerprint: str = None,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -116,16 +123,34 @@ async def get_license_status(
         license_obj.is_valid = False
         reason = "许可证已过期"
         await db.flush()
+        await db.commit()
+    # 如果用户被禁用，许可证也应无效
+    if license_obj.is_valid and not current_user.is_active:
+        license_obj.is_valid = False
+        reason = "账户已被禁用"
+        await db.flush()
+        await db.commit()
+    # 如果提供了fingerprint，检查设备绑定限制
+    if license_obj.is_valid and fingerprint:
+        from ..services.heartbeat_service import check_and_bind_machine
+        can_bind = await check_and_bind_machine(db, current_user.id, fingerprint)
+        if not can_bind:
+            reason = "设备绑定数量已达上限(最多3台)"
     # 如果is_valid=False，判断具体原因
     if not license_obj.is_valid and not reason:
         if not current_user.is_active:
             reason = "账户已被禁用"
         else:
             reason = "许可证已失效"
+
+    # 生成签名数据前，确保is_valid与实际状态一致
+    original_db_is_valid = license_obj.is_valid
+    if reason and license_obj.is_valid:
+        # 设备绑定限制是运行时限制，不修改数据库is_valid，但签名必须反映实际状态
+        license_obj.is_valid = False
     license_data = encode_license_data(license_obj, current_user.username)
-    # 二次确保：如果is_valid为False，签名数据中也必须为False
-    if not license_obj.is_valid:
-        license_data.is_valid = False
+    license_obj.is_valid = original_db_is_valid
+
     return LicenseStatusResponse(license=license_data, reason=reason)
 
 

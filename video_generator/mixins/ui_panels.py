@@ -1,6 +1,7 @@
 """UI panels mixin - left panel, advanced settings, script/log areas."""
 import os
 import json
+import threading
 import tkinter as tk
 from tkinter import ttk
 

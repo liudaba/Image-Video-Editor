@@ -182,10 +182,6 @@ def calc_renewal_expiry(existing_expiry_date, plan_type: PlanType) -> Optional[d
         return now + remaining + delta
 
 
-def build_license_response(license_obj: License, username: str) -> LicenseData:
-    return encode_license_data(license_obj, username)
-
-
 def generate_license_key(length: int = 32) -> str:
     alphabet = string.ascii_uppercase + string.digits
     key = "-".join(
@@ -217,13 +213,7 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
 
 
 async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[Union[License, str]]:
-    from ..database import engine
-
-    use_for_update = not str(engine.url).startswith("sqlite")
-
-    q = select(LicenseKey).where(LicenseKey.license_key == license_key)
-    if use_for_update:
-        q = q.with_for_update()
+    q = select(LicenseKey).where(LicenseKey.license_key == license_key).with_for_update()
     key_result = await db.execute(q)
     license_key_obj = key_result.scalar_one_or_none()
 
@@ -393,35 +383,6 @@ async def cleanup_expired_license_keys(db: AsyncSession) -> int:
     return count
 
 
-async def get_trial_key_status(db: AsyncSession, license_key: str) -> Optional[dict]:
-    result = await db.execute(
-        select(LicenseKey)
-        .where(LicenseKey.license_key == license_key)
-        .where(LicenseKey.plan_type == PlanType.TRIAL_15D)
-    )
-    key = result.scalar_one_or_none()
-
-    if not key:
-        return None
-
-    now = datetime.now(timezone.utc)
-    created_at = key.created_at.replace(tzinfo=timezone.utc)
-
-    age_days = (now - created_at).days
-    days_remaining = max(0, 15 - age_days)
-    is_expired = age_days >= 15
-
-    return {
-        "license_key": key.license_key,
-        "status": key.status.value,
-        "is_expired": is_expired,
-        "days_remaining": days_remaining,
-        "created_at": key.created_at.isoformat(),
-        "activated_at": key.activated_at.isoformat() if key.activated_at else None,
-        "activated_by": key.activated_by,
-    }
-
-
 def encode_license_data(license: License, username: str) -> LicenseData:
     days_left = -1
     if license.expiry_date:
@@ -448,26 +409,45 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         plan_type_val = license.plan_type.value if license.plan_type else None
         license_type_val = license.license_type.value if isinstance(license.license_type, str) else license.license_type.value
         # 离线容忍时长（小时），与客户端_OFFLINE_TOLERANCE保持一致
+        # 商业运营版：收紧离线容忍窗口，防止钻空子
         offline_hours_map = {
-            "trial": 4, "trial_15d": 4,
-            "monthly": 24, "quarterly": 48,
-            "yearly": 72,
-            "lifetime": 168, "pro": 72,
+            "trial": 2, "trial_15d": 2,
+            "monthly": 12, "quarterly": 24,
+            "yearly": 48,
+            "lifetime": 72, "pro": 48,
         }
         tolerance_key = plan_type_val if plan_type_val and plan_type_val in offline_hours_map else license_type_val
-        tolerance_hours = offline_hours_map.get(tolerance_key, 4)
+        tolerance_hours = offline_hours_map.get(tolerance_key, 2)
         offline_until_dt = now + timedelta(hours=tolerance_hours)
         offline_until_str = offline_until_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 判断是否终身/试用
+    is_lifetime = license.plan_type == PlanType.LIFETIME or (license.license_type == LicenseType.PRO and license.expiry_date is None)
+    is_trial = license.license_type == LicenseType.TRIAL
+
+    # 会员类型显示名称
+    membership_name_map = {
+        PlanType.MONTHLY: "月度会员",
+        PlanType.QUARTERLY: "季度会员",
+        PlanType.YEARLY: "年度会员",
+        PlanType.LIFETIME: "终身会员",
+        PlanType.TRIAL_15D: "试用版",
+    }
+    membership_type_name = membership_name_map.get(license.plan_type, "会员") if license.plan_type else "会员"
 
     data_without_sig = {
         "username": username,
         "license_type": license.license_type if isinstance(license.license_type, str) else license.license_type.value,
         "plan_type": license.plan_type.value if license.plan_type else None,
         "is_valid": license.is_valid,
+        "is_lifetime": is_lifetime,
+        "is_trial": is_trial,
         "days_left": days_left,
+        "membership_type_name": membership_type_name,
         "trial_start": trial_start_str,
         "trial_end": trial_end_str,
         "expiry_date": expiry_str,
+        "expires_at": expiry_str,
         "license_key": license.license_key,
         "offline_until": offline_until_str,
     }
@@ -481,10 +461,14 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         license_type=license.license_type if isinstance(license.license_type, str) else license.license_type.value,
         plan_type=license.plan_type.value if license.plan_type else None,
         is_valid=license.is_valid,
+        is_lifetime=is_lifetime,
+        is_trial=is_trial,
         days_left=days_left,
+        membership_type_name=membership_type_name,
         trial_start=trial_start_str,
         trial_end=trial_end_str,
         expiry_date=expiry_str,
+        expires_at=expiry_str,
         license_key=license.license_key,
         offline_until=offline_until_str,
     )

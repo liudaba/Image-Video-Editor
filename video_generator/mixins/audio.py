@@ -111,7 +111,7 @@ class AudioMixin:
             if not self._whisper_on_gpu:
                 self.log("   🧹 Whisper GPU资源已释放")
             
-            self._move_output_to_trash(reason="导入新音频")
+            self._move_output_to_trash(reason="new_audio")
             self._reset_project_state(reset_audio_path=False)
             
             if hasattr(self, 'txt_script') and self.txt_script:

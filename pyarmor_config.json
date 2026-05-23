@@ -1,0 +1,18 @@
+{
+    "build_output": "dist_obfuscated",
+    "core_modules": [
+        "video_generator/auth_core.py",
+        "video_generator/auth_dialogs.py",
+        "video_generator/auth_fingerprint.py",
+        "video_generator/license_manager.py",
+        "video_generator/crypto_utils.py",
+        "video_generator/auto_updater.py",
+        "video_generator/cloud_image_client.py",
+        "video_generator/cloud_llm_client.py"
+    ],
+    "pyarmor_options": {
+        "assert_call": true,
+        "assert_import": true,
+        "obf_code": 2
+    }
+}

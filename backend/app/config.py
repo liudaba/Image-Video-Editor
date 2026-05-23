@@ -5,7 +5,7 @@ import sys
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "sqlite+aiosqlite:///./videogen.db"
+    DATABASE_URL: str = "postgresql+asyncpg://videogen:videogen@localhost:5432/videogen"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     JWT_SECRET_KEY: str = ""
@@ -80,7 +80,7 @@ settings = Settings.from_env()
 _INSECURE_DEFAULTS = {
     "JWT_SECRET_KEY": "",
     "HMAC_SIGN_KEY": "",
-    "DATABASE_URL": "sqlite+aiosqlite:///./videogen.db",
+    "DATABASE_URL": "postgresql+asyncpg://videogen:videogen@localhost:5432/videogen",
 }
 
 

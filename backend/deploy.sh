@@ -9,6 +9,10 @@ echo ""
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DEPLOY_DIR"
 
+# 从 .env 读取域名，未设置则使用默认值
+API_DOMAIN="${API_DOMAIN:-api.videogen.com}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@${API_DOMAIN}}"
+
 if [ ! -f ".env" ]; then
     echo "❌ 未找到 .env 文件，正在从模板创建..."
     cp .env.example .env
@@ -83,7 +87,7 @@ echo ""
 echo "6️⃣ 配置 SSL 证书..."
 if command -v certbot &> /dev/null; then
     echo "   🔐 使用 Let's Encrypt 申请证书..."
-    certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com || {
+    certbot --nginx -d ${API_DOMAIN} --non-interactive --agree-tos --email ${ADMIN_EMAIL} || {
         echo "   ⚠️  SSL 证书申请失败，请确认域名已解析到此服务器"
     }
     (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
@@ -91,7 +95,7 @@ if command -v certbot &> /dev/null; then
 else
     echo "   📦 安装 Certbot..."
     apt install -y certbot python3-certbot-nginx
-    certbot --nginx -d api.videogen.com --non-interactive --agree-tos --email admin@videogen.com || {
+    certbot --nginx -d ${API_DOMAIN} --non-interactive --agree-tos --email ${ADMIN_EMAIL} || {
         echo "   ⚠️  SSL 证书申请失败，请确认域名已解析到此服务器"
     }
     (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
@@ -191,8 +195,8 @@ echo "=========================================="
 echo "  🎉 部署完成!"
 echo "=========================================="
 echo ""
-echo "  API 地址: https://api.videogen.com"
-echo "  健康检查: https://api.videogen.com/health"
+echo "  API 地址: https://${API_DOMAIN}"
+echo "  健康检查: https://${API_DOMAIN}/health"
 echo ""
 echo "  管理员登录: admin / (你在.env中设置的密码)"
 echo ""

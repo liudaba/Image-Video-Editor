@@ -687,6 +687,11 @@ class LoginDialog(_get_toplevel_base()):
         threading.Thread(target=do_register, daemon=True).start()
 
     def _on_register_success(self, message):
+        # 注册成功后自动登录已完成，保存凭证
+        mgr = LicenseManager()
+        mgr.save_login_credentials(username=self._reg_username_var.get().strip(),
+                                   password=self._reg_password_var.get().strip(),
+                                   save_user=True, save_pass=True)
         messagebox.showinfo("成功", message, parent=self)
         self.result = True
         self.destroy()
@@ -728,7 +733,10 @@ class LoginDialog(_get_toplevel_base()):
                     return
             success2, message2 = mgr.activate_pro_license(code)
             if success2:
-                mgr.save_login_credentials(username or mgr.license_data.get("username", ""), password, True, False)
+                actual_username = username or mgr.license_data.get("username", "")
+                actual_password = password if not already_logged_in else ""
+                save_pass = bool(password and not already_logged_in)
+                mgr.save_login_credentials(actual_username, actual_password, True, save_pass)
                 self.after(0, lambda: self._safe_call(lambda: self._on_activate_success()))
             else:
                 self.after(0, lambda: self._safe_call(lambda: self._on_activate_partial(message2, activate_btn)))
@@ -1109,7 +1117,7 @@ class PasswordResetDialog(_get_toplevel_base()):
 
     def _on_reset_success(self, message):
         LicenseManager().clear_login_credentials()
-        messagebox.showinfo("成功", message, parent=self)
+        messagebox.showinfo("成功", f"{message}\n\n请使用新密码重新登录", parent=self)
         self.destroy()
 
     def _on_reset_failure(self, message):
@@ -1479,7 +1487,12 @@ class PurchaseDialog(_get_toplevel_base()):
 
     def _on_purchase_activate_success(self, message):
         messagebox.showinfo("提示", "程序已激活", parent=self)
+        # 激活成功后，同时设置父窗口(LoginDialog)的result=True并关闭
+        parent = self.master
         self.destroy()
+        if parent and hasattr(parent, 'result') and parent.winfo_exists():
+            parent.result = True
+            parent.destroy()
 
     def _on_purchase_activate_failure(self, message):
         if hasattr(self, '_activate_btn') and self._activate_btn.winfo_exists():
@@ -1568,7 +1581,12 @@ class PurchaseDialog(_get_toplevel_base()):
 
     def _on_payment_confirmed(self):
         messagebox.showinfo("支付成功", "支付已确认，专业版已开通！", parent=self)
+        # 支付成功后，同时设置父窗口(LoginDialog)的result=True并关闭
+        parent = self.master
         self.destroy()
+        if parent and hasattr(parent, 'result') and parent.winfo_exists():
+            parent.result = True
+            parent.destroy()
 
     def _on_purchase_failure(self, result, payment_method):
         self._alipay_btn.configure(state=tk.NORMAL, text="支付宝支付")

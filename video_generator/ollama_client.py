@@ -7,6 +7,7 @@
 
 import re
 import subprocess
+import sys
 import threading
 import time
 
@@ -230,16 +231,42 @@ def try_start_ollama_service():
     import os
 
     ollama_path = None
-    for path in [
-        r"D:\Ollama\ollama.exe",
-        r"C:\Ollama\ollama.exe",
-        r"C:\Program Files\Ollama\ollama.exe",
-        os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
-        "ollama"
-    ]:
-        if os.path.exists(path) or path == "ollama":
-            ollama_path = path
-            break
+
+    # 优先从环境变量读取自定义路径
+    custom_path = os.environ.get("OLLAMA_PATH", "")
+    if custom_path and os.path.exists(custom_path):
+        ollama_path = custom_path
+
+    # 其次从 config.json 读取
+    if not ollama_path:
+        try:
+            import json
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(base_dir, "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cfg_path = data.get("ollama_path", "")
+                if cfg_path and os.path.exists(cfg_path):
+                    ollama_path = cfg_path
+        except Exception:
+            pass
+
+    # 最后尝试常见安装路径
+    if not ollama_path:
+        for path in [
+            r"D:\Ollama\ollama.exe",
+            r"C:\Ollama\ollama.exe",
+            r"C:\Program Files\Ollama\ollama.exe",
+            os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe"),
+            "ollama"
+        ]:
+            if os.path.exists(path) or path == "ollama":
+                ollama_path = path
+                break
 
     if ollama_path:
         try:

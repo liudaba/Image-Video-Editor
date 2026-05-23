@@ -7,13 +7,17 @@ echo   短视频生成器 - 打包结果验证工具
 echo ========================================
 echo.
 
-set OUTPUT_DIR=dist\VideoGenerator
+set OUTPUT_DIR=dist\VideoGenerator_Release
 
 if not exist "%OUTPUT_DIR%" (
-    echo ❌ 错误: 输出目录不存在
-    echo 请先运行: python 01build_exe.py
-    pause
-    exit /b 1
+    if exist "dist\VideoGenerator" (
+        set OUTPUT_DIR=dist\VideoGenerator
+    ) else (
+        echo ❌ 错误: 输出目录不存在
+        echo 请先运行: python 01build_exe.py
+        pause
+        exit /b 1
+    )
 )
 
 echo 📁 检查目录: %OUTPUT_DIR%
@@ -70,7 +74,7 @@ for %%F in (01build_exe.py 02build_exe.py obfuscate_build.py release_helper.py i
     )
 )
 
-for %%F in (02验证打包结果.bat 推送代码.bat 快速发布.bat 检查环境.bat 生成Demo素材.bat check_and_install_deps.bat 停止后台管理系统.bat) do (
+for %%F in (02验证打包结果.bat 推送代码.bat 快速发布.bat 检查环境.bat 生成Demo素材.bat check_and_install_deps.bat 停止后台管理系统.bat !!!FirstRun.bat 启动.vbs 启动主程序.bat) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F
         set FILE_ERROR=1
@@ -109,7 +113,7 @@ REM ========== 检查应该存在的文件 ==========
 echo 🔍 检查应该存在的文件...
 set MISSING_ERROR=0
 
-for %%F in (VideoGenerator.exe start.vbs start.bat QuickStart.md config.json) do (
+for %%F in (VideoGenerator.exe start.vbs start.bat QuickStart.md UserGuide.md config.json) do (
     if not exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 缺少必要文件 %%F
         set MISSING_ERROR=1
@@ -134,6 +138,20 @@ if exist "%OUTPUT_DIR%\LICENSE" (
     echo   ✅ LICENSE 已包含
 ) else (
     echo   ⚠️  LICENSE 缺失（建议包含许可证文件）
+    set /a WARNING_COUNT+=1
+)
+
+if exist "%OUTPUT_DIR%\FirstRunSetup.bat" (
+    echo   ✅ FirstRunSetup.bat 已包含
+) else (
+    echo   ⚠️  FirstRunSetup.bat 缺失（首次运行引导）
+    set /a WARNING_COUNT+=1
+)
+
+if exist "%OUTPUT_DIR%\CheckEnv.bat" (
+    echo   ✅ CheckEnv.bat 已包含
+) else (
+    echo   ⚠️  CheckEnv.bat 缺失（环境检查工具）
     set /a WARNING_COUNT+=1
 )
 

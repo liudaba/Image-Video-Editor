@@ -1021,7 +1021,7 @@ class VideoMixin:
                     if hasattr(self, '_shot_texts_for_context'):
                         delattr(self, '_shot_texts_for_context')
                     
-                    self._move_output_to_trash(reason="一键生成视频")
+                    self._move_output_to_trash(reason="generate_video")
                     
                     self.cache_clear()
                     try:

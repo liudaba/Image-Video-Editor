@@ -2,6 +2,7 @@
 import os
 import sys
 import gc
+import json
 import time
 import ctypes
 import datetime
@@ -387,8 +388,107 @@ class ResourceMixin:
         self._move_output_to_trash(reason="thorough_cleanup")
         self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
+    def _get_user_config_path(self):
+        """获取用户配置文件路径"""
+        from video_generator.config import get_app_dir
+        app_dir = get_app_dir()
+        return os.path.join(app_dir, "user_config.json")
+
+    def save_config(self):
+        """保存用户配置到文件"""
+        config_vars = [
+            'sd_api_url_var', 'ollama_model_var', 'llm_config_preset_var',
+            'transition_var', 'model_var', 'width_var', 'height_var',
+            'custom_theme_var', 'custom_visual_tone_var', 'prompt_type_var',
+            'animation_var', 'thread_count_var', 'batch_size_var',
+            'min_shot_duration_var', 'whisper_model_var',
+            'cloud_llm_enabled_var', 'cloud_llm_provider_var',
+            'cloud_llm_api_key_var', 'cloud_llm_model_var',
+            'cloud_llm_custom_url_var',
+            'cloud_asr_enabled_var', 'cloud_asr_api_key_var',
+            'cloud_image_enabled_var', 'cloud_image_provider_var',
+            'cloud_image_api_key_var', 'cloud_image_model_var',
+            'cloud_image_custom_url_var',
+        ]
+        data = {}
+        for var_name in config_vars:
+            var = getattr(self, var_name, None)
+            if var is not None:
+                try:
+                    data[var_name] = var.get()
+                except Exception:
+                    pass
+        try:
+            dlr_vars = getattr(self, 'dlr_vars', [])
+            dlr_data = {}
+            for opt, var in dlr_vars:
+                try:
+                    dlr_data[opt] = var.get()
+                except Exception:
+                    pass
+            if dlr_data:
+                data['dlr_vars'] = dlr_data
+        except Exception:
+            pass
+        try:
+            config_path = self._get_user_config_path()
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def load_config(self):
+        """从文件加载用户配置"""
+        try:
+            config_path = self._get_user_config_path()
+            if not os.path.exists(config_path):
+                return
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for var_name, value in data.items():
+                if var_name == 'dlr_vars':
+                    dlr_vars = getattr(self, 'dlr_vars', [])
+                    for opt, var in dlr_vars:
+                        if opt in value:
+                            try:
+                                var.set(value[opt])
+                            except Exception:
+                                pass
+                    continue
+                var = getattr(self, var_name, None)
+                if var is not None:
+                    try:
+                        var.set(value)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _safe_release_whisper_gpu(self):
+        """安全释放Whisper模型占用的GPU显存"""
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return
+            whisper = getattr(self, 'whisper_model', None)
+            if whisper is not None:
+                try:
+                    device_type = next(whisper.parameters()).device.type
+                except (StopIteration, Exception):
+                    device_type = "cpu"
+                if device_type == "cuda":
+                    whisper = whisper.to("cpu")
+                    self.whisper_model = whisper
+                    torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
     def _release_memory_resources(self):
         """只释放内存资源，不删除磁盘文件（用于程序退出时）"""
+        self._safe_release_whisper_gpu()
         self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
 
@@ -583,7 +683,7 @@ class ResourceMixin:
             self.perf_monitor_running = False
             self.task_running = False
             self._api_heartbeat_running = False
-            self.sd_connected = False
+            self._sd_api_connected = False
         except Exception:
             pass
 
@@ -664,6 +764,13 @@ class ResourceMixin:
                 self.whisper_model = None
                 self._whisper_on_gpu = False
             gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except ImportError:
+                pass
         except Exception:
             pass
 

@@ -152,12 +152,7 @@ async def alipay_callback(
         db.add(notify_log)
         await db.flush()
 
-        from ..database import engine
-        use_for_update = not str(engine.url).startswith("sqlite")
-
-        order_query = select(Order).filter(Order.order_no == order_no)
-        if use_for_update:
-            order_query = order_query.with_for_update()
+        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
         result = await db.execute(order_query)
         order = result.scalar_one_or_none()
         
@@ -281,12 +276,7 @@ async def wechat_callback(
         db.add(notify_log)
         await db.flush()
 
-        from ..database import engine
-        use_for_update = not str(engine.url).startswith("sqlite")
-
-        order_query = select(Order).filter(Order.order_no == order_no)
-        if use_for_update:
-            order_query = order_query.with_for_update()
+        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
         result = await db.execute(order_query)
         order = result.scalar_one_or_none()
         

@@ -1100,22 +1100,22 @@ class UIHandlersMixin:
                 self._trash_window = None
 
         self._trash_window = tk.Toplevel(self.root)
-        self._trash_window.title("Trash Browser")
-        self._trash_window.geometry("720x520")
+        self._trash_window.title("垃圾桶 - 已删除文件")
+        self._trash_window.geometry("860x560")
         self._trash_window.configure(bg="#1e1e1e")
         self._trash_window.transient(self.root)
 
-        header = tk.Frame(self._trash_window, bg="#252526", height=40)
+        header = tk.Frame(self._trash_window, bg="#252526", height=44)
         header.pack(fill=tk.X, padx=0, pady=0)
         header.pack_propagate(False)
 
-        tk.Label(header, text="  🗑️ Trash - Deleted Files", font=("Microsoft YaHei", 13, "bold"),
+        tk.Label(header, text="  🗑️ 垃圾桶 - 已删除的文件", font=("Microsoft YaHei", 14, "bold"),
                  bg="#252526", fg="#d4d4d4").pack(side=tk.LEFT, padx=8, pady=6)
 
-        btn_empty = ttk.Button(header, text="Empty Trash", command=self._empty_trash_and_refresh, style="Small.TButton")
+        btn_empty = ttk.Button(header, text="清空垃圾桶", command=self._empty_trash_and_refresh, style="Small.TButton")
         btn_empty.pack(side=tk.RIGHT, padx=8, pady=6)
 
-        btn_refresh = ttk.Button(header, text="Refresh", command=self._refresh_trash_list, style="Small.TButton")
+        btn_refresh = ttk.Button(header, text="刷新", command=self._refresh_trash_list, style="Small.TButton")
         btn_refresh.pack(side=tk.RIGHT, padx=4, pady=6)
 
         list_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
@@ -1123,14 +1123,19 @@ class UIHandlersMixin:
 
         columns = ("session", "files", "size", "contents")
         self._trash_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
-        self._trash_tree.heading("session", text="Session")
-        self._trash_tree.heading("files", text="Files")
-        self._trash_tree.heading("size", text="Size")
-        self._trash_tree.heading("contents", text="Contents")
-        self._trash_tree.column("session", width=200, minwidth=150)
-        self._trash_tree.column("files", width=50, minwidth=40, anchor="center")
-        self._trash_tree.column("size", width=80, minwidth=60, anchor="center")
-        self._trash_tree.column("contents", width=300, minwidth=200)
+        self._trash_tree.heading("session", text="会话")
+        self._trash_tree.heading("files", text="文件数")
+        self._trash_tree.heading("size", text="大小")
+        self._trash_tree.heading("contents", text="内容")
+        self._trash_tree.column("session", width=220, minwidth=150)
+        self._trash_tree.column("files", width=60, minwidth=40, anchor="center")
+        self._trash_tree.column("size", width=90, minwidth=60, anchor="center")
+        self._trash_tree.column("contents", width=350, minwidth=200)
+
+        # 设置Treeview行高和字体大小
+        tree_font = ("Microsoft YaHei", 11)
+        self._trash_tree.tag_configure("normal", font=tree_font)
+        self._trash_tree.configure(font=tree_font, rowheight=32)
 
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
         self._trash_tree.configure(yscrollcommand=scrollbar.set)
@@ -1140,13 +1145,13 @@ class UIHandlersMixin:
         btn_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
         btn_frame.pack(fill=tk.X, padx=10, pady=8)
 
-        btn_restore = ttk.Button(btn_frame, text="📂 Restore Selected", command=self._restore_selected_trash, style="Medium.TButton")
+        btn_restore = ttk.Button(btn_frame, text="📂 恢复选中项", command=self._restore_selected_trash, style="Medium.TButton")
         btn_restore.pack(side=tk.LEFT, padx=5)
 
-        btn_delete = ttk.Button(btn_frame, text="❌ Delete Permanently", command=self._delete_selected_trash, style="Medium.TButton")
+        btn_delete = ttk.Button(btn_frame, text="❌ 永久删除", command=self._delete_selected_trash, style="Medium.TButton")
         btn_delete.pack(side=tk.LEFT, padx=5)
 
-        btn_open_dir = ttk.Button(btn_frame, text="📁 Open in Explorer", command=self._open_trash_folder, style="Medium.TButton")
+        btn_open_dir = ttk.Button(btn_frame, text="📁 打开文件夹", command=self._open_trash_folder, style="Medium.TButton")
         btn_open_dir.pack(side=tk.LEFT, padx=5)
 
         self._trash_session_map = {}
@@ -1171,13 +1176,13 @@ class UIHandlersMixin:
         for s in sessions:
             content_parts = []
             if s["has_shots"]:
-                content_parts.append("📝 Script")
+                content_parts.append("📝 分镜脚本")
             if s["has_images"]:
-                content_parts.append("🖼️ Images")
+                content_parts.append("🖼️ 图片")
             if s["has_video"]:
-                content_parts.append("🎬 Video")
+                content_parts.append("🎬 视频")
             if not content_parts:
-                content_parts.append("📄 Other")
+                content_parts.append("📄 其他")
             size_str = self._format_size(s["total_size"])
             item_id = self._trash_tree.insert("", tk.END, values=(
                 s["name"], s["file_count"], size_str, " | ".join(content_parts)
@@ -1189,47 +1194,47 @@ class UIHandlersMixin:
             return
         sel = self._trash_tree.selection()
         if not sel:
-            messagebox.showinfo("Trash", "Please select a session to restore.", parent=self._trash_window)
+            messagebox.showinfo("垃圾桶", "请先选择要恢复的会话", parent=self._trash_window)
             return
         item_id = sel[0]
         session_path = self._trash_session_map.get(item_id)
         if not session_path:
             return
-        if not messagebox.askyesno("Restore", "Restore this session's files to output_project?\nExisting files with the same name will be kept.",
+        if not messagebox.askyesno("恢复确认", "将此会话的文件恢复到 output_project？\n同名文件将保留不被覆盖。",
                                     parent=self._trash_window):
             return
         if self._restore_trash_session(session_path):
-            self.log("✅ Files restored from trash to output_project")
+            self.log("✅ 文件已从垃圾桶恢复到 output_project")
             self._refresh_trash_list()
         else:
-            messagebox.showerror("Error", "Failed to restore files from trash.", parent=self._trash_window)
+            messagebox.showerror("错误", "恢复文件失败", parent=self._trash_window)
 
     def _delete_selected_trash(self):
         if not hasattr(self, '_trash_tree') or not self._trash_tree:
             return
         sel = self._trash_tree.selection()
         if not sel:
-            messagebox.showinfo("Trash", "Please select a session to delete permanently.", parent=self._trash_window)
+            messagebox.showinfo("垃圾桶", "请先选择要永久删除的会话", parent=self._trash_window)
             return
         item_id = sel[0]
         session_path = self._trash_session_map.get(item_id)
         if not session_path:
             return
-        if not messagebox.askyesno("Delete Permanently", "Permanently delete this session? This cannot be undone!",
+        if not messagebox.askyesno("永久删除", "确定要永久删除此会话？此操作不可撤销！",
                                     parent=self._trash_window):
             return
         if self._delete_trash_session(session_path):
-            self.log("🗑️ Trash session permanently deleted")
+            self.log("🗑️ 垃圾桶会话已永久删除")
             self._refresh_trash_list()
         else:
-            messagebox.showerror("Error", "Failed to delete trash session.", parent=self._trash_window)
+            messagebox.showerror("错误", "删除失败", parent=self._trash_window)
 
     def _empty_trash_and_refresh(self):
-        if not messagebox.askyesno("Empty Trash", "Permanently delete ALL files in the trash? This cannot be undone!",
+        if not messagebox.askyesno("清空垃圾桶", "确定要永久删除垃圾桶中的所有文件？此操作不可撤销！",
                                     parent=self._trash_window):
             return
         count = self._empty_trash()
-        self.log(f"🗑️ Trash emptied: {count} sessions removed")
+        self.log(f"🗑️ 垃圾桶已清空：共删除 {count} 个会话")
         self._refresh_trash_list()
 
     def _open_trash_folder(self):

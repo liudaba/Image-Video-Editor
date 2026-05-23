@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_, delete, update
@@ -447,9 +447,9 @@ async def update_user(
             user_license = License(
                 user_id=user_id,
                 license_type=LicenseType.PRO,
-                plan_type=PlanType.LIFETIME if body.expiry_date == "never" else PlanType.YEARLY,
+                plan_type=PlanType.LIFETIME if body.expiry_date == "never" else None,
                 is_valid=target_user.is_active,
-                expiry_date=None if body.expiry_date == "never" else None,
+                expiry_date=None,
             )
             db.add(user_license)
             await db.flush()
@@ -1053,16 +1053,16 @@ async def revoke_license_key(
             )
         )
         other_active_keys = other_keys_result.scalars().all()
-        # 如果没有其他有效密钥，根据许可证过期时间决定is_valid
+        # 如果没有其他有效密钥，检查License是否仅靠此激活码支撑
         if not other_active_keys:
             lic_result = await db.execute(select(License).where(License.user_id == key.activated_by))
             user_lic = lic_result.scalar_one_or_none()
             if user_lic:
-                from ..services.license_service import is_license_time_expired
-                user_lic.is_valid = not is_license_time_expired(user_lic)
-                # 清除License对已撤销密钥的引用
                 if user_lic.license_key == license_key:
+                    # License关联的就是被撤销的激活码，授权应失效
+                    user_lic.is_valid = False
                     user_lic.license_key = None
+                # 如果License关联的是其他激活码，不受影响
                 await db.flush()
 
     key.status = LicenseKeyStatus.REVOKED
@@ -1484,22 +1484,8 @@ async def list_expiring_users(
         )
         .order_by(License.expiry_date.asc())
     )
-    rows = result.scalars().all()
-
-    # 需要重新查询获取User信息
     expiring_list = []
-    lic_result = await db.execute(
-        select(License, User)
-        .join(User, User.id == License.user_id)
-        .where(
-            License.is_valid == True,
-            License.expiry_date != None,
-            License.expiry_date > now,
-            License.expiry_date <= expiry_cutoff,
-        )
-        .order_by(License.expiry_date.asc())
-    )
-    for lic, u in lic_result:
+    for lic, u in result:
         exp = lic.expiry_date
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)

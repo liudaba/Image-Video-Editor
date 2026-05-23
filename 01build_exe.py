@@ -438,6 +438,8 @@ def build_executable():
     add_data_args = [
         '--add-data=config.json;.',
     ]
+    if os.path.exists('config.json.sig'):
+        add_data_args.append('--add-data=config.json.sig;.')
     if os.path.exists('LICENSE'):
         add_data_args.append('--add-data=LICENSE;.')
 
@@ -586,12 +588,14 @@ def _clean_output(output_dir):
         'release_helper.py', 'installer_setup.iss',
         'requirements.txt',
         '后台管理系统启动器.py', '停止后台管理系统.bat',
+        '!!!FirstRun.bat', '启动.vbs', '启动主程序.bat',
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
-        '生成Demo素材.bat', 'check_and_install_deps.bat',
+        '生成Demo素材.bat', 'check_and_install_deps.bat', '检查环境.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         'sync_to_server.py', 'config.json.example',
         'VideoGenerator.spec', 'check_packing_safety.py',
         'pyarmor_config.json', 'pack_patch.py', 'PackPatch.bat',
+        'config.json.sig',
     ]
     for f in unwanted_files:
         fp = os.path.join(output_dir, f)
@@ -653,13 +657,16 @@ def _verify_output(output_dir):
         'requirements.txt', 'check_and_install_deps.bat',
         # 后台管理系统
         '后台管理系统启动器.py', '停止后台管理系统.bat',
+        # 开发模式启动脚本（打包版有自己生成的start.vbs/start.bat）
+        '!!!FirstRun.bat', '启动.vbs', '启动主程序.bat',
         # 其他开发脚本
         '02验证打包结果.bat', '推送代码.bat', '快速发布.bat',
-        '生成Demo素材.bat',
+        '生成Demo素材.bat', 'check_and_install_deps.bat', '检查环境.bat',
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         'sync_to_server.py', 'config.json.example',
         'VideoGenerator.spec', 'check_packing_safety.py',
         'pyarmor_config.json', 'pack_patch.py', 'PackPatch.bat',
+        'config.json.sig',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds', '.license_verify_key',
@@ -900,14 +907,29 @@ def _post_build(output_dir):
         f.write(bat_content)
     print("  ✅ 生成 start.bat（含环境检查）")
 
-    # config.json: 双位置复制（exe同级 + _internal/）
+    # config.json: 双位置复制（exe同级 + _internal/）+ 签名生成
     config_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
     if os.path.exists(config_src):
         internal_dir = os.path.join(output_dir, "_internal")
         os.makedirs(internal_dir, exist_ok=True)
         shutil.copy2(config_src, os.path.join(output_dir, "config.json"))
         shutil.copy2(config_src, os.path.join(internal_dir, "config.json"))
-        print("  ✅ config.json → exe同级 + _internal/")
+
+        # 生成 config.json 签名文件
+        try:
+            with open(config_src, "r", encoding="utf-8") as f:
+                config_content = f.read()
+            import hashlib, hmac as _hmac
+            _CONFIG_SIGN_KEY = "VideoGen2025ConfigSignatureKey_v1"
+            sig = _hmac.new(_CONFIG_SIGN_KEY.encode("utf-8"), config_content.encode("utf-8"), hashlib.sha256).hexdigest()
+            for sig_dir in [output_dir, internal_dir]:
+                sig_path = os.path.join(sig_dir, "config.json.sig")
+                with open(sig_path, "w", encoding="utf-8") as sf:
+                    sf.write(sig)
+            print("  ✅ config.json → exe同级 + _internal/ (含签名)")
+        except Exception as e:
+            print(f"  ⚠️ config.json 签名生成失败: {e}")
+            print("  ✅ config.json → exe同级 + _internal/ (无签名)")
     else:
         print("  ❌ 错误: config.json 缺失！")
         sys.exit(1)
@@ -933,6 +955,15 @@ def _post_build(output_dir):
     _copy_ffmpeg(output_dir)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 复制 LICENSE 文件
+    license_src = os.path.join(base_dir, "LICENSE")
+    if os.path.exists(license_src):
+        shutil.copy2(license_src, os.path.join(output_dir, "LICENSE"))
+        print("  ✅ 复制 LICENSE")
+    else:
+        print("  ⚠️  LICENSE 缺失（建议包含许可证文件）")
+
     quick_start = os.path.join(base_dir, "QuickStart.md")
     if os.path.exists(quick_start):
         shutil.copy2(quick_start, os.path.join(output_dir, "QuickStart.md"))
@@ -984,13 +1015,10 @@ def _post_build(output_dir):
 
 
 def _post_clean_copy(output_dir):
+    """打包后最终复制：将源码目录中的辅助文件复制到输出目录"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    first_run_bat = os.path.join(base_dir, "!!!FirstRun.bat")
-    if os.path.exists(first_run_bat):
-        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!FirstRun.bat"))
-        print("  ✅ 复制 !!!FirstRun.bat")
-    else:
-        print("  ⚠️  !!!FirstRun.bat 缺失")
+    # !!!FirstRun.bat 不再复制到打包输出，因为打包后会生成更完善的 FirstRunSetup.bat
+    # 如果用户需要首次运行引导，FirstRunSetup.bat 已由 _generate_first_run_bat 生成
 
 
 
@@ -1160,7 +1188,7 @@ if exist "%APP_DIR%_internal\config.json" (
 echo.
 
 echo [7/10] 检查授权验证文件...
-if exist "%APP_DIR%_internal\.license_verify_key" (
+if exist "%APP_DIR%_internal\.license_verify_pubkey.pem" (
     echo   [OK] 授权文件正常
     echo   [OK] 授权文件正常 >> "%LOG_FILE%"
     set /a PASS+=1

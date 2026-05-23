@@ -908,7 +908,7 @@ class ImagesMixin:
     def clear_images_and_videos(self):
         """清除图片和视频文件"""
         self.log("🗑️ 开始清除图片和视频文件...")
-        self._move_output_to_trash(reason="清除图片视频")
+        self._move_output_to_trash(reason="clear_images")
         self.log("✅ 图片和视频文件已移至垃圾桶")
     
 

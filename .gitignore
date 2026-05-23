@@ -93,6 +93,7 @@ backups/
 license.json
 keys/
 logs/
+config.json.sig
 # 配置文件生成工具和安全脚本
 create_config.py
 generate_config.py
@@ -159,3 +160,7 @@ verify_all.py
 test_*.py
 test_*.json
 右键菜单备份恢复.reg
+
+# 后端测试报告
+backend/test_*_report.txt
+backend/test_output.txt

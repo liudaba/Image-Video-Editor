@@ -102,7 +102,7 @@ def sanitize_url(url):
 
 
 def get_api_base_url():
-    """从config.json读取API基础地址，失败则使用默认值。"""
+    """从config.json读取API基础地址，校验签名防止篡改，失败则使用默认值。"""
     try:
         import os
         import json
@@ -113,7 +113,25 @@ def get_api_base_url():
         config_path = os.path.join(base_dir, "config.json")
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                raw_content = f.read()
+            data = json.loads(raw_content)
+
+            # 校验配置文件签名，防止API地址被篡改
+            sig_path = config_path + ".sig"
+            if os.path.exists(sig_path):
+                try:
+                    with open(sig_path, "r", encoding="utf-8") as sf:
+                        stored_sig = sf.read().strip()
+                    from .crypto_utils import verify_config_signature
+                    if not verify_config_signature(raw_content, stored_sig):
+                        import logging
+                        logging.getLogger("config").warning("config.json 签名校验失败，可能被篡改，使用默认API地址")
+                        return Config.API_BASE_URL
+                except Exception:
+                    import logging
+                    logging.getLogger("config").warning("config.json 签名校验异常，使用默认API地址")
+                    return Config.API_BASE_URL
+
             url = data.get("api_base_url", "").strip()
             if url:
                 url = url.rstrip("/")

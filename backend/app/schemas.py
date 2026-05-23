@@ -46,10 +46,14 @@ class LicenseData(BaseModel):
     license_type: str
     plan_type: Optional[str] = None
     is_valid: bool
+    is_lifetime: bool = False
+    is_trial: bool = False
     days_left: int
+    membership_type_name: str = ""
     trial_start: Optional[str] = None
     trial_end: Optional[str] = None
     expiry_date: Optional[str] = None
+    expires_at: Optional[str] = None
     license_key: Optional[str] = None
     offline_until: Optional[str] = None
 

@@ -119,30 +119,12 @@ def main():
         print(f"  {f}")
     print()
 
-    # 过滤：只打包 video_generator/ 下的文件
-    client_files = [f for f in all_changed if f.startswith('video_generator/')]
+    # 过滤：只打包 video_generator/ 下的文件 + run.py/run.pyw
+    client_files = [f for f in all_changed if f.startswith('video_generator/') or f in ('run.py', 'run.pyw')]
     if not client_files:
         print("变更文件中没有 video_generator/ 下的文件，无需生成补丁。")
         print("如果是后端或文档变更，不需要客户端补丁更新。")
         sys.exit(0)
-
-    # 警告：.py文件在PyInstaller打包后不存在于文件系统，补丁更新无法替换
-    py_files = [f for f in client_files if f.endswith('.py')]
-    non_py_files = [f for f in client_files if not f.endswith('.py')]
-
-    if py_files:
-        print(f"⚠ 注意: 检测到 {len(py_files)} 个 .py 文件变更:")
-        for f in py_files:
-            print(f"  {f}")
-        print("  PyInstaller打包后.py文件不在文件系统中，补丁更新无法替换这些文件。")
-        print("  这些文件仍会包含在补丁包中（供开发模式使用），但打包客户端需全量更新。")
-        print()
-
-    if not non_py_files and py_files:
-        print("所有变更都是 .py 文件，打包客户端无法通过补丁更新。")
-        print("建议：发布全量更新包，或仅包含资源/配置文件变更时使用补丁更新。")
-        print()
-        # 仍然生成补丁包（开发模式下可用），但给出明确提示
 
     print(f"需要打包的文件 ({len(client_files)}):")
     for f in client_files:

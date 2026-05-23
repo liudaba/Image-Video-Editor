@@ -20,10 +20,21 @@ __build_number__ = 2026052301
 VERSION_TUPLE = tuple(int(x) for x in __version__.split("."))
 
 # 运行时版本文件路径（补丁更新写入此文件）
+# 便携版（内嵌Python模式）：version.json 在应用根目录（run.py同级）
+# PyInstaller模式：version.json 在exe同级目录
+# 开发模式：version.json 在项目根目录
 if getattr(sys, "frozen", False):
     _VERSION_JSON_PATH = Path(sys.executable).resolve().parent / "version.json"
 else:
-    _VERSION_JSON_PATH = Path(__file__).resolve().parent.parent / "version.json"
+    # 先检查是否为便携版（内嵌Python模式）
+    _project_root = Path(__file__).resolve().parent.parent
+    _embedded_python = _project_root / "python" / "python.exe"
+    if _embedded_python.exists():
+        # 便携版：version.json 在应用根目录
+        _VERSION_JSON_PATH = _project_root / "version.json"
+    else:
+        # 开发模式：version.json 在项目根目录
+        _VERSION_JSON_PATH = _project_root / "version.json"
 
 
 def _is_valid_version(v: str) -> bool:

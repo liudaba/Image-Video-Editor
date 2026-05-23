@@ -84,6 +84,8 @@ SYNC_FILES = [
     ("backend/app/services/payment_service.py",    "{app_dir}/services/payment_service.py"),
     # Python 依赖（重建镜像时需要）
     ("backend/requirements.txt",             "{project_dir}/requirements.txt"),
+    # 数据库初始化脚本
+    ("backend/init_db.py",                   "{project_dir}/init_db.py"),
     # 数据库迁移
     ("backend/alembic.ini",                  "{project_dir}/alembic.ini"),
     ("backend/alembic/env.py",               "{project_dir}/alembic/env.py"),
@@ -98,6 +100,9 @@ SYNC_FILES = [
     # Docker 配置（同步到项目根目录）
     ("backend/Dockerfile",                   "{project_dir}/Dockerfile"),
     ("backend/docker-compose.yml",           "{project_dir}/docker-compose.yml"),
+    # 密钥文件（同步到 keys/ 目录）
+    ("backend/keys/.license_sign_private.pem", "{project_dir}/keys/.license_sign_private.pem"),
+    ("backend/keys/.license_verify_pubkey.pem", "{project_dir}/keys/.license_verify_pubkey.pem"),
     # 注意：.env 不同步！服务器有自己的配置（含 DB_PASSWORD 等）
 ]
 

@@ -50,10 +50,10 @@ def _get_allowed_hosts():
     if _ALLOWED_DOWNLOAD_HOSTS is not None:
         return _ALLOWED_DOWNLOAD_HOSTS
     _ALLOWED_DOWNLOAD_HOSTS = {
-        deobfuscate_string("c20254192e5a04d1d241b8103040f2d55f"),
-        deobfuscate_string("9e404b5a7e1a529b8b0eb8123d"),
-        deobfuscate_string("c71e134038550dccc048e8163f56bfd95d1b"),
-        deobfuscate_string("c1070e063a564dc8d54d"),
+        deobfuscate_string("37190d4b18260b0948585304645d4d161d08"),  # api.wangzha178.com
+        deobfuscate_string("21080a02152f045f05081c563c08"),          # wangzha178.com
+        deobfuscate_string("3100100d1a254b0d5d5d"),                  # github.com
+        deobfuscate_string("3100100d1a25101d5742515a3d11061b064b2c0d0b"),  # githubusercontent.com
     }
     _ALLOWED_DOWNLOAD_HOSTS.discard("")
     return _ALLOWED_DOWNLOAD_HOSTS
@@ -775,28 +775,64 @@ class PatchUpdater:
 # ============================================================
 
 def restart_application():
-    """重启应用程序（补丁更新后调用）"""
+    """重启应用程序（补丁更新后调用）
+
+    支持三种运行模式：
+    1. 内嵌Python模式（便携版）：python/pythonw.exe run.pyw
+    2. PyInstaller打包模式：直接重启exe
+    3. 开发模式：python run.py
+    """
     logger.info("Restarting application for update...")
     try:
-        exe = sys.executable
         env = os.environ.copy()
 
-        if getattr(sys, 'frozen', False):
+        # 检测是否为内嵌Python模式（便携版）
+        # 便携版特征：_ROOT_DIR/python/python.exe 存在
+        embedded_python = _ROOT_DIR / 'python' / 'python.exe'
+        embedded_pythonw = _ROOT_DIR / 'python' / 'pythonw.exe'
+        run_script = _ROOT_DIR / 'run.py'
+        run_scriptw = _ROOT_DIR / 'run.pyw'
+
+        if embedded_python.exists() and run_script.exists():
+            # 内嵌Python模式（便携版）
+            # 优先用pythonw.exe+run.pyw（无控制台窗口）
+            logger.info("Restarting in embedded Python mode (portable)")
+            if os.path.exists(os.path.join(str(_ROOT_DIR), 'ffmpeg', 'ffmpeg.exe')):
+                env['FFMPEG_BINARY'] = str(_ROOT_DIR / 'ffmpeg' / 'ffmpeg.exe')
+
+            if embedded_pythonw.exists() and run_scriptw.exists():
+                # 无窗口模式（用户通常通过start.vbs启动）
+                subprocess.Popen(
+                    [str(embedded_pythonw), str(run_scriptw)] + sys.argv[1:],
+                    cwd=str(_ROOT_DIR),
+                    env=env,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                )
+            else:
+                # 回退到有窗口模式
+                subprocess.Popen(
+                    [str(embedded_python), str(run_script)] + sys.argv[1:],
+                    cwd=str(_ROOT_DIR),
+                    env=env,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                )
+            os._exit(0)
+        elif getattr(sys, 'frozen', False):
             # PyInstaller打包模式：直接重启exe
+            logger.info("Restarting in PyInstaller mode")
             subprocess.Popen(
-                [exe],
-                cwd=os.path.dirname(exe),
+                [sys.executable],
+                cwd=os.path.dirname(sys.executable),
                 env=env,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
             )
             os._exit(0)
         else:
             # 开发模式：重启python脚本
-            main_script = str(_ROOT_DIR / 'run.py')
-            if not os.path.exists(main_script):
-                main_script = str(_ROOT_DIR / 'app.py')
+            logger.info("Restarting in development mode")
+            main_script = str(run_script) if run_script.exists() else str(_ROOT_DIR / 'app.py')
             subprocess.Popen(
-                [exe, main_script] + sys.argv[1:],
+                [sys.executable, main_script] + sys.argv[1:],
                 cwd=str(_ROOT_DIR),
                 env=env,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
@@ -828,6 +864,12 @@ class UpdateDialog(tk.Toplevel):
 
         if self._forced:
             self.protocol("WM_DELETE_WINDOW", self._on_force_close_attempt)
+            # 禁用父窗口，防止用户绕过强制更新继续使用
+            try:
+                self.parent.attributes('-disabled', True)
+            except Exception:
+                pass
+            self.grab_set()  # 模态窗口，防止切换到主窗口
         else:
             self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -847,14 +889,24 @@ class UpdateDialog(tk.Toplevel):
             "此版本包含重要安全修复，必须更新后才能继续使用！\n请点击「立即更新」完成更新。"
         )
 
+    def _release_parent(self):
+        """恢复父窗口的可用状态"""
+        try:
+            self.parent.attributes('-disabled', False)
+        except Exception:
+            pass
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+
     def _on_close(self):
         """关闭窗口时取消正在进行的下载"""
         if self.is_downloading:
             self.update_manager.cancel_download()
             self.patch_updater.cancel()
-            # 不直接设is_downloading=False，子线程回调会处理
-            # 但窗口即将销毁，子线程回调可能无法执行，所以需要标记
             self.is_downloading = False
+        self._release_parent()
         self.destroy()
 
     def init_ui(self):
@@ -1086,8 +1138,10 @@ class UpdateDialog(tk.Toplevel):
             self.cancel_btn.pack_forget()
 
             if self._forced:
+                self._release_parent()
                 self.after(1500, lambda: restart_application())
             else:
+                self._release_parent()
                 if messagebox.askyesno(
                     "更新完成",
                     f"已成功更新到 v{new_version}！\n需要重启程序才能生效，是否立即重启？"
@@ -1115,6 +1169,8 @@ class UpdateDialog(tk.Toplevel):
             self.check_btn.config(state=tk.NORMAL)
             if not is_cancelled:
                 messagebox.showerror("更新失败", error_msg)
+            # 强制更新失败时，恢复父窗口但保持弹窗不关闭，用户可重试
+            # 不调用_release_parent，因为强制更新场景下用户不应回到主界面
         except Exception:
             pass
 
@@ -1166,8 +1222,10 @@ class UpdateDialog(tk.Toplevel):
             self.cancel_btn.pack_forget()
 
             if self._forced:
+                self._release_parent()
                 self._launch_installer_and_exit(file_path)
             else:
+                self._release_parent()
                 if messagebox.askyesno(
                     "下载完成",
                     f"更新包已下载到:\n{file_path}\n\n是否立即安装?"

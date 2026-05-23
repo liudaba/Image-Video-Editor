@@ -66,8 +66,8 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo [2/2] 开始打包...
-python 01build_exe.py
+echo [2/2] 开始打包（便携版-内嵌Python+源码外置）...
+python 02build_portable.py
 if errorlevel 1 (
     echo ❌ 打包失败!
     pause

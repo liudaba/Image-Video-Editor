@@ -5,7 +5,7 @@
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "liudaba"
 #define MyAppURL "https://github.com/liudaba/Image-Video-Editor"
-#define MyAppExeName "短视频生成器.exe"
+#define MyAppExeName "VideoGenerator.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -47,7 +47,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-Filename: "{app}\启动.vbs"; Description: "启动短视频生成器"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\start.vbs"; Description: "启动短视频生成器"; Flags: postinstall nowait skipifsilent
 
 [Code]
 var
