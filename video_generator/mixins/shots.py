@@ -5105,7 +5105,7 @@ class ShotsMixin:
             
             self.shots_data = []
             
-            self._move_output_to_trash(reason="一键生成分镜")
+            self._move_output_to_trash(reason="regenerate_shots")
             
             # 步骤1: 音频分析
             self.log("\n📍 步骤 1/3: 音频语音识别")

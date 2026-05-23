@@ -7,7 +7,7 @@ echo   短视频生成器 - 打包结果验证工具
 echo ========================================
 echo.
 
-set OUTPUT_DIR=dist\短视频生成器
+set OUTPUT_DIR=dist\VideoGenerator
 
 if not exist "%OUTPUT_DIR%" (
     echo ❌ 错误: 输出目录不存在
@@ -46,7 +46,7 @@ echo.
 REM ========== 检查不应该存在的文件夹 ==========
 echo 🔍 检查不应该存在的文件夹...
 set DIR_ERROR=0
-for %%F in (.git .idea .vscode .venv __pycache__ backend models model_aware_patch output_project 垃圾桶 build dist docs logs) do (
+for %%F in (.git .idea .vscode .venv __pycache__ backend models model_aware_patch output_project trash build dist docs logs) do (
     if exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 发现了不应该存在的 %%F/
         set DIR_ERROR=1
@@ -109,7 +109,7 @@ REM ========== 检查应该存在的文件 ==========
 echo 🔍 检查应该存在的文件...
 set MISSING_ERROR=0
 
-for %%F in (短视频生成器.exe 启动.vbs start.bat README.md 快速上手指南.md LICENSE config.json) do (
+for %%F in (VideoGenerator.exe start.vbs start.bat QuickStart.md config.json) do (
     if not exist "%OUTPUT_DIR%\%%F" (
         echo   ❌ 错误: 缺少必要文件 %%F
         set MISSING_ERROR=1
@@ -123,15 +123,17 @@ if not exist "%OUTPUT_DIR%\_internal" (
     set /a ERROR_COUNT+=1
 )
 
-if exist ".license_verify_key" (
-    if not exist "%OUTPUT_DIR%\.license_verify_key" (
-        echo   ⚠️  缺少 .license_verify_key（源目录有但未复制到打包目录）
-        set /a WARNING_COUNT+=1
-    ) else (
-        echo   ✅ .license_verify_key 已包含
-    )
+if exist "%OUTPUT_DIR%\.license_verify_key" (
+    echo   ❌ 严重: 发现 HMAC 密钥 .license_verify_key - 绝不能分发!
+    set /a ERROR_COUNT+=1
 ) else (
-    echo   ⚠️  .license_verify_key 不存在（部署后端后需手动复制）
+    echo   ✅ .license_verify_key 未包含（正确，HMAC密钥不应分发）
+)
+
+if exist "%OUTPUT_DIR%\LICENSE" (
+    echo   ✅ LICENSE 已包含
+) else (
+    echo   ⚠️  LICENSE 缺失（建议包含许可证文件）
     set /a WARNING_COUNT+=1
 )
 
@@ -143,12 +145,12 @@ echo.
 REM ========== 检查启动脚本内容 ==========
 echo 🔍 检查启动脚本内容...
 
-findstr /C:"pythonw" "%OUTPUT_DIR%\启动.vbs" >nul 2>&1
+findstr /C:"pythonw" "%OUTPUT_DIR%\start.vbs" >nul 2>&1
 if not errorlevel 1 (
-    echo   ❌ 错误: 启动.vbs 仍引用 pythonw（打包版应启动exe）
+    echo   ❌ 错误: start.vbs 仍引用 pythonw（打包版应启动exe）
     set /a ERROR_COUNT+=1
 ) else (
-    echo   ✅ 启动.vbs 内容正确（启动exe）
+    echo   ✅ start.vbs 内容正确（启动exe）
 )
 
 findstr /C:"pythonw" "%OUTPUT_DIR%\start.bat" >nul 2>&1

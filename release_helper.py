@@ -45,10 +45,13 @@ def update_version_file(new_version):
         content,
     )
     build_date = datetime.now().strftime("%Y%m%d")
-    build_num = int(datetime.now().strftime("%H")) + 1
+    # 使用时间戳秒数取模生成 build_number，避免 23:59+1=2360 的问题
+    build_num = int(datetime.now().strftime("%H%M"))
+    if build_num >= 2359:
+        build_num = 2359
     content = re.sub(
         r'__build_number__\s*=\s*\d+',
-        f'__build_number__ = {build_date}{build_num:02d}',
+        f'__build_number__ = {build_date}{build_num:04d}',
         content,
     )
     with open(version_file, "w", encoding="utf-8") as f:
@@ -57,8 +60,10 @@ def update_version_file(new_version):
 
 
 def git_commit_push(message):
+    # 只添加版本文件和配置文件，避免将敏感文件加入暂存区
+    version_file = os.path.join(os.path.dirname(__file__), "video_generator", "version.py")
     cmds = [
-        ["git", "add", "video_generator/", "config.json.example", "01build_exe.py", "obfuscate_build.py", "pyarmor_config.json", ".gitignore"],
+        ["git", "add", version_file],
         ["git", "commit", "-m", message],
         ["git", "push"],
     ]

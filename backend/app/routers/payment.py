@@ -152,9 +152,13 @@ async def alipay_callback(
         db.add(notify_log)
         await db.flush()
 
-        result = await db.execute(
-            select(Order).filter(Order.order_no == order_no)
-        )
+        from ..database import engine
+        use_for_update = not str(engine.url).startswith("sqlite")
+
+        order_query = select(Order).filter(Order.order_no == order_no)
+        if use_for_update:
+            order_query = order_query.with_for_update()
+        result = await db.execute(order_query)
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
@@ -190,6 +194,9 @@ async def alipay_callback(
                     existing_license.trial_end = None
                     from ..services.license_service import calc_renewal_expiry
                     existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+                    # 在线支付无激活码，用订单号标识来源
+                    if not existing_license.license_key:
+                        existing_license.license_key = f"ALIPAY-{order_no}"
                 await db.flush()
             else:
                 from ..services.license_service import PLAN_DELTAS
@@ -206,6 +213,7 @@ async def alipay_callback(
                     user_id=order.user_id,
                     license_type=LicenseType.PRO,
                     plan_type=order.plan_type,
+                    license_key=f"ALIPAY-{order_no}",
                     is_valid=order_user2.is_active if order_user2 else True,
                     expiry_date=expiry,
                 )
@@ -273,9 +281,13 @@ async def wechat_callback(
         db.add(notify_log)
         await db.flush()
 
-        result = await db.execute(
-            select(Order).filter(Order.order_no == order_no)
-        )
+        from ..database import engine
+        use_for_update = not str(engine.url).startswith("sqlite")
+
+        order_query = select(Order).filter(Order.order_no == order_no)
+        if use_for_update:
+            order_query = order_query.with_for_update()
+        result = await db.execute(order_query)
         order = result.scalar_one_or_none()
         
         if order and order.status == OrderStatus.PENDING:
@@ -319,6 +331,9 @@ async def wechat_callback(
                     existing_license.trial_end = None
                     from ..services.license_service import calc_renewal_expiry
                     existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+                    # 在线支付无激活码，用订单号标识来源
+                    if not existing_license.license_key:
+                        existing_license.license_key = f"WXPAY-{order_no}"
                 await db.flush()
             else:
                 from ..services.license_service import PLAN_DELTAS
@@ -335,6 +350,7 @@ async def wechat_callback(
                     user_id=order.user_id,
                     license_type=LicenseType.PRO,
                     plan_type=order.plan_type,
+                    license_key=f"WXPAY-{order_no}",
                     is_valid=order_user2.is_active if order_user2 else True,
                     expiry_date=expiry,
                 )

@@ -53,28 +53,39 @@ class SafetyChecker:
         """检查敏感文件"""
         print_section("检查敏感文件")
 
-        sensitive_files = [
-            '.env',
-            '.env.local',
-            '.env.production',
-            'license.json',
-            '.secret_key',
-            '.license_sign_key',
+        sensitive_files_will_clean = [
             '.key_salt',
             '配置信息.txt',
             'create_config.py',
             'generate_config.py',
             'setup_config.py',
             '设置配置.bat',
-            'current_ssh_password.txt',
-            'ssh_password_history.txt',
-            'ssh_password_manager.py',
         ]
 
         found = False
-        for file in sensitive_files:
+        for file in sensitive_files_will_clean:
             if os.path.exists(file):
-                self.add_error(f"发现敏感文件: {file}")
+                self.add_warning(f"发现敏感文件: {file} (打包时会自动清理)")
+                found = True
+
+        sensitive_files_must_fix = [
+            '.env',
+            '.env.local',
+            '.env.production',
+            '.secret_key',
+            '.license_sign_key',
+            'current_ssh_password.txt',
+            'ssh_password_history.txt',
+            'ssh_password_manager.py',
+            'generate_signing_keys.py',
+            '_audit_server.py',
+            '_check.py',
+            '_cleanup_server.py',
+        ]
+
+        for file in sensitive_files_must_fix:
+            if os.path.exists(file):
+                self.add_error(f"发现高危敏感文件: {file}")
                 found = True
 
         if not found:
@@ -117,7 +128,7 @@ class SafetyChecker:
             'keys',
             'models',
             'output_project',
-            '垃圾桶',
+            'trash',
             'docs',
             'logs',
             '__pycache__',
@@ -187,10 +198,9 @@ class SafetyChecker:
             ('README.md', '项目说明'),
             ('LICENSE', '软件许可证'),
             ('USER_GUIDE.md', '使用指南'),
-            ('快速上手指南.md', '快速入门'),
+            ('QuickStart.md', '快速入门'),
             ('TERMS_OF_SERVICE.md', '服务条款'),
             ('PRIVACY_POLICY.md', '隐私政策'),
-            ('.license_verify_key', '授权验证密钥'),
             ('.license_verify_pubkey.pem', 'ECDSA签名验证公钥'),
         ]
 

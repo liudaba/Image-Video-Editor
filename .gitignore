@@ -56,6 +56,7 @@ output_project/
 *.json
 !config.json.example
 !config.json
+!pyarmor_config.json
 
 # 临时文件
 *.tmp

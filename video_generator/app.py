@@ -117,7 +117,21 @@ class VideoGenApp(
     ResourceMixin,
 ):
     """短视频生成器 - 主应用类（Mixin 组合，业务逻辑在各 Mixin 模块中）"""
-    pass
+
+    def start_periodic_update_check(self, interval_hours=24):
+        """启动周期性更新检查"""
+        from .auto_updater import check_and_notify_update
+
+        def _do_check():
+            try:
+                check_and_notify_update(self.root, auto_check=True, silent=True)
+            except Exception as e:
+                import logging
+                logging.getLogger("auto_updater").debug(f"Periodic update check failed: {e}")
+
+        _do_check()
+        self.root.after(int(interval_hours * 3600 * 1000),
+                        lambda: self.start_periodic_update_check(interval_hours))
 
 
 def _check_critical_files(app_dir):
@@ -132,7 +146,6 @@ def _check_critical_files(app_dir):
     internal_dir = os.path.join(app_dir, "_internal")
     critical = {
         "config.json": os.path.join(app_dir, "config.json"),
-        ".license_verify_key": os.path.join(app_dir, ".license_verify_key"),
         ".license_verify_pubkey.pem": os.path.join(internal_dir, ".license_verify_pubkey.pem"),
     }
     missing = []
@@ -194,7 +207,7 @@ def main():
         sys.exit(1)
 
     root.after(800, app._deferred_auth_check)
-    root.after(30000, lambda: app.start_periodic_update_check(interval_hours=24))
+    root.after(3000, lambda: app.start_periodic_update_check(interval_hours=24))
     root.mainloop()
 
 

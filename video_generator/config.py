@@ -5,8 +5,6 @@ import re
 import sys
 import requests
 import threading
-
-
 class Config:
     OLLAMA_BASE_URL = "http://localhost:11434"
     SD_API_BASE_URL = "http://127.0.0.1:8080"
@@ -104,9 +102,7 @@ def sanitize_url(url):
 
 
 def get_api_base_url():
-    """从config.json读取API基础地址，失败则使用默认值。
-    当配置为HTTPS域名时自动升级HTTP→HTTPS；IP地址保持原样（内测阶段）。
-    """
+    """从config.json读取API基础地址，失败则使用默认值。"""
     try:
         import os
         import json

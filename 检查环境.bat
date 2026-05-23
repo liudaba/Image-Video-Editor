@@ -8,11 +8,11 @@ echo.
 cd /d "%~dp0"
 
 if exist ".venv\Scripts\python.exe" (
-    echo [✓] 使用项目虚拟环境的 Python
-    .venv\Scripts\python.exe check_python_env.py
+    echo [OK] 使用项目虚拟环境的 Python
+    .venv\Scripts\python.exe -c "import sys; print(f'Python {sys.version}'); import moviepy; print('[OK] moviepy'); import requests; print('[OK] requests'); import PIL; print('[OK] Pillow'); import numpy; print('[OK] numpy'); import tiktoken; print('[OK] tiktoken'); import whisper; print('[OK] whisper')"
 ) else (
     echo [!] 未找到虚拟环境，使用系统 Python
-    python check_python_env.py
+    python -c "import sys; print(f'Python {sys.version}'); import moviepy; print('[OK] moviepy'); import requests; print('[OK] requests'); import PIL; print('[OK] Pillow'); import numpy; print('[OK] numpy'); import tiktoken; print('[OK] tiktoken'); import whisper; print('[OK] whisper')"
 )
 
 echo.

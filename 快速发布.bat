@@ -57,7 +57,22 @@ echo.
 echo ========================================
 echo   完整发布流程
 echo ========================================
+echo.
+echo [1/2] 更新版本号并推送代码...
 python release_helper.py
+if errorlevel 1 (
+    echo ❌ 版本更新失败!
+    pause
+    exit /b 1
+)
+echo.
+echo [2/2] 开始打包...
+python 01build_exe.py
+if errorlevel 1 (
+    echo ❌ 打包失败!
+    pause
+    exit /b 1
+)
 goto end
 
 :end

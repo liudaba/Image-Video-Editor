@@ -121,7 +121,7 @@
         modalBody.innerHTML = `<p>确定要手动确认订单 "<strong>${escapeHtml(orderNo)}</strong>" 的支付吗？</p><p class="text-danger">确认后订单将变为"已支付"，用户许可证将自动激活。</p>`;
         document.getElementById('commonModalLabel').textContent = '手动确认支付';
         document.getElementById('confirmModalBtn').textContent = '确认支付';
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
 
         document.getElementById('confirmModalBtn').onclick = async function() {

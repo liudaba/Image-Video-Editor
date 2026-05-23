@@ -143,17 +143,27 @@ class MachineBinding(Base):
 
 class AppVersion(Base):
     __tablename__ = "app_versions"
+    __table_args__ = (
+        # 同一版本号可以有full+patch多条记录，但 (version, update_type, from_version) 组合唯一
+        # 注意：SQLite不支持部分索引，这里用UniqueConstraint近似
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    version = Column(String(20), nullable=False, unique=True)
+    version = Column(String(20), nullable=False)
     release_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     changelog = Column(Text, nullable=True)
-    download_url = Column(String(500), nullable=False)
+    download_url = Column(String(500), nullable=True)
     file_hash = Column(String(64), nullable=True)
-    file_size = Column(Integer, nullable=False)
+    file_size = Column(Integer, nullable=True)
     priority = Column(String(20), default="normal", nullable=False)
     force_update = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    # 增量补丁更新字段
+    update_type = Column(String(20), default="full", nullable=False)  # full / patch
+    patch_url = Column(String(500), nullable=True)
+    patch_hash = Column(String(64), nullable=True)
+    patch_size = Column(Integer, nullable=True)
+    from_version = Column(String(20), nullable=True)  # 补丁适用的源版本
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

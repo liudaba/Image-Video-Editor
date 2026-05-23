@@ -944,6 +944,10 @@ class UIHandlersMixin:
                 else:
                     results[dep] = ("ok", is_core, install_cmd)
             except (ImportError, TypeError, OSError) as e:
+                self.log(f"     ⚠️ {dep} 导入失败: {type(e).__name__}: {e}")
+                results[dep] = ("missing", is_core, install_cmd)
+            except Exception as e:
+                self.log(f"     ⚠️ {dep} 导入异常: {type(e).__name__}: {e}")
                 results[dep] = ("missing", is_core, install_cmd)
 
         def _check_lightweight(dep, install_cmd, is_core):
@@ -1083,10 +1087,166 @@ class UIHandlersMixin:
 
 
     def open_output_folder(self):
-        """打开输出文件夹"""
         output_folder = os.path.join(self.base_dir, "output_project")
         os.makedirs(output_folder, exist_ok=True)
         self._open_folder(output_folder)
+
+    def open_trash_browser(self):
+        if hasattr(self, '_trash_window') and self._trash_window is not None:
+            try:
+                self._trash_window.focus_force()
+                return
+            except tk.TclError:
+                self._trash_window = None
+
+        self._trash_window = tk.Toplevel(self.root)
+        self._trash_window.title("Trash Browser")
+        self._trash_window.geometry("720x520")
+        self._trash_window.configure(bg="#1e1e1e")
+        self._trash_window.transient(self.root)
+
+        header = tk.Frame(self._trash_window, bg="#252526", height=40)
+        header.pack(fill=tk.X, padx=0, pady=0)
+        header.pack_propagate(False)
+
+        tk.Label(header, text="  🗑️ Trash - Deleted Files", font=("Microsoft YaHei", 13, "bold"),
+                 bg="#252526", fg="#d4d4d4").pack(side=tk.LEFT, padx=8, pady=6)
+
+        btn_empty = ttk.Button(header, text="Empty Trash", command=self._empty_trash_and_refresh, style="Small.TButton")
+        btn_empty.pack(side=tk.RIGHT, padx=8, pady=6)
+
+        btn_refresh = ttk.Button(header, text="Refresh", command=self._refresh_trash_list, style="Small.TButton")
+        btn_refresh.pack(side=tk.RIGHT, padx=4, pady=6)
+
+        list_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        columns = ("session", "files", "size", "contents")
+        self._trash_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
+        self._trash_tree.heading("session", text="Session")
+        self._trash_tree.heading("files", text="Files")
+        self._trash_tree.heading("size", text="Size")
+        self._trash_tree.heading("contents", text="Contents")
+        self._trash_tree.column("session", width=200, minwidth=150)
+        self._trash_tree.column("files", width=50, minwidth=40, anchor="center")
+        self._trash_tree.column("size", width=80, minwidth=60, anchor="center")
+        self._trash_tree.column("contents", width=300, minwidth=200)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
+        self._trash_tree.configure(yscrollcommand=scrollbar.set)
+        self._trash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
+        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+
+        btn_restore = ttk.Button(btn_frame, text="📂 Restore Selected", command=self._restore_selected_trash, style="Medium.TButton")
+        btn_restore.pack(side=tk.LEFT, padx=5)
+
+        btn_delete = ttk.Button(btn_frame, text="❌ Delete Permanently", command=self._delete_selected_trash, style="Medium.TButton")
+        btn_delete.pack(side=tk.LEFT, padx=5)
+
+        btn_open_dir = ttk.Button(btn_frame, text="📁 Open in Explorer", command=self._open_trash_folder, style="Medium.TButton")
+        btn_open_dir.pack(side=tk.LEFT, padx=5)
+
+        self._trash_session_map = {}
+        self._refresh_trash_list()
+
+        self._trash_window.protocol("WM_DELETE_WINDOW", self._on_trash_window_close)
+
+    def _on_trash_window_close(self):
+        if hasattr(self, '_trash_window') and self._trash_window:
+            try:
+                self._trash_window.destroy()
+            except Exception:
+                pass
+            self._trash_window = None
+
+    def _refresh_trash_list(self):
+        if not hasattr(self, '_trash_tree') or not self._trash_tree:
+            return
+        self._trash_tree.delete(*self._trash_tree.get_children())
+        self._trash_session_map.clear()
+        sessions = self._list_trash_sessions()
+        for s in sessions:
+            content_parts = []
+            if s["has_shots"]:
+                content_parts.append("📝 Script")
+            if s["has_images"]:
+                content_parts.append("🖼️ Images")
+            if s["has_video"]:
+                content_parts.append("🎬 Video")
+            if not content_parts:
+                content_parts.append("📄 Other")
+            size_str = self._format_size(s["total_size"])
+            item_id = self._trash_tree.insert("", tk.END, values=(
+                s["name"], s["file_count"], size_str, " | ".join(content_parts)
+            ))
+            self._trash_session_map[item_id] = s["path"]
+
+    def _restore_selected_trash(self):
+        if not hasattr(self, '_trash_tree') or not self._trash_tree:
+            return
+        sel = self._trash_tree.selection()
+        if not sel:
+            messagebox.showinfo("Trash", "Please select a session to restore.", parent=self._trash_window)
+            return
+        item_id = sel[0]
+        session_path = self._trash_session_map.get(item_id)
+        if not session_path:
+            return
+        if not messagebox.askyesno("Restore", "Restore this session's files to output_project?\nExisting files with the same name will be kept.",
+                                    parent=self._trash_window):
+            return
+        if self._restore_trash_session(session_path):
+            self.log("✅ Files restored from trash to output_project")
+            self._refresh_trash_list()
+        else:
+            messagebox.showerror("Error", "Failed to restore files from trash.", parent=self._trash_window)
+
+    def _delete_selected_trash(self):
+        if not hasattr(self, '_trash_tree') or not self._trash_tree:
+            return
+        sel = self._trash_tree.selection()
+        if not sel:
+            messagebox.showinfo("Trash", "Please select a session to delete permanently.", parent=self._trash_window)
+            return
+        item_id = sel[0]
+        session_path = self._trash_session_map.get(item_id)
+        if not session_path:
+            return
+        if not messagebox.askyesno("Delete Permanently", "Permanently delete this session? This cannot be undone!",
+                                    parent=self._trash_window):
+            return
+        if self._delete_trash_session(session_path):
+            self.log("🗑️ Trash session permanently deleted")
+            self._refresh_trash_list()
+        else:
+            messagebox.showerror("Error", "Failed to delete trash session.", parent=self._trash_window)
+
+    def _empty_trash_and_refresh(self):
+        if not messagebox.askyesno("Empty Trash", "Permanently delete ALL files in the trash? This cannot be undone!",
+                                    parent=self._trash_window):
+            return
+        count = self._empty_trash()
+        self.log(f"🗑️ Trash emptied: {count} sessions removed")
+        self._refresh_trash_list()
+
+    def _open_trash_folder(self):
+        trash_dir = self._get_trash_dir()
+        os.makedirs(trash_dir, exist_ok=True)
+        self._open_folder(trash_dir)
+
+    @staticmethod
+    def _format_size(size_bytes):
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
     
 
     def clear_log(self):
@@ -1704,7 +1864,7 @@ class UIHandlersMixin:
             
             _w, _h = validate_image_size(self.width_var.get(), self.height_var.get())
             config = {
-                'api_base_url': existing_config.get('api_base_url', 'http://8.141.101.155'),
+                'api_base_url': existing_config.get('api_base_url', 'https://api.wangzha178.com'),
                 'model': self.model_var.get(),
                 'width': _w,
                 'height': _h,
@@ -1750,4 +1910,30 @@ class UIHandlersMixin:
             self.log("✅ 配置保存完成")
         except Exception as e:
             self.log(f"⚠️ 配置保存失败: {e}")
+
+    def _check_api_heartbeat(self):
+        try:
+            from video_generator.config import get_api_base_url, get_http_session
+            api_url = get_api_base_url()
+            if not api_url:
+                return
+            resp = get_http_session().get(
+                f"{api_url}/health",
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                db_ok = data.get("database") == "ok"
+                if not db_ok:
+                    if not getattr(self, '_api_db_warned', False):
+                        self._api_db_warned = True
+                        self.log("⚠️ Backend API database degraded")
+            else:
+                if not getattr(self, '_api_warned', False):
+                    self._api_warned = True
+                    self.log(f"⚠️ Backend API returned status {resp.status_code}")
+        except Exception:
+            if not getattr(self, '_api_warned', False):
+                self._api_warned = True
+                self.log("⚠️ Backend API unreachable")
 

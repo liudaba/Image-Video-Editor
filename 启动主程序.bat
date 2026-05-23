@@ -1,97 +1,105 @@
 @echo off
-title Video Generator - Main Program
+title 短视频生成器 - 主程序启动器
+chcp 65001 >nul 2>&1
 
 echo ================================================================
 echo.
-echo   Video Generator - Main Program Launcher
+echo   短视频生成器 - 主程序启动器
 echo.
 echo ================================================================
 echo.
 
 cd /d "%~dp0"
 
-REM Check Python
-echo [1/4] Checking Python...
+REM 检查Python
+echo [1/4] 检查Python环境...
 python --version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo ERROR: Python is not installed!
+    echo 错误: 未检测到Python!
     echo.
-    echo Please install Python 3.10 or higher:
+    echo 请安装 Python 3.10 或更高版本:
     echo   https://www.python.org/downloads/
     echo.
-    echo IMPORTANT: During installation, make sure to check:
+    echo 重要: 安装时请务必勾选:
     echo   [x] Add Python to PATH
     echo.
     pause
     exit /b 1
 )
 for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PYTHON_VER=%%i
-echo    OK: Python %PYTHON_VER%
+echo    正常: Python %PYTHON_VER%
 
-REM Check or create virtual environment
+REM 检查或创建虚拟环境
 echo.
-echo [2/4] Checking virtual environment...
-if not exist "venv" (
-    echo    Creating virtual environment...
+echo [2/4] 检查虚拟环境...
+if not exist "venv" if not exist ".venv" (
+    echo    正在创建虚拟环境...
     python -m venv venv
-    echo    OK: Virtual environment created
+    echo    完成: 虚拟环境已创建
 ) else (
-    echo    OK: Virtual environment exists
+    echo    正常: 虚拟环境已存在
 )
 
-REM Install dependencies if needed
+REM 安装依赖
 echo.
-echo [3/4] Installing dependencies...
-call venv\Scripts\activate.bat
+echo [3/4] 安装依赖...
+if exist "venv\Scripts\activate.bat" (
+    call venv\Scripts\activate.bat
+) else if exist ".venv\Scripts\activate.bat" (
+    call .venv\Scripts\activate.bat
+)
 
-REM Check if dependencies are installed
 python -c "import moviepy" >nul 2>&1
 if errorlevel 1 (
-    echo    Installing dependencies, please wait...
+    echo    正在安装依赖，请稍候...
     pip install -r requirements.txt -q
     if errorlevel 1 (
         echo.
-        echo ERROR: Failed to install dependencies!
+        echo 错误: 依赖安装失败!
         echo.
-        echo Please try:
-        echo   1. Right-click this file and select "Run as administrator"
-        echo   2. Check your internet connection
+        echo 请尝试:
+        echo   1. 右键此文件，选择"以管理员身份运行"
+        echo   2. 检查网络连接
         echo.
         pause
         exit /b 1
     )
-    echo    OK: Dependencies installed
+    echo    完成: 依赖已安装
 ) else (
-    echo    OK: Dependencies installed
+    echo    正常: 依赖已安装
 )
 
-REM Start main program
+REM 启动主程序
 echo.
-echo [4/4] Starting main program...
-echo.
-echo ================================================================
-echo.
-echo   Main Program Starting...
+echo [4/4] 启动主程序...
 echo.
 echo ================================================================
 echo.
-echo   If this is your first time, please:
-echo   1. Register an account
-echo   2. Activate your license
-echo   3. Configure API keys in Settings
+echo   正在启动主程序...
 echo.
-echo   For help, see README.md
+echo ================================================================
+echo.
+echo   首次使用请:
+echo   1. 注册账号
+echo   2. 激活授权码
+echo   3. 在设置中配置API密钥
+echo.
+echo   帮助文档请查看 README.md
 echo.
 echo ================================================================
 echo.
 
-REM Start in windowed mode (no console)
-start "" venv\Scripts\pythonw.exe run.pyw
+REM 无控制台窗口模式启动
+if exist "venv\Scripts\pythonw.exe" (
+    start "" venv\Scripts\pythonw.exe run.pyw
+) else if exist ".venv\Scripts\pythonw.exe" (
+    start "" .venv\Scripts\pythonw.exe run.pyw
+)
 
-echo    OK: Program started!
+echo    完成: 程序已启动!
 echo.
-echo    The program should open automatically.
-echo    If not, check the window that just appeared.
+echo    程序应自动打开窗口。
+echo    如未打开，请检查刚出现的窗口。
 echo.
 timeout /t 3 >nul

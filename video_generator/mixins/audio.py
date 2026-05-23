@@ -180,7 +180,7 @@ class AudioMixin:
             
             self.audio_path = None
             self._reset_project_state(reset_audio_path=True)
-            self._move_output_to_trash(reason="清除音频")
+            self._move_output_to_trash(reason="clear_audio")
             
             # 更新UI
             if hasattr(self, 'lbl_audio_status'):

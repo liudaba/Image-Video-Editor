@@ -251,14 +251,15 @@ async def delete_user(
 
     # 级联删除关联数据
     await db.execute(delete(HeartbeatLog).where(HeartbeatLog.user_id == user_id))
-    from ..models import MachineBinding, License, LicenseKey, LicenseKeyStatus
+    from ..models import MachineBinding, License, LicenseKey, LicenseKeyStatus, Order
     await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
     await db.execute(delete(License).where(License.user_id == user_id))
-    # 将该用户激活的密钥状态设为已撤销（已使用的密钥不应被重复使用）
+    await db.execute(delete(Order).where(Order.user_id == user_id))
+    # 将该用户关联的所有密钥状态设为已撤销（包括已激活和未使用的）
     from sqlalchemy import update
     await db.execute(
         update(LicenseKey)
-        .where(LicenseKey.activated_by == user_id, LicenseKey.status == LicenseKeyStatus.ACTIVATED)
+        .where(LicenseKey.activated_by == user_id, LicenseKey.status.in_([LicenseKeyStatus.ACTIVATED, LicenseKeyStatus.UNUSED]))
         .values(status=LicenseKeyStatus.REVOKED)
     )
 

@@ -16,6 +16,7 @@
                 <thead>
                     <tr>
                         <th>版本号</th>
+                        <th>更新类型</th>
                         <th>发布日期</th>
                         <th>优先级</th>
                         <th>强制更新</th>
@@ -58,6 +59,10 @@
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td><strong>${escapeHtml(version.version)}</strong></td>
+                    <td>
+                        <span class="badge ${version.update_type === 'patch' ? 'bg-info' : 'bg-primary'}">${version.update_type === 'patch' ? '增量补丁' : '全量更新'}</span>
+                        ${version.update_type === 'patch' && version.from_version ? '<br><small class="text-muted">从 ' + escapeHtml(version.from_version) + '</small>' : ''}
+                    </td>
                     <td>${formatDate(version.release_date)}</td>
                     <td>
                         <span class="badge ${
@@ -138,17 +143,45 @@
                     <input type="text" class="form-control" id="version-number" placeholder="如: 2.1.0" required>
                 </div>
                 <div class="mb-3">
-                    <label for="download-url" class="form-label">下载地址</label>
-                    <input type="url" class="form-control" id="download-url" required>
+                    <label for="update-type" class="form-label">更新类型</label>
+                    <select class="form-select" id="update-type" onchange="togglePatchFields()">
+                        <option value="full">全量更新</option>
+                        <option value="patch">增量补丁</option>
+                    </select>
+                </div>
+                <div class="mb-3" id="from-version-group" style="display:none">
+                    <label for="from-version" class="form-label">适用源版本</label>
+                    <input type="text" class="form-control" id="from-version" placeholder="如: 2.0.0（补丁从此版本升级）">
                 </div>
                 <div class="mb-3">
-                    <label for="file-size" class="form-label">文件大小 (字节)</label>
-                    <input type="number" class="form-control" id="file-size" min="1" required>
+                    <label for="download-url" class="form-label">全量安装包下载地址</label>
+                    <input type="url" class="form-control" id="download-url" placeholder="https://...">
                 </div>
                 <div class="mb-3">
-                    <label for="file-hash" class="form-label">文件哈希 (SHA256, 可选)</label>
+                    <label for="file-size" class="form-label">全量包大小 (字节)</label>
+                    <input type="number" class="form-control" id="file-size" min="0">
+                </div>
+                <div class="mb-3">
+                    <label for="file-hash" class="form-label">全量包哈希 (SHA256, 可选)</label>
                     <input type="text" class="form-control" id="file-hash" placeholder="SHA256哈希值，用于完整性校验">
                 </div>
+                <hr>
+                <div class="mb-3" id="patch-fields">
+                    <h6 class="text-muted">增量补丁信息（可选）</h6>
+                    <div class="mb-3">
+                        <label for="patch-url" class="form-label">补丁包下载地址</label>
+                        <input type="url" class="form-control" id="patch-url" placeholder="补丁zip包的CDN地址">
+                    </div>
+                    <div class="mb-3">
+                        <label for="patch-size" class="form-label">补丁包大小 (字节)</label>
+                        <input type="number" class="form-control" id="patch-size" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="patch-hash" class="form-label">补丁包哈希 (SHA256)</label>
+                        <input type="text" class="form-control" id="patch-hash" placeholder="补丁包SHA256校验值">
+                    </div>
+                </div>
+                <hr>
                 <div class="mb-3">
                     <label for="changelog" class="form-label">更新日志</label>
                     <textarea class="form-control" id="changelog" rows="3"></textarea>
@@ -171,17 +204,40 @@
         document.getElementById('commonModalLabel').textContent = '添加新版本';
         document.getElementById('confirmModalBtn').textContent = '添加';
         
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
         
         document.getElementById('confirmModalBtn').onclick = async function() {
             try {
+                const updateType = document.getElementById('update-type').value;
+                const fromVersion = document.getElementById('from-version').value.trim();
+                const patchUrl = document.getElementById('patch-url').value.trim();
+                const downloadUrl = document.getElementById('download-url').value.trim();
+                
+                // 校验
+                if (updateType === 'patch' && !fromVersion) {
+                    showError('增量补丁类型必须填写适用源版本');
+                    return;
+                }
+                if (!downloadUrl && !patchUrl) {
+                    showError('至少需要提供全量包下载地址或补丁包下载地址');
+                    return;
+                }
+                
+                const changelogText = document.getElementById('changelog').value;
+                const changelogLines = changelogText ? changelogText.split('\n').filter(l => l.trim()) : [];
+                
                 const data = {
                     version: document.getElementById('version-number').value,
-                    download_url: document.getElementById('download-url').value,
-                    file_size: parseInt(document.getElementById('file-size').value),
+                    update_type: updateType,
+                    from_version: updateType === 'patch' ? fromVersion : null,
+                    download_url: downloadUrl || null,
+                    file_size: document.getElementById('file-size').value ? parseInt(document.getElementById('file-size').value) : null,
                     file_hash: document.getElementById('file-hash').value || null,
-                    changelog: document.getElementById('changelog').value,
+                    patch_url: patchUrl || null,
+                    patch_size: document.getElementById('patch-size').value ? parseInt(document.getElementById('patch-size').value) : null,
+                    patch_hash: document.getElementById('patch-hash').value || null,
+                    changelog: changelogLines,
                     priority: document.getElementById('priority').value,
                     force_update: document.getElementById('force-update').checked
                 };
@@ -213,20 +269,48 @@
                         <input type="text" class="form-control" id="edit-version-number" value="${escapeHtml(version.version)}" required>
                     </div>
                     <div class="mb-3">
-                        <label for="edit-download-url" class="form-label">下载地址</label>
-                        <input type="url" class="form-control" id="edit-download-url" value="${escapeHtml(version.download_url)}" required>
+                        <label for="edit-update-type" class="form-label">更新类型</label>
+                        <select class="form-select" id="edit-update-type" onchange="toggleEditPatchFields()">
+                            <option value="full" ${version.update_type !== 'patch' ? 'selected' : ''}>全量更新</option>
+                            <option value="patch" ${version.update_type === 'patch' ? 'selected' : ''}>增量补丁</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="edit-from-version-group" style="display:${version.update_type === 'patch' ? 'block' : 'none'}">
+                        <label for="edit-from-version" class="form-label">适用源版本</label>
+                        <input type="text" class="form-control" id="edit-from-version" value="${escapeHtml(version.from_version || '')}" placeholder="如: 2.0.0">
                     </div>
                     <div class="mb-3">
-                        <label for="edit-file-size" class="form-label">文件大小 (字节)</label>
-                        <input type="number" class="form-control" id="edit-file-size" value="${version.file_size}" min="1" required>
+                        <label for="edit-download-url" class="form-label">全量安装包下载地址</label>
+                        <input type="url" class="form-control" id="edit-download-url" value="${escapeHtml(version.download_url || '')}" placeholder="https://...">
                     </div>
                     <div class="mb-3">
-                        <label for="edit-file-hash" class="form-label">文件哈希 (SHA256, 可选)</label>
+                        <label for="edit-file-size" class="form-label">全量包大小 (字节)</label>
+                        <input type="number" class="form-control" id="edit-file-size" value="${version.file_size || ''}" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-file-hash" class="form-label">全量包哈希 (SHA256, 可选)</label>
                         <input type="text" class="form-control" id="edit-file-hash" value="${escapeHtml(version.file_hash || '')}" placeholder="SHA256哈希值，用于完整性校验">
                     </div>
+                    <hr>
+                    <div class="mb-3">
+                        <h6 class="text-muted">增量补丁信息（可选）</h6>
+                        <div class="mb-3">
+                            <label for="edit-patch-url" class="form-label">补丁包下载地址</label>
+                            <input type="url" class="form-control" id="edit-patch-url" value="${escapeHtml(version.patch_url || '')}" placeholder="补丁zip包的CDN地址">
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-patch-size" class="form-label">补丁包大小 (字节)</label>
+                            <input type="number" class="form-control" id="edit-patch-size" value="${version.patch_size || ''}" min="0">
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-patch-hash" class="form-label">补丁包哈希 (SHA256)</label>
+                            <input type="text" class="form-control" id="edit-patch-hash" value="${escapeHtml(version.patch_hash || '')}" placeholder="补丁包SHA256校验值">
+                        </div>
+                    </div>
+                    <hr>
                     <div class="mb-3">
                         <label for="edit-changelog" class="form-label">更新日志</label>
-                        <textarea class="form-control" id="edit-changelog" rows="3">${escapeHtml(version.changelog || '')}</textarea>
+                        <textarea class="form-control" id="edit-changelog" rows="3">${escapeHtml(Array.isArray(version.changelog) ? version.changelog.join('\n') : (version.changelog || ''))}</textarea>
                     </div>
                     <div class="mb-3">
                         <label for="edit-priority" class="form-label">优先级</label>
@@ -250,17 +334,40 @@
             document.getElementById('commonModalLabel').textContent = '编辑版本';
             document.getElementById('confirmModalBtn').textContent = '保存';
             
-            const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+            const modal = getCommonModal();
             modal.show();
             
             document.getElementById('confirmModalBtn').onclick = async function() {
                 try {
+                    const updateType = document.getElementById('edit-update-type').value;
+                    const fromVersion = document.getElementById('edit-from-version').value.trim();
+                    const patchUrl = document.getElementById('edit-patch-url').value.trim();
+                    const downloadUrl = document.getElementById('edit-download-url').value.trim();
+                    
+                    // 校验
+                    if (updateType === 'patch' && !fromVersion) {
+                        showError('增量补丁类型必须填写适用源版本');
+                        return;
+                    }
+                    if (!downloadUrl && !patchUrl) {
+                        showError('至少需要提供全量包下载地址或补丁包下载地址');
+                        return;
+                    }
+                    
+                    const changelogText = document.getElementById('edit-changelog').value;
+                    const changelogLines = changelogText ? changelogText.split('\n').filter(l => l.trim()) : [];
+                    
                     const data = {
                         version: document.getElementById('edit-version-number').value,
-                        download_url: document.getElementById('edit-download-url').value,
-                        file_size: parseInt(document.getElementById('edit-file-size').value),
+                        update_type: updateType,
+                        from_version: updateType === 'patch' ? fromVersion : null,
+                        download_url: downloadUrl || null,
+                        file_size: document.getElementById('edit-file-size').value ? parseInt(document.getElementById('edit-file-size').value) : null,
                         file_hash: document.getElementById('edit-file-hash').value || null,
-                        changelog: document.getElementById('edit-changelog').value,
+                        patch_url: patchUrl || null,
+                        patch_size: document.getElementById('edit-patch-size').value ? parseInt(document.getElementById('edit-patch-size').value) : null,
+                        patch_hash: document.getElementById('edit-patch-hash').value || null,
+                        changelog: changelogLines,
                         priority: document.getElementById('edit-priority').value,
                         force_update: document.getElementById('edit-force-update').checked,
                         is_active: document.getElementById('edit-is-active').checked
@@ -307,7 +414,7 @@
         document.getElementById('commonModalLabel').textContent = '删除版本确认';
         document.getElementById('confirmModalBtn').textContent = '删除';
         
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
         
         document.getElementById('confirmModalBtn').onclick = async function() {
@@ -324,5 +431,21 @@
                 showError(`删除版本失败: ${error.message}`);
             }
         };
+    }
+
+    function togglePatchFields() {
+        const updateType = document.getElementById('update-type').value;
+        const fromVersionGroup = document.getElementById('from-version-group');
+        if (fromVersionGroup) {
+            fromVersionGroup.style.display = updateType === 'patch' ? 'block' : 'none';
+        }
+    }
+
+    function toggleEditPatchFields() {
+        const updateType = document.getElementById('edit-update-type').value;
+        const fromVersionGroup = document.getElementById('edit-from-version-group');
+        if (fromVersionGroup) {
+            fromVersionGroup.style.display = updateType === 'patch' ? 'block' : 'none';
+        }
     }
 </script>

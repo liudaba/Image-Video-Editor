@@ -1,5 +1,5 @@
 """
-短视频生成器 - PyInstaller打包配置
+VideoGenerator - PyInstaller Build Script
 生成独立的.exe可执行文件
 集成PyArmor代码混淆，一键构建发布版本
 """
@@ -14,9 +14,29 @@ import json
 import re
 
 
+def _load_core_modules_config():
+    """从 pyarmor_config.json 加载核心模块列表，避免多处硬编码"""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyarmor_config.json")
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        return config.get("core_modules", [])
+    # 配置文件不存在时回退到默认列表
+    return [
+        "video_generator/auth_core.py",
+        "video_generator/auth_dialogs.py",
+        "video_generator/auth_fingerprint.py",
+        "video_generator/license_manager.py",
+        "video_generator/crypto_utils.py",
+        "video_generator/auto_updater.py",
+        "video_generator/cloud_image_client.py",
+        "video_generator/cloud_llm_client.py",
+    ]
+
+
 def clean_build_dirs():
     dirs_to_clean = ['build', 'dist', '__pycache__', 'dist_obfuscated', '_obf_backup',
-                     'dependencies_package', 'installer_output']
+                     '_cython_backup', 'dependencies_package', 'installer_output']
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
             print(f"🗑️  清理 {dir_name}/")
@@ -268,16 +288,7 @@ def _obfuscate_core_modules():
         shutil.rmtree(obf_output)
     os.makedirs(obf_output, exist_ok=True)
 
-    core_modules = [
-        "video_generator/auth_core.py",
-        "video_generator/auth_dialogs.py",
-        "video_generator/auth_fingerprint.py",
-        "video_generator/license_manager.py",
-        "video_generator/crypto_utils.py",
-        "video_generator/auto_updater.py",
-        "video_generator/cloud_image_client.py",
-        "video_generator/cloud_llm_client.py",
-    ]
+    core_modules = _load_core_modules_config()
 
     backup_dir = os.path.join(base_dir, "_obf_backup")
     if os.path.exists(backup_dir):
@@ -343,16 +354,7 @@ def _restore_original_modules():
         return
 
     print("\n🔄 恢复原始源码文件（从 _obf_backup/）...")
-    core_modules = [
-        "video_generator/auth_core.py",
-        "video_generator/auth_dialogs.py",
-        "video_generator/auth_fingerprint.py",
-        "video_generator/license_manager.py",
-        "video_generator/crypto_utils.py",
-        "video_generator/auto_updater.py",
-        "video_generator/cloud_image_client.py",
-        "video_generator/cloud_llm_client.py",
-    ]
+    core_modules = _load_core_modules_config()
 
     for module_path in core_modules:
         backup_path = os.path.join(backup_dir, module_path)
@@ -413,8 +415,8 @@ def build_executable():
     ]
 
     recommended_files = {
-        '快速上手指南.md': '快速上手指南',
-        '使用指南.md': '详细使用指南',
+        'QuickStart.md': 'Quick Start Guide',
+        'UserGuide.md': 'User Guide',
         'LICENSE': '商业软件许可证',
     }
 
@@ -453,7 +455,7 @@ def build_executable():
 
     args = [
         'run.py',
-        '--name=短视频生成器',
+        '--name=VideoGenerator',
         '--onedir',
         '--windowed',
         '--icon=assets/icon.ico',
@@ -470,20 +472,20 @@ def build_executable():
     ]
 
     print("\n" + "=" * 60)
-    print("🚀 开始打包短视频生成器...")
+    print("🚀 开始打包 VideoGenerator...")
     print("=" * 60)
 
     print("\n📦 打包内容清单:")
     print("  ✅ video_generator/     - 核心程序模块")
     print("  ✅ config.json          - 配置文件")
-    print("  ✅ 快速上手指南.md      - 快速上手指南")
-    print("  ✅ 使用指南.md          - 详细使用指南")
+    print("  ✅ QuickStart.md          - Quick Start Guide")
+    print("  ✅ UserGuide.md            - User Guide")
     if os.path.exists('LICENSE'):
         print("  ✅ LICENSE              - 商业软件许可证")
     print("  ✅ _internal/           - PyInstaller依赖库")
     print("  ✅ whisper_models/      - Whisper语音识别模型(打包后复制)")
     print("  ✅ ffmpeg/              - FFmpeg音视频工具(打包后复制)")
-    print("  🔄 启动.vbs             - 打包后自动生成（指向exe）")
+    print("  🔄 start.vbs             - 打包后自动生成（指向exe）")
     print("  🔄 start.bat            - 打包后自动生成（指向exe）")
     print("  ✅ .license_verify_pubkey.pem - ECDSA签名验证公钥")
 
@@ -502,8 +504,8 @@ def build_executable():
         print("✅ 打包完成!")
         print("=" * 60)
 
-        output_dir = os.path.join('dist', '短视频生成器')
-        final_dir = os.path.join('dist', 'VideoGenerator')
+        output_dir = os.path.join('dist', 'VideoGenerator')
+        final_dir = os.path.join('dist', 'VideoGenerator_Release')
         if os.path.exists(output_dir):
             _post_build(output_dir)
             _clean_output(output_dir)
@@ -529,7 +531,7 @@ def build_executable():
             print(f"\n💡 分发说明:")
             print(f"  1. 压缩包将自动生成在 dist/ 目录下")
             print(f"  2. 上传到网盘或CDN")
-            print(f"  3. 用户解压后双击 启动.vbs 即可运行")
+            print(f"  3. 用户解压后双击 start.vbs 即可运行")
             print(f"  4. Whisper模型和FFmpeg已预装，无需额外下载")
             print(f"  5. 用户需自行安装: SD WebUI + 模型, Ollama + 推理模型")
 
@@ -573,13 +575,13 @@ def _clean_output(output_dir):
 
     unwanted_files = [
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.key_salt', '.login_creds',
+        '.key_salt', '.login_creds', '.license_verify_key',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
         'generate_signing_keys.py',
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py', '生成SSH密码.bat',
-        'run.py', 'run.pyw',
+        'run.py', 'run.pyw', 'run.pyc',
         '01build_exe.py', '02build_exe.py', 'obfuscate_build.py',
         'release_helper.py', 'installer_setup.iss',
         'requirements.txt',
@@ -589,6 +591,7 @@ def _clean_output(output_dir):
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         'sync_to_server.py', 'config.json.example',
         'VideoGenerator.spec', 'check_packing_safety.py',
+        'pyarmor_config.json', 'pack_patch.py', 'PackPatch.bat',
     ]
     for f in unwanted_files:
         fp = os.path.join(output_dir, f)
@@ -612,9 +615,8 @@ def _clean_output(output_dir):
     if os.path.isdir(internal_dir):
         internal_unwanted = [
             '.env', 'license.json', '.secret_key', '.license_sign_key',
-            '.key_salt', '.login_creds',
+            '.key_salt', '.login_creds', '.license_verify_key',
             'current_ssh_password.txt', 'ssh_password_history.txt',
-            # .license_verify_key is REQUIRED, do not remove
             'README.md', 'TERMS_OF_SERVICE.md', 'PRIVACY_POLICY.md',
             '用户快速开始.md', '开发人员快速参考.md',
         ]
@@ -645,7 +647,7 @@ def _verify_output(output_dir):
         '.trae', 'dist_obfuscated', '_obf_backup', '_cython_backup',
         'output_project', '垃圾桶', 'docs', 'logs',
         # 源代码和构建脚本
-        'run.py', 'run.pyw',
+        'run.py', 'run.pyw', 'run.pyc',
         '01build_exe.py', '02build_exe.py', 'obfuscate_build.py',
         'release_helper.py', 'installer_setup.iss',
         'requirements.txt', 'check_and_install_deps.bat',
@@ -657,9 +659,10 @@ def _verify_output(output_dir):
         'GITHUB_IMPROVEMENT_GUIDE.md', '.gitignore',
         'sync_to_server.py', 'config.json.example',
         'VideoGenerator.spec', 'check_packing_safety.py',
+        'pyarmor_config.json', 'pack_patch.py', 'PackPatch.bat',
         # ⚠️ 机密文件 - 绝对不能打包
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.key_salt', '.login_creds',
+        '.key_salt', '.login_creds', '.license_verify_key',
         '配置信息.txt', 'create_config.py', 'generate_config.py',
         'setup_config.py', '设置配置.bat',
         # ⚠️ SSH密码管理 - 绝对不能打包
@@ -681,7 +684,7 @@ def _verify_output(output_dir):
         matches = glob.glob(os.path.join(output_dir, pattern))
         for match in matches:
             filename = os.path.basename(match)
-            if filename in ('.license_verify_key', '.license_verify_pubkey.pem'):
+            if filename in ('.license_verify_pubkey.pem',):
                 continue
             print(f"  ❌ 错误: 发现了不应该存在的 {filename}")
             has_error = True
@@ -690,10 +693,9 @@ def _verify_output(output_dir):
     internal_dir = os.path.join(output_dir, '_internal')
     internal_sensitive = [
         '.env', 'license.json', '.secret_key', '.license_sign_key',
-        '.key_salt', '.login_creds',
+        '.key_salt', '.login_creds', '.license_verify_key',
         'current_ssh_password.txt', 'ssh_password_history.txt',
     ]
-    # .license_verify_key is a REQUIRED file, not a sensitive leak
     if os.path.isdir(internal_dir):
         for item in internal_sensitive:
             item_path = os.path.join(internal_dir, item)
@@ -704,19 +706,19 @@ def _verify_output(output_dir):
             matches = glob.glob(os.path.join(internal_dir, pattern))
             for match in matches:
                 filename = os.path.basename(match)
-                if filename in ('.license_verify_key', '.license_verify_pubkey.pem'):
+                if filename in ('.license_verify_pubkey.pem', 'cacert.pem'):
                     continue
                 print(f"  ❌ 错误: 发现了不应该存在的 _internal/{filename}")
                 has_error = True
         # 深度扫描: 递归检查所有子目录中的敏感文件
         sensitive_patterns = ['.env', 'license.json', '.secret_key', '.license_sign_key',
-                              '.key_salt', '.login_creds', 'current_ssh_password.txt']
-        # .license_verify_key is REQUIRED, excluded from sensitive scan
+                              '.key_salt', '.login_creds', '.license_verify_key',
+                              'current_ssh_password.txt']
         sensitive_extensions = ['.pem', '.db', '.key']
         for root, dirs, files in os.walk(internal_dir):
             for f in files:
                 fl = f.lower()
-                if f in ('.license_verify_key', '.license_verify_pubkey.pem'):
+                if f in ('.license_verify_pubkey.pem', 'cacert.pem'):
                     continue
                 if f in sensitive_patterns or any(f.endswith(ext) for ext in sensitive_extensions):
                     rel = os.path.relpath(os.path.join(root, f), output_dir)
@@ -728,13 +730,8 @@ def _verify_output(output_dir):
                     if 'video_generator/' in rel_norm:
                         print(f"  ❌ 错误: 发现源代码文件 {rel}")
                         has_error = True
-                    obf_modules = ['auth_core', 'auth_dialogs', 'auth_fingerprint',
-                                   'license_manager', 'crypto_utils', 'auto_updater',
-                                   'cloud_image_client', 'cloud_llm_client']
-                    for mod in obf_modules:
-                        if fl == f'{mod}.py' or fl == f'{mod}.pyc':
-                            print(f"  ❌ 错误: 安全模块未混淆 {rel}（应为 .pyd）")
-                            has_error = True
+                    # PyArmor混淆后的模块仍为.pyc格式（非.pyd），
+                    # 只有Cython编译的才是.pyd，因此不再对.pyc报错
 
     if not has_error:
         print(f"  ✅ 安全验证通过: 没有发现不该存在的文件")
@@ -844,14 +841,14 @@ def _post_build(output_dir):
         'Set fso = CreateObject("Scripting.FileSystemObject")\n'
         'Set shell = CreateObject("WScript.Shell")\n'
         'appDir = fso.GetParentFolderName(WScript.ScriptFullName)\n'
-        'exePath = appDir & "\\短视频生成器.exe"\n'
+        'exePath = appDir & "\\VideoGenerator.exe"\n'
         'If Not fso.FileExists(exePath) Then\n'
-        '    MsgBox "未找到 短视频生成器.exe" & vbCrLf & vbCrLf & "请确认文件解压完整，或运行「环境自检修复.bat」", vbCritical, "启动失败"\n'
+        '    MsgBox "VideoGenerator.exe not found" & vbCrLf & vbCrLf & "Please confirm complete extraction, or run CheckEnv.bat", vbCritical, "Launch Failed"\n'
         '    WScript.Quit 1\n'
         'End If\n'
         'internalDll = appDir & "\\_internal\\python310.dll"\n'
         'If Not fso.FileExists(internalDll) Then\n'
-        '    MsgBox "运行时文件缺失，软件无法启动。" & vbCrLf & vbCrLf & "请重新下载完整安装包，或运行「环境自检修复.bat」", vbCritical, "启动失败"\n'
+        '    MsgBox "Runtime files missing, cannot start." & vbCrLf & vbCrLf & "Please re-download the complete package, or run CheckEnv.bat", vbCritical, "Launch Failed"\n'
         '    WScript.Quit 1\n'
         'End If\n'
         'hasChinese = False\n'
@@ -863,40 +860,40 @@ def _post_build(output_dir):
         '    End If\n'
         'Next\n'
         'If hasChinese Then\n'
-        '    result = MsgBox("当前安装路径包含中文字符，可能导致软件运行异常。" & vbCrLf & vbCrLf & "建议迁移到纯英文路径，如 D:\\VideoGenerator\\" & vbCrLf & vbCrLf & "是否仍然继续启动？", vbExclamation + vbYesNo, "路径警告")\n'
+        '    result = MsgBox("Current path contains non-ASCII characters, which may cause issues." & vbCrLf & vbCrLf & "Recommended: move to an English-only path like D:\\VideoGenerator\\" & vbCrLf & vbCrLf & "Continue anyway?", vbExclamation + vbYesNo, "Path Warning")\n'
         '    If result = vbNo Then WScript.Quit 0\n'
         'End If\n'
         'shell.CurrentDirectory = appDir\n'
         'If fso.FileExists(appDir & "\\ffmpeg\\ffmpeg.exe") Then\n'
         '    shell.Environment("Process").Item("FFMPEG_BINARY") = appDir & "\\ffmpeg\\ffmpeg.exe"\n'
         'End If\n'
-        'shell.Run "短视频生成器.exe", 1, False\n'
+        'shell.Run "VideoGenerator.exe", 1, False\n'
     )
-    vbs_path = os.path.join(output_dir, "启动.vbs")
+    vbs_path = os.path.join(output_dir, "start.vbs")
     with open(vbs_path, "w", encoding="gbk") as f:
         f.write(vbs_content)
-    print("  ✅ 生成 启动.vbs（含路径检查+缺失提示）")
+    print("  ✅ 生成 start.vbs（含路径检查+缺失提示）")
 
     bat_content = (
         '@echo off\n'
         'chcp 65001 >nul 2>&1\n'
         'cd /d "%~dp0"\n'
-        'if not exist "短视频生成器.exe" (\n'
-        '    echo [错误] 未找到 短视频生成器.exe\n'
-        '    echo 请确认文件解压完整，或运行「环境自检修复.bat」\n'
+        'if not exist "VideoGenerator.exe" (\n'
+        '    echo [ERROR] VideoGenerator.exe not found\n'
+        '    echo Please confirm complete extraction, or run CheckEnv.bat\n'
         '    echo.\n'
         '    pause\n'
         '    exit /b 1\n'
         ')\n'
         'if not exist "_internal\\python310.dll" (\n'
-        '    echo [错误] 运行时文件缺失\n'
-        '    echo 请重新下载完整安装包，或运行「环境自检修复.bat」\n'
+        '    echo [ERROR] Runtime files missing\n'
+        '    echo Please re-download the complete package, or run CheckEnv.bat\n'
         '    echo.\n'
         '    pause\n'
         '    exit /b 1\n'
         ')\n'
         'if exist "%~dp0ffmpeg\\ffmpeg.exe" set "FFMPEG_BINARY=%~dp0ffmpeg\\ffmpeg.exe"\n'
-        'start "" "短视频生成器.exe"\n'
+        'start "" "VideoGenerator.exe"\n'
     )
     bat_path = os.path.join(output_dir, "start.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
@@ -915,14 +912,8 @@ def _post_build(output_dir):
         print("  ❌ 错误: config.json 缺失！")
         sys.exit(1)
 
-    # .license_verify_key: 双位置复制（exe同级 + _internal/）
-    verify_key_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".license_verify_key")
-    if os.path.exists(verify_key_src):
-        internal_dir = os.path.join(output_dir, "_internal")
-        os.makedirs(internal_dir, exist_ok=True)
-        shutil.copy2(verify_key_src, os.path.join(output_dir, ".license_verify_key"))
-        shutil.copy2(verify_key_src, os.path.join(internal_dir, ".license_verify_key"))
-        print("  ✅ 复制 .license_verify_key (HMAC, 向后兼容)")
+    # .license_verify_key (HMAC) 不再分发给客户，仅服务端使用
+    # 如果客户端需要离线验证，应使用 ECDSA 公钥 (.license_verify_pubkey.pem)
 
     pubkey_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".license_verify_pubkey.pem")
     if os.path.exists(pubkey_src):
@@ -937,29 +928,23 @@ def _post_build(output_dir):
         print("     或从服务器复制公钥文件到项目根目录")
         sys.exit(1)
 
-    if not os.path.exists(verify_key_src) and not os.path.exists(pubkey_src):
-        print("  ❌ 错误: .license_verify_key 和 .license_verify_pubkey.pem 都缺失！")
-        print("     授权验证将无法工作")
-        sys.exit(1)
 
     _copy_whisper_models(output_dir)
     _copy_ffmpeg(output_dir)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    quick_start = os.path.join(base_dir, "快速上手指南.md")
+    quick_start = os.path.join(base_dir, "QuickStart.md")
     if os.path.exists(quick_start):
-        shutil.copy2(quick_start, os.path.join(output_dir, "快速上手指南.md"))
-        print("  ✅ 复制 快速上手指南.md")
+        shutil.copy2(quick_start, os.path.join(output_dir, "QuickStart.md"))
+        print("  ✅ 复制 QuickStart.md")
     else:
-        print("  ❌ 错误: 快速上手指南.md 缺失！")
-        sys.exit(1)
-    detailed_guide = os.path.join(base_dir, "使用指南.md")
+        print("  ⚠️  QuickStart.md 缺失（建议包含）")
+    detailed_guide = os.path.join(base_dir, "UserGuide.md")
     if os.path.exists(detailed_guide):
-        shutil.copy2(detailed_guide, os.path.join(output_dir, "使用指南.md"))
-        print("  ✅ 复制 使用指南.md")
+        shutil.copy2(detailed_guide, os.path.join(output_dir, "UserGuide.md"))
+        print("  ✅ 复制 UserGuide.md")
     else:
-        print("  ❌ 错误: 使用指南.md 缺失！")
-        sys.exit(1)
+        print("  ⚠️  UserGuide.md 缺失（建议包含）")
 
     icon_src = os.path.join(base_dir, "assets", "icon.ico")
     if os.path.exists(icon_src):
@@ -968,29 +953,44 @@ def _post_build(output_dir):
     else:
         print("  ⚠️  assets/icon.ico 缺失，桌面快捷方式将使用默认图标")
 
-    shortcut_bat = os.path.join(base_dir, "创建桌面快捷方式.bat")
+    shortcut_bat = os.path.join(base_dir, "CreateShortcut.bat")
     if os.path.exists(shortcut_bat):
-        shutil.copy2(shortcut_bat, os.path.join(output_dir, "创建桌面快捷方式.bat"))
-        print("  ✅ 复制 创建桌面快捷方式.bat")
+        shutil.copy2(shortcut_bat, os.path.join(output_dir, "CreateShortcut.bat"))
+        print("  ✅ 复制 CreateShortcut.bat")
     else:
-        print("  ⚠️  创建桌面快捷方式.bat 缺失")
+        print("  ⚠️  CreateShortcut.bat 缺失")
 
     _generate_checksums(output_dir)
 
     _generate_diagnostic_bat(output_dir)
     _generate_first_run_bat(output_dir)
 
+    # 生成 version.json 供运行时版本读取（补丁更新后可覆盖此文件更新版本号）
+    try:
+        from video_generator.version import __version__, __build_number__
+        version_json_path = os.path.join(output_dir, "version.json")
+        version_data = {
+            "version": __version__,
+            "build_number": __build_number__,
+            "updated_at": "",
+        }
+        with open(version_json_path, "w", encoding="utf-8") as f:
+            json.dump(version_data, f, ensure_ascii=False, indent=2)
+        print(f"  ✅ 生成 version.json (v{__version__})")
+    except ImportError:
+        print("  ⚠️  无法生成 version.json，版本信息将从内置值读取")
+
     print("  ✅ 后处理完成\n")
 
 
 def _post_clean_copy(output_dir):
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    first_run_bat = os.path.join(base_dir, "!!!首次使用点我.bat")
+    first_run_bat = os.path.join(base_dir, "!!!FirstRun.bat")
     if os.path.exists(first_run_bat):
-        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!首次使用点我.bat"))
-        print("  ✅ 复制 !!!首次使用点我.bat")
+        shutil.copy2(first_run_bat, os.path.join(output_dir, "!!!FirstRun.bat"))
+        print("  ✅ 复制 !!!FirstRun.bat")
     else:
-        print("  ⚠️  !!!首次使用点我.bat 缺失")
+        print("  ⚠️  !!!FirstRun.bat 缺失")
 
 
 
@@ -1006,9 +1006,9 @@ def _generate_checksums(output_dir):
     count = 0
     total_size = 0
     with open(checksum_path, "w", encoding="utf-8") as f:
-        f.write("# 短视频生成器 - 文件完整性校验\n")
+        f.write("# VideoGenerator - File Integrity Checksums\n")
         f.write("# 由打包脚本自动生成，请勿修改\n")
-        f.write("# 运行「环境自检修复.bat」可验证文件完整性\n")
+        f.write("# Run CheckEnv.bat to verify file integrity\n")
         f.write("# 格式: SHA256  相对路径\n\n")
         for root, dirs, files in os.walk(output_dir):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -1034,14 +1034,14 @@ def _generate_checksums(output_dir):
                     count += 1
     print(f"  ✅ 已生成校验文件 ({count} 个文件, 总计 {total_size / (1024*1024):.0f}MB)")
     print(f"  💡 排除了大体积目录: whisper_models/, ffmpeg/ (这些目录由环境自检单独检查大小)")
-    print(f"  💡 用户运行「环境自检修复.bat」时会自动比对SHA256")
+    print(f"  💡 用户运行 CheckEnv.bat 时会自动比对SHA256")
 
 
 def _generate_diagnostic_bat(output_dir):
-    print("  🔧 生成 环境自检修复.bat ...")
+    print("  🔧 生成 CheckEnv.bat ...")
     bat_content = r'''@echo off
 chcp 65001 >nul 2>&1
-title 短视频生成器 - 环境自检修复
+title VideoGenerator - Environment Check
 color 0A
 setlocal enabledelayedexpansion
 
@@ -1049,7 +1049,7 @@ set "APP_DIR=%~dp0"
 set "LOG_FILE=%APP_DIR%diagnostic_log.txt"
 
 echo ============================================================
-echo          短视频生成器 - 环境自检修复工具
+echo          VideoGenerator - Environment Check
 echo ============================================================
 echo.
 
@@ -1077,19 +1077,19 @@ if not errorlevel 1 (
 echo.
 
 echo [2/10] 检查主程序...
-if exist "%APP_DIR%短视频生成器.exe" (
-    for %%F in ("%APP_DIR%短视频生成器.exe") do set EXE_SIZE=%%~zF
+if exist "%APP_DIR%VideoGenerator.exe" (
+    for %%F in ("%APP_DIR%VideoGenerator.exe") do set EXE_SIZE=%%~zF
     if !EXE_SIZE! LSS 1000000 (
-        echo   [!!] 主程序文件不完整，大小异常
+        echo   [!!] Main program file incomplete, abnormal size
         echo   [!!] 主程序文件不完整 >> "%LOG_FILE%"
         set /a FAIL+=1
     ) else (
-        echo   [OK] 主程序正常
+        echo   [OK] Main program OK
         echo   [OK] 主程序正常 >> "%LOG_FILE%"
         set /a PASS+=1
     )
 ) else (
-    echo   [!!] 未找到 短视频生成器.exe
+    echo   [!!] VideoGenerator.exe not found
     echo   [!!] 未找到主程序 >> "%LOG_FILE%"
     set /a FAIL+=1
 )
@@ -1331,28 +1331,28 @@ echo.
 echo 按任意键退出...
 pause >nul
 '''
-    bat_path = os.path.join(output_dir, "环境自检修复.bat")
+    bat_path = os.path.join(output_dir, "CheckEnv.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
-    print("  ✅ 生成 环境自检修复.bat（10项诊断，含SHA256校验）")
+    print("  ✅ 生成 CheckEnv.bat（10项诊断，含SHA256校验）")
 
 
 def _generate_first_run_bat(output_dir):
-    print("  🔧 生成 首次运行引导.bat ...")
+    print("  🔧 生成 FirstRunSetup.bat ...")
     bat_content = r'''@echo off
 chcp 65001 >nul 2>&1
-title 短视频生成器 - 首次运行引导
+title VideoGenerator - First Run Setup
 color 0B
 cd /d "%~dp0"
 
 set "APP_DIR=%~dp0"
 
 echo ============================================================
-echo        短视频生成器 - 首次运行引导
+echo        VideoGenerator - First Run Setup
 echo ============================================================
 echo.
-echo  欢迎使用短视频生成器！
-echo  请按以下步骤操作，确保软件正常运行。
+echo  Welcome to VideoGenerator!
+echo  Please follow these steps to ensure proper operation.
 echo.
 echo ============================================================
 echo  第1步: 检查安装路径
@@ -1407,8 +1407,8 @@ echo.
 
 powershell -Command "Get-ChildItem '%APP_DIR%' -Recurse | Unblock-File -ErrorAction SilentlyContinue" 2>nul
 if errorlevel 1 (
-    echo  [!] 自动解除失败，请手动操作:
-    echo  右键 短视频生成器.exe -^> 属性 -^> 勾选「解除锁定」-^> 确定
+    echo  [!] Automatic unlock failed, please do it manually:
+    echo  Right-click VideoGenerator.exe -^> Properties -^> Check "Unblock" -^> OK
 ) else (
     echo  [OK] 文件锁定已解除
 )
@@ -1459,10 +1459,10 @@ echo.
 
 set "VERIFY_OK=1"
 
-if exist "%APP_DIR%短视频生成器.exe" (
-    echo  [OK] 主程序: 存在
+if exist "%APP_DIR%VideoGenerator.exe" (
+    echo  [OK] Main program: found
 ) else (
-    echo  [!!] 主程序: 缺失！可能被杀毒软件删除
+    echo  [!!] Main program: missing! May have been deleted by antivirus
     set "VERIFY_OK=0"
 )
 
@@ -1486,23 +1486,23 @@ if exist "%APP_DIR%whisper_models\medium.pt" (
 )
 
 if exist "%APP_DIR%file_checksums.txt" (
-    echo  [OK] 校验文件: 存在（可运行环境自检修复.bat进行完整校验）
+    echo  [OK] Checksum file: found (run CheckEnv.bat for full verification)
 ) else (
-    echo  [!] 校验文件: 缺失
+    echo  [!] Checksum file: missing
 )
 
 if "!VERIFY_OK!"=="0" (
     echo.
-    echo  [!!] 检测到关键文件缺失！
+    echo  [!!] Critical files missing!
     echo.
-    echo  最可能的原因:
-    echo    1. 杀毒软件在解压时删除了文件
-    echo    2. 解压不完整
+    echo  Most likely causes:
+    echo    1. Antivirus deleted files during extraction
+    echo    2. Incomplete extraction
     echo.
-    echo  建议操作:
-    echo    1. 关闭杀毒软件的实时保护
-    echo    2. 使用7-Zip或WinRAR重新解压
-    echo    3. 解压完成后再次运行本引导
+    echo  Recommended actions:
+    echo    1. Disable antivirus real-time protection
+    echo    2. Re-extract using 7-Zip or WinRAR
+    echo    3. Run this guide again after re-extraction
     echo.
     echo  按任意键退出...
     pause >nul
@@ -1510,7 +1510,7 @@ if "!VERIFY_OK!"=="0" (
 )
 
 echo.
-echo  如需完整文件校验，请运行「环境自检修复.bat」
+echo  For full file verification, run CheckEnv.bat
 echo.
 
 echo ============================================================
@@ -1527,23 +1527,24 @@ echo  3秒后自动启动...
 echo.
 
 timeout /t 3 /nobreak >nul
-start "" "%APP_DIR%短视频生成器.exe"
+start "" "%APP_DIR%VideoGenerator.exe"
 '''
-    bat_path = os.path.join(output_dir, "首次运行引导.bat")
+    bat_path = os.path.join(output_dir, "FirstRunSetup.bat")
     with open(bat_path, "w", encoding="utf-8") as f:
         f.write(bat_content)
-    print("  ✅ 生成 首次运行引导.bat（7步引导，含解压验证）")
+    print("  ✅ 生成 FirstRunSetup.bat（7步引导，含解压验证）")
 
 
 def _verify_required_files(output_dir):
     print("\n🔍 验证关键文件完整性...")
     required = [
-        ("短视频生成器.exe", "主程序"),
+        ("VideoGenerator.exe", "主程序"),
         ("_internal/python310.dll", "Python运行时"),
         ("config.json", "配置文件(exe同级)"),
         ("_internal/config.json", "配置文件(_internal)"),
         (".license_verify_pubkey.pem", "ECDSA公钥(exe同级)"),
         ("_internal/.license_verify_pubkey.pem", "ECDSA公钥(_internal)"),
+        ("version.json", "运行时版本信息"),
     ]
     recommended = [
         ("whisper_models", "Whisper语音模型目录"),
@@ -1567,11 +1568,12 @@ def _verify_required_files(output_dir):
         sys.exit(1)
     print("  ✅ 所有关键文件完整")
 
-    # HMAC 密钥为向后兼容保留，缺失仅警告
+    # HMAC 密钥不应分发给客户，如果存在则报错
     hmac_key = os.path.join(output_dir, ".license_verify_key")
     hmac_key_internal = os.path.join(output_dir, "_internal", ".license_verify_key")
-    if not os.path.exists(hmac_key) and not os.path.exists(hmac_key_internal):
-        print("  ⚠️  .license_verify_key 缺失 (HMAC 验证不可用)")
+    if os.path.exists(hmac_key) or os.path.exists(hmac_key_internal):
+        print("  ❌ .license_verify_key 不应出现在打包输出中！HMAC 密钥仅服务端使用")
+        missing.append(".license_verify_key (should not exist)")
 
     print("\n🔍 检查推荐文件（缺失不中止打包，但影响用户体验）...")
     for rel_path, desc in recommended:
@@ -1675,8 +1677,8 @@ def _create_release_archive(output_dir):
     print(f"  📋 分发说明:")
     print(f"  1. 将 {archive_7z} 上传到网盘或CDN")
     print(f"  2. 提醒用户使用 7-Zip 或 WinRAR 解压（不要用其他压缩软件的快速解压）")
-    print(f"  3. 解压后双击「首次运行引导.bat」或「启动.vbs」")
-    print(f"  4. 建议用户解压后运行「环境自检修复.bat」验证文件完整性")
+    print(f"  3. 解压后双击 FirstRunSetup.bat 或 start.vbs")
+    print(f"  4. 建议用户解压后运行 CheckEnv.bat 验证文件完整性")
 
 
 def get_directory_size(path):

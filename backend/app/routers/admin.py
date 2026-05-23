@@ -35,12 +35,25 @@ async def _log_audit(db: AsyncSession, admin: User, action: str, detail: str = N
 
 class VersionCreate(BaseModel):
     version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
-    download_url: str = Field(..., pattern=r"^https?://")
-    file_size: int = Field(..., gt=0)
+    download_url: Optional[str] = None
+    file_size: Optional[int] = None
     file_hash: Optional[str] = None
-    changelog: str = ""
+    changelog: Optional[List[str]] = None
     priority: str = "normal"
     force_update: bool = False
+    update_type: str = Field("full", pattern=r"^(full|patch)$")
+    patch_url: Optional[str] = None
+    patch_hash: Optional[str] = None
+    patch_size: Optional[int] = None
+    from_version: Optional[str] = Field(None, pattern=r"^(\d+\.\d+\.\d+)?$")
+
+    def validate_urls(self):
+        """校验：至少提供 download_url 或 patch_url 之一"""
+        if not self.download_url and not self.patch_url:
+            raise ValueError("至少需要提供全量包下载地址(download_url)或补丁包下载地址(patch_url)")
+        if self.update_type == "patch" and not self.from_version:
+            raise ValueError("增量补丁类型必须指定适用源版本(from_version)")
+        return self
 
 
 class LicenseKeyGenerate(BaseModel):
@@ -51,10 +64,19 @@ class LicenseKeyGenerate(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: str = Field(..., max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=6, max_length=128)
     is_admin: bool = False
     is_active: bool = True
     plan_type: Optional[str] = None
+
+    @staticmethod
+    def validate_password_strength(v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("密码至少6位")
+        return v
+
+    def model_post_init(self, __context):
+        self.validate_password_strength(self.password)
 
 
 @router.get("/stats")
@@ -248,17 +270,8 @@ async def get_user(
             if lic.expiry_date is None:
                 current_plan = "lifetime"
             else:
-                from datetime import timedelta
-                cur = lic.expiry_date
-                if cur.tzinfo is None:
-                    cur = cur.replace(tzinfo=timezone.utc)
-                remaining = (cur - datetime.now(timezone.utc)).days
-                if remaining <= 30:
-                    current_plan = "monthly"
-                elif remaining <= 90:
-                    current_plan = "quarterly"
-                else:
-                    current_plan = "yearly"
+                # plan_type为空的历史数据，无法可靠推断套餐类型
+                current_plan = "pro"
         elif lic.license_type == LicenseType.TRIAL:
             current_plan = "trial_15d"
     if not current_plan:
@@ -296,10 +309,15 @@ class VersionUpdate(BaseModel):
     download_url: Optional[str] = None
     file_size: Optional[int] = None
     file_hash: Optional[str] = None
-    changelog: Optional[str] = None
+    changelog: Optional[List[str]] = None
     priority: Optional[str] = None
     force_update: Optional[bool] = None
     is_active: Optional[bool] = None
+    update_type: Optional[str] = None
+    patch_url: Optional[str] = None
+    patch_hash: Optional[str] = None
+    patch_size: Optional[int] = None
+    from_version: Optional[str] = None
 
 
 @router.put("/users/{user_id}")
@@ -316,10 +334,34 @@ async def update_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     
     if body.username is not None:
+        # 检查用户名是否与其他用户冲突
+        if body.username != target_user.username:
+            existing = await db.execute(
+                select(User).filter(User.username == body.username)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="用户名已存在")
         target_user.username = body.username
     if body.email is not None:
+        # 检查邮箱是否与其他用户冲突
+        if body.email != target_user.email:
+            existing = await db.execute(
+                select(User).filter(User.email == body.email)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="邮箱已存在")
         target_user.email = body.email
     if body.password is not None:
+        # 管理员修改自己的密码时，必须通过 /api/auth/admin/change-password 接口验证旧密码
+        # 此接口不允许直接修改自己的密码，防止绕过旧密码验证
+        if user_id == user.id:
+            raise HTTPException(status_code=400, detail="请使用修改密码功能修改自己的密码")
+        # 验证新密码强度
+        try:
+            from ..schemas import UserRegister
+            UserRegister.validate_password_strength.__func__(None, body.password)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         target_user.hashed_password = hash_password(body.password)
         target_user.password_changed_at = datetime.now(timezone.utc)
     if body.is_active is not None and body.is_active is False and target_user.id == user.id:
@@ -337,6 +379,9 @@ async def update_user(
                 user_license.is_valid = False
             await db.flush()
     if body.is_admin is not None:
+        # 管理员不能取消自己的管理员权限
+        if not body.is_admin and user_id == user.id:
+            raise HTTPException(status_code=400, detail="不能取消自己的管理员权限")
         target_user.is_admin = body.is_admin
 
     if body.plan_type is not None:
@@ -402,7 +447,7 @@ async def update_user(
             user_license = License(
                 user_id=user_id,
                 license_type=LicenseType.PRO,
-                plan_type=PlanType.LIFETIME if body.expiry_date == "never" else None,
+                plan_type=PlanType.LIFETIME if body.expiry_date == "never" else PlanType.YEARLY,
                 is_valid=target_user.is_active,
                 expiry_date=None if body.expiry_date == "never" else None,
             )
@@ -420,6 +465,18 @@ async def update_user(
             try:
                 parsed = datetime.fromisoformat(body.expiry_date.replace("Z", "+00:00"))
                 user_license.expiry_date = parsed
+                # 如果plan_type为空，根据到期时间推断合理的套餐类型
+                if not user_license.plan_type:
+                    now = datetime.now(timezone.utc)
+                    remaining = parsed - now
+                    remaining_days = remaining.days if remaining.days > 0 else 0
+                    if remaining_days <= 30:
+                        user_license.plan_type = PlanType.MONTHLY
+                    elif remaining_days <= 90:
+                        user_license.plan_type = PlanType.QUARTERLY
+                    else:
+                        user_license.plan_type = PlanType.YEARLY
+                    user_license.license_type = LicenseType.PRO
                 if target_user.is_active:
                     from ..services.license_service import is_license_time_expired
                     user_license.is_valid = not is_license_time_expired(user_license)
@@ -439,14 +496,7 @@ async def update_user(
     
     await db.commit()
 
-    # 如果管理员修改了自己的密码，返回新Token避免被踢出
-    response_data = {"success": True}
-    if body.password is not None and user_id == user.id:
-        from ..auth import create_access_token
-        new_token = create_access_token(data={"sub": user.username})
-        response_data["new_token"] = new_token
-
-    return response_data
+    return {"success": True}
 
 
 @router.delete("/users/{user_id}")
@@ -831,14 +881,24 @@ async def create_version(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        body.validate_urls()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     new_version = AppVersion(
         version=body.version,
         download_url=body.download_url,
         file_size=body.file_size,
         file_hash=body.file_hash,
-        changelog=body.changelog,
+        changelog="\n".join(body.changelog) if isinstance(body.changelog, list) else str(body.changelog or ""),
         priority=body.priority,
         force_update=body.force_update,
+        update_type=body.update_type,
+        patch_url=body.patch_url,
+        patch_hash=body.patch_hash,
+        patch_size=body.patch_size,
+        from_version=body.from_version,
     )
     db.add(new_version)
     await db.flush()
@@ -1000,6 +1060,9 @@ async def revoke_license_key(
             if user_lic:
                 from ..services.license_service import is_license_time_expired
                 user_lic.is_valid = not is_license_time_expired(user_lic)
+                # 清除License对已撤销密钥的引用
+                if user_lic.license_key == license_key:
+                    user_lic.license_key = None
                 await db.flush()
 
     key.status = LicenseKeyStatus.REVOKED
@@ -1114,6 +1177,11 @@ async def list_versions(
                 "priority": v.priority,
                 "force_update": v.force_update,
                 "is_active": v.is_active,
+                "update_type": v.update_type,
+                "patch_url": v.patch_url,
+                "patch_hash": v.patch_hash,
+                "patch_size": v.patch_size,
+                "from_version": v.from_version,
                 "release_date": v.release_date.isoformat() if v.release_date else None,
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             }
@@ -1146,6 +1214,11 @@ async def get_version(
         "priority": version.priority,
         "force_update": version.force_update,
         "is_active": version.is_active,
+        "update_type": version.update_type,
+        "patch_url": version.patch_url,
+        "patch_hash": version.patch_hash,
+        "patch_size": version.patch_size,
+        "from_version": version.from_version,
         "release_date": version.release_date.isoformat() if version.release_date else None,
         "created_at": version.created_at.isoformat() if version.created_at else None,
     }
@@ -1171,7 +1244,7 @@ async def update_version(
     if body.file_size is not None:
         target.file_size = body.file_size
     if body.changelog is not None:
-        target.changelog = body.changelog
+        target.changelog = "\n".join(body.changelog) if isinstance(body.changelog, list) else str(body.changelog)
     if body.priority is not None:
         target.priority = body.priority
     if body.force_update is not None:
@@ -1180,7 +1253,24 @@ async def update_version(
         target.is_active = body.is_active
     if body.file_hash is not None:
         target.file_hash = body.file_hash
-    
+    if body.update_type is not None:
+        target.update_type = body.update_type
+    if body.patch_url is not None:
+        target.patch_url = body.patch_url
+    if body.patch_hash is not None:
+        target.patch_hash = body.patch_hash
+    if body.patch_size is not None:
+        target.patch_size = body.patch_size
+    if body.from_version is not None:
+        target.from_version = body.from_version
+
+    # 校验：更新后仍需满足至少一个URL
+    if not target.download_url and not target.patch_url:
+        raise HTTPException(status_code=422, detail="至少需要提供全量包下载地址或补丁包下载地址")
+    # 校验：patch类型必须有from_version
+    if target.update_type == "patch" and not target.from_version:
+        raise HTTPException(status_code=422, detail="增量补丁类型必须指定适用源版本(from_version)")
+
     await db.flush()
     await _log_audit(db, user, "update_version", f"version_id={version_id}, version={body.version}", request)
     await db.commit()
@@ -1348,6 +1438,27 @@ async def list_audit_logs(
             for l in logs
         ],
     }
+
+
+@router.delete("/audit_logs")
+async def clear_audit_logs(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """清空所有审计日志"""
+    count = await db.scalar(select(func.count(AuditLog.id)))
+    if count == 0:
+        return {"success": True, "deleted_count": 0}
+    # 先记录审计日志（flush后获得新记录id），再删除除该记录外的所有日志
+    await _log_audit(db, user, "clear_audit_logs", f"deleted {count} log entries", request)
+    await db.flush()
+    # 获取刚插入的审计记录id（当前session中最后一条）
+    latest_log = (await db.execute(select(AuditLog).order_by(desc(AuditLog.id)).limit(1))).scalar_one_or_none()
+    keep_id = latest_log.id if latest_log else 0
+    await db.execute(delete(AuditLog).where(AuditLog.id != keep_id))
+    await db.commit()
+    return {"success": True, "deleted_count": count}
 
 
 @router.get("/expiring_users")

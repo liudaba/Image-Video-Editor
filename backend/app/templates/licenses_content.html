@@ -319,7 +319,7 @@
         document.getElementById('commonModalLabel').textContent = '生成许可证密钥';
         document.getElementById('confirmModalBtn').textContent = '生成';
         
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
         
         document.getElementById('confirmModalBtn').onclick = async function() {

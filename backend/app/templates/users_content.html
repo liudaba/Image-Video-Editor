@@ -288,9 +288,10 @@
                 <div class="mb-3">
                     <label for="new-password" class="form-label">密码</label>
                     <div class="input-group">
-                        <input type="password" class="form-control" id="new-password" required>
+                        <input type="password" class="form-control" id="new-password" required minlength="6">
                         <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
                     </div>
+                    <small class="text-muted">至少6位</small>
                 </div>
                 <div class="mb-3">
                     <label for="new-role" class="form-label">角色</label>
@@ -317,15 +318,21 @@
         document.getElementById('commonModalLabel').textContent = '添加新用户';
         document.getElementById('confirmModalBtn').textContent = '添加';
         
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
         
         document.getElementById('confirmModalBtn').onclick = async function() {
             try {
+                const password = document.getElementById('new-password').value;
+                if (password.length < 6) {
+                    showError('密码至少6位');
+                    return;
+                }
+
                 const userData = {
                     username: document.getElementById('new-username').value,
                     email: document.getElementById('new-email').value,
-                    password: document.getElementById('new-password').value,
+                    password: password,
                     is_admin: document.getElementById('new-role').value === 'admin'
                 };
                 const planType = document.getElementById('new-plan-type').value;
@@ -364,10 +371,15 @@
                         <label for="edit-email" class="form-label">邮箱</label>
                         <input type="email" class="form-control" id="edit-email" value="${escapeHtml(user.email)}" required>
                     </div>
+                    ${currentUser && currentUser.id === userId ? `
+                    <div class="alert alert-info py-1 px-2 mb-3" style="font-size:0.85em">
+                        <i class="fas fa-info-circle"></i> 修改自己的密码请使用右上角"修改密码"按钮
+                    </div>
+                    ` : ''}
                     <div class="mb-3">
-                        <label for="edit-password" class="form-label">新密码（留空则不修改）</label>
+                        <label for="edit-password" class="form-label">新密码（留空则不修改${currentUser && currentUser.id === userId ? '，请使用右上角修改密码功能' : ''}）</label>
                         <div class="input-group">
-                            <input type="password" class="form-control" id="edit-password">
+                            <input type="password" class="form-control" id="edit-password" ${currentUser && currentUser.id === userId ? 'disabled' : ''}>
                             <button class="btn btn-outline-secondary toggle-pwd" type="button" tabindex="-1" title="显示/隐藏密码">&#128065;</button>
                         </div>
                     </div>
@@ -420,7 +432,7 @@
             document.getElementById('commonModalLabel').textContent = '编辑用户';
             document.getElementById('confirmModalBtn').textContent = '保存';
             
-            const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+            const modal = getCommonModal();
             modal.show();
             
             // 加载心跳历史
@@ -428,6 +440,23 @@
             
             document.getElementById('confirmModalBtn').onclick = async function() {
                 try {
+                    const newPassword = document.getElementById('edit-password').value;
+                    
+                    // 管理员不能通过用户管理接口修改自己的密码（后端会拒绝）
+                    const isSelf = currentUser && currentUser.id === userId;
+                    if (isSelf && newPassword) {
+                        showError('请使用右上角"修改密码"按钮修改自己的密码');
+                        return;
+                    }
+                    
+                    // 非自己修改密码时，校验密码长度
+                    if (newPassword && !isSelf) {
+                        if (newPassword.length < 6) {
+                            showError('密码至少6位');
+                            return;
+                        }
+                    }
+                    
                     const userData = {
                         username: document.getElementById('edit-username').value,
                         email: document.getElementById('edit-email').value,
@@ -435,8 +464,8 @@
                         is_active: document.getElementById('edit-active').checked
                     };
                     
-                    const newPassword = document.getElementById('edit-password').value;
-                    if (newPassword) {
+                    // 非自己修改密码
+                    if (newPassword && !isSelf) {
                         userData.password = newPassword;
                     }
                     
@@ -447,7 +476,7 @@
                     
                     const expiryDate = document.getElementById('edit-expiry-date').value;
                     if (expiryDate) {
-                        // datetime-local返回本地时间如"2024-01-15T10:30"，直接追加Z标记为UTC
+                        // datetime-local返回本地时间如"2024-01-15T10:30"，追加秒和Z标记为UTC
                         userData.expiry_date = expiryDate + ':00Z';
                     }
                     
@@ -455,11 +484,6 @@
                         method: 'PUT',
                         body: JSON.stringify(userData)
                     });
-                    
-                    // 如果管理员修改了自己的密码，更新Token避免被踢出
-                    if (result && result.new_token) {
-                        localStorage.setItem('token', result.new_token);
-                    }
                     
                     showSuccess('更新用户成功');
                     modal.hide();
@@ -487,7 +511,7 @@
         document.getElementById('commonModalLabel').textContent = '删除用户确认';
         document.getElementById('confirmModalBtn').textContent = '删除';
         
-        const modal = new bootstrap.Modal(document.getElementById('commonModal'));
+        const modal = getCommonModal();
         modal.show();
         
         document.getElementById('confirmModalBtn').onclick = async function() {

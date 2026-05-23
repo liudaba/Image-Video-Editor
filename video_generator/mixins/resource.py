@@ -384,7 +384,7 @@ class ResourceMixin:
 
     def _thorough_cleanup(self):
         """彻底清理所有分镜脚本数据和缓存 - 确保无残留（含磁盘文件+内存数据）"""
-        self._move_output_to_trash(reason="彻底清理")
+        self._move_output_to_trash(reason="thorough_cleanup")
         self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
     def _release_memory_resources(self):
@@ -392,28 +392,22 @@ class ResourceMixin:
         self._clear_internal_state(reset_audio=True, reset_cache_stats=True)
 
 
+    def _get_trash_dir(self):
+        if getattr(sys, 'frozen', False):
+            return os.path.join(os.path.dirname(sys.executable), "trash")
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "trash")
+
     def _move_to_trash(self, file_path, trash_session_dir=None):
-        """将文件移动到垃圾桶而非直接删除
-        
-        Args:
-            file_path: 要移动的文件路径
-            trash_session_dir: 垃圾桶会话目录，如果为None则自动创建
-        Returns:
-            bool: 是否成功移动
-        """
         try:
             if not os.path.exists(file_path):
                 return False
             
-            if getattr(sys, 'frozen', False):
-                trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
-            else:
-                trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
+            trash_dir = self._get_trash_dir()
             os.makedirs(trash_dir, exist_ok=True)
 
             if trash_session_dir is None:
                 timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-                trash_session_dir = os.path.join(trash_dir, f"清理_{timestamp}")
+                trash_session_dir = os.path.join(trash_dir, f"cleanup_{timestamp}")
             os.makedirs(trash_session_dir, exist_ok=True)
             
             filename = os.path.basename(file_path)
@@ -426,17 +420,14 @@ class ResourceMixin:
             return True
         except Exception as e:
             if hasattr(self, 'log'):
-                self._log_exception(f"⚠️ 移动文件到垃圾桶失败: {os.path.basename(file_path)}", e)
+                self._log_exception(f"⚠️ move to trash failed: {os.path.basename(file_path)}", e)
             return False
 
 
-    def _move_output_to_trash(self, reason="清理"):
+    def _move_output_to_trash(self, reason="cleanup"):
         moved_count = 0
         try:
-            if getattr(sys, 'frozen', False):
-                trash_dir = os.path.join(os.path.dirname(sys.executable), "垃圾桶")
-            else:
-                trash_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "垃圾桶")
+            trash_dir = self._get_trash_dir()
             os.makedirs(trash_dir, exist_ok=True)
 
             timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -478,8 +469,107 @@ class ResourceMixin:
 
 
     def _cleanup_residual_files(self):
-        """清理残留的磁盘文件，移动到垃圾桶而非直接删除"""
-        self._move_output_to_trash(reason="自动清理")
+        self._move_output_to_trash(reason="auto_cleanup")
+
+    def _list_trash_sessions(self):
+        trash_dir = self._get_trash_dir()
+        if not os.path.isdir(trash_dir):
+            return []
+        sessions = []
+        for name in sorted(os.listdir(trash_dir), reverse=True):
+            session_path = os.path.join(trash_dir, name)
+            if not os.path.isdir(session_path):
+                continue
+            file_count = 0
+            total_size = 0
+            has_shots = False
+            has_images = False
+            has_video = False
+            for root, dirs, files in os.walk(session_path):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except OSError:
+                        pass
+                    file_count += 1
+                    lf = f.lower()
+                    if lf == "shots_data.json":
+                        has_shots = True
+                    elif lf.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                        has_images = True
+                    elif lf.endswith((".mp4", ".avi", ".mkv", ".mov", ".webm")):
+                        has_video = True
+            sessions.append({
+                "name": name,
+                "path": session_path,
+                "file_count": file_count,
+                "total_size": total_size,
+                "has_shots": has_shots,
+                "has_images": has_images,
+                "has_video": has_video,
+            })
+        return sessions
+
+    def _restore_trash_session(self, session_path):
+        if not os.path.isdir(session_path):
+            return False
+        try:
+            output_dir = getattr(self, 'output_dir', None)
+            if not output_dir:
+                return False
+            os.makedirs(output_dir, exist_ok=True)
+            for item in os.listdir(session_path):
+                src = os.path.join(session_path, item)
+                dst = os.path.join(output_dir, item)
+                if os.path.isdir(src):
+                    if os.path.exists(dst):
+                        for sub_root, sub_dirs, sub_files in os.walk(src):
+                            rel = os.path.relpath(sub_root, src)
+                            target_dir = os.path.join(dst, rel)
+                            os.makedirs(target_dir, exist_ok=True)
+                            for sf in sub_files:
+                                sfp = os.path.join(sub_root, sf)
+                                dfp = os.path.join(target_dir, sf)
+                                if not os.path.exists(dfp):
+                                    shutil.copy2(sfp, dfp)
+                    else:
+                        shutil.copytree(src, dst)
+                else:
+                    if not os.path.exists(dst):
+                        shutil.copy2(src, dst)
+            shutil.rmtree(session_path)
+            return True
+        except Exception as e:
+            if hasattr(self, 'log'):
+                self._log_exception("⚠️ restore from trash failed", e)
+            return False
+
+    def _delete_trash_session(self, session_path):
+        if not os.path.isdir(session_path):
+            return False
+        try:
+            shutil.rmtree(session_path)
+            return True
+        except Exception as e:
+            if hasattr(self, 'log'):
+                self._log_exception("⚠️ delete trash session failed", e)
+            return False
+
+    def _empty_trash(self):
+        trash_dir = self._get_trash_dir()
+        if not os.path.isdir(trash_dir):
+            return 0
+        count = 0
+        for name in os.listdir(trash_dir):
+            session_path = os.path.join(trash_dir, name)
+            if os.path.isdir(session_path):
+                try:
+                    shutil.rmtree(session_path)
+                    count += 1
+                except Exception:
+                    pass
+        return count
 
 
     def on_close(self):

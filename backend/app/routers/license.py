@@ -41,6 +41,8 @@ async def activate_license_endpoint(
     if not activated:
         raise HTTPException(status_code=400, detail="许可证激活失败，请检查密钥是否正确")
 
+    await db.commit()
+
     license_result = await db.execute(
         select(License).filter(License.user_id == current_user.id)
     )

@@ -5,7 +5,7 @@ import hmac as _hmac
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -196,7 +196,7 @@ def generate_license_key(length: int = 32) -> str:
 
 
 async def create_trial_license(db: AsyncSession, user_id: int) -> License:
-    trial_days = 15  # 试用天数与plan_type=TRIAL_15D保持一致
+    trial_days = settings.TRIAL_DAYS
     trial_start = datetime.now(timezone.utc)
     trial_end = trial_start + timedelta(days=trial_days)
 
@@ -216,7 +216,7 @@ async def create_trial_license(db: AsyncSession, user_id: int) -> License:
     return license_obj
 
 
-async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[License]:
+async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> Optional[Union[License, str]]:
     from ..database import engine
 
     use_for_update = not str(engine.url).startswith("sqlite")
@@ -279,6 +279,9 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         expiry_date = datetime.now(timezone.utc) + expiry_delta
         license_type = LicenseType.PRO
 
+    # 设置LicenseKey的到期时间，便于管理后台展示
+    license_key_obj.expiry_date = expiry_date
+
     existing_result = await db.execute(
         select(License).where(License.user_id == user_id)
     )
@@ -292,7 +295,6 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             existing_license.is_valid = user_obj.is_active if user_obj else True
             existing_license.expiry_date = None
             await db.flush()
-            await db.commit()
             return existing_license
         elif license_key_obj.plan_type == PlanType.TRIAL_15D:
             if existing_license.expiry_date:
@@ -339,7 +341,6 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
             existing_license.trial_start = None
             existing_license.trial_end = None
         await db.flush()
-        await db.commit()
         return existing_license
     else:
         if license_key_obj.plan_type == PlanType.TRIAL_15D:
@@ -357,7 +358,6 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
         )
         db.add(license_obj)
         await db.flush()
-        await db.commit()
         return license_obj
 
 
@@ -451,7 +451,7 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         offline_hours_map = {
             "trial": 4, "trial_15d": 4,
             "monthly": 24, "quarterly": 48,
-            "yearly": 72, "annual": 72,
+            "yearly": 72,
             "lifetime": 168, "pro": 72,
         }
         tolerance_key = plan_type_val if plan_type_val and plan_type_val in offline_hours_map else license_type_val

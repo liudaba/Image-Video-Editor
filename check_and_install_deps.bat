@@ -12,7 +12,7 @@ if errorlevel 1 (
     echo ❌ Python未安装,正在下载安装...
     
     REM 下载Python安装器
-    powershell -Command "& {Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile '%TEMP%\python-installer.exe'}"
+    powershell -Command "& {Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe' -OutFile '%TEMP%\python-installer.exe'}"
     
     if exist "%TEMP%\python-installer.exe" (
         echo ✅ Python安装包下载完成
@@ -60,9 +60,6 @@ if errorlevel 1 (
     echo.
     echo ⚠️ 部分依赖安装失败,尝试逐个安装...
     
-    echo 安装 PyQt5...
-    pip install PyQt5 -i https://pypi.tuna.tsinghua.edu.cn/simple
-    
     echo 安装 moviepy...
     pip install moviepy>=2.0.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
     
@@ -85,11 +82,11 @@ echo 🎉 短视频生成器已成功安装!
 echo.
 echo 📝 下一步:
 echo    1. 双击桌面上的"短视频生成器"图标启动程序
-echo    2. 首次运行需要注册账号(享7天免费试用)
+echo    2. 首次运行需要注册账号(享15天免费试用)
 echo    3. 确保Stable Diffusion WebUI正在运行
 echo.
 echo 💡 提示:
-echo    - 如遇到问题,请查看 docs/README.md
+echo    - 如遇到问题,请查看 快速上手指南.md
 echo    - 加入QQ群获取技术支持
 echo.
 

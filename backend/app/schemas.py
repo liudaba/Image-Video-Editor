@@ -7,18 +7,14 @@ import re
 class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_\u4e00-\u9fa5]+$")
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=6, max_length=128)
     fingerprint: Optional[str] = Field(None, max_length=255, pattern=r"^[a-zA-Z0-9:_\-\.]*$")
 
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, v):
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("密码必须包含至少一个大写字母")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("密码必须包含至少一个小写字母")
-        if not re.search(r"\d", v):
-            raise ValueError("密码必须包含至少一个数字")
+        if len(v) < 6:
+            raise ValueError("密码至少6位")
         return v
 
 
@@ -89,7 +85,7 @@ class OrderResponse(BaseModel):
 
 
 class VersionInfo(BaseModel):
-    has_update: bool
+    has_update: Optional[bool] = False
     version: Optional[str] = None
     release_date: Optional[str] = None
     changelog: Optional[List[str]] = None
@@ -99,6 +95,12 @@ class VersionInfo(BaseModel):
     priority: Optional[str] = "normal"
     force_update: Optional[bool] = False
     is_active: Optional[bool] = True
+    # 增量补丁更新字段
+    update_type: Optional[str] = "full"  # full / patch
+    patch_url: Optional[str] = None
+    patch_hash: Optional[str] = None
+    patch_size: Optional[int] = None
+    from_version: Optional[str] = None
 
 
 class TokenData(BaseModel):
@@ -114,15 +116,11 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     email: EmailStr
     code: str = Field(..., pattern=r"^\d{6}$")
-    new_password: str = Field(..., min_length=8, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)
 
     @field_validator("new_password")
     @classmethod
     def validate_password_strength(cls, v):
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("密码必须包含至少一个大写字母")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("密码必须包含至少一个小写字母")
-        if not re.search(r"\d", v):
-            raise ValueError("密码必须包含至少一个数字")
+        if len(v) < 6:
+            raise ValueError("密码至少6位")
         return v

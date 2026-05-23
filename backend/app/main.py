@@ -365,11 +365,14 @@ async def admin_login(request: Request, db=Depends(get_db)):
     from .auth import verify_password, create_access_token, check_login_rate_limit, record_login_failure, clear_login_failures
     from sqlalchemy import select
     from .models import User
-    if not check_login_rate_limit(f"admin:{username}"):
-        raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    # 管理员跳过登录限流
+    if not user or not user.is_admin:
+        if not check_login_rate_limit(f"admin:{username}"):
+            raise HTTPException(status_code=429, detail="请求过于频繁,请稍后再试")
     if not user or not verify_password(password, user.hashed_password):
-        record_login_failure(f"admin:{username}")
+        if user and not user.is_admin:
+            record_login_failure(f"admin:{username}")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="需要管理员权限")

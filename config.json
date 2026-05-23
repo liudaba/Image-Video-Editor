@@ -1,5 +1,5 @@
 {
-  "api_base_url": "http://localhost:8000",
+  "api_base_url": "https://api.wangzha178.com",
   "model": "[SD1.5] absoluteRealisticVision_v20 [d9d99cdc39]",
   "width": 768,
   "height": 512,
@@ -16,7 +16,7 @@
   "animation": "缩放",
   "thread_count": 4,
   "batch_size": 2,
-  "cloud_llm_enabled": false,
+  "cloud_llm_enabled": true,
   "cloud_llm_provider": "DeepSeek 深度求索",
   "cloud_llm_api_key": "",
   "cloud_llm_model": "deepseek-chat",
@@ -24,11 +24,11 @@
   "cloud_llm_custom_url": "",
   "cloud_asr_enabled": false,
   "cloud_asr_api_key": "",
-  "cloud_image_enabled": false,
+  "cloud_image_enabled": true,
   "cloud_image_provider": "硅基流动 SiliconFlow",
   "cloud_image_api_key": "",
-  "cloud_image_model": "",
-  "cloud_image_model_id": "",
+  "cloud_image_model": "stabilityai/stable-diffusion-xl-base-1.0",
+  "cloud_image_model_id": "stabilityai/stable-diffusion-xl-base-1.0",
   "cloud_image_custom_url": "",
   "min_shot_duration": 2.5
 }

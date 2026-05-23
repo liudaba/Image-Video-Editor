@@ -54,8 +54,8 @@ services:
     restart: always
     env_file: .env
     environment:
-      VIDEOGEN_ENV: production
       TZ: Asia/Shanghai
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--timeout-keep-alive", "30"]
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

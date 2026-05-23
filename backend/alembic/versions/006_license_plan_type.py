@@ -1,14 +1,14 @@
 """add plan_type to licenses table
 
 Revision ID: 006
-Revises: 005
+Revises: 005_license_key_expiry
 Create Date: 2026-05-20
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = '006'
-down_revision = '005'
+down_revision = '005_license_key_expiry'
 branch_labels = None
 depends_on = None
 

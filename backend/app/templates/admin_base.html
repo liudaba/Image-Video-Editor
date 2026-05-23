@@ -350,11 +350,15 @@
                     });
                     
                     if (response.ok) {
-                        showSuccess('密码修改成功，请重新登录');
-                        await fetch('/auth/logout', { method: 'POST' });
-                        setTimeout(() => {
-                            window.location.href = '/admin/login';
-                        }, 1500);
+                        const result = await response.json();
+                        // 用新token更新，避免登录过期
+                        if (result.access_token) {
+                            localStorage.setItem('admin_token', result.access_token);
+                        }
+                        showSuccess('密码修改成功');
+                        // 关闭弹窗
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('changePwdModal'));
+                        if (modal) modal.hide();
                     } else {
                         const error = await response.json();
                         showError(error.detail || '修改密码失败');
@@ -370,7 +374,21 @@
         }
 
         async function loadSection(section) {
-            if (currentSection === section) return;
+            if (currentSection === section) {
+                // 同一页面时重新加载内容（刷新数据）
+                let initFunctionName;
+                if (section === 'trial_codes') {
+                    initFunctionName = 'loadTrialCodesContent';
+                } else if (section === 'audit_logs') {
+                    initFunctionName = 'loadAuditLogsContent';
+                } else {
+                    initFunctionName = `load${section.charAt(0).toUpperCase() + section.slice(1)}Content`;
+                }
+                if (typeof window[initFunctionName] === 'function') {
+                    window[initFunctionName]();
+                }
+                return;
+            }
             currentSection = section;
             
             const contentArea = document.getElementById('content-area');
@@ -459,6 +477,16 @@
             const div = document.createElement('div');
             div.appendChild(document.createTextNode(String(str)));
             return div.innerHTML;
+        }
+
+        // 获取或创建 Bootstrap Modal 实例（避免重复创建导致模态框无法弹出）
+        function getCommonModal() {
+            const modalEl = document.getElementById('commonModal');
+            let modal = bootstrap.Modal.getInstance(modalEl);
+            if (!modal) {
+                modal = new bootstrap.Modal(modalEl);
+            }
+            return modal;
         }
 
         function showError(message) {

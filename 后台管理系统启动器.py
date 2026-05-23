@@ -6,7 +6,7 @@ import sys
 import webbrowser
 
 
-ADMIN_URL = "http://8.141.101.155/admin/login"
+ADMIN_URL = "https://api.wangzha178.com/admin/login"
 
 
 def main():

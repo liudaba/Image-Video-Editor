@@ -206,6 +206,13 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账户已被禁用，请联系客服")
 
+    # 验证新密码强度
+    try:
+        from ..schemas import UserRegister
+        UserRegister.validate_password_strength.__func__(None, data.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     user.hashed_password = hash_password(data.new_password)
     user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
@@ -327,6 +334,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
         if is_license_expired(license_obj) and license_obj.is_valid:
             license_obj.is_valid = False
             await db.flush()
+            await db.commit()
         license_data = encode_license_data(license_obj, user.username)
 
     # 清除登录失败记录
@@ -378,6 +386,7 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
         if is_license_expired(license_obj) and license_obj.is_valid:
             license_obj.is_valid = False
             await db.flush()
+            await db.commit()
         license_data = encode_license_data(license_obj, user.username)
     
     return LoginResponse(access_token=new_token, license=license_data)
@@ -416,5 +425,8 @@ async def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
     await db.commit()
-    
-    return {"message": "密码修改成功"}
+
+    # 生成新token，防止修改密码后登录过期
+    new_token = create_access_token(data={"user_id": current_user.id, "username": current_user.username})
+
+    return {"message": "密码修改成功", "access_token": new_token}

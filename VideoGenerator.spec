@@ -33,7 +33,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='短视频生成器',
+    name='VideoGenerator',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

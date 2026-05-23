@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     HMAC_SIGN_KEY: str = ""
     ECDSA_PRIVATE_KEY_PATH: str = ""
-    TRIAL_DAYS: int = 7
+    TRIAL_DAYS: int = 15
     GRACE_HOURS: int = 2
 
     ALIPAY_APP_ID: str = ""
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
 
-    CORS_ORIGINS: List[str] = ["https://api.videogen.com"]
+    CORS_ORIGINS: List[str] = ["https://api.wangzha178.com"]
 
     RATE_LIMIT_PER_MINUTE: int = 60
 

@@ -23,9 +23,13 @@
                 <option value="delete_version">删除版本</option>
                 <option value="toggle_version_active">切换版本状态</option>
                 <option value="confirm_payment">确认支付</option>
+                <option value="clear_audit_logs">清空审计日志</option>
             </select>
-            <button class="btn btn-sm btn-outline-secondary" id="refresh-audit">
+            <button class="btn btn-sm btn-outline-secondary me-2" id="refresh-audit">
                 <i class="fas fa-refresh"></i> 刷新
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="clear-audit">
+                <i class="fas fa-trash"></i> 一键清空
             </button>
         </div>
     </div>
@@ -73,6 +77,7 @@
         'delete_version': '删除版本',
         'toggle_version_active': '切换版本状态',
         'confirm_payment': '确认支付',
+        'clear_audit_logs': '清空审计日志',
     };
 
     async function loadAuditLogsContent() {
@@ -85,6 +90,18 @@
         document.getElementById('audit-action-filter').addEventListener('change', () => {
             auditCurrentPage = 1;
             loadAuditLogs(auditCurrentPage);
+        });
+
+        document.getElementById('clear-audit').addEventListener('click', async () => {
+            if (!confirm('确定要清空所有审计日志吗？此操作不可撤销！')) return;
+            try {
+                const result = await apiRequest('/api/admin/audit_logs', { method: 'DELETE' });
+                showSuccess(`已清空 ${result.deleted_count} 条日志记录`);
+                auditCurrentPage = 1;
+                loadAuditLogs(auditCurrentPage);
+            } catch (error) {
+                showError('清空日志失败: ' + error.message);
+            }
         });
     }
 

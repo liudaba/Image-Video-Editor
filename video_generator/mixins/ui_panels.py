@@ -66,6 +66,10 @@ class UIPanelsMixin:
         btn_open_folder.grid(row=0, column=1, padx=(10, 0), sticky="e")
         ToolTip(btn_open_folder, "打开视频输出文件夹")
 
+        btn_trash = ttk.Button(title_frame, text="🗑️", command=self.open_trash_browser, style="Small.TButton")
+        btn_trash.grid(row=0, column=2, padx=(5, 0), sticky="e")
+        ToolTip(btn_trash, "浏览垃圾桶，查看和恢复已删除的文件")
+
         # ========== 新增: 版本更新按钮 ==========
         update_frame = ttk.Frame(frame)
         update_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
