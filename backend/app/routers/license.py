@@ -18,9 +18,9 @@ async def activate_license_endpoint(
 ):
     from sqlalchemy import select
 
-    # 先检查密钥状态，给出更具体的错误信息
+    # 先检查密钥状态（加锁防止TOCTOU竞态），给出更具体的错误信息
     key_result = await db.execute(
-        select(LicenseKey).where(LicenseKey.license_key == license_data.license_key)
+        select(LicenseKey).where(LicenseKey.license_key == license_data.license_key).with_for_update()
     )
     key_obj = key_result.scalar_one_or_none()
     if not key_obj:

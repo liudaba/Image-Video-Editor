@@ -228,13 +228,13 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
 
     # 检查用户是否已是PRO会员，如果是则拒绝激活试用码（避免浪费）
     if license_key_obj.plan_type == PlanType.TRIAL_15D:
-        existing_check = await db.execute(select(License).where(License.user_id == user_id))
+        existing_check = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
         existing_check_lic = existing_check.scalar_one_or_none()
         if existing_check_lic and existing_check_lic.license_type == LicenseType.PRO:
             return "already_pro"
 
     # 终身会员不允许被任何激活码降级
-    existing_check2 = await db.execute(select(License).where(License.user_id == user_id))
+    existing_check2 = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
     existing_check_lic2 = existing_check2.scalar_one_or_none()
     if existing_check_lic2 and existing_check_lic2.plan_type == PlanType.LIFETIME:
         return "already_lifetime"
@@ -273,7 +273,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     license_key_obj.expiry_date = expiry_date
 
     existing_result = await db.execute(
-        select(License).where(License.user_id == user_id)
+        select(License).where(License.user_id == user_id).with_for_update()
     )
     existing_license = existing_result.scalar_one_or_none()
 

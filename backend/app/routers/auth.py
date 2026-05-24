@@ -315,7 +315,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     # 获取用户许可证信息
     from ..models import License
     license_result = await db.execute(
-        select(License).filter(License.user_id == user.id)
+        select(License).filter(License.user_id == user.id).with_for_update()
     )
     license_obj = license_result.scalar_one_or_none()
 
@@ -325,11 +325,12 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
         if is_license_expired(license_obj) and license_obj.is_valid:
             license_obj.is_valid = False
             await db.flush()
-            await db.commit()
         license_data = encode_license_data(license_obj, user.username)
 
     # 清除登录失败记录
     clear_login_failures(user_data.username)
+
+    await db.commit()
 
     return LoginResponse(access_token=access_token, license=license_data)
 
@@ -367,7 +368,7 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
     
     from ..models import License
     license_result = await db.execute(
-        select(License).filter(License.user_id == user.id)
+        select(License).filter(License.user_id == user.id).with_for_update()
     )
     license_obj = license_result.scalar_one_or_none()
     
@@ -377,8 +378,9 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
         if is_license_expired(license_obj) and license_obj.is_valid:
             license_obj.is_valid = False
             await db.flush()
-            await db.commit()
         license_data = encode_license_data(license_obj, user.username)
+    
+    await db.commit()
     
     return LoginResponse(access_token=new_token, license=license_data)
 

@@ -136,6 +136,12 @@ async def alipay_callback(
     trade_status = params.get('trade_status')
     
     if trade_status in ['TRADE_SUCCESS', 'TRADE_FINISHED']:
+        # 先锁定订单行，防止并发回调重复处理
+        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
+        result = await db.execute(order_query)
+        order = result.scalar_one_or_none()
+
+        # 在订单锁内检查是否已处理过此通知（防止重复激活）
         notify_id = params.get('notify_id', params.get('trade_no', ''))
         existing_notify = await db.execute(
             select(PaymentNotifyLog).where(PaymentNotifyLog.notify_id == notify_id)
@@ -143,20 +149,16 @@ async def alipay_callback(
         if existing_notify.scalar_one_or_none():
             return {"code": "SUCCESS", "msg": "OK"}
 
-        notify_log = PaymentNotifyLog(
-            notify_id=notify_id,
-            order_no=order_no or "",
-            payment_method="alipay",
-            raw_data=json.dumps(params, ensure_ascii=False),
-        )
-        db.add(notify_log)
-        await db.flush()
-
-        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
-        result = await db.execute(order_query)
-        order = result.scalar_one_or_none()
-        
         if order and order.status == OrderStatus.PENDING:
+            # 记录通知日志（在订单锁内，确保原子性）
+            notify_log = PaymentNotifyLog(
+                notify_id=notify_id,
+                order_no=order_no or "",
+                payment_method="alipay",
+                raw_data=json.dumps(params, ensure_ascii=False),
+            )
+            db.add(notify_log)
+            await db.flush()
             if not validate_order_status_transition(order.status, OrderStatus.PAID):
                 logger.warning(f"Invalid order status transition for order {order_no}: {order.status} -> PAID")
                 return {"code": "FAIL", "msg": "订单状态异常"}
@@ -171,7 +173,7 @@ async def alipay_callback(
             await db.flush()
 
             license_result = await db.execute(
-                select(License).filter(License.user_id == order.user_id)
+                select(License).filter(License.user_id == order.user_id).with_for_update()
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:
@@ -220,7 +222,7 @@ async def alipay_callback(
             except Exception as e:
                 logger.error(f"Failed to commit alipay callback for order {order_no}: {e}")
                 return {"code": "FAIL", "msg": "数据库提交失败"}
-    
+
     return {"code": "SUCCESS", "msg": "OK"}
 
 
@@ -260,6 +262,12 @@ async def wechat_callback(
     trade_state = data.get('trade_state')
     
     if trade_state == 'SUCCESS':
+        # 先锁定订单行，防止并发回调重复处理
+        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
+        result = await db.execute(order_query)
+        order = result.scalar_one_or_none()
+
+        # 在订单锁内检查是否已处理过此通知（防止重复激活）
         wx_notify_id = data.get('transaction_id', data.get('id', ''))
         existing_notify = await db.execute(
             select(PaymentNotifyLog).where(PaymentNotifyLog.notify_id == wx_notify_id)
@@ -267,20 +275,16 @@ async def wechat_callback(
         if existing_notify.scalar_one_or_none():
             return {"code": "SUCCESS", "msg": "OK"}
 
-        notify_log = PaymentNotifyLog(
-            notify_id=wx_notify_id,
-            order_no=order_no or "",
-            payment_method="wechat",
-            raw_data=body.decode('utf-8')[:65535],
-        )
-        db.add(notify_log)
-        await db.flush()
-
-        order_query = select(Order).filter(Order.order_no == order_no).with_for_update()
-        result = await db.execute(order_query)
-        order = result.scalar_one_or_none()
-        
         if order and order.status == OrderStatus.PENDING:
+            # 记录通知日志（在订单锁内，确保原子性）
+            notify_log = PaymentNotifyLog(
+                notify_id=wx_notify_id,
+                order_no=order_no or "",
+                payment_method="wechat",
+                raw_data=body.decode('utf-8')[:65535],
+            )
+            db.add(notify_log)
+            await db.flush()
             if not validate_order_status_transition(order.status, OrderStatus.PAID):
                 logger.warning(f"Invalid order status transition for order {order_no}: {order.status} -> PAID")
                 return {"code": "FAIL", "msg": "订单状态异常"}
@@ -303,7 +307,7 @@ async def wechat_callback(
             await db.flush()
 
             license_result = await db.execute(
-                select(License).filter(License.user_id == order.user_id)
+                select(License).filter(License.user_id == order.user_id).with_for_update()
             )
             existing_license = license_result.scalar_one_or_none()
             if existing_license:

@@ -111,7 +111,6 @@ TEMPLATE_FILES = [
     "backend/app/templates/admin_base.html",
     "backend/app/templates/analytics_content.html",
     "backend/app/templates/audit_logs_content.html",
-    "backend/app/templates/dashboard.html",
     "backend/app/templates/dashboard_content.html",
     "backend/app/templates/licenses_content.html",
     "backend/app/templates/login.html",

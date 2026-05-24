@@ -72,7 +72,11 @@ def _load_spec_config():
         print("  ⚠️  VideoGenerator.spec 不存在，使用内置默认配置")
         return (
             ['whisper', 'moviepy', 'torch', 'torchaudio', 'numpy', 'PIL', 'requests',
-             'tkinter', 'cryptography', 'cryptography.fernet', 'psutil', 'GPUtil',
+             'tkinter', 'cryptography', 'cryptography.fernet',
+             'cryptography.hazmat.primitives.serialization',
+             'cryptography.hazmat.primitives.asymmetric.ec',
+             'cryptography.hazmat.primitives.hashes',
+             'psutil', 'GPUtil',
              'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip',
              'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip',
              'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip',

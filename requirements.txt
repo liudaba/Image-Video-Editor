@@ -4,6 +4,7 @@
 # 视频处理
 moviepy>=2.0.0
 imageio[ffmpeg]
+proglog>=0.1.10
 
 # 语音识别
 openai-whisper

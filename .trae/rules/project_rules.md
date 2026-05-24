@@ -213,7 +213,45 @@ python sync_to_server.py --templates  # 仅模板文件
 
 ---
 
-## 九、新会话启动检查
+## 九、PowerShell 环境下执行 Python 代码规范
+
+### 9.1 核心原则
+
+**禁止使用 `python -c "..."` 执行复杂 Python 代码**。PowerShell 5 对嵌套引号、f-string、特殊字符的转义处理极差，会导致不可预期的语法错误。
+
+### 9.2 标准执行模式：here-string + 临时文件
+
+```powershell
+$code = @'
+# 任意 Python 代码，无需任何转义
+print(f"单引号'双引号\"反斜杠\\都OK")
+result = "RAW" not in "Ghibli style"
+print(f"逻辑判断 = {result}")
+'@
+[System.IO.File]::WriteAllText("$env:TEMP\_py_test.py", $code, [System.Text.UTF8Encoding]::new($false))
+python "$env:TEMP\_py_test.py"
+```
+
+### 9.3 关键技术要点
+
+| 要点 | 说明 |
+|------|------|
+| `@' ... '@` | PowerShell here-string，内部**不做任何转义解析**，原样输出 |
+| `[System.Text.UTF8Encoding]::new($false)` | 写入**无BOM的UTF-8**，避免 Python 报 `U+FEFF` 错误 |
+| `$env:TEMP\_py_test.py` | 使用系统临时目录，不污染项目 |
+| `sys.path.insert(0, r'项目路径')` | 临时文件不在项目目录时，需手动添加项目路径到 `sys.path` |
+
+### 9.4 简单命令例外
+
+仅以下场景允许使用 `python -c`：
+- 单行、无引号嵌套的简单检查：`python -c "import ast; print('OK')"`
+- 版本检查：`python -c "import torch; print(torch.__version__)"`
+
+**判断标准**：如果代码包含 f-string、嵌套引号、中文、或超过1个逻辑行，必须使用临时文件模式。
+
+---
+
+## 十、新会话启动检查
 
 每次新对话开始时，必须按以下顺序检查项目状态并向用户汇报：
 

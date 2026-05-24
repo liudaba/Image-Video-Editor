@@ -3,8 +3,14 @@ from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
 datas = [('config.json', '.'), ('LICENSE', '.')]
+# ECDSA公钥文件（如果存在则包含）
+import os as _os
+if _os.path.exists('.license_verify_pubkey.pem'):
+    datas.append(('.license_verify_pubkey.pem', '.'))
+if _os.path.exists('config.json.sig'):
+    datas.append(('config.json.sig', '.'))
 binaries = []
-hiddenimports = ['whisper', 'moviepy', 'torch', 'torchaudio', 'numpy', 'PIL', 'requests', 'tkinter', 'cryptography', 'cryptography.fernet', 'psutil', 'GPUtil', 'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip', 'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip', 'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip', 'moviepy.editor', 'tiktoken', 'numba', 'llvmlite', 'regex', 'pydub', 'imageio', 'imageio_ffmpeg', 'proglog', 'tqdm']
+hiddenimports = ['whisper', 'moviepy', 'torch', 'torchaudio', 'numpy', 'PIL', 'requests', 'tkinter', 'cryptography', 'cryptography.fernet', 'cryptography.hazmat.primitives.serialization', 'cryptography.hazmat.primitives.asymmetric.ec', 'cryptography.hazmat.primitives.hashes', 'psutil', 'GPUtil', 'moviepy.video.io.ffmpeg_tools', 'moviepy.video.VideoClip', 'moviepy.video.compositing.CompositeVideoClip', 'moviepy.audio.AudioClip', 'moviepy.audio.io.AudioFileClip', 'moviepy.video.io.VideoFileClip', 'moviepy.editor', 'tiktoken', 'numba', 'llvmlite', 'regex', 'pydub', 'imageio', 'imageio_ffmpeg', 'proglog', 'tqdm']
 hiddenimports += collect_submodules('moviepy')
 hiddenimports += collect_submodules('torchaudio')
 hiddenimports += collect_submodules('tiktoken')

@@ -94,6 +94,24 @@ D. 语句通顺：读起来语义不通的可能是识别错误
         "- NO explanatory sentences, NO reasoning text, NO style labels"
     )
 
+    # 非写实风格的核心规则变体：放宽抽象词限制，允许艺术化表达
+    _CORE_RULES_NON_REALISTIC = (
+        "CRITICAL RULES - SEMANTIC ACCURACY (ARTISTIC STYLE):\n"
+        "1. SCENE FIRST: Every prompt MUST describe a specific scene that directly illustrates the dubbing text's meaning. Think in the CHOSEN ART STYLE - what would this look like as an illustration/painting/animation?\n"
+        "2. SEMANTIC FIDELITY: The visual scene MUST directly reflect the SPECIFIC meaning of THIS dubbing line. Each line has a unique message - your scene must capture THAT message in the chosen artistic style.\n"
+        "3. ARTISTICALLY RENDERABLE: Use keywords that work with the chosen artistic style. Abstract mood words like 'dreamy atmosphere', 'mysterious aura', 'melancholy', 'hopeful glow' are ALLOWED for artistic styles. BANNED: purely conceptual terms with no visual form like 'political system', 'economic theory'.\n"
+        "4. FOCUS: Use 3-5 key visual elements per prompt. Prioritize the MOST important visual that captures the core meaning.\n"
+        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, render them in the chosen artistic style consistently.\n"
+        "6. STYLE INTEGRATION: The artistic style MUST be applied to EVERY element in the scene - characters, backgrounds, lighting, atmosphere all conform to the style.\n"
+        "\n"
+        "OUTPUT FORMAT:\n"
+        "- Output ONLY: 中文语义骨架 || English understanding || SD prompt\n"
+        "- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调\n"
+        "- English understanding: 1 English sentence capturing the SPECIFIC meaning\n"
+        "- SD prompt: ONLY comma-separated keywords/phrases, NO Chinese, NO quality tags\n"
+        "- NO explanatory sentences, NO reasoning text, NO style labels"
+    )
+
     _METAPHOR_RULES = (
         "\nCHINESE IDIOM AND METAPHOR HANDLING - CRITICAL:\n"
         "Chinese idioms/metaphors must be translated by MEANING, NOT word-for-word. Depict the REAL-WORLD CONSEQUENCE or SITUATION:\n"
@@ -171,11 +189,16 @@ D. 语句通顺：读起来语义不通的可能是识别错误
     }
 
     @classmethod
-    def get_rules_for_content_type(cls, content_type):
-        """根据内容类型动态组合规则，减少不必要的token消耗"""
+    def get_rules_for_content_type(cls, content_type, is_non_realistic=False):
+        """根据内容类型和风格动态组合规则
+
+        Args:
+            content_type: 内容类型（军事/新闻/科普等）
+            is_non_realistic: 是否为非写实风格（动漫/油画等），非写实风格使用放宽的规则
+        """
         content_lower = (content_type or "general").lower()
         active_extensions = cls._CONTENT_TYPE_RULE_MAP.get(content_lower, ["variety"])
-        rules = cls._CORE_RULES
+        rules = cls._CORE_RULES_NON_REALISTIC if is_non_realistic else cls._CORE_RULES
         if "metaphor" in active_extensions:
             rules += cls._METAPHOR_RULES
         if "variety" in active_extensions:
@@ -426,7 +449,14 @@ Output: 中文语义骨架 || English understanding || SD prompt"""
                 theme_instruction += f"\n【Narrative Strategy】{strategy_text}"
 
             content_type_for_rules = kwargs.get("content_type", "") or "general"
-            effective_rules = cls.get_rules_for_content_type(content_type_for_rules)
+            # 检测非写实风格，传递给规则选择器
+            visual_style_lower = (visual_style or "").lower()
+            non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon',
+                'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
+                'sketch', 'illustration', '3d animation', 'cel shading',
+                '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺']
+            is_non_realistic = any(kw.lower() in visual_style_lower for kw in non_realistic_keywords)
+            effective_rules = cls.get_rules_for_content_type(content_type_for_rules, is_non_realistic=is_non_realistic)
 
             system_content = template["system"].format(
                 style_instruction=style_instruction,

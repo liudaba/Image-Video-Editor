@@ -144,7 +144,7 @@ class MachineBinding(Base):
 class AppVersion(Base):
     __tablename__ = "app_versions"
     __table_args__ = (
-        # (version, update_type, from_version) 组合唯一
+        UniqueConstraint("version", "update_type", "from_version", name="uq_app_version_type_from"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)

@@ -24,7 +24,9 @@ auth_update.py
 deploy.sh
 *.service
 nginx.conf
+# 排除所有txt文件，但保留requirements.txt（Docker构建必需）
 *.txt
+!requirements.txt
 *.db-shm
 *.db-wal
 pyproject.toml

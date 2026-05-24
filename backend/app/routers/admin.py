@@ -369,7 +369,7 @@ async def update_user(
 
     if body.is_active is not None:
         target_user.is_active = body.is_active
-        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
         user_license = license_result.scalar_one_or_none()
         if user_license:
             if body.is_active:
@@ -396,7 +396,7 @@ async def update_user(
         if body.plan_type not in plan_deltas:
             raise HTTPException(status_code=400, detail=f"无效的套餐类型: {body.plan_type}")
         lic_type, delta = plan_deltas[body.plan_type]
-        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
         user_license = license_result.scalar_one_or_none()
         if not user_license:
             now = datetime.now(timezone.utc)
@@ -441,7 +441,7 @@ async def update_user(
         # 修改用户套餐只影响用户的License记录，不影响密钥记录
 
     if body.expiry_date is not None:
-        license_result = await db.execute(select(License).where(License.user_id == user_id))
+        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
         user_license = license_result.scalar_one_or_none()
         if not user_license:
             user_license = License(
@@ -616,7 +616,7 @@ async def confirm_payment(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -632,7 +632,7 @@ async def confirm_payment(
     await db.flush()
 
     license_result = await db.execute(
-        select(License).where(License.user_id == order.user_id)
+        select(License).where(License.user_id == order.user_id).with_for_update()
     )
     existing_license = license_result.scalar_one_or_none()
     if existing_license:
@@ -808,7 +808,7 @@ async def toggle_user_active(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     target = result.scalar_one_or_none()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -819,7 +819,7 @@ async def toggle_user_active(
     target.is_active = not target.is_active
     await db.flush()
 
-    license_result = await db.execute(select(License).where(License.user_id == user_id))
+    license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
     user_license = license_result.scalar_one_or_none()
     if user_license:
         if target.is_active:
@@ -1033,7 +1033,7 @@ async def revoke_license_key(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(LicenseKey).where(LicenseKey.license_key == license_key))
+    result = await db.execute(select(LicenseKey).where(LicenseKey.license_key == license_key).with_for_update())
     key = result.scalar_one_or_none()
     if not key:
         raise HTTPException(status_code=404, detail="许可证密钥不存在")
@@ -1055,7 +1055,7 @@ async def revoke_license_key(
         other_active_keys = other_keys_result.scalars().all()
         # 如果没有其他有效密钥，检查License是否仅靠此激活码支撑
         if not other_active_keys:
-            lic_result = await db.execute(select(License).where(License.user_id == key.activated_by))
+            lic_result = await db.execute(select(License).where(License.user_id == key.activated_by).with_for_update())
             user_lic = lic_result.scalar_one_or_none()
             if user_lic:
                 if user_lic.license_key == license_key:

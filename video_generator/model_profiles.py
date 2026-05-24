@@ -149,13 +149,13 @@ def detect_model_type(model_name):
     if clean_name != name_lower:
         name_lower = clean_name
 
-    if any(kw in name_lower for kw in ['flux', 'flx', 'schnell']):
+    if any(kw in name_lower for kw in ['flux', 'flx', 'schnell', 'flux1']):
         return MODEL_TYPE_FLUX
 
     if any(kw in name_lower for kw in ['sdxl', 'xl', 'ssd-1']):
         return MODEL_TYPE_SDXL
 
-    if any(kw in name_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3', 'sd_3']):
+    if any(kw in name_lower for kw in ['sd3', 'sd 3', 'stable diffusion 3', 'sd_3', 'sd3-medium', 'sd3.5', 'stable diffusion 3.5']):
         return MODEL_TYPE_SD3
 
     sdxl_model_hints = [
@@ -170,14 +170,14 @@ def detect_model_type(model_name):
             return MODEL_TYPE_SDXL
 
     flux_model_hints = [
-        'schnell', 'flx', 'fluxfill',
+        'schnell', 'flx', 'fluxfill', 'flux1', 'flux-dev', 'flux-schnell',
     ]
     for hint in flux_model_hints:
         if hint in name_lower:
             return MODEL_TYPE_FLUX
 
     sd3_model_hints = [
-        'sd3.5', 'stable diffusion 3.5',
+        'sd3.5', 'stable diffusion 3.5', 'sd3-medium', 'sd3-large',
     ]
     for hint in sd3_model_hints:
         if hint in name_lower:

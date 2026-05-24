@@ -24,6 +24,25 @@ EXPIRED_ORDER_RETENTION_DAYS = settings.EXPIRED_ORDER_RETENTION_DAYS
 HEARTBEAT_RETENTION_DAYS = settings.HEARTBEAT_RETENTION_DAYS
 PENDING_ORDER_EXPIRE_HOURS = 2
 CLEANUP_INTERVAL_HOURS = settings.CLEANUP_INTERVAL_HOURS
+# 每批删除的最大行数，避免长事务锁表
+BATCH_DELETE_SIZE = 5000
+
+
+async def _batch_delete(db: AsyncSession, model, condition, batch_size: int = BATCH_DELETE_SIZE) -> int:
+    """分批删除，避免单次删除过多行导致长事务锁表"""
+    total = 0
+    while True:
+        # 使用子查询获取要删除的ID，再批量删除，兼容PostgreSQL
+        subquery = select(model.id).where(condition).limit(batch_size)
+        result = await db.execute(
+            delete(model).where(model.id.in_(subquery))
+        )
+        deleted = result.rowcount
+        total += deleted
+        if deleted < batch_size:
+            break
+        await db.flush()
+    return total
 
 
 async def run_database_cleanup():
@@ -32,31 +51,24 @@ async def run_database_cleanup():
             results = {}
 
             cutoff_audit = datetime.now(timezone.utc) - timedelta(days=AUDIT_LOG_RETENTION_DAYS)
-            result = await db.execute(
-                delete(AuditLog).where(AuditLog.created_at < cutoff_audit)
-            )
-            results["audit_logs"] = result.rowcount
+            total = await _batch_delete(db, AuditLog, AuditLog.created_at < cutoff_audit)
+            results["audit_logs"] = total
 
             cutoff_payment = datetime.now(timezone.utc) - timedelta(days=PAYMENT_NOTIFY_RETENTION_DAYS)
-            result = await db.execute(
-                delete(PaymentNotifyLog).where(PaymentNotifyLog.created_at < cutoff_payment)
-            )
-            results["payment_notify_logs"] = result.rowcount
+            total = await _batch_delete(db, PaymentNotifyLog, PaymentNotifyLog.created_at < cutoff_payment)
+            results["payment_notify_logs"] = total
 
             cutoff_order = datetime.now(timezone.utc) - timedelta(days=EXPIRED_ORDER_RETENTION_DAYS)
-            result = await db.execute(
-                delete(Order).where(
-                    Order.status.in_([OrderStatus.EXPIRED, OrderStatus.CANCELLED]),
-                    Order.created_at < cutoff_order,
-                )
+            total = await _batch_delete(
+                db, Order,
+                (Order.status.in_([OrderStatus.EXPIRED, OrderStatus.CANCELLED]))
+                & (Order.created_at < cutoff_order)
             )
-            results["expired_orders"] = result.rowcount
+            results["expired_orders"] = total
 
             cutoff_heartbeat = datetime.now(timezone.utc) - timedelta(days=HEARTBEAT_RETENTION_DAYS)
-            result = await db.execute(
-                delete(HeartbeatLog).where(HeartbeatLog.created_at < cutoff_heartbeat)
-            )
-            results["heartbeat_logs"] = result.rowcount
+            total = await _batch_delete(db, HeartbeatLog, HeartbeatLog.created_at < cutoff_heartbeat)
+            results["heartbeat_logs"] = total
 
             pending_cutoff = datetime.now(timezone.utc) - timedelta(hours=PENDING_ORDER_EXPIRE_HOURS)
             result = await db.execute(
@@ -72,11 +84,16 @@ async def run_database_cleanup():
 
             await db.commit()
 
+            # 只对清理涉及的表执行VACUUM ANALYZE，避免全库锁表
+            vacuum_tables = ["audit_logs", "payment_notify_logs", "orders", "heartbeat_logs", "license_keys"]
             try:
-                # PostgreSQL VACUUM ANALYZE 回收空间并更新统计信息
                 async with engine.connect() as conn:
-                    await conn.execution_options(isolation_level="AUTOCOMMIT")
-                    await conn.execute(text("VACUUM (ANALYZE)"))
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    for table in vacuum_tables:
+                        try:
+                            await conn.execute(text(f"VACUUM (ANALYZE) {table}"))
+                        except Exception:
+                            pass
             except Exception:
                 pass
 

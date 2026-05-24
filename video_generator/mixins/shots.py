@@ -2622,7 +2622,8 @@ class ShotsMixin:
                         _mt = detect_model_type(_mn)
                     except Exception:
                         pass
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
+                _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
                 custom_theme=core_theme, custom_visual_tone=visual_tone)
         
@@ -3367,7 +3368,16 @@ class ShotsMixin:
             parts.append(suffix)
 
         if model_type in ('flux', 'sd3') and len(parts) > 1:
-            result = '. '.join(p for p in parts if p)
+            # Flux/SD3使用自然语言：如果有质量前缀/后缀，用逗号融入场景描述
+            # 避免用句号生硬拼接导致不自然的文本
+            if prefix and suffix:
+                result = f"{prefix}, {cleaned}, {suffix}"
+            elif prefix:
+                result = f"{prefix}, {cleaned}"
+            elif suffix:
+                result = f"{cleaned}, {suffix}"
+            else:
+                result = cleaned
         else:
             result = ', '.join(parts)
         result = self._validate_sd_syntax(result, model_type)
@@ -3410,8 +3420,13 @@ class ShotsMixin:
             flux_kws = [k.strip() for k in text.split(',')]
             flux_kws = [k for k in flux_kws if k.lower().strip() not in _flux_generic and len(k.strip()) > 1]
             if flux_kws:
+                # 检测是否已包含自然语言句子（句号或长词组）
                 has_sentence = any('.' in k or len(k.split()) > 4 for k in flux_kws)
-                if not has_sentence and len(flux_kws) >= 3:
+                if has_sentence:
+                    # 已有自然语言描述，保持原样，仅用逗号连接
+                    text = ', '.join(flux_kws)
+                elif len(flux_kws) >= 3:
+                    # 纯关键词列表，转为自然语言
                     main_subject = flux_kws[0]
                     details = ', '.join(flux_kws[1:])
                     text = f"A {main_subject}, with {details}"
@@ -3462,7 +3477,8 @@ class ShotsMixin:
                     _mt = detect_model_type(_mn)
                 except Exception:
                     pass
-            return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt)
+            _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
+            return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles)
         else:
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
                 custom_theme=core_theme, custom_visual_tone=visual_tone)
@@ -4080,6 +4096,14 @@ class ShotsMixin:
             'survival': (['生存', '保险', '压舱石', '防线', '崩塌', '退路', '后路', '赌', '筹码'], ['survival struggle', 'desperate situation', 'high stakes']),
             'corruption': (['腐败', '贪腐', '金山', '肥差', '利益', '贿赂'], ['corruption', 'power abuse', 'wealth disparity']),
             'social': (['民生', '社会', '底层', '百姓', '民众', '食品分发'], ['social conditions', 'civilian life', 'hardship']),
+            'space': (['宇宙', '太空', '银河', '黑洞', '恒星', '星云', '行星', '卫星'], ['deep space', 'cosmic scene', 'astronomical phenomenon']),
+            'nature': (['森林', '丛林', '草原', '山脉', '河流', '海洋', '沙漠', '湖泊', '瀑布', '火山', '珊瑚'], ['natural landscape', 'wilderness', 'scenic view']),
+            'science': (['细胞', '基因', 'DNA', '分子', '蛋白质', '实验', '研究', '科学家', '进化', '演化', '物种', '自然选择'], ['scientific research', 'laboratory', 'discovery']),
+            'culture': (['建筑', '古建筑', '寺庙', '教堂', '绘画', '雕塑', '艺术', '博物馆', '音乐', '乐器', '演奏'], ['cultural heritage', 'artistic scene', 'architecture']),
+            'sports': (['比赛', '竞赛', '运动员', '冠军', '奥运', '足球', '篮球', '游泳', '跑步'], ['sports competition', 'athletic event', 'stadium']),
+            'history': (['古代', '朝代', '皇帝', '宫殿', '历史', '文明', '王朝'], ['historical scene', 'ancient civilization', 'imperial court']),
+            'education': (['学校', '教育', '学生', '课堂', '老师', '教授', '大学'], ['education', 'classroom', 'learning environment']),
+            'ai_tech': (['人工智能', 'AI', '机器人', '自动化', '互联网', '网络', '数据', '芯片', '算法'], ['AI technology', 'digital innovation', 'futuristic lab']),
         }
         for key, (triggers, tags) in theme_map.items():
             if any(w in text for w in triggers):
@@ -4128,6 +4152,30 @@ class ShotsMixin:
             (r'民众|百姓|民生|食品|底层', 'civilian life, everyday hardship'),
             (r'签字|签约|合同|协议|握手', 'signing ceremony, handshake over document'),
             (r'妻子|夫人|夫妇|女性', 'woman in formal attire, political figure'),
+            # 科普/科学领域
+            (r'宇宙|太空|星|银河|黑洞|恒星', 'deep space, cosmic scene, stars'),
+            (r'细胞|基因|DNA|分子|蛋白质', 'microscopic view, molecular structure'),
+            (r'实验|研究|科学家|实验室', 'laboratory, scientific research'),
+            (r'进化|演化|自然选择|物种', 'evolution, life progression, nature'),
+            # 自然/地理领域
+            (r'森林|丛林|树木|草原', 'dense forest, woodland, green landscape'),
+            (r'海洋|大海|海底|珊瑚', 'ocean view, underwater scene, marine life'),
+            (r'山脉|山峰|火山|峡谷', 'mountain landscape, dramatic peaks'),
+            (r'沙漠|荒漠|戈壁', 'desert landscape, sand dunes'),
+            (r'河流|湖泊|瀑布', 'river flowing, lake scenery, waterfall'),
+            # 文化/艺术领域
+            (r'建筑|古建筑|寺庙|教堂', 'architectural landmark, historic building'),
+            (r'绘画|雕塑|艺术|博物馆', 'art gallery, museum interior, artwork'),
+            (r'音乐|乐器|演奏|交响', 'musical performance, concert hall'),
+            # 体育领域
+            (r'比赛|竞赛|运动员|冠军|奥运', 'sports competition, athlete in action'),
+            (r'足球|篮球|游泳|跑步', 'sports event, athletic performance'),
+            # 历史/教育领域
+            (r'古代|朝代|皇帝|宫殿', 'ancient palace, historical scene, imperial court'),
+            (r'学校|教育|学生|课堂|老师', 'classroom, students learning, education'),
+            # 科技领域
+            (r'人工智能|AI|机器人|自动化', 'AI technology, robot, futuristic lab'),
+            (r'互联网|网络|数据|芯片', 'digital technology, network, circuit board'),
         ]
         for pattern, scene in _SCENE_PATTERNS:
             if re.search(pattern, text):
@@ -5997,7 +6045,8 @@ class ShotsMixin:
                                         _mt = detect_model_type(_mn)
                                     except Exception:
                                         pass
-                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''), model_type=_mt)
+                                _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
+                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''), model_type=_mt, user_styles=_user_styles)
                             else:
                                 pregenerated_prompts[idx] = self._analyze_and_generate_sd_prompt(dubbing, theme_info.get('content_type', ''))
                             if pregenerated_prompts[idx]:
