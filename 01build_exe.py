@@ -167,12 +167,15 @@ def post_build():
         shutil.copy2(icon_src, os.path.join(OUTPUT_DIR, 'icon.ico'))
         print("  ✅ icon.ico")
 
-    # 复制快捷方式脚本
+    # 复制辅助脚本
     for f in ['CreateShortcut.bat']:
         src = os.path.join(BASE_DIR, f)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(OUTPUT_DIR, f))
             print(f"  ✅ {f}")
+
+    # 生成环境检查和首次运行脚本
+    _generate_helper_scripts()
 
     # 4.6 生成启动脚本
     _generate_start_scripts()
@@ -251,6 +254,130 @@ def _copy_whisper_models():
         print("    ⚠️ 无 .pt 模型文件")
     else:
         print(f"    ✅ 共 {count} 个模型")
+
+
+def _generate_helper_scripts():
+    """生成 CheckEnv.bat 和 FirstRunSetup.bat"""
+    # CheckEnv.bat - 环境检查
+    checkenv = '''@echo off
+chcp 65001 >nul 2>&1
+title VideoGenerator - Environment Check
+
+echo.
+echo  ==========================================
+echo     VideoGenerator - Environment Check
+echo  ==========================================
+echo.
+
+cd /d "%~dp0"
+
+set "PASS=0"
+set "FAIL=0"
+
+if exist "VideoGenerator.exe" (
+    echo  [OK] VideoGenerator.exe found
+    set /a PASS+=1
+) else (
+    echo  [FAIL] VideoGenerator.exe NOT found
+    set /a FAIL+=1
+)
+
+if exist "ffmpeg\\ffmpeg.exe" (
+    echo  [OK] FFmpeg found
+    set /a PASS+=1
+) else (
+    echo  [FAIL] FFmpeg NOT found
+    set /a FAIL+=1
+)
+
+if exist "whisper_models\\medium.pt" (
+    echo  [OK] Whisper model found
+    set /a PASS+=1
+) else (
+    echo  [WARN] Whisper model NOT found (will download on first use)
+)
+
+if exist "config.json" (
+    echo  [OK] config.json found
+    set /a PASS+=1
+) else (
+    echo  [FAIL] config.json NOT found
+    set /a FAIL+=1
+)
+
+if exist ".license_verify_pubkey.pem" (
+    echo  [OK] License public key found
+    set /a PASS+=1
+) else (
+    echo  [FAIL] License public key NOT found
+    set /a FAIL+=1
+)
+
+echo.
+echo  Checking network...
+ping -n 1 api.wangzha178.com >nul 2>&1
+if %errorlevel%==0 (
+    echo  [OK] Server reachable
+    set /a PASS+=1
+) else (
+    echo  [FAIL] Cannot reach server
+    set /a FAIL+=1
+)
+
+echo.
+echo  ==========================================
+echo  Results: %PASS% passed, %FAIL% failed
+echo  ==========================================
+echo.
+if %FAIL%==0 (
+    echo  All checks passed.
+) else (
+    echo  Some checks failed. Please check above.
+)
+echo.
+pause
+'''
+    with open(os.path.join(OUTPUT_DIR, 'CheckEnv.bat'), 'w', encoding='utf-8') as f:
+        f.write(checkenv)
+    print("  ✅ CheckEnv.bat")
+
+    # FirstRunSetup.bat - 首次运行引导
+    firstrun = '''@echo off
+chcp 65001 >nul 2>&1
+title VideoGenerator - First Run Setup
+
+echo.
+echo  ==========================================
+echo     VideoGenerator - First Run Setup
+echo  ==========================================
+echo.
+
+cd /d "%~dp0"
+
+echo  Step 1: Checking environment...
+echo.
+if exist "CheckEnv.bat" call CheckEnv.bat
+
+echo.
+echo  Step 2: Creating desktop shortcut...
+echo.
+if exist "CreateShortcut.bat" call CreateShortcut.bat
+
+echo.
+echo  ==========================================
+echo  Setup complete!
+echo.
+echo  How to start:
+echo    - Double-click start.vbs (recommended)
+echo    - Or double-click VideoGenerator.exe
+echo    - Or use the desktop shortcut
+echo  ==========================================
+echo.
+pause
+'''
+    with open(os.path.join(OUTPUT_DIR, 'FirstRunSetup.bat'), 'w', encoding='utf-8') as f:
+        f.write(firstrun)
+    print("  ✅ FirstRunSetup.bat")
 
 
 def _generate_start_scripts():

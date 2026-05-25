@@ -97,6 +97,8 @@ SYNC_FILES = [
     ("backend/alembic/versions/005_license_key_expiry.py", "{project_dir}/alembic/versions/005_license_key_expiry.py"),
     ("backend/alembic/versions/006_license_plan_type.py",  "{project_dir}/alembic/versions/006_license_plan_type.py"),
     ("backend/alembic/versions/007_version_patch_fields.py", "{project_dir}/alembic/versions/007_version_patch_fields.py"),
+    ("backend/alembic/versions/008_fix_license_plan_type_enum.py", "{project_dir}/alembic/versions/008_fix_license_plan_type_enum.py"),
+    ("backend/alembic/versions/009_add_missing_plan_type_enum_values.py", "{project_dir}/alembic/versions/009_add_missing_plan_type_enum_values.py"),
     # Docker 配置（同步到项目根目录）
     ("backend/Dockerfile",                   "{project_dir}/Dockerfile"),
     ("backend/docker-compose.yml",           "{project_dir}/docker-compose.yml"),
