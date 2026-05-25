@@ -10,7 +10,7 @@ DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DEPLOY_DIR"
 
 # 从 .env 读取域名，未设置则使用默认值
-API_DOMAIN="${API_DOMAIN:-api.videogen.com}"
+API_DOMAIN="${API_DOMAIN:-api.wangzha178.com}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@${API_DOMAIN}}"
 
 if [ ! -f ".env" ]; then

@@ -17,7 +17,8 @@ from .schemas import TokenData
 logger = logging.getLogger("videogen")
 security = HTTPBearer(auto_error=False)
 
-MAX_LOGIN_ATTEMPTS = 5
+MAX_LOGIN_ATTEMPTS = 5          # 单用户最大失败次数
+MAX_IP_LOGIN_ATTEMPTS = 20      # 单IP最大失败次数（同一IP可能有多个用户）
 LOCKOUT_SECONDS = 900
 
 
@@ -99,6 +100,11 @@ def decode_access_token(token: str) -> TokenData:
 _memory_rate_limit: dict = {}
 
 
+def _get_max_attempts(identifier: str) -> int:
+    """根据标识符类型返回最大失败次数"""
+    return MAX_IP_LOGIN_ATTEMPTS if identifier.startswith("ip:") else MAX_LOGIN_ATTEMPTS
+
+
 def _memory_rate_limit_check(identifier: str) -> bool:
     """内存限流检查（单进程快速路径）"""
     now = time.time()
@@ -117,9 +123,10 @@ def _memory_rate_limit_check(identifier: str) -> bool:
 def _memory_record_failure(identifier: str):
     """内存记录登录失败"""
     now = time.time()
+    max_attempts = _get_max_attempts(identifier)
     entry = _memory_rate_limit.get(identifier, {"fails": 0, "first_fail": now, "lockout_until": None})
     entry["fails"] += 1
-    if entry["fails"] >= MAX_LOGIN_ATTEMPTS:
+    if entry["fails"] >= max_attempts:
         entry["lockout_until"] = now + LOCKOUT_SECONDS
     _memory_rate_limit[identifier] = entry
 
@@ -131,6 +138,7 @@ def _memory_clear_failures(identifier: str):
 
 def check_login_rate_limit(identifier: str) -> bool:
     """检查登录限流：Redis > 内存"""
+    max_attempts = _get_max_attempts(identifier)
     r = _get_redis()
     if r is not None:
         try:
@@ -139,7 +147,7 @@ def check_login_rate_limit(identifier: str) -> bool:
                 return False
             fail_key = f"login_fail:{identifier}"
             fails = int(r.get(fail_key) or 0)
-            if fails >= MAX_LOGIN_ATTEMPTS:
+            if fails >= max_attempts:
                 r.setex(lock_key, LOCKOUT_SECONDS, "1")
                 r.delete(fail_key)
                 return False
@@ -151,6 +159,7 @@ def check_login_rate_limit(identifier: str) -> bool:
 
 def record_login_failure(identifier: str):
     """记录登录失败：Redis > 内存"""
+    max_attempts = _get_max_attempts(identifier)
     r = _get_redis()
     if r is not None:
         try:
@@ -158,7 +167,7 @@ def record_login_failure(identifier: str):
             lock_key = f"login_lockout:{identifier}"
             fails = r.incr(fail_key)
             r.expire(fail_key, LOCKOUT_SECONDS)
-            if fails >= MAX_LOGIN_ATTEMPTS:
+            if fails >= max_attempts:
                 r.setex(lock_key, LOCKOUT_SECONDS, "1")
             return
         except Exception:

@@ -6,14 +6,13 @@ import threading
 import hashlib
 import re
 import gc
-import traceback
 import warnings
 from video_generator.mixins.logging import safe_print_exc
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import messagebox
 
-from video_generator.config import Config, get_http_session, get_whisper_model_path
+from video_generator.config import Config, get_whisper_model_path
 from video_generator.cache import prompt_cache, image_cache
 from video_generator.ollama_client import (
     call_ollama_model,
@@ -25,9 +24,7 @@ from video_generator.ollama_client import (
     try_start_ollama_service,
     check_model_gpu_status,
 )
-from video_generator.multi_model import LLMPerformanceOptimizer, llm_optimizer
 from video_generator.templates import PromptTemplates
-from video_generator.parallel import ParallelPromptGenerator
 from video_generator.app_state import set_ollama_available_global
 
 try:
@@ -115,56 +112,31 @@ _SIMPLIFIED_TO_TRADITIONAL = {
     '驻': '駐', '驾': '駕', '骂': '罵', '骄': '驕', '验': '驗', '骑': '騎',
     '骗': '騙', '腾': '騰', '鱼': '魚', '鲜': '鮮', '鲸': '鯨', '鸟': '鳥',
     '鸡': '雞', '鸣': '鳴', '鸥': '鷗', '鸭': '鴨', '鹅': '鵝', '鹤': '鶴',
-    '齐': '齊', '齿': '齒', '龙': '龍', '龟': '龜',
-    '罗': '羅', '里': '裡', '纸': '紙', '杆': '桿', '稳': '穩', '矿': '礦',
-    '脑': '腦', '给': '給', '装': '裝', '亚': '亞', '个': '個', '织': '織',
-    '样': '樣', '觉': '覺', '维': '維', '现': '現', '状': '狀', '贵': '貴',
-    '线': '線', '轻': '輕', '说': '說', '卖': '賣', '顾': '顧', '简': '簡',
-    '华': '華', '顿': '頓', '债': '債', '邻': '鄰', '虽': '雖', '总': '總',
-    '让': '讓', '处': '處', '种': '種', '御': '禦', '后': '後', '经': '經',
-    '顶': '頂', '济': '濟', '盘': '盤', '许': '許', '赎': '贖', '赌': '賭',
-    '筹': '籌', '码': '碼', '纽': '紐', '彻': '徹', '损': '損', '衬': '襯',
-    '贴': '貼', '购': '購', '贷': '貸', '贸': '貿', '费': '費', '贺': '賀',
-    '贼': '賊', '赔': '賠', '赚': '賺', '赛': '賽', '赞': '贊', '走': '走',
-    '赶': '趕', '起': '起', '超': '超', '越': '越', '趋': '趨', '跌': '跌',
-    '跑': '跑', '跟': '跟', '跨': '跨', '跪': '跪', '路': '路', '踪': '蹤',
-    '身': '身', '车': '車', '轧': '軋', '轴': '軸', '较': '較', '辈': '輩',
-    '辊': '輥', '辍': '輟', '辑': '輯', '辔': '轡', '辕': '轅', '辖': '轄',
-    '邓': '鄧', '邮': '郵', '郑': '鄭', '钓': '釣', '铃': '鈴', '铅': '鉛',
-    '铢': '銖', '铭': '銘', '铺': '鋪', '锏': '鐧', '门': '門', '闲': '閒',
-    '闷': '悶', '闸': '閘', '阁': '閣', '阀': '閥', '阕': '闋', '阑': '闌',
-    '阒': '闃', '阖': '闔', '阙': '闕', '陕': '陝', '陪': '陪', '隶': '隸',
-    '雇': '僱', '雏': '雛', '麦': '麥', '麸': '麩', '麹': '麴', '麻': '麻',
-    '黄': '黃', '黔': '黔', '默': '默', '黛': '黛', '黜': '黜', '黝': '黝',
-    '点': '點', '齐': '齊', '龄': '齡', '龀': '齔', '龁': '齕', '龃': '齟',
-    '龅': '齙', '龆': '齠', '龇': '齜', '龈': '齦', '龉': '齬', '龊': '齪',
-    '龋': '齲', '龌': '齷', '龚': '龔', '龛': '龕',
-    '著': '著', '游': '遊', '干': '幹', '系': '係', '面': '面', '后': '後',
-    '里': '裡', '发': '發', '复': '復', '制': '製', '板': '闆', '表': '錶',
-    '困': '睏', '厂': '廠', '广': '廣', '范': '範', '汇': '匯', '台': '臺',
-    '准': '準', '确': '確', '朴': '樸', '筑': '築', '蜡': '蠟', '术': '術',
-    '松': '鬆', '舍': '捨', '咸': '鹹', '岩': '巖', '谷': '穀', '征': '徵',
-    '致': '緻', '制': '製', '钟': '鐘', '板': '闆', '出': '齣', '沈': '瀋',
-    '拓': '搨', '括': '括', '挽': '輓', '搓': '撚', '摸': '摸', '摆': '擺',
-    '据': '據', '拟': '擬', '撞': '撞', '操': '操', '支': '支', '收': '收',
-    '改': '改', '攻': '攻', '放': '放', '政': '政', '效': '效', '敏': '敏',
-    '救': '救', '教': '教', '敬': '敬', '整': '整', '斗': '鬥', '料': '料',
-    '斧': '斧', '斯': '斯', '新': '新', '方': '方', '施': '施', '旁': '旁',
-    '旅': '旅', '旋': '旋', '族': '族', '既': '既', '日': '日', '明': '明',
-    '易': '易', '映': '映', '昨': '昨', '是': '是', '晚': '晚', '晨': '晨',
-    '普': '普', '景': '景', '晴': '晴', '智': '智', '暗': '暗', '暴': '暴',
-    '更': '更', '替': '替', '最': '最', '月': '月', '有': '有', '朋': '朋',
-    '服': '服', '朝': '朝', '期': '期', '未': '未', '末': '末', '本': '本',
-    '林': '林', '果': '果', '枝': '枝', '棋': '棋', '森': '森', '植': '植',
-    '椅': '椅', '椒': '椒', '概': '概', '榜': '榜', '模': '模', '橙': '橙',
-    '橡': '橡', '檀': '檀', '次': '次', '欣': '欣', '正': '正', '此': '此',
-    '步': '步', '武': '武', '歧': '歧', '殃': '殃', '段': '段', '毁': '毀',
-    '每': '每', '毒': '毒', '比': '比', '民': '民', '水': '水', '永': '永',
-    '浦': '浦', '海': '海', '浸': '浸', '涂': '塗', '消': '消', '涉': '涉',
-    '深': '深', '混': '混', '添': '添', '清': '清', '渡': '渡', '源': '源',
-    '溢': '溢', '溯': '溯', '溶': '溶', '滴': '滴', '漂': '漂', '漏': '漏',
-    '演': '演', '漫': '漫', '澄': '澄', '激': '激', '灌': '灌', '泼': '潑',
-    '黑': '黑', '鼎': '鼎', '鼓': '鼓', '鼠': '鼠', '鼻': '鼻', '龄': '齡',
+    '齐': '齊', '齿': '齒', '龙': '龍', '龟': '龜', '罗': '羅', '里': '裡',
+    '纸': '紙', '杆': '桿', '稳': '穩', '矿': '礦', '脑': '腦', '给': '給',
+    '装': '裝', '亚': '亞', '个': '個', '织': '織', '样': '樣', '觉': '覺',
+    '维': '維', '现': '現', '状': '狀', '贵': '貴', '线': '線', '轻': '輕',
+    '说': '說', '卖': '賣', '顾': '顧', '简': '簡', '华': '華', '顿': '頓',
+    '债': '債', '邻': '鄰', '虽': '雖', '总': '總', '让': '讓', '处': '處',
+    '种': '種', '御': '禦', '后': '後', '经': '經', '顶': '頂', '济': '濟',
+    '盘': '盤', '许': '許', '赎': '贖', '赌': '賭', '筹': '籌', '码': '碼',
+    '纽': '紐', '彻': '徹', '损': '損', '衬': '襯', '贴': '貼', '购': '購',
+    '贷': '貸', '贸': '貿', '费': '費', '贺': '賀', '贼': '賊', '赔': '賠',
+    '赚': '賺', '赛': '賽', '赶': '趕', '趋': '趨', '踪': '蹤', '轧': '軋',
+    '轴': '軸', '较': '較', '辈': '輩', '辊': '輥', '辍': '輟', '辑': '輯',
+    '辔': '轡', '辕': '轅', '辖': '轄', '邓': '鄧', '邮': '郵', '郑': '鄭',
+    '钓': '釣', '铃': '鈴', '铅': '鉛', '铢': '銖', '铭': '銘', '铺': '鋪',
+    '锏': '鐧', '闲': '閒', '闷': '悶', '闸': '閘', '阁': '閣', '阀': '閥',
+    '阕': '闋', '阑': '闌', '阒': '闃', '阖': '闔', '阙': '闕', '陕': '陝',
+    '隶': '隸', '雇': '僱', '雏': '雛', '麦': '麥', '麸': '麩', '麹': '麴',
+    '黄': '黃', '龄': '齡', '龀': '齔', '龁': '齕', '龃': '齟', '龅': '齙',
+    '龆': '齠', '龇': '齜', '龈': '齦', '龉': '齬', '龊': '齪', '龋': '齲',
+    '龌': '齷', '龚': '龔', '龛': '龕', '游': '遊', '干': '幹', '系': '係',
+    '发': '發', '复': '復', '制': '製', '板': '闆', '表': '錶', '困': '睏',
+    '厂': '廠', '范': '範', '台': '臺', '准': '準', '确': '確', '朴': '樸',
+    '筑': '築', '蜡': '蠟', '松': '鬆', '舍': '捨', '咸': '鹹', '岩': '巖',
+    '谷': '穀', '征': '徵', '致': '緻', '出': '齣', '沈': '瀋', '拓': '搨',
+    '挽': '輓', '搓': '撚', '拟': '擬', '毁': '毀', '涂': '塗', '泼': '潑',
 }
 
 def _is_traditional_conversion(old, new):
@@ -5156,7 +5128,7 @@ class ShotsMixin:
             self._move_output_to_trash(reason="regenerate_shots")
             
             # 步骤1: 音频分析
-            self.log("\n📍 步骤 1/3: 音频语音识别")
+            self.log("\n📍 步骤 1/4: 音频语音识别")
             self.update_task_progress("正在识别音频语音...", 10)
             
             # 生成音频文件的缓存键（添加文件大小防止冲突）
@@ -5295,11 +5267,12 @@ class ShotsMixin:
                         except Exception as e:
                             self._log_exception("⚠️ GPU加载失败，回退到CPU", e)
                             try:
+                                import whisper as _whisper_fallback
                                 local_model = get_whisper_model_path(whisper_model_size)
                                 model_arg = local_model if local_model else whisper_model_size
                                 if local_model:
                                     self.log(f"   使用本地模型: {local_model}")
-                                self.whisper_model = whisper.load_model(model_arg, device="cpu")
+                                self.whisper_model = _whisper_fallback.load_model(model_arg, device="cpu")
                                 whisper_model_loaded = True
                                 self._whisper_on_gpu = False
                                 self.log(f"✅ Whisper {whisper_model_size} 加载成功 (CPU模式)")
@@ -5366,7 +5339,7 @@ class ShotsMixin:
                         self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
-            self.log("\n📍 步骤 2/3: 主题分析与纠错")
+            self.log("\n📍 步骤 2/4: 主题分析与纠错")
             self.log("   流程: 发送全文 → 大模型提取主题/基调/元素/纠错 → 供后续分镜使用")
             self.update_task_progress("正在分析文章内容...", 40)
             
@@ -5440,28 +5413,22 @@ class ShotsMixin:
                 if theme_info.get('core_theme'):
                     simplified_theme = self._simplify_theme(theme_info['core_theme'])
                     if simplified_theme != theme_info['core_theme']:
-                        self.log(f"   🔄 主题已简化: {theme_info['core_theme']} → {simplified_theme}")
                         theme_info['core_theme'] = simplified_theme
                 
                 user_custom_theme = self.custom_theme_var.get() if hasattr(self, 'custom_theme_var') else ""
                 user_custom_tone = self.custom_visual_tone_var.get() if hasattr(self, 'custom_visual_tone_var') else ""
                 
-                if not user_custom_theme and theme_info.get('core_theme'):
-                    self.log(f"🎯 核心主题: {theme_info['core_theme']}")
-                elif user_custom_theme:
+                if user_custom_theme:
                     theme_info['core_theme'] = user_custom_theme
-                    self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
+                if user_custom_tone:
+                    theme_info['visual_tone'] = user_custom_tone
                 
-                if not user_custom_tone and theme_info.get('visual_tone'):
+                self.log(f"🎯 核心主题: {theme_info.get('core_theme', '未指定')}")
+                if theme_info.get('visual_tone'):
                     tone_cn = theme_info['visual_tone']
                     tone_en = theme_info.get('visual_tone_en', '')
                     tone_display = f"{tone_cn} ({tone_en})" if tone_en else tone_cn
                     self.log(f"🎨 视觉基调: {tone_display}")
-                    self.log(f"   💡 每个分镜将根据配音内容自动差异化基调")
-                elif user_custom_tone:
-                    theme_info['visual_tone'] = user_custom_tone
-                    self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
-                
                 if theme_info.get('theme_elements'):
                     self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
@@ -5581,7 +5548,7 @@ class ShotsMixin:
                                     
                                     result_content = result_content.strip()
                                     
-                                    self.log(f"   🔍 调试: 原始响应内容: {repr(result_content[:200])}")
+                                    self.log(f"   📝 模型响应长度: {len(result_content)} 字符")
                                     
                                     return result_content
                                 except Exception as e:
@@ -5689,24 +5656,21 @@ class ShotsMixin:
                             if theme_info.get('content_type'):
                                 self.log(f"📺 内容类型: {theme_info['content_type']}")
                             
-                            if not user_custom_theme and theme_info.get('core_theme'):
-                                self.log(f"🎯 核心主题: {theme_info['core_theme']}")
-                            elif user_custom_theme:
+                            if user_custom_theme:
                                 theme_info['core_theme'] = user_custom_theme
-                                self.log(f"🎯 使用用户指定的核心主题: {user_custom_theme}")
+                            if user_custom_tone:
+                                theme_info['visual_tone'] = user_custom_tone
+                            
+                            self.log(f"🎯 核心主题: {theme_info.get('core_theme', '未指定')}")
                             
                             if theme_info.get('emotional_tone'):
                                 self.log(f"💭 情感基调: {theme_info['emotional_tone']}")
                             
-                            if not user_custom_tone and theme_info.get('visual_tone'):
+                            if theme_info.get('visual_tone'):
                                 tone_cn = theme_info['visual_tone']
                                 tone_en = theme_info.get('visual_tone_en', '')
                                 tone_display = f"{tone_cn} ({tone_en})" if tone_en else tone_cn
                                 self.log(f"🎨 视觉基调: {tone_display}")
-                                self.log(f"   💡 每个分镜将根据配音内容自动差异化基调")
-                            elif user_custom_tone:
-                                theme_info['visual_tone'] = user_custom_tone
-                                self.log(f"🎨 使用用户指定的视觉基调: {user_custom_tone}")
                             
                             if theme_info.get('visual_style'):
                                 self.log(f"🎬 视觉风格: {theme_info['visual_style']}")
@@ -5715,7 +5679,7 @@ class ShotsMixin:
                                 self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                             
                             if theme_info.get('correction_dict'):
-                                self.log(f"🔧 大模型纠错结果: {theme_info['correction_dict']}")
+                                self.log(f"🔧 纠错结果: {len(theme_info['correction_dict'])} 处修正")
                                 self.log("✅ 主题分析完成，纠错结果将应用到分镜文本")
                             elif analysis_result:
                                 self.log("✅ 主题分析完成，文本无需纠错")
@@ -5751,9 +5715,9 @@ class ShotsMixin:
                     self.log(f"⚠️ 文本内容过短({len(full_text)}字符)，跳过大模型主题分析")
                     self.log(f"   💡 提示: 主题分析需要至少20字符的文本内容")
             
-            # 步骤2.5: 使用原始语音片段（每个语音片段对应一个分镜）
-            self.log("\n📍 步骤 3/3: 创建分镜")
-            self.log("   流程: 语音片段 → 批量生成提示词(含差异化基调) → 创建分镜 → 合并过短/拆分超长")
+            # 步骤3: 生成提示词
+            self.log("\n📍 步骤 3/4: 生成分镜提示词")
+            self.log("   流程: 语音片段 → 批量生成提示词(含差异化基调)")
             self.update_task_progress("正在准备分镜任务...", 60)
             
             correction_dict = theme_info.get('correction_dict', {})
@@ -6059,8 +6023,8 @@ class ShotsMixin:
             
             self._pregenerated_prompts = pregenerated_prompts
             
-            # 步骤3: 创建分镜
-            self.log("\n🔧 步骤 3 - 创建分镜")
+            # 步骤4: 创建分镜并后处理
+            self.log("\n📍 步骤 4/4: 创建分镜与后处理")
             self.update_task_progress("正在创建分镜...", 80)
             self.log(f"📝 基于语音片段创建分镜（提示词已预生成，将应用差异化基调）")
             
@@ -6177,7 +6141,7 @@ class ShotsMixin:
                 return
             
             # 后处理：时间戳修复 + 合并过短 + 拆分超长
-            self.log("\n🔧 步骤 3 - 后处理（时间戳修复、合并、拆分）")
+            self.log("\n🔧 后处理（时间戳修复、合并、拆分）")
             self.update_task_progress("正在后处理分镜数据...", 85)
             
             audio_total_duration = segments[-1].get("end", 0) if segments else 0
@@ -6508,7 +6472,7 @@ class ShotsMixin:
                             self.txt_script.insert(tk.END, f"提示词: {shot['prompt_en'][:100]}...\n\n")
                         # 自动模式下不显示弹窗
                         if not auto_mode:
-                            messagebox.showinfo("完成", f"分镜脚本生成完成！\n\n共 {len(shots)} 个分镜\n\n下一步：点击「生成图片」生成分镜画面")
+                            messagebox.showinfo("完成", f"分镜脚本生成完成！\n\n共 {len(shots)} 个分镜\n\n下一步：点击「生成视频」自动生成图片并合成视频")
                     except Exception as e:
                         self.log(f"❌ 更新脚本区域失败: {e}")
                 if hasattr(self, 'root') and self.root:
@@ -6637,11 +6601,17 @@ class ShotsMixin:
                             self._whisper_on_gpu = False
                     except Exception:
                         pass
-                    try:
-                        if hasattr(self, 'shots_data') and self.shots_data:
-                            self.shots_data = []
-                    except Exception:
-                        pass
+                    # 注意：不在 finally 中无条件清空 shots_data
+                    # 分镜数据已保存到 shots_data.json 文件，内存中保留供后续"生成视频"使用
+                    # 仅在任务被取消时才清空内存中的分镜数据
+                    with self.task_lock:
+                        _was_cancelled = not self.task_running
+                    if _was_cancelled:
+                        try:
+                            if hasattr(self, 'shots_data') and self.shots_data:
+                                self.shots_data = []
+                        except Exception:
+                            pass
                     try:
                         prompt_cache.clear()
                         image_cache.clear()

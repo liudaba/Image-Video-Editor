@@ -48,8 +48,14 @@ class SmartCache:
         with self._lock:
             if len(self._cache) >= self.max_size:
                 self._evict()
+                # 如果淘汰后仍超限（极端情况），强制淘汰最旧的一项
+                if len(self._cache) >= self.max_size and self._access_times:
+                    oldest_key = min(self._access_times, key=self._access_times.get)
+                    self._cache.pop(oldest_key, None)
+                    self._expire_times.pop(oldest_key, None)
+                    self._access_times.pop(oldest_key, None)
 
-            ttl = ttl or self.default_ttl
+            ttl = ttl if ttl is not None else self.default_ttl
             now = time.time()
             self._cache[key] = value
             self._expire_times[key] = now + ttl

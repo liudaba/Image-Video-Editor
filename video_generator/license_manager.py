@@ -59,8 +59,25 @@ def _get_app_dir() -> str:
 
 
 def _get_verify_key_path() -> str:
-    """获取签名验证公钥路径"""
-    return os.path.join(_get_app_dir(), ".license_verify_pubkey.pem")
+    """获取签名验证公钥路径
+
+    优先查找exe同级目录，然后查找_internal目录（PyInstaller打包模式）。
+    """
+    # 优先：exe同级目录
+    primary = os.path.join(_get_app_dir(), ".license_verify_pubkey.pem")
+    if os.path.exists(primary):
+        return primary
+
+    # 回退：_internal 目录（PyInstaller --add-data 放置位置）
+    if getattr(sys, "frozen", False):
+        internal_path = os.path.join(
+            os.path.dirname(sys.executable), "_internal", ".license_verify_pubkey.pem"
+        )
+        if os.path.exists(internal_path):
+            return internal_path
+
+    # 都不存在时返回主路径（后续逻辑会处理文件不存在的情况）
+    return primary
 
 
 class LicenseManager:
@@ -85,6 +102,7 @@ class LicenseManager:
                 instance._heartbeat_thread = None
                 instance._heartbeat_running = False
                 instance._heartbeat_failures = 0
+                instance._auth_revoked_notified = False
                 instance._auth_revoked_callback = None
                 instance._auth_recovered_callback = None
                 instance._last_heartbeat_time = 0
@@ -150,8 +168,11 @@ class LicenseManager:
                     self._heartbeat_failures = 0
                     return True, "登录成功"
                 elif token and not license_info:
-                    # 有token但无许可证，清理token避免后续请求使用无效状态
-                    self._set_token(None)
+                    # 有token但无许可证：保留token让用户看到无授权状态
+                    # 不清除token，避免用户需要重新登录
+                    self._set_token(token)
+                    self._server_invalid = True
+                    self._clear_license_cache()
                     return False, "账号无有效授权，请联系管理员"
                 else:
                     return False, "登录响应异常，请重试"
@@ -489,7 +510,8 @@ class LicenseManager:
                         self.license_data = license_info
                         self._server_invalid = False
                     else:
-                        # 无效许可证：更新内存但不缓存到文件
+                        # 无效许可证：清除旧缓存，更新内存状态
+                        self._clear_license_cache()
                         self.license_data = license_info
                         self._server_invalid = True
                     return is_valid
@@ -534,6 +556,7 @@ class LicenseManager:
                 return
             self._heartbeat_running = True
             self._heartbeat_failures = 0
+            self._auth_revoked_notified = False
 
         self._heartbeat_thread = threading.Thread(
             target=self._heartbeat_loop, daemon=True
@@ -565,16 +588,18 @@ class LicenseManager:
                 success = self._send_heartbeat()
                 if success:
                     self._heartbeat_failures = 0
+                    self._auth_revoked_notified = False
                     self._last_heartbeat_time = time.time()
                 else:
                     self._heartbeat_failures += 1
                     if self._heartbeat_failures >= _MAX_HEARTBEAT_FAILURES:
                         logger.warning("心跳连续失败%d次，标记授权失效", self._heartbeat_failures)
-                        if self._auth_revoked_callback:
+                        if self._auth_revoked_callback and not self._auth_revoked_notified:
                             try:
                                 self._auth_revoked_callback()
                             except Exception:
                                 pass
+                            self._auth_revoked_notified = True
                         # 重置计数器，避免每次心跳都重复触发回调
                         self._heartbeat_failures = 0
 
@@ -619,10 +644,11 @@ class LicenseManager:
                     self.license_data = license_info
                     self._server_invalid = False
                 elif not is_valid:
-                    # 授权无效，标记服务端无效状态
+                    # 授权无效，标记服务端无效状态，清除旧缓存
                     self._server_invalid = True
+                    self._clear_license_cache()
                     if license_info:
-                        # 仍然更新内存中的license_data用于显示信息，但不缓存到文件
+                        # 仍然更新内存中的license_data用于显示信息
                         self.license_data = license_info
 
                 if is_valid:
@@ -639,36 +665,43 @@ class LicenseManager:
                     # 服务端明确返回无效（非网络问题），立即触发授权失效回调
                     # 避免管理员禁用用户后客户端长时间不感知
                     immediate_revoke_reasons = ("账户已被禁用", "许可证已过期", "设备绑定数量已达上限")
-                    if reason.startswith(immediate_revoke_reasons) and self._auth_revoked_callback:
+                    if reason.startswith(immediate_revoke_reasons) and self._auth_revoked_callback and not self._auth_revoked_notified:
                         try:
                             self._auth_revoked_callback()
                         except Exception:
                             pass
+                        self._auth_revoked_notified = True
                         # 重置计数器，避免回调被重复触发
                         self._heartbeat_failures = 0
                     return False
             elif response.status_code == 401:
-                # Token 过期，尝试续期
-                renewed = self._renew_token()
-                if renewed:
-                    return self._send_heartbeat()
+                # Token 过期，尝试续期（仅一次，防止无限递归）
+                if not getattr(self, '_renewing_token', False):
+                    self._renewing_token = True
+                    try:
+                        renewed = self._renew_token()
+                    finally:
+                        self._renewing_token = False
+                    if renewed:
+                        return self._send_heartbeat()
                 return False
             elif response.status_code == 403:
                 # 账户被禁用，立即标记授权失效并触发回调
                 self._server_invalid = True
                 logger.warning("心跳返回403，账户已被禁用")
-                if self._auth_revoked_callback:
+                if self._auth_revoked_callback and not self._auth_revoked_notified:
                     try:
                         self._auth_revoked_callback()
                     except Exception:
                         pass
+                    self._auth_revoked_notified = True
                     self._heartbeat_failures = 0
                 return False
             else:
                 return False
 
         except Exception as e:
-            logger.debug("心跳请求异常: %s", e)
+            logger.warning("心跳请求异常: %s", e)
             return False
 
     def _renew_token(self) -> bool:
@@ -702,10 +735,14 @@ class LicenseManager:
                         self.license_data = license_info
                         self._server_invalid = False
                     else:
+                        # 服务端返回无效时，清除旧缓存避免下次启动用过期数据
+                        self._clear_license_cache()
                         self.license_data = license_info
                         self._server_invalid = True
                 return True
-            return False
+            # Token续期失败，尝试静默重登录作为后备
+            logger.info("Token续期失败(status=%d)，尝试静默重登录", response.status_code)
+            return self._try_silent_relogin()
 
         except Exception:
             return False
@@ -747,7 +784,7 @@ class LicenseManager:
                 save_pass=save_pass,
             )
         except Exception as e:
-            logger.debug("保存凭证失败: %s", e)
+            logger.warning("保存凭证失败: %s", e)
 
     def load_login_credentials(self) -> Tuple[str, str, bool, bool]:
         """加载保存的登录凭证（密码反混淆）
@@ -764,8 +801,16 @@ class LicenseManager:
                     decoded = deobfuscate_string(password)
                     if decoded:
                         password = decoded
+                    else:
+                        # 反混淆返回空值，说明密码数据损坏，清除保存的凭证
+                        logger.warning("密码反混淆失败，已清除保存的凭证")
+                        _db_clear_credentials()
+                        return username, "", save_user, False
                 except Exception:
-                    pass
+                    # 反混淆异常，密码数据可能损坏
+                    logger.warning("密码反混淆异常，已清除保存的凭证")
+                    _db_clear_credentials()
+                    return username, "", save_user, False
             return username, password, save_user, save_pass
         except Exception:
             pass
@@ -795,6 +840,13 @@ class LicenseManager:
             pass
         return None
 
+    def _clear_license_cache(self):
+        """清除本地许可证缓存"""
+        try:
+            _db_clear_license_cache()
+        except Exception as e:
+            logger.debug("清除许可证缓存失败: %s", e)
+
     # ============ 签名验证 ============
 
     def _verify_license_signature(self, data: dict) -> bool:
@@ -822,10 +874,7 @@ class LicenseManager:
 
             if sig_ver == 2:
                 # ECDSA 签名验证
-                pubkey_path = _get_verify_key_path()
-                if not os.path.exists(pubkey_path):
-                    # 也检查打包目录下的公钥
-                    pubkey_path = os.path.join(_get_app_dir(), ".license_verify_pubkey.pem")
+                pubkey_path = _get_verify_key_path()  # 已包含 _internal 目录回退
                 if os.path.exists(pubkey_path):
                     from cryptography.hazmat.primitives import serialization
                     from cryptography.hazmat.primitives.asymmetric import ec

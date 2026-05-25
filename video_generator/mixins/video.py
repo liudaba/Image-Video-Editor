@@ -256,6 +256,7 @@ class VideoMixin:
                             image_path = os.path.join(self.images_dir, shot['image_file'])
                             if not os.path.exists(image_path):
                                 self.log(f"   ⚠️ 图片缺失: {shot['image_file']}")
+                                prev_end = shot['end']  # 仍然更新时间戳，避免后续gap计算错误
                                 continue
                             
                             shot_dur = shot['end'] - shot['start']
@@ -1167,11 +1168,17 @@ class VideoMixin:
                         self._whisper_on_gpu = False
                 except Exception:
                     pass
-                try:
-                    if hasattr(self, 'shots_data') and self.shots_data:
-                        self.shots_data = []
-                except Exception:
-                    pass
+                # 注意：不在 finally 中无条件清空 shots_data
+                # 分镜数据已保存到 shots_data.json 文件，内存中保留供用户查看/重新生成
+                # 仅在任务被取消时才清空内存中的分镜数据
+                with self.task_lock:
+                    _was_cancelled = not self.task_running
+                if _was_cancelled:
+                    try:
+                        if hasattr(self, 'shots_data') and self.shots_data:
+                            self.shots_data = []
+                    except Exception:
+                        pass
                 try:
                     prompt_cache.clear()
                     image_cache.clear()

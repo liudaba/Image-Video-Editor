@@ -2,7 +2,7 @@
 ; 功能: 自动检测系统,安装Python环境,部署程序
 
 #define MyAppName "短视频生成器"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "liudaba"
 #define MyAppURL "https://github.com/liudaba/Image-Video-Editor"
 #define MyAppExeName "VideoGenerator.exe"

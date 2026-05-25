@@ -673,20 +673,44 @@ class ResourceMixin:
 
 
     def on_close(self):
-        """关闭窗口时的处理 - 增强版，确保快速退出并彻底清除所有残留数据"""
+        """关闭窗口时的处理 - 确保快速退出"""
+        # 防止重复调用
+        if getattr(self, '_closing', False):
+            return
+        self._closing = True
+
+        # 启动超时守护线程：3秒后强制退出，防止任何清理步骤卡死
+        def _force_exit_watchdog():
+            time.sleep(3)
+            os._exit(0)
+        import threading as _th
+        _th.Thread(target=_force_exit_watchdog, daemon=False).start()
+
         try:
-            self.log("🔄 正在关闭程序，清理资源...")
+            self.log("🔄 正在关闭程序...")
         except Exception:
             pass
 
+        # 1. 停止所有运行标志
         try:
             self.perf_monitor_running = False
             self.task_running = False
             self._api_heartbeat_running = False
             self._sd_api_connected = False
+            if hasattr(self, '_api_heartbeat_event'):
+                self._api_heartbeat_event.set()
         except Exception:
             pass
 
+        # 2. 停止心跳（直接用已有实例，避免 LicenseManager() 阻塞）
+        try:
+            from video_generator.license_manager import LicenseManager
+            if LicenseManager._instance is not None:
+                LicenseManager._instance.stop_heartbeat()
+        except Exception:
+            pass
+
+        # 3. 取消定时器
         try:
             if hasattr(self, 'resize_timer') and self.resize_timer:
                 self.root.after_cancel(self.resize_timer)
@@ -694,11 +718,13 @@ class ResourceMixin:
         except Exception:
             pass
 
+        # 4. 保存配置
         try:
             self.save_config()
         except Exception:
             pass
 
+        # 5. 释放任务锁
         try:
             with self.task_lock:
                 self.task_paused = False
@@ -708,6 +734,7 @@ class ResourceMixin:
         except Exception:
             pass
 
+        # 6. 关闭线程池
         try:
             if hasattr(self, 'executor') and self.executor is not None:
                 try:
@@ -725,31 +752,7 @@ class ResourceMixin:
         except Exception:
             pass
 
-        try:
-            if hasattr(self, 'thread_pool') and isinstance(self.thread_pool, dict):
-                self.thread_pool['tasks'].clear()
-                self.thread_pool['task_counter'] = 0
-        except Exception:
-            pass
-
-        try:
-            for attr in ['_active_audio', '_active_background', '_active_final_clip']:
-                clip = getattr(self, attr, None)
-                if clip is not None:
-                    try:
-                        clip.close()
-                    except Exception:
-                        pass
-                    setattr(self, attr, None)
-            active_clips = getattr(self, '_active_clips', None)
-            if active_clips is not None:
-                for c in active_clips:
-                    try: c.close()
-                    except Exception: pass
-                self._active_clips = None
-        except Exception:
-            pass
-
+        # 7. 终止视频渲染
         try:
             if hasattr(self, 'video_renderer') and self.video_renderer is not None:
                 self.video_renderer.cancel_render()
@@ -757,39 +760,7 @@ class ResourceMixin:
         except Exception:
             pass
 
-        try:
-            if self.whisper_model is not None:
-                self._safe_release_whisper_gpu()
-                del self.whisper_model
-                self.whisper_model = None
-                self._whisper_on_gpu = False
-            gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-            except ImportError:
-                pass
-        except Exception:
-            pass
-
-        try:
-            self._unload_ollama_models(log_prefix="🔄 退出清理: ", exit_mode=True)
-        except Exception:
-            pass
-
-        try:
-            stop_ollama_serve()
-        except Exception:
-            pass
-
-        try:
-            from video_generator.license_manager import LicenseManager
-            LicenseManager().stop_heartbeat()
-        except Exception:
-            pass
-
+        # 8. 关闭HTTP Session
         try:
             session = get_http_session()
             if session is not None:
@@ -797,48 +768,14 @@ class ResourceMixin:
         except Exception:
             pass
 
-        try:
-            self._release_memory_resources()
-        except Exception:
-            pass
-
-        try:
-            self._cleanup_residual_files()
-        except Exception:
-            pass
-
-        try:
-            gc.collect()
-        except Exception:
-            pass
-
-        try:
-            self.log("✅ 资源清理完成，正在退出...")
-        except Exception:
-            pass
-
+        # 9. 销毁窗口
         try:
             self.root.destroy()
         except Exception:
             pass
 
-        try:
-            if sys.stdout and hasattr(sys.stdout, 'close'):
-                try:
-                    sys.stdout.close()
-                except Exception:
-                    pass
-            if sys.stderr and hasattr(sys.stderr, 'close'):
-                try:
-                    sys.stderr.close()
-                except Exception:
-                    pass
-            if sys.platform == "win32":
-                ctypes.windll.kernel32.FreeConsole()
-        except Exception:
-            pass
-
-        sys.exit(0)
+        # 10. 强制退出
+        os._exit(0)
     
     # =======================================================================
     # 第十部分：主任务执行 - 生成分镜/图片/视频 (行 7995-8940)

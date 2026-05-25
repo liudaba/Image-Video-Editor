@@ -309,12 +309,12 @@ def _prepare_embedded_python(output_dir):
             # 开发/构建工具
             'pip', 'pip-_internal', 'setuptools', 'wheel', 'build',
             'distlib', 'installer',
-            # 后端专用
+            # 后端专用（注意：httpx/anyio/pydantic 被openai等包依赖，不可排除）
             'fastapi', 'uvicorn', 'sqlalchemy', 'redis',
             'asyncpg', 'aiosqlite', 'paramiko', 'bcrypt',
             'passlib', 'python_jose', 'python_multipart',
-            'httpx', 'websockets', 'starlette', 'anyio',
-            'httptools', 'pydantic', 'uvloop',
+            'websockets', 'starlette',
+            'httptools', 'uvloop',
             'databases', 'alembic', 'async_timeout',
             # 大型无关包
             'PyQt5', 'PyQt6', 'matplotlib', 'notebook',
@@ -364,6 +364,40 @@ def _prepare_embedded_python(output_dir):
                 print(f"  警告: 复制 {item} 失败: {e}")
 
         print(f"  复制了 {copied_count} 个包/文件")
+
+        # 验证dist-info完整性：确保所有非排除包的dist-info都被复制
+        missing_dist_info = []
+        for item in os.listdir(sp_src):
+            if not (item.endswith('.dist-info') or item.endswith('.egg-info')):
+                continue
+            item_lower = item.lower().replace('-', '_')
+            # 检查是否在排除列表中
+            is_excluded = False
+            for prefix in exclude_dist_info_prefixes:
+                if item_lower.startswith(prefix):
+                    is_excluded = True
+                    break
+            if is_excluded:
+                continue
+            # 检查目标是否存在
+            if not os.path.exists(os.path.join(sp_dest, item)):
+                missing_dist_info.append(item)
+
+        if missing_dist_info:
+            print(f"  ⚠️ 发现 {len(missing_dist_info)} 个缺失的dist-info，正在补充复制...")
+            for item in missing_dist_info:
+                src_item = os.path.join(sp_src, item)
+                dst_item = os.path.join(sp_dest, item)
+                try:
+                    if os.path.isdir(src_item):
+                        shutil.copytree(src_item, dst_item,
+                                       ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
+                    else:
+                        shutil.copy2(src_item, dst_item)
+                    print(f"    + 补充: {item}")
+                except Exception as e2:
+                    print(f"    ✗ 补充失败: {item}: {e2}")
+            print(f"  dist-info补充完成")
 
     # 复制DLLs目录
     dlls_src = os.path.join(current_python, "DLLs")

@@ -12,6 +12,9 @@ import os
 import subprocess
 from typing import Dict, List, Any
 
+# Windows 下隐藏子进程的控制台窗口，防止蓝色命令框闪烁
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+
 
 class ResourceManager:
     """智能资源管理器 - GPU显存、内存、线程池统一管理"""
@@ -152,7 +155,8 @@ class ResourceManager:
             if os.name == 'nt':
                 subprocess.run(
                     ['taskkill', '/F', '/IM', 'ollama.exe'],
-                    capture_output=True, timeout=5
+                    capture_output=True, timeout=5,
+                    creationflags=_SUBPROCESS_FLAGS
                 )
             else:
                 subprocess.run(

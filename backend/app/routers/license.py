@@ -18,9 +18,9 @@ async def activate_license_endpoint(
 ):
     from sqlalchemy import select
 
-    # 先检查密钥状态（加锁防止TOCTOU竞态），给出更具体的错误信息
+    # activate_license内部会加锁，此处不再重复加锁，避免死锁
     key_result = await db.execute(
-        select(LicenseKey).where(LicenseKey.license_key == license_data.license_key).with_for_update()
+        select(LicenseKey).where(LicenseKey.license_key == license_data.license_key)
     )
     key_obj = key_result.scalar_one_or_none()
     if not key_obj:
@@ -102,8 +102,8 @@ async def list_license_keys(
         "keys": [
             {
                 "key": key.license_key,
-                "plan_type": key.plan_type,
-                "status": key.status,
+                "plan_type": key.plan_type.value if hasattr(key.plan_type, 'value') else key.plan_type,
+                "status": key.status.value if hasattr(key.status, 'value') else key.status,
                 "activated_by": key.activated_by,
                 "activated_at": key.activated_at,
                 "created_at": key.created_at

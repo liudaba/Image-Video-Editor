@@ -50,10 +50,10 @@ def _get_allowed_hosts():
     if _ALLOWED_DOWNLOAD_HOSTS is not None:
         return _ALLOWED_DOWNLOAD_HOSTS
     _ALLOWED_DOWNLOAD_HOSTS = {
-        deobfuscate_string("37190d4b18260b0948585304645d4d161d08"),  # api.wangzha178.com
-        deobfuscate_string("21080a02152f045f05081c563c08"),          # wangzha178.com
-        deobfuscate_string("3100100d1a254b0d5d5d"),                  # github.com
-        deobfuscate_string("3100100d1a25101d5742515a3d11061b064b2c0d0b"),  # githubusercontent.com
+        deobfuscate_string("NzcMQDQTFxcOB1MBBQ5xLA0L"),  # api.wangzha178.com
+        deobfuscate_string("ISYLCTkaGEFDVxxTXVs="),          # wangzha178.com
+        deobfuscate_string("MS4RBjYQVxMbAg=="),                  # github.com
+        deobfuscate_string("JCYSQCQbDRgBDUdDV0Q8IAwSEB0XTxcGAg=="),  # githubusercontent.com
     }
     _ALLOWED_DOWNLOAD_HOSTS.discard("")
     return _ALLOWED_DOWNLOAD_HOSTS
@@ -802,40 +802,52 @@ def restart_application():
 
             if embedded_pythonw.exists() and run_scriptw.exists():
                 # 无窗口模式（用户通常通过start.vbs启动）
+                _portable_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+                if os.name == 'nt':
+                    _portable_flags |= subprocess.CREATE_NO_WINDOW
                 subprocess.Popen(
                     [str(embedded_pythonw), str(run_scriptw)] + sys.argv[1:],
                     cwd=str(_ROOT_DIR),
                     env=env,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                    creationflags=_portable_flags if os.name == 'nt' else 0,
                 )
             else:
                 # 回退到有窗口模式
+                _portable_flags2 = subprocess.CREATE_NEW_PROCESS_GROUP
+                if os.name == 'nt':
+                    _portable_flags2 |= subprocess.CREATE_NO_WINDOW
                 subprocess.Popen(
                     [str(embedded_python), str(run_script)] + sys.argv[1:],
                     cwd=str(_ROOT_DIR),
                     env=env,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                    creationflags=_portable_flags2 if os.name == 'nt' else 0,
                 )
             os._exit(0)
         elif getattr(sys, 'frozen', False):
             # PyInstaller打包模式：直接重启exe
             logger.info("Restarting in PyInstaller mode")
+            _restart_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            if os.name == 'nt':
+                _restart_flags |= subprocess.CREATE_NO_WINDOW
             subprocess.Popen(
                 [sys.executable],
                 cwd=os.path.dirname(sys.executable),
                 env=env,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                creationflags=_restart_flags if os.name == 'nt' else 0,
             )
             os._exit(0)
         else:
             # 开发模式：重启python脚本
             logger.info("Restarting in development mode")
             main_script = str(run_script) if run_script.exists() else str(_ROOT_DIR / 'app.py')
+            _dev_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            if os.name == 'nt':
+                _dev_flags |= subprocess.CREATE_NO_WINDOW
             subprocess.Popen(
                 [sys.executable, main_script] + sys.argv[1:],
                 cwd=str(_ROOT_DIR),
                 env=env,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+                creationflags=_dev_flags if os.name == 'nt' else 0,
             )
             os._exit(0)
     except Exception as e:
@@ -908,6 +920,11 @@ class UpdateDialog(tk.Toplevel):
             self.is_downloading = False
         self._release_parent()
         self.destroy()
+
+    def destroy(self):
+        """重写 destroy，确保父窗口始终被释放"""
+        self._release_parent()
+        super().destroy()
 
     def init_ui(self):
         main_frame = ttk.Frame(self, padding="20")
@@ -1263,7 +1280,7 @@ def _try_launch(exe_path):
                 exe_path = c
                 break
     try:
-        subprocess.Popen([exe_path], creationflags=subprocess.DETACHED_PROCESS)
+        subprocess.Popen([exe_path], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
     except Exception:
         try:
             os.startfile(exe_path)
@@ -1279,7 +1296,7 @@ proc = None
 try:
     proc = subprocess.Popen(
         [installer_path],
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     )
 except Exception:
     try:
@@ -1332,7 +1349,7 @@ _try_launch(app_exe)
 
             subprocess.Popen(
                 [watcher_path, installer_path, app_exe],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
                 close_fds=True
             )
         else:
@@ -1348,7 +1365,7 @@ _try_launch(app_exe)
 
             subprocess.Popen(
                 [sys.executable, watcher_path, installer_path, app_exe, '300'],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
                 close_fds=True
             )
 

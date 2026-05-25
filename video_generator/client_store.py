@@ -19,8 +19,10 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger("client_store")
 
-# 线程安全的数据库连接锁
-_db_lock = threading.Lock()
+# 线程安全的数据库连接锁（使用可重入锁，避免 _init_db -> _get_connection 死锁）
+_db_lock = threading.RLock()
+# 全局连接复用（WAL模式支持并发读写）
+_db_connection = None
 
 
 def _get_db_path() -> str:
@@ -33,46 +35,57 @@ def _get_db_path() -> str:
 
 
 def _get_connection() -> sqlite3.Connection:
-    """获取数据库连接（启用WAL模式提升并发性能）"""
-    db_path = _get_db_path()
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    return conn
+    """获取数据库连接（复用全局连接，启用WAL模式提升并发性能）"""
+    global _db_connection
+    with _db_lock:
+        if _db_connection is not None:
+            try:
+                _db_connection.execute("SELECT 1")
+                return _db_connection
+            except sqlite3.Error:
+                try:
+                    _db_connection.close()
+                except Exception:
+                    pass
+                _db_connection = None
+
+        db_path = _get_db_path()
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        _db_connection = conn
+        return conn
 
 
 def _init_db():
     """初始化数据库表结构"""
     with _db_lock:
         conn = _get_connection()
-        try:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS credentials (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    username TEXT NOT NULL DEFAULT '',
-                    password TEXT NOT NULL DEFAULT '',
-                    save_user INTEGER NOT NULL DEFAULT 0,
-                    save_pass INTEGER NOT NULL DEFAULT 0,
-                    saved_at TEXT NOT NULL DEFAULT '',
-                    integrity_hash TEXT NOT NULL DEFAULT ''
-                );
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS credentials (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                save_user INTEGER NOT NULL DEFAULT 0,
+                save_pass INTEGER NOT NULL DEFAULT 0,
+                saved_at TEXT NOT NULL DEFAULT '',
+                integrity_hash TEXT NOT NULL DEFAULT ''
+            );
 
-                CREATE TABLE IF NOT EXISTS license_cache (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    license_data TEXT NOT NULL DEFAULT '{}',
-                    cached_at TEXT NOT NULL DEFAULT '',
-                    integrity_hash TEXT NOT NULL DEFAULT ''
-                );
+            CREATE TABLE IF NOT EXISTS license_cache (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                license_data TEXT NOT NULL DEFAULT '{}',
+                cached_at TEXT NOT NULL DEFAULT '',
+                integrity_hash TEXT NOT NULL DEFAULT ''
+            );
 
-                CREATE TABLE IF NOT EXISTS store_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL DEFAULT ''
-                );
-            """)
-            conn.commit()
-        finally:
-            conn.close()
+            CREATE TABLE IF NOT EXISTS store_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            );
+        """)
+        conn.commit()
 
 
 def _compute_integrity_hash(*fields: str) -> str:
@@ -118,9 +131,7 @@ def save_credentials(username: str, password: str, save_user: bool, save_pass: b
             """, (username, password, int(save_user), int(save_pass), saved_at, integrity_hash))
             conn.commit()
         except Exception as e:
-            logger.debug("保存凭证到数据库失败: %s", e)
-        finally:
-            conn.close()
+            logger.warning("保存凭证到数据库失败: %s", e)
 
 
 def load_credentials() -> Tuple[str, str, bool, bool]:
@@ -154,10 +165,8 @@ def load_credentials() -> Tuple[str, str, bool, bool]:
 
             return username, password, save_user, save_pass
         except Exception as e:
-            logger.debug("从数据库加载凭证失败: %s", e)
+            logger.warning("从数据库加载凭证失败: %s", e)
             return "", "", False, False
-        finally:
-            conn.close()
 
 
 def clear_credentials():
@@ -170,8 +179,6 @@ def clear_credentials():
             conn.commit()
         except Exception as e:
             logger.debug("清除凭证失败: %s", e)
-        finally:
-            conn.close()
 
 
 # ============ 许可证缓存管理 ============
@@ -197,9 +204,7 @@ def save_license_cache(license_data: dict):
             """, (data_str, cached_at, integrity_hash))
             conn.commit()
         except Exception as e:
-            logger.debug("保存许可证缓存到数据库失败: %s", e)
-        finally:
-            conn.close()
+            logger.warning("保存许可证缓存到数据库失败: %s", e)
 
 
 def load_license_cache() -> Optional[dict]:
@@ -228,10 +233,8 @@ def load_license_cache() -> Optional[dict]:
 
             return json.loads(data_str)
         except Exception as e:
-            logger.debug("从数据库加载许可证缓存失败: %s", e)
+            logger.warning("从数据库加载许可证缓存失败: %s", e)
             return None
-        finally:
-            conn.close()
 
 
 def clear_license_cache():
@@ -244,8 +247,6 @@ def clear_license_cache():
             conn.commit()
         except Exception as e:
             logger.debug("清除许可证缓存失败: %s", e)
-        finally:
-            conn.close()
 
 
 # ============ JSON 迁移 ============
@@ -273,10 +274,14 @@ def migrate_from_json():
             password = cred.get("password", "")
             save_user = cred.get("save_user", False)
             save_pass = cred.get("save_pass", False)
-            # 只有当数据库中还没有凭证时才迁移
-            existing = load_credentials()
-            if not existing[0] and not existing[1]:
+            # 如果JSON中有有效凭证，始终以JSON数据为准（覆盖数据库）
+            if username or password:
                 save_credentials(username, password, save_user, save_pass)
+            else:
+                # JSON中无有效凭证，仅当数据库也没有时跳过
+                existing = load_credentials()
+                if not existing[0] and not existing[1]:
+                    save_credentials(username, password, save_user, save_pass)
             # 迁移成功后删除旧文件
             os.remove(cred_path)
             logger.info("凭证从JSON迁移到SQLite完成")

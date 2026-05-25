@@ -328,7 +328,7 @@ async def update_user(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     target_user = result.scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -367,10 +367,12 @@ async def update_user(
     if body.is_active is not None and body.is_active is False and target_user.id == user.id:
         raise HTTPException(status_code=400, detail="不能禁用自己")
 
+    # 统一查询License（加锁），避免多次查询和加锁
+    license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
+    user_license = license_result.scalar_one_or_none()
+
     if body.is_active is not None:
         target_user.is_active = body.is_active
-        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
-        user_license = license_result.scalar_one_or_none()
         if user_license:
             if body.is_active:
                 from ..services.license_service import is_license_time_expired
@@ -396,8 +398,7 @@ async def update_user(
         if body.plan_type not in plan_deltas:
             raise HTTPException(status_code=400, detail=f"无效的套餐类型: {body.plan_type}")
         lic_type, delta = plan_deltas[body.plan_type]
-        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
-        user_license = license_result.scalar_one_or_none()
+        # user_license 已在前面统一查询并加锁
         if not user_license:
             now = datetime.now(timezone.utc)
             user_license = License(
@@ -441,8 +442,7 @@ async def update_user(
         # 修改用户套餐只影响用户的License记录，不影响密钥记录
 
     if body.expiry_date is not None:
-        license_result = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
-        user_license = license_result.scalar_one_or_none()
+        # user_license 已在前面统一查询并加锁
         if not user_license:
             user_license = License(
                 user_id=user_id,
@@ -507,14 +507,19 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
 ):
     """删除用户"""
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     target = result.scalar_one_or_none()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
+
     if target.id == user.id:
         raise HTTPException(status_code=400, detail="不能删除自己的账户")
-    
+
+    # 先将License标记为无效，确保客户端尽快感知
+    await db.execute(
+        update(License).where(License.user_id == user_id).values(is_valid=False)
+    )
+
     # 级联删除关联数据
     await db.execute(delete(HeartbeatLog).where(HeartbeatLog.user_id == user_id))
     await db.execute(delete(MachineBinding).where(MachineBinding.user_id == user_id))
@@ -631,49 +636,8 @@ async def confirm_payment(
     order.paid_at = datetime.now(timezone.utc)
     await db.flush()
 
-    license_result = await db.execute(
-        select(License).where(License.user_id == order.user_id).with_for_update()
-    )
-    existing_license = license_result.scalar_one_or_none()
-    if existing_license:
-        # 终身会员不允许被任何订单降级
-        if existing_license.plan_type == PlanType.LIFETIME:
-            await _log_audit(db, user, "confirm_payment", f"order_id={order_id}, order_no={order.order_no}, SKIPPED: user already lifetime member", request)
-            await db.commit()
-            return {"success": True, "message": "订单已确认支付，但用户已是终身会员，许可证未变更"}
-        else:
-            existing_license.license_type = LicenseType.PRO
-            existing_license.plan_type = order.plan_type
-            # 检查用户是否被禁用
-            target_user_result = await db.execute(select(User).where(User.id == order.user_id))
-            target_user_obj = target_user_result.scalar_one_or_none()
-            existing_license.is_valid = target_user_obj.is_active if target_user_obj else True
-            existing_license.trial_start = None
-            existing_license.trial_end = None
-            from ..services.license_service import calc_renewal_expiry
-            existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
-        await db.flush()
-    else:
-        # 用户没有 License 记录，创建新的
-        from ..services.license_service import PLAN_DELTAS
-        now = datetime.now(timezone.utc)
-        expiry = None
-        if order.plan_type == PlanType.LIFETIME:
-            expiry = None
-        elif order.plan_type in PLAN_DELTAS:
-            expiry = now + PLAN_DELTAS[order.plan_type]
-        # 检查用户是否被禁用
-        target_user_result = await db.execute(select(User).where(User.id == order.user_id))
-        target_user_obj = target_user_result.scalar_one_or_none()
-        new_license = License(
-            user_id=order.user_id,
-            license_type=LicenseType.PRO,
-            plan_type=order.plan_type,
-            is_valid=target_user_obj.is_active if target_user_obj else True,
-            expiry_date=expiry,
-        )
-        db.add(new_license)
-        await db.flush()
+    from ..services.license_service import process_paid_order
+    await process_paid_order(db, order, "MANUAL")
 
     await _log_audit(db, user, "confirm_payment", f"order_id={order_id}, order_no={order.order_no}, amount={order.amount}, plan={order.plan_type.value}", request)
     await db.commit()
@@ -854,13 +818,13 @@ async def batch_set_user_status(
         if uid == user.id:
             fail_count += 1
             continue
-        result = await db.execute(select(User).where(User.id == uid))
+        result = await db.execute(select(User).where(User.id == uid).with_for_update())
         target = result.scalar_one_or_none()
         if not target:
             fail_count += 1
             continue
         target.is_active = body.is_active
-        license_result = await db.execute(select(License).where(License.user_id == uid))
+        license_result = await db.execute(select(License).where(License.user_id == uid).with_for_update())
         user_license = license_result.scalar_one_or_none()
         if user_license:
             if body.is_active:
@@ -942,10 +906,14 @@ async def create_user(
         }
         if body.plan_type in plan_deltas:
             lic_type, delta = plan_deltas[body.plan_type]
+            try:
+                plan_enum = PlanType(body.plan_type)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"无效的套餐类型: {body.plan_type}")
             new_license = License(
                 user_id=new_user.id,
                 license_type=lic_type,
-                plan_type=PlanType(body.plan_type),
+                plan_type=plan_enum,
                 is_valid=new_user.is_active,
                 expiry_date=None if delta is None else datetime.now(timezone.utc) + delta,
             )
@@ -1079,7 +1047,7 @@ async def delete_license_key(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(LicenseKey).where(LicenseKey.license_key == license_key))
+    result = await db.execute(select(LicenseKey).where(LicenseKey.license_key == license_key).with_for_update())
     key = result.scalar_one_or_none()
     if not key:
         raise HTTPException(status_code=404, detail="许可证密钥不存在")

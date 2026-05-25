@@ -1,146 +1,103 @@
 # -*- coding: utf-8 -*-
-"""加密工具模块
+"""加密工具模块 - 提供字符串混淆和签名验证功能
 
-提供字符串混淆/反混淆等安全工具函数，用于保护敏感配置信息。
-此模块为客户端核心安全模块，由 PyArmor 混淆保护。
+用于客户端凭证持久化（密码混淆存储）和配置文件签名验证。
 """
 
 import base64
 import hashlib
+import hmac as _hmac
+import os
+import logging
+
+logger = logging.getLogger("crypto_utils")
+
+# 混淆盐值（与 client_store.py 中的完整性哈希盐值配合使用）
+_OBFUSCATION_KEY = "VGenCrypto2026_ObfuscationKey"
 
 
-# 混淆种子表：用于简单的字符串混淆，防止明文暴露
-_OBFUSCATION_SEED = "VideoGen2025SecureObfuscationSeed"
+def obfuscate_string(text: str) -> str:
+    """混淆字符串用于安全存储
 
-
-def obfuscate_string(plain: str) -> str:
-    """混淆字符串，生成可逆的混淆表示
+    使用 XOR 加密 + Base64 编码，防止密码明文存储。
 
     Args:
-        plain: 明文字符串
+        text: 原始字符串
 
     Returns:
-        混淆后的十六进制字符串
+        混淆后的字符串
     """
-    if not plain:
+    if not text:
         return ""
-    key_bytes = _OBFUSCATION_SEED.encode("utf-8")
-    plain_bytes = plain.encode("utf-8")
-    result = bytearray(len(plain_bytes))
-    for i, b in enumerate(plain_bytes):
-        result[i] = b ^ key_bytes[i % len(key_bytes)]
-    return base64.b16encode(bytes(result)).decode("ascii").lower()
+
+    key_bytes = _OBFUSCATION_KEY.encode("utf-8")
+    text_bytes = text.encode("utf-8")
+
+    # XOR 加密：循环使用密钥字节
+    encrypted = bytearray(len(text_bytes))
+    for i, b in enumerate(text_bytes):
+        encrypted[i] = b ^ key_bytes[i % len(key_bytes)]
+
+    # Base64 编码
+    return base64.b64encode(bytes(encrypted)).decode("ascii")
 
 
 def deobfuscate_string(obfuscated: str) -> str:
-    """反混淆字符串，还原原始明文
+    """反混淆字符串
+
+    将 obfuscate_string 的输出还原为原始字符串。
 
     Args:
-        obfuscated: 混淆后的十六进制字符串
+        obfuscated: 混淆后的字符串
 
     Returns:
-        原始明文字符串
+        原始字符串
+
+    Raises:
+        ValueError: 如果输入不是有效的混淆字符串
     """
     if not obfuscated:
         return ""
+
     try:
-        key_bytes = _OBFUSCATION_SEED.encode("utf-8")
-        obf_bytes = base64.b16decode(obfuscated.upper())
-        result = bytearray(len(obf_bytes))
-        for i, b in enumerate(obf_bytes):
-            result[i] = b ^ key_bytes[i % len(key_bytes)]
-        return result.decode("utf-8")
-    except Exception:
-        return ""
+        key_bytes = _OBFUSCATION_KEY.encode("utf-8")
+        encrypted = base64.b64decode(obfuscated)
 
+        # XOR 解密（与加密相同操作）
+        decrypted = bytearray(len(encrypted))
+        for i, b in enumerate(encrypted):
+            decrypted[i] = b ^ key_bytes[i % len(key_bytes)]
 
-# ============ 配置文件签名校验 ============
-
-# 签名密钥（与构建脚本中的密钥保持一致）
-_CONFIG_SIGN_KEY = "VideoGen2025ConfigSignatureKey_v1"
-
-
-def compute_config_signature(config_content: str) -> str:
-    """计算配置文件内容的HMAC-SHA256签名
-
-    Args:
-        config_content: 配置文件的原始文本内容
-
-    Returns:
-        十六进制签名字符串
-    """
-    import hmac as _hmac
-    return _hmac.new(
-        _CONFIG_SIGN_KEY.encode("utf-8"),
-        config_content.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+        return decrypted.decode("utf-8")
+    except Exception as e:
+        logger.warning("反混淆失败: %s", e)
+        raise ValueError(f"无效的混淆字符串: {e}")
 
 
 def verify_config_signature(config_content: str, signature: str) -> bool:
-    """验证配置文件签名
+    """验证配置文件的HMAC签名
+
+    使用与打包脚本相同的密钥验证 config.json 的完整性，
+    防止API地址等关键配置被篡改。
 
     Args:
-        config_content: 配置文件的原始文本内容
-        signature: 待验证的签名
+        config_content: 配置文件的原始内容
+        signature: 存储的签名值
 
     Returns:
-        True 如果签名验证通过
+        签名是否有效
     """
-    import hmac as _hmac
-    expected = compute_config_signature(config_content)
-    return _hmac.compare_digest(expected, signature)
+    if not config_content or not signature:
+        return False
 
-
-# ============ 配置文件敏感字段加密/解密 ============
-
-# 需要加密的配置键名（API Key等敏感信息）
-_SENSITIVE_KEYS = frozenset([
-    "cloud_llm_api_key",
-    "cloud_asr_api_key",
-    "cloud_image_api_key",
-])
-
-# 加密标记前缀
-_ENCRYPTED_PREFIX = "ENC:"
-
-
-def encrypt_config(config: dict, base_dir: str = "") -> dict:
-    """加密配置中的敏感字段（原地修改并返回）
-
-    对 API Key 等敏感字段使用 XOR 混淆，防止明文存储在 config.json 中。
-
-    Args:
-        config: 配置字典
-        base_dir: 应用根目录（用于签名文件路径）
-
-    Returns:
-        修改后的配置字典
-    """
-    for key in _SENSITIVE_KEYS:
-        value = config.get(key, "")
-        if value and not value.startswith(_ENCRYPTED_PREFIX):
-            encrypted = obfuscate_string(value)
-            config[key] = _ENCRYPTED_PREFIX + encrypted
-    return config
-
-
-def decrypt_config(config: dict, base_dir: str = "") -> dict:
-    """解密配置中的敏感字段（原地修改并返回）
-
-    将加密的 API Key 等字段还原为明文，供运行时使用。
-
-    Args:
-        config: 配置字典
-        base_dir: 应用根目录（用于签名文件路径）
-
-    Returns:
-        修改后的配置字典
-    """
-    for key in _SENSITIVE_KEYS:
-        value = config.get(key, "")
-        if value and value.startswith(_ENCRYPTED_PREFIX):
-            encrypted_part = value[len(_ENCRYPTED_PREFIX):]
-            decrypted = deobfuscate_string(encrypted_part)
-            config[key] = decrypted
-    return config
+    try:
+        _CONFIG_SIGN_KEY = "VideoGen2025ConfigSignatureKey_v1"
+        expected = _hmac.new(
+            _CONFIG_SIGN_KEY.encode("utf-8"),
+            config_content.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+        return _hmac.compare_digest(expected, signature)
+    except Exception as e:
+        logger.warning("配置签名验证异常: %s", e)
+        return False

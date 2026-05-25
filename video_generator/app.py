@@ -6,14 +6,35 @@ All business logic lives in video_generator/mixins/ modules.
 import tkinter as tk
 import os
 import sys
+import io
 import datetime
 import warnings
 import ctypes
 
-# ============ Sub-module imports ============
+# ============ Windows console setup (MUST be before any imports that may use stdout) ============
+_is_pythonw = sys.executable.lower().endswith('pythonw.exe')
+_has_no_console = sys.stdout is None or sys.stderr is None
+_console_allocated = False
 
-if __name__ == "__main__":
-    print("✅ 优化模块已加载: 智能缓存 + 并行生成 + 批量SD + 硬件加速（延迟检测）")
+# PyInstaller 打包的 Windows GUI 程序中 sys.stdout/stderr 为 None，
+# 导致 tqdm、whisper 等库调用 .write() 时崩溃。提前替换为安全对象。
+class _NullWriter:
+    """Dummy writer that silently discards all output."""
+    def write(self, *args, **kwargs):
+        return 0
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+    def fileno(self):
+        raise io.UnsupportedOperation("fileno")
+
+if sys.stdout is None:
+    sys.stdout = _NullWriter()
+if sys.stderr is None:
+    sys.stderr = _NullWriter()
+
+# ============ Sub-module imports ============
 
 sys.path.append(os.path.dirname(__file__))
 
@@ -27,11 +48,6 @@ from video_generator.mixins.images import ImagesMixin
 from video_generator.mixins.video import VideoMixin
 from video_generator.mixins.resource import ResourceMixin
 from video_generator.mixins.logging import LoggingMixin
-
-# ============ Windows console setup ============
-_is_pythonw = sys.executable.lower().endswith('pythonw.exe')
-_has_no_console = sys.stdout is None or sys.stderr is None
-_console_allocated = False
 
 # 检测是否为便携版（内嵌Python模式）
 _is_portable = False
@@ -85,8 +101,12 @@ if sys.platform == "win32" and _should_show_console:
         pass
 
     if _is_pythonw or _has_no_console:
-        sys.stdout = open('CONOUT$', 'w', encoding='utf-8')
-        sys.stderr = open('CONOUT$', 'w', encoding='utf-8')
+        try:
+            sys.stdout = open('CONOUT$', 'w', encoding='utf-8')
+            sys.stderr = open('CONOUT$', 'w', encoding='utf-8')
+        except OSError:
+            # AllocConsole 可能失败（权限不足等），保持 _NullWriter
+            pass
 
     ctypes.windll.kernel32.SetConsoleTitleW("短视频生成器 - 日志控制台")
 
@@ -216,7 +236,6 @@ def main():
     try:
         app = VideoGenApp(root)
         root.deiconify()
-        print("[OK] VideoGenApp created successfully")
     except Exception as e:
         print(f"[ERROR] VideoGenApp init failed: {e}")
         import traceback

@@ -18,7 +18,7 @@ from ..services.payment_service import (
     verify_alipay_notification,
     verify_wechat_notification,
 )
-from ..services.license_service import activate_license
+from ..services.license_service import activate_license, process_paid_order
 
 logger = logging.getLogger("videogen")
 router = APIRouter(prefix="/api/payment", tags=["payment"])
@@ -49,6 +49,14 @@ async def create_payment_order_route(
     # 检查用户是否被禁用
     if not current_user.is_active:
         raise HTTPException(status_code=403, detail="账户已被禁用，无法创建订单")
+    
+    # 检查用户是否已是终身会员，终身会员无需再购买
+    license_result = await db.execute(
+        select(License).filter(License.user_id == current_user.id)
+    )
+    existing_license = license_result.scalar_one_or_none()
+    if existing_license and existing_license.plan_type == PlanType.LIFETIME:
+        raise HTTPException(status_code=400, detail="您已是终身会员，无需再购买")
     
     result = await create_payment_order(
         db,
@@ -172,50 +180,7 @@ async def alipay_callback(
             order.paid_at = datetime.now(timezone.utc)
             await db.flush()
 
-            license_result = await db.execute(
-                select(License).filter(License.user_id == order.user_id).with_for_update()
-            )
-            existing_license = license_result.scalar_one_or_none()
-            if existing_license:
-                # 终身会员不允许被任何支付降级
-                if existing_license.plan_type == PlanType.LIFETIME:
-                    logger.info(f"User {order.user_id} is lifetime member, skipping license downgrade from alipay order {order_no}")
-                else:
-                    existing_license.license_type = LicenseType.PRO
-                    existing_license.plan_type = order.plan_type
-                    # 检查用户是否被禁用
-                    order_user_result = await db.execute(select(User).where(User.id == order.user_id))
-                    order_user = order_user_result.scalar_one_or_none()
-                    existing_license.is_valid = order_user.is_active if order_user else True
-                    existing_license.trial_start = None
-                    existing_license.trial_end = None
-                    from ..services.license_service import calc_renewal_expiry
-                    existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
-                    # 在线支付无激活码，用订单号标识来源
-                    if not existing_license.license_key:
-                        existing_license.license_key = f"ALIPAY-{order_no}"
-                await db.flush()
-            else:
-                from ..services.license_service import PLAN_DELTAS
-                now = datetime.now(timezone.utc)
-                expiry = None
-                if order.plan_type == PlanType.LIFETIME:
-                    expiry = None
-                elif order.plan_type in PLAN_DELTAS:
-                    expiry = now + PLAN_DELTAS[order.plan_type]
-                # 检查用户是否被禁用
-                order_user_result2 = await db.execute(select(User).where(User.id == order.user_id))
-                order_user2 = order_user_result2.scalar_one_or_none()
-                new_license = License(
-                    user_id=order.user_id,
-                    license_type=LicenseType.PRO,
-                    plan_type=order.plan_type,
-                    license_key=f"ALIPAY-{order_no}",
-                    is_valid=order_user2.is_active if order_user2 else True,
-                    expiry_date=expiry,
-                )
-                db.add(new_license)
-                await db.flush()
+            await process_paid_order(db, order, "ALIPAY")
 
             try:
                 await db.commit()
@@ -306,50 +271,7 @@ async def wechat_callback(
             order.paid_at = datetime.now(timezone.utc)
             await db.flush()
 
-            license_result = await db.execute(
-                select(License).filter(License.user_id == order.user_id).with_for_update()
-            )
-            existing_license = license_result.scalar_one_or_none()
-            if existing_license:
-                # 终身会员不允许被任何支付降级
-                if existing_license.plan_type == PlanType.LIFETIME:
-                    logger.info(f"User {order.user_id} is lifetime member, skipping license downgrade from wechat order {order_no}")
-                else:
-                    existing_license.license_type = LicenseType.PRO
-                    existing_license.plan_type = order.plan_type
-                    # 检查用户是否被禁用
-                    order_user_result = await db.execute(select(User).where(User.id == order.user_id))
-                    order_user = order_user_result.scalar_one_or_none()
-                    existing_license.is_valid = order_user.is_active if order_user else True
-                    existing_license.trial_start = None
-                    existing_license.trial_end = None
-                    from ..services.license_service import calc_renewal_expiry
-                    existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
-                    # 在线支付无激活码，用订单号标识来源
-                    if not existing_license.license_key:
-                        existing_license.license_key = f"WXPAY-{order_no}"
-                await db.flush()
-            else:
-                from ..services.license_service import PLAN_DELTAS
-                now = datetime.now(timezone.utc)
-                expiry = None
-                if order.plan_type == PlanType.LIFETIME:
-                    expiry = None
-                elif order.plan_type in PLAN_DELTAS:
-                    expiry = now + PLAN_DELTAS[order.plan_type]
-                # 检查用户是否被禁用
-                order_user_result2 = await db.execute(select(User).where(User.id == order.user_id))
-                order_user2 = order_user_result2.scalar_one_or_none()
-                new_license = License(
-                    user_id=order.user_id,
-                    license_type=LicenseType.PRO,
-                    plan_type=order.plan_type,
-                    license_key=f"WXPAY-{order_no}",
-                    is_valid=order_user2.is_active if order_user2 else True,
-                    expiry_date=expiry,
-                )
-                db.add(new_license)
-                await db.flush()
+            await process_paid_order(db, order, "WXPAY")
 
             try:
                 await db.commit()
@@ -381,10 +303,10 @@ async def list_orders(
                 "id": order.id,
                 "user_id": order.user_id,
                 "order_no": order.order_no,
-                "plan_type": order.plan_type,
+                "plan_type": order.plan_type.value if hasattr(order.plan_type, 'value') else order.plan_type,
                 "payment_method": order.payment_method,
                 "amount": order.amount,
-                "status": order.status,
+                "status": order.status.value if hasattr(order.status, 'value') else order.status,
                 "transaction_id": order.transaction_id,
                 "paid_at": order.paid_at,
                 "created_at": order.created_at

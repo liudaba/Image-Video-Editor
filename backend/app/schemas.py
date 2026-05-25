@@ -7,14 +7,23 @@ import re
 class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_\u4e00-\u9fa5]+$")
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     fingerprint: Optional[str] = Field(None, max_length=255, pattern=r"^[a-zA-Z0-9:_\-\.]*$")
 
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, v):
-        if len(v) < 6:
-            raise ValueError("密码至少6位")
+        if len(v) < 8:
+            raise ValueError("密码至少8位")
+        if not re.search(r"[A-Za-z]", v):
+            raise ValueError("密码必须包含字母")
+        if not re.search(r"\d", v):
+            raise ValueError("密码必须包含数字")
+        # 检查常见弱密码
+        weak_passwords = {"123456", "password", "12345678", "qwerty", "abc123",
+                          "111111", "123123", "admin", "letmein", "welcome"}
+        if v.lower() in weak_passwords:
+            raise ValueError("密码过于简单，请使用更强的密码")
         return v
 
 
@@ -34,7 +43,7 @@ class PaymentCreateOrder(BaseModel):
 
 class HeartbeatRequest(BaseModel):
     fingerprint: Optional[str] = Field(None, max_length=255, pattern=r"^[a-zA-Z0-9:_\-\.]*$")
-    app_version: Optional[str] = Field(None, max_length=50, pattern=r"^[\d\.\-a-zA-Z]*$")
+    app_version: str = Field(..., min_length=1, max_length=50, pattern=r"^[\d\.\-a-zA-Z]+$")
 
 
 class LicenseData(BaseModel):
@@ -55,6 +64,7 @@ class LicenseData(BaseModel):
     expiry_date: Optional[str] = None
     expires_at: Optional[str] = None
     license_key: Optional[str] = None
+    machine_fingerprint: Optional[str] = None
     offline_until: Optional[str] = None
 
 

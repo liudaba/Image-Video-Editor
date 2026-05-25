@@ -25,8 +25,9 @@ async def heartbeat(
 
     client_ip = _get_real_ip(request)
 
+    # 先无锁读取License状态，减少锁竞争
     license_result = await db.execute(
-        select(License).filter(License.user_id == current_user.id).with_for_update()
+        select(License).filter(License.user_id == current_user.id)
     )
     license_obj = license_result.scalar_one_or_none()
 
@@ -35,10 +36,11 @@ async def heartbeat(
 
     is_valid = license_obj.is_valid
     reason = None
+    needs_update = False
     if not current_user.is_active:
         is_valid = False
         reason = "账户已被禁用"
-        license_obj.is_valid = False
+        needs_update = True
     if license_obj.expiry_date:
         expiry = license_obj.expiry_date
         if expiry.tzinfo is None:
@@ -47,15 +49,34 @@ async def heartbeat(
         if expiry < now:
             is_valid = False
             reason = reason or "许可证已过期"
-            license_obj.is_valid = False
+            needs_update = True
 
     if is_valid and req.fingerprint:
         can_bind = await check_and_bind_machine(db, current_user.id, req.fingerprint)
         if not can_bind:
             is_valid = False
             reason = "设备绑定数量已达上限(最多3台)"
-            # 设备绑定限制是运行时限制，不修改数据库is_valid
-            # 用户在其他设备解绑后，此设备应能正常使用
+
+    # 只有需要更新数据库时才加锁，减少锁竞争
+    if needs_update or is_valid:
+        license_result = await db.execute(
+            select(License).filter(License.user_id == current_user.id).with_for_update()
+        )
+        license_obj = license_result.scalar_one_or_none()
+        if not license_obj:
+            return HeartbeatResponse(is_valid=False, reason="未找到许可证", timestamp=time.time())
+
+        # 双重检查：加锁后再次确认状态
+        if needs_update:
+            if not current_user.is_active:
+                license_obj.is_valid = False
+            if license_obj.expiry_date:
+                expiry = license_obj.expiry_date
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                now2 = datetime.now(timezone.utc)
+                if expiry < now2 and license_obj.is_valid:
+                    license_obj.is_valid = False
 
     # 只有许可证有效时才更新心跳字段，避免无效许可证显示"在线"
     if is_valid:
@@ -85,22 +106,20 @@ async def heartbeat(
         )
         db.add(heartbeat_log)
 
-    await db.flush()
-    await db.commit()
-
     # 生成签名数据：设备绑定限制是运行时限制，不修改数据库is_valid
-    # 使用副本签名，避免修改ORM对象导致意外持久化
+    # 如果运行时判定无效但数据库is_valid仍为True，构造签名时标记为无效
     if not is_valid and license_obj.is_valid:
         # 设备绑定超限等运行时原因：签名标记为无效，但不修改数据库
-        import copy
-        sign_license = copy.copy(license_obj)
-        # 使SQLAlchemy不再追踪此对象，避免影响session
-        from sqlalchemy import inspect as sa_inspect
-        sa_inspect(sign_license).detach()
-        sign_license.is_valid = False
-        license_data = encode_license_data(sign_license, current_user.username)
+        # 临时修改is_valid用于签名，签名后立即恢复（在commit前恢复，避免持久化）
+        original_is_valid = license_obj.is_valid
+        license_obj.is_valid = False
+        license_data = encode_license_data(license_obj, current_user.username)
+        license_obj.is_valid = original_is_valid
     else:
         license_data = encode_license_data(license_obj, current_user.username)
+
+    await db.flush()
+    await db.commit()
 
     return HeartbeatResponse(is_valid=is_valid, license=license_data, reason=reason, timestamp=time.time())
 
@@ -114,7 +133,7 @@ async def get_license_status(
     from sqlalchemy import select
 
     result = await db.execute(
-        select(License).filter(License.user_id == current_user.id).with_for_update()
+        select(License).filter(License.user_id == current_user.id)
     )
     license_obj = result.scalar_one_or_none()
 
@@ -124,23 +143,41 @@ async def get_license_status(
     from ..services.license_service import is_license_expired
     # 如果许可证已过期但is_valid仍为True，同步更新数据库
     reason = None
+    needs_update = False
     if license_obj.is_valid and is_license_expired(license_obj):
-        license_obj.is_valid = False
-        reason = "许可证已过期"
-        await db.flush()
-        await db.commit()
+        # 需要更新数据库，此时加锁防止并发修改
+        result = await db.execute(
+            select(License).filter(License.user_id == current_user.id).with_for_update()
+        )
+        license_obj = result.scalar_one_or_none()
+        # 双重检查：加锁后再次确认状态
+        if license_obj and license_obj.is_valid and is_license_expired(license_obj):
+            license_obj.is_valid = False
+            reason = "许可证已过期"
+            needs_update = True
     # 如果用户被禁用，许可证也应无效
     if license_obj.is_valid and not current_user.is_active:
-        license_obj.is_valid = False
-        reason = "账户已被禁用"
-        await db.flush()
-        await db.commit()
+        if not needs_update:
+            result = await db.execute(
+                select(License).filter(License.user_id == current_user.id).with_for_update()
+            )
+            license_obj = result.scalar_one_or_none()
+            needs_update = True
+        if license_obj and license_obj.is_valid and not current_user.is_active:
+            license_obj.is_valid = False
+            reason = "账户已被禁用"
     # 如果提供了fingerprint，检查设备绑定限制
     if license_obj.is_valid and fingerprint:
         from ..services.heartbeat_service import check_and_bind_machine
         can_bind = await check_and_bind_machine(db, current_user.id, fingerprint)
         if not can_bind:
             reason = "设备绑定数量已达上限(最多3台)"
+        else:
+            needs_update = True
+    # 统一提交所有修改
+    if needs_update:
+        await db.flush()
+        await db.commit()
     # 如果is_valid=False，判断具体原因
     if not license_obj.is_valid and not reason:
         if not current_user.is_active:
@@ -149,14 +186,12 @@ async def get_license_status(
             reason = "许可证已失效"
 
     # 生成签名数据：设备绑定限制是运行时限制，不修改数据库is_valid
-    # 使用副本签名，避免修改ORM对象导致意外持久化
+    # 如果运行时判定无效但数据库is_valid仍为True，构造签名时标记为无效
     if reason and license_obj.is_valid:
-        import copy
-        sign_license = copy.copy(license_obj)
-        from sqlalchemy import inspect as sa_inspect
-        sa_inspect(sign_license).detach()
-        sign_license.is_valid = False
-        license_data = encode_license_data(sign_license, current_user.username)
+        original_is_valid = license_obj.is_valid
+        license_obj.is_valid = False
+        license_data = encode_license_data(license_obj, current_user.username)
+        license_obj.is_valid = original_is_valid
     else:
         license_data = encode_license_data(license_obj, current_user.username)
 

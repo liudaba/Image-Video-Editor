@@ -8,18 +8,52 @@ import shutil
 import json
 import re
 import time
+import logging
+import threading
+import queue
 from typing import Dict
+
+logger = logging.getLogger(__name__)
+
+# Windows 下隐藏子进程的控制台窗口，防止蓝色命令框闪烁
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
 
 def _get_ffmpeg_bin():
-    return os.environ.get('FFMPEG_BINARY', 'ffmpeg')
+    """获取FFmpeg可执行文件路径，优先环境变量，回退到打包目录"""
+    env_bin = os.environ.get('FFMPEG_BINARY')
+    if env_bin:
+        return env_bin
+    # 回退：检查打包目录下的 ffmpeg/
+    try:
+        from video_generator.config import get_ffmpeg_dir
+        ffmpeg_dir = get_ffmpeg_dir()
+        if ffmpeg_dir:
+            exe_name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+            return os.path.join(ffmpeg_dir, exe_name)
+    except Exception:
+        pass
+    return 'ffmpeg'
 
 
 def _get_ffprobe_bin():
-    ffmpeg_bin = os.environ.get('FFMPEG_BINARY', 'ffmpeg')
-    ffmpeg_dir = os.path.dirname(ffmpeg_bin)
-    if ffmpeg_dir:
-        return os.path.join(ffmpeg_dir, 'ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+    """获取FFprobe可执行文件路径，优先环境变量，回退到打包目录"""
+    env_bin = os.environ.get('FFMPEG_BINARY')
+    if env_bin:
+        ffmpeg_dir = os.path.dirname(env_bin)
+        if ffmpeg_dir:
+            probe_name = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
+            return os.path.join(ffmpeg_dir, probe_name)
+        return 'ffprobe'
+    # 回退：检查打包目录下的 ffmpeg/
+    try:
+        from video_generator.config import get_ffmpeg_dir
+        ffmpeg_dir = get_ffmpeg_dir()
+        if ffmpeg_dir:
+            probe_name = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
+            return os.path.join(ffmpeg_dir, probe_name)
+    except Exception:
+        pass
     return 'ffprobe'
 
 
@@ -60,7 +94,8 @@ class HardwareAcceleratedRenderer:
         try:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-encoders'],
-                capture_output=True, text=True, timeout=3
+                capture_output=True, text=True, timeout=3,
+                creationflags=_SUBPROCESS_FLAGS
             )
             stdout = result.stdout
             self._has_cuda = 'h264_nvenc' in stdout
@@ -117,7 +152,8 @@ class HardwareAcceleratedRenderer:
         try:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-filters'],
-                capture_output=True, text=True, timeout=3
+                capture_output=True, text=True, timeout=3,
+                creationflags=_SUBPROCESS_FLAGS
             )
             return 'hwupload_cuda' in result.stdout
         except Exception:
@@ -127,7 +163,8 @@ class HardwareAcceleratedRenderer:
         try:
             result = subprocess.run(
                 ['nvidia-smi', '--query-gpu=gpu_name', '--format=csv,noheader'],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                creationflags=_SUBPROCESS_FLAGS
             )
             gpu_name = result.stdout.strip().lower()
             if any(k in gpu_name for k in ['quadro', 'tesla', 'rtx a', 'a100', 'a10', 'a30', 'a40', 'l40']):
@@ -140,7 +177,8 @@ class HardwareAcceleratedRenderer:
         try:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-hide_banner', '-h', 'encoder=h264_nvenc'],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                creationflags=_SUBPROCESS_FLAGS
             )
             help_text = result.stdout
             options = {}
@@ -302,7 +340,8 @@ class HardwareAcceleratedRenderer:
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=_SUBPROCESS_FLAGS
             )
 
             duration_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.\d+)')
@@ -452,6 +491,7 @@ class HardwareAcceleratedRenderer:
             segment_outputs = []
             processes = []
             progress_data = []
+            stderr_queues = []
 
             for i, segment in enumerate(segments):
                 seg_output = os.path.join(temp_dir, f"segment_{i:04d}.mp4")
@@ -461,10 +501,10 @@ class HardwareAcceleratedRenderer:
                 seg_concat = os.path.join(temp_dir, f"concat_{i:04d}.txt")
                 with open(seg_concat, 'w', encoding='utf-8') as f:
                     for img_file, dur in zip(segment['images'], segment['durations']):
-                        f.write(f"file '{img_file}'\n")
+                        f.write(f"file '{_sanitize_ffmpeg_path(img_file)}'\n")
                         f.write(f"duration {dur}\n")
                     if segment['images']:
-                        f.write(f"file '{segment['images'][-1]}'\n")
+                        f.write(f"file '{_sanitize_ffmpeg_path(segment['images'][-1])}'\n")
 
                 use_cuda = (self.has_cuda_filters
                             and encoder_config.get('vcodec') == 'h264_nvenc')
@@ -504,10 +544,24 @@ class HardwareAcceleratedRenderer:
 
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    creationflags=_SUBPROCESS_FLAGS
                 )
                 processes.append(proc)
                 progress_data[i]['process'] = proc
+
+                # 为每个进程启动独立的 stderr 读取线程，避免 readline 阻塞主循环
+                stderr_queue = queue.Queue()
+                stderr_queues.append(stderr_queue)
+
+                def _stderr_reader(p=proc, q=stderr_queue):
+                    try:
+                        for line in p.stderr:
+                            q.put(line)
+                    finally:
+                        q.put(None)  # 哨兵值，表示读取结束
+
+                threading.Thread(target=_stderr_reader, daemon=True).start()
 
             self._render_processes = processes
 
@@ -536,11 +590,30 @@ class HardwareAcceleratedRenderer:
                     if progress_data[i]['done']:
                         continue
 
+                    # 从队列中非阻塞地读取所有可用的 stderr 行
+                    try:
+                        while True:
+                            line = stderr_queues[i].get_nowait()
+                            if line is None:
+                                # 哨兵值，stderr 读取结束
+                                break
+                            match = duration_pattern.search(line)
+                            if match:
+                                hours = int(match.group(1))
+                                minutes = int(match.group(2))
+                                seconds = float(match.group(3))
+                                progress_data[i]['current_time'] = hours * 3600 + minutes * 60 + seconds
+                    except Exception:
+                        pass  # 队列为空，正常
+
                     return_code = proc.poll()
                     if return_code is not None:
-                        progress_data[i]['done'] = True
+                        # 进程已结束，排空队列中剩余的行
                         try:
-                            for line in proc.stderr:
+                            while True:
+                                line = stderr_queues[i].get_nowait()
+                                if line is None:
+                                    break
                                 match = duration_pattern.search(line)
                                 if match:
                                     hours = int(match.group(1))
@@ -549,6 +622,8 @@ class HardwareAcceleratedRenderer:
                                     progress_data[i]['current_time'] = hours * 3600 + minutes * 60 + seconds
                         except Exception:
                             pass
+
+                        progress_data[i]['done'] = True
                         if return_code != 0:
                             if log_callback:
                                 log_callback(f"❌ 分段{i}编码失败 (退出码:{return_code})")
@@ -561,22 +636,6 @@ class HardwareAcceleratedRenderer:
                         continue
 
                     all_done = False
-
-                    try:
-                        stderr_lines = []
-                        while True:
-                            line = proc.stderr.readline()
-                            if not line:
-                                break
-                            stderr_lines.append(line)
-                            match = duration_pattern.search(line)
-                            if match:
-                                hours = int(match.group(1))
-                                minutes = int(match.group(2))
-                                seconds = float(match.group(3))
-                                progress_data[i]['current_time'] = hours * 3600 + minutes * 60 + seconds
-                    except Exception:
-                        pass
 
                 total_progress_time = sum(pd['current_time'] for pd in progress_data)
                 progress = min(100.0, (total_progress_time / audio_duration) * 100) if audio_duration > 0 else 0
@@ -646,7 +705,8 @@ class HardwareAcceleratedRenderer:
             ]
 
             merge_result = subprocess.run(
-                merge_cmd, capture_output=True, text=True, timeout=300
+                merge_cmd, capture_output=True, text=True, timeout=300,
+                creationflags=_SUBPROCESS_FLAGS
             )
 
             if merge_result.returncode != 0:
@@ -793,10 +853,15 @@ class HardwareAcceleratedRenderer:
                 '-of', 'json',
                 audio_file
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                    creationflags=_SUBPROCESS_FLAGS)
             data = json.loads(result.stdout)
-            return float(data['format']['duration'])
-        except Exception:
+            duration = float(data['format']['duration'])
+            if duration <= 0:
+                logger.warning("ffprobe 报告音频时长为 0: %s", audio_file)
+            return duration
+        except Exception as e:
+            logger.warning("获取音频时长失败 (%s): %s", audio_file, e)
             return 0.0
 
     def get_encoder_info(self) -> Dict:

@@ -1101,7 +1101,7 @@ class UIHandlersMixin:
 
         self._trash_window = tk.Toplevel(self.root)
         self._trash_window.title("垃圾桶 - 已删除文件")
-        self._trash_window.geometry("860x560")
+        self._trash_window.geometry("960x640")
         self._trash_window.configure(bg="#1e1e1e")
         self._trash_window.transient(self.root)
 
@@ -1118,30 +1118,62 @@ class UIHandlersMixin:
         btn_refresh = ttk.Button(header, text="刷新", command=self._refresh_trash_list, style="Small.TButton")
         btn_refresh.pack(side=tk.RIGHT, padx=4, pady=6)
 
-        list_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # 主区域：左侧列表 + 右侧预览
+        main_pane = tk.PanedWindow(self._trash_window, orient=tk.HORIZONTAL, bg="#1e1e1e",
+                                    sashwidth=4, sashrelief=tk.FLAT)
+        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # 左侧：会话列表
+        left_frame = tk.Frame(main_pane, bg="#1e1e1e")
+        main_pane.add(left_frame, width=520)
 
         columns = ("session", "files", "size", "contents")
-        self._trash_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
+        self._trash_tree = ttk.Treeview(left_frame, columns=columns, show="headings", selectmode="browse")
         self._trash_tree.heading("session", text="会话")
         self._trash_tree.heading("files", text="文件数")
         self._trash_tree.heading("size", text="大小")
         self._trash_tree.heading("contents", text="内容")
-        self._trash_tree.column("session", width=220, minwidth=150)
-        self._trash_tree.column("files", width=60, minwidth=40, anchor="center")
-        self._trash_tree.column("size", width=90, minwidth=60, anchor="center")
-        self._trash_tree.column("contents", width=350, minwidth=200)
+        self._trash_tree.column("session", width=200, minwidth=150)
+        self._trash_tree.column("files", width=55, minwidth=40, anchor="center")
+        self._trash_tree.column("size", width=80, minwidth=60, anchor="center")
+        self._trash_tree.column("contents", width=160, minwidth=100)
 
-        # 设置Treeview行高和字体大小
         tree_font = ("Microsoft YaHei", 11)
         self._trash_tree.tag_configure("normal", font=tree_font)
         self._trash_tree.configure(font=tree_font, rowheight=32)
 
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
+        scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
         self._trash_tree.configure(yscrollcommand=scrollbar.set)
         self._trash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        self._trash_tree.bind("<<TreeviewSelect>>", self._on_trash_select)
+
+        # 右侧：预览区
+        right_frame = tk.Frame(main_pane, bg="#2d2d2d")
+        main_pane.add(right_frame, width=400)
+
+        preview_label = tk.Label(right_frame, text="📁 文件预览", font=("Microsoft YaHei", 12, "bold"),
+                                  bg="#2d2d2d", fg="#cccccc")
+        preview_label.pack(fill=tk.X, padx=8, pady=(8, 4))
+
+        # 文件列表
+        self._trash_file_list = tk.Listbox(right_frame, bg="#1e1e1e", fg="#d4d4d4",
+                                            font=("Microsoft YaHei", 11), selectbackground="#094771",
+                                            selectforeground="#ffffff", activestyle="none",
+                                            relief=tk.FLAT, highlightthickness=0)
+        self._trash_file_list.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        self._trash_file_list.bind("<Double-Button-1>", self._on_trash_file_double_click)
+
+        # 缩略图预览区
+        self._trash_preview_frame = tk.Frame(right_frame, bg="#2d2d2d", height=120)
+        self._trash_preview_frame.pack(fill=tk.X, padx=8, pady=(4, 8))
+        self._trash_preview_frame.pack_propagate(False)
+        self._trash_preview_label = tk.Label(self._trash_preview_frame, text="双击图片文件可预览",
+                                              bg="#2d2d2d", fg="#888888", font=("Microsoft YaHei", 10))
+        self._trash_preview_label.pack(fill=tk.BOTH, expand=True)
+
+        # 底部按钮
         btn_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
         btn_frame.pack(fill=tk.X, padx=10, pady=8)
 
@@ -1155,6 +1187,7 @@ class UIHandlersMixin:
         btn_open_dir.pack(side=tk.LEFT, padx=5)
 
         self._trash_session_map = {}
+        self._trash_current_session_path = None
         self._refresh_trash_list()
 
         self._trash_window.protocol("WM_DELETE_WINDOW", self._on_trash_window_close)
@@ -1166,6 +1199,69 @@ class UIHandlersMixin:
             except Exception:
                 pass
             self._trash_window = None
+
+    def _on_trash_select(self, event=None):
+        """选中会话时，右侧显示该会话内的文件列表"""
+        sel = self._trash_tree.selection()
+        if not sel:
+            return
+        session_path = self._trash_session_map.get(sel[0])
+        if not session_path or not os.path.isdir(session_path):
+            return
+        self._trash_current_session_path = session_path
+        self._trash_file_list.delete(0, tk.END)
+        self._trash_preview_label.config(image="", text="双击图片文件可预览")
+
+        for root, dirs, files in os.walk(session_path):
+            for f in sorted(files):
+                fp = os.path.join(root, f)
+                rel = os.path.relpath(fp, session_path)
+                lf = f.lower()
+                if lf.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                    icon = "🖼️"
+                elif lf.endswith((".mp4", ".avi", ".mkv", ".mov", ".webm")):
+                    icon = "🎬"
+                elif lf == "shots_data.json":
+                    icon = "📝"
+                else:
+                    icon = "📄"
+                self._trash_file_list.insert(tk.END, f"{icon} {rel}")
+
+    def _on_trash_file_double_click(self, event=None):
+        """双击文件：图片则预览，视频/其他则用系统打开"""
+        sel = self._trash_file_list.curselection()
+        if not sel:
+            return
+        display_text = self._trash_file_list.get(sel[0])
+        # 去掉图标前缀
+        filename = display_text.split(" ", 1)[1] if " " in display_text else display_text
+        if not self._trash_current_session_path:
+            return
+        file_path = os.path.join(self._trash_current_session_path, filename)
+        if not os.path.isfile(file_path):
+            return
+
+        lf = file_path.lower()
+        if lf.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            self._preview_trash_image(file_path)
+        else:
+            os.startfile(file_path)
+
+    def _preview_trash_image(self, file_path):
+        """在预览区显示图片缩略图"""
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(file_path)
+            # 适配预览区大小
+            max_w, max_h = 380, 110
+            img.thumbnail((max_w, max_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            self._trash_preview_label.config(image=photo, text="")
+            self._trash_preview_label._photo = photo  # 防止GC
+        except ImportError:
+            self._trash_preview_label.config(text="需要Pillow库才能预览图片", image="")
+        except Exception:
+            self._trash_preview_label.config(text="图片预览失败", image="")
 
     def _refresh_trash_list(self):
         if not hasattr(self, '_trash_tree') or not self._trash_tree:

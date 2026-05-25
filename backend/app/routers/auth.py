@@ -212,6 +212,9 @@ async def confirm_reset(data: PasswordResetConfirm, db: AsyncSession = Depends(g
     await db.flush()
     await db.commit()
 
+    # 密码重置成功后清除该用户的登录失败记录，避免用户改完密码仍被限流锁定
+    clear_login_failures(user.username)
+
     return {"message": "密码重置成功"}
 
 
@@ -224,13 +227,14 @@ async def register(user_data: UserRegister, request: Request, db: AsyncSession =
 
     if user_data.fingerprint:
         from sqlalchemy import func as sa_func
+        from ..services.heartbeat_service import MAX_MACHINE_BINDINGS
 
         # 查询设备绑定数量（不能用FOR UPDATE + 聚合函数，PostgreSQL不支持）
         fp_user_count = await db.execute(
             select(sa_func.count(MachineBinding.id)).where(MachineBinding.fingerprint == user_data.fingerprint)
         )
         fp_count = fp_user_count.scalar() or 0
-        if fp_count >= 3:
+        if fp_count >= MAX_MACHINE_BINDINGS:
             raise HTTPException(status_code=429, detail="该设备注册账号数量已达上限")
         from ..models import License
         fp_active_trial = await db.execute(
@@ -315,7 +319,7 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     # 获取用户许可证信息
     from ..models import License
     license_result = await db.execute(
-        select(License).filter(License.user_id == user.id).with_for_update()
+        select(License).filter(License.user_id == user.id)
     )
     license_obj = license_result.scalar_one_or_none()
 
@@ -323,12 +327,20 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
     if license_obj:
         from ..services.license_service import is_license_expired
         if is_license_expired(license_obj) and license_obj.is_valid:
-            license_obj.is_valid = False
-            await db.flush()
+            # 需要更新is_valid，此时加锁防止并发修改
+            license_result = await db.execute(
+                select(License).filter(License.user_id == user.id).with_for_update()
+            )
+            license_obj = license_result.scalar_one_or_none()
+            # 双重检查：加锁后再次确认状态
+            if license_obj and is_license_expired(license_obj) and license_obj.is_valid:
+                license_obj.is_valid = False
+                await db.flush()
         license_data = encode_license_data(license_obj, user.username)
 
     # 清除登录失败记录
     clear_login_failures(user_data.username)
+    clear_login_failures(f"ip:{client_ip}")
 
     await db.commit()
 
@@ -337,22 +349,35 @@ async def login(user_data: UserLogin, request: Request, db: AsyncSession = Depen
 
 @router.post("/token-renew", response_model=LoginResponse, summary="Token续期")
 async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
+    from jose import jwt as josejwt, JWTError
+    from ..config import settings
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="缺少授权令牌")
     
     token = auth_header[7:]
     
+    # Token续期接口允许过期token换新token，因此跳过exp验证
+    # 但仍验证签名和payload完整性，防止伪造
     try:
-        from ..auth import decode_token
-        payload = decode_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="令牌无效或已过期")
-        
+        payload = josejwt.decode(
+            token, settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": False}
+        )
         user_id = payload.get("user_id")
         username = payload.get("username")
         if not user_id or not username:
             raise HTTPException(status_code=401, detail="令牌数据不完整")
+        # 安全限制：过期超过24小时的token不允许续期，必须重新登录
+        exp = payload.get("exp", 0)
+        if exp and (datetime.now(timezone.utc).timestamp() - exp) > 86400:
+            raise HTTPException(status_code=401, detail="令牌过期过久，请重新登录")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="令牌签名无效或格式错误")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="令牌验证失败")
     
@@ -368,7 +393,7 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
     
     from ..models import License
     license_result = await db.execute(
-        select(License).filter(License.user_id == user.id).with_for_update()
+        select(License).filter(License.user_id == user.id)
     )
     license_obj = license_result.scalar_one_or_none()
     
@@ -376,8 +401,14 @@ async def token_renew(request: Request, db: AsyncSession = Depends(get_db)):
     if license_obj:
         from ..services.license_service import is_license_expired
         if is_license_expired(license_obj) and license_obj.is_valid:
-            license_obj.is_valid = False
-            await db.flush()
+            # 需要更新is_valid，此时加锁防止并发修改
+            license_result = await db.execute(
+                select(License).filter(License.user_id == user.id).with_for_update()
+            )
+            license_obj = license_result.scalar_one_or_none()
+            if license_obj and is_license_expired(license_obj) and license_obj.is_valid:
+                license_obj.is_valid = False
+                await db.flush()
         license_data = encode_license_data(license_obj, user.username)
     
     await db.commit()
@@ -418,6 +449,9 @@ async def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     await db.flush()
     await db.commit()
+
+    # 密码修改成功后清除该用户的登录失败记录
+    clear_login_failures(current_user.username)
 
     # 生成新token，防止修改密码后登录过期
     new_token = create_access_token(data={"user_id": current_user.id, "username": current_user.username})

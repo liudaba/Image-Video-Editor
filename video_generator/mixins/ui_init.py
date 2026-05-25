@@ -37,26 +37,29 @@ class UIInitMixin:
     
 
     def _update_membership_title(self):
-        try:
-            from video_generator.license_manager import LicenseManager
-            mgr = LicenseManager()
-            account_info = mgr.get_account_info()
-            version_str = f"短视频生成器 v{get_version()}"
-            base_title = f"{version_str} | 智能分镜工作流"
+        """在后台线程中获取账户信息并更新窗口标题，避免阻塞主线程"""
+        def _do_update():
+            try:
+                from video_generator.license_manager import LicenseManager
+                mgr = LicenseManager()
+                account_info = mgr.get_account_info()
+                version_str = f"短视频生成器 v{get_version()}"
+                base_title = f"{version_str} | 智能分镜工作流"
 
-            parts = [base_title]
-            username = account_info.get("username", "")
-            if username:
-                parts.append(username)
-            membership_name = account_info.get("membership_type_name", "")
-            if membership_name:
-                parts.append(membership_name)
+                parts = [base_title]
+                username = account_info.get("username", "")
+                if username:
+                    parts.append(username)
+                membership_name = account_info.get("membership_type_name", "")
+                if membership_name:
+                    parts.append(membership_name)
 
-            title_text = " | ".join(parts)
+                title_text = " | ".join(parts)
+                self.root.after(0, lambda: self.root.title(title_text))
+            except Exception:
+                self.root.after(0, lambda: self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流"))
 
-            self.root.title(title_text)
-        except Exception:
-            self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
+        threading.Thread(target=_do_update, daemon=True).start()
 
     def _initialize_ui(self):
         """初始化用户界面"""
@@ -95,7 +98,9 @@ class UIInitMixin:
         
         # 先创建布局
         self._create_layout()
-        self._update_membership_title()
+        # 设置默认窗口标题（延迟更新会员标题，避免 LicenseManager 初始化阻塞 UI）
+        self.root.title(f"短视频生成器 v{get_version()} | 智能分镜工作流")
+        self.root.after(500, self._update_membership_title)
         
         # 设置样式（只执行一次）
         self._setup_styles()
@@ -453,6 +458,10 @@ class UIInitMixin:
             self.root.after(500, self._show_login_dialog)
 
     def _on_auth_revoked(self):
+        # 防重入：如果已经在处理授权失效（弹窗或登录框），忽略后续回调
+        if getattr(self, '_auth_revoked_handling', False):
+            return
+        self._auth_revoked_handling = True
         try:
             from video_generator.license_manager import LicenseManager
             mgr = LicenseManager()
@@ -470,6 +479,20 @@ class UIInitMixin:
                 if license_status.get("valid"):
                     # 本地缓存仍有效，可能是网络波动，不强制登出
                     return
+
+            # 服务器确认无效（非网络问题），尝试静默重登录
+            try:
+                if mgr._try_silent_relogin():
+                    license_status = mgr.check_license()
+                    if license_status.get("valid"):
+                        mgr.start_heartbeat()
+                        mgr.set_auth_revoked_callback(lambda: self.root.after(0, self._on_auth_revoked))
+                        mgr.set_auth_recovered_callback(lambda: self.root.after(0, self._on_auth_recovered))
+                        display = mgr.get_membership_display()
+                        self._on_auth_valid(display)
+                        return
+            except Exception:
+                pass
         except Exception:
             pass
         self._auth_valid = False
@@ -481,7 +504,10 @@ class UIInitMixin:
             messagebox.showwarning("授权失效", "您的账号已被禁用或授权已失效，请重新登录。", parent=self.root)
         except Exception:
             pass
-        self._show_login_dialog()
+        try:
+            self._show_login_dialog()
+        finally:
+            self._auth_revoked_handling = False
 
     def _on_auth_recovered(self):
         try:
@@ -677,10 +703,8 @@ class UIInitMixin:
             self.root.after(0, lambda: self.log("  系统自检开始"))
             self.root.after(0, lambda: self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
 
-            try:
-                self._cleanup_residual_files()
-            except Exception:
-                pass
+            # 启动时不再清空output_project，保留上次任务文件供查看
+            # 仅在导入新音频/开始新任务时才清空（见 import_audio 和 generate_shots）
 
             self._readiness['config'] = True
             self.root.after(0, lambda: self.log("  [1/7] ✅ 配置文件加载完成"))
@@ -859,63 +883,5 @@ class UIInitMixin:
 
         self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    def on_close(self):
-        """窗口关闭处理 - 快速释放所有资源"""
-        # 防止重复调用
-        if getattr(self, '_closing', False):
-            return
-        self._closing = True
-
-        # 1. 停止任务
-        if getattr(self, 'task_running', False):
-            self.task_running = False
-
-        # 2. 停止心跳线程
-        try:
-            from video_generator.license_manager import LicenseManager
-            mgr = LicenseManager()
-            mgr.stop_heartbeat()
-        except Exception:
-            pass
-
-        # 3. 停止API心跳循环
-        self._api_heartbeat_running = False
-        if hasattr(self, '_api_heartbeat_event'):
-            self._api_heartbeat_event.set()
-
-        # 4. 终止视频渲染子进程
-        try:
-            if self.video_renderer:
-                self.video_renderer.cancel_render()
-        except Exception:
-            pass
-
-        # 5. 关闭并行提示词生成器线程池
-        try:
-            if hasattr(self, '_parallel_generator') and self._parallel_generator:
-                self._parallel_generator.shutdown()
-        except Exception:
-            pass
-
-        # 6. 关闭资源管理器中的线程池
-        try:
-            if hasattr(self, 'resource_manager') and self.resource_manager:
-                self.resource_manager.shutdown_all_pools(wait=False)
-        except Exception:
-            pass
-
-        # 7. 关闭HTTP Session（释放连接池）
-        try:
-            from video_generator.config import _http_session, _http_session_lock
-            with _http_session_lock:
-                if _http_session is not None:
-                    _http_session.close()
-        except Exception:
-            pass
-
-        # 8. 销毁窗口
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
+    # on_close 由 ResourceMixin 提供（ui_init.py 不再重复定义，避免 MRO 覆盖）
 

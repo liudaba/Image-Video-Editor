@@ -45,7 +45,7 @@ def _get_site_base_url() -> str:
     base = getattr(settings, "SITE_BASE_URL", "")
     if base:
         return base.rstrip("/")
-    return "https://api.videogen.com"
+    return "https://api.wangzha178.com"
 
 
 def _get_alipay_instance():
@@ -218,7 +218,8 @@ async def verify_alipay_notification(data: dict) -> bool:
         verify_data = {k: v for k, v in data.items() if k not in ("sign", "sign_type")}
         signature = data.get("sign")
         return alipay.verify(verify_data, signature)
-    except Exception:
+    except Exception as e:
+        logger.warning("支付宝签名验证异常: %s", e)
         return False
 
 
@@ -245,7 +246,8 @@ async def verify_wechat_notification(headers: dict, body: bytes) -> bool:
 
         import hmac as _hmac
         return _hmac.compare_digest(computed_sign, received_sign)
-    except Exception:
+    except Exception as e:
+        logger.warning("微信签名验证异常: %s", e)
         return False
 
 
@@ -256,7 +258,10 @@ async def create_payment_order(
     payment_method: str,
 ) -> Dict[str, Any]:
     """统一创建支付订单接口"""
-    plan_type_enum = PlanType(plan_type.lower())
+    try:
+        plan_type_enum = PlanType(plan_type.lower())
+    except ValueError:
+        return {"error": f"无效的套餐类型: {plan_type}"}
     order = await create_order(db, user_id, plan_type_enum, payment_method)
     
     if payment_method.lower() == "alipay":

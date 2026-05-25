@@ -26,9 +26,14 @@ def _get_ecdsa_private_key():
         return _ecdsa_private_key
     key_path = getattr(settings, "ECDSA_PRIVATE_KEY_PATH", "") or ""
     if not key_path:
-        key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_sign_private.pem")
-    if not os.path.isabs(key_path):
-        key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", key_path)
+        # 从 app/services/ 上溯两级到 backend/，然后找 keys/
+        key_path = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "keys", ".license_sign_private.pem")
+        )
+    elif not os.path.isabs(key_path):
+        key_path = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", key_path)
+        )
     if os.path.exists(key_path):
         try:
             from cryptography.hazmat.primitives import serialization
@@ -47,7 +52,9 @@ def _get_hmac_signing_key() -> bytes:
     if settings.HMAC_SIGN_KEY and settings.HMAC_SIGN_KEY.strip():
         _hmac_signing_key = settings.HMAC_SIGN_KEY.encode("utf-8")
         return _hmac_signing_key
-    key_path = os.path.join(os.path.dirname(__file__), "..", "keys", ".license_verify_key")
+    key_path = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "keys", ".license_verify_key")
+    )
     try:
         with open(key_path, "rb") as f:
             key = f.read().strip()
@@ -84,7 +91,9 @@ def verify_signature(data: dict, signature: str) -> bool:
         sig_ver = data.get(_SIG_VERSION_KEY, 1)
         payload = _make_payload(data)
         if sig_ver == 2:
-            pubkey_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "keys", ".license_verify_pubkey.pem")
+            pubkey_path = os.path.normpath(
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "keys", ".license_verify_pubkey.pem")
+            )
             if os.path.exists(pubkey_path):
                 from cryptography.hazmat.primitives import serialization
                 from cryptography.hazmat.primitives.asymmetric import ec
@@ -182,6 +191,60 @@ def calc_renewal_expiry(existing_expiry_date, plan_type: PlanType) -> Optional[d
         return now + remaining + delta
 
 
+async def process_paid_order(db: AsyncSession, order, payment_prefix: str) -> None:
+    """支付成功后更新用户License的公共逻辑
+
+    Args:
+        db: 数据库会话
+        order: 已支付的订单（需已设置status=PAID, paid_at等）
+        payment_prefix: 支付来源前缀，如 "ALIPAY"、"WXPAY"、"MANUAL"
+    """
+    license_result = await db.execute(
+        select(License).filter(License.user_id == order.user_id).with_for_update()
+    )
+    existing_license = license_result.scalar_one_or_none()
+    if existing_license:
+        # 终身会员不允许被任何支付降级
+        if existing_license.plan_type == PlanType.LIFETIME:
+            import logging
+            logging.getLogger("videogen").info(
+                f"User {order.user_id} is lifetime member, skipping license downgrade from {payment_prefix} order {order.order_no}"
+            )
+        else:
+            existing_license.license_type = LicenseType.PRO
+            existing_license.plan_type = order.plan_type
+            # 检查用户是否被禁用
+            order_user_result = await db.execute(select(User).where(User.id == order.user_id))
+            order_user = order_user_result.scalar_one_or_none()
+            existing_license.is_valid = order_user.is_active if order_user else True
+            existing_license.trial_start = None
+            existing_license.trial_end = None
+            existing_license.expiry_date = calc_renewal_expiry(existing_license.expiry_date, order.plan_type)
+            if not existing_license.license_key:
+                existing_license.license_key = f"{payment_prefix}-{order.order_no}"
+        await db.flush()
+    else:
+        now = datetime.now(timezone.utc)
+        expiry = None
+        if order.plan_type == PlanType.LIFETIME:
+            expiry = None
+        elif order.plan_type in PLAN_DELTAS:
+            expiry = now + PLAN_DELTAS[order.plan_type]
+        # 检查用户是否被禁用
+        order_user_result = await db.execute(select(User).where(User.id == order.user_id))
+        order_user = order_user_result.scalar_one_or_none()
+        new_license = License(
+            user_id=order.user_id,
+            license_type=LicenseType.PRO,
+            plan_type=order.plan_type,
+            license_key=f"{payment_prefix}-{order.order_no}",
+            is_valid=order_user.is_active if order_user else True,
+            expiry_date=expiry,
+        )
+        db.add(new_license)
+        await db.flush()
+
+
 def generate_license_key(length: int = 32) -> str:
     alphabet = string.ascii_uppercase + string.digits
     key = "-".join(
@@ -226,24 +289,26 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     if license_key_obj.status == LicenseKeyStatus.ACTIVATED:
         return None
 
-    # 检查用户是否已是PRO会员，如果是则拒绝激活试用码（避免浪费）
-    if license_key_obj.plan_type == PlanType.TRIAL_15D:
-        existing_check = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
-        existing_check_lic = existing_check.scalar_one_or_none()
-        if existing_check_lic and existing_check_lic.license_type == LicenseType.PRO:
-            return "already_pro"
-
-    # 终身会员不允许被任何激活码降级
-    existing_check2 = await db.execute(select(License).where(License.user_id == user_id).with_for_update())
-    existing_check_lic2 = existing_check2.scalar_one_or_none()
-    if existing_check_lic2 and existing_check_lic2.plan_type == PlanType.LIFETIME:
-        return "already_lifetime"
-
     # 检查用户是否被禁用，禁用用户不允许激活
     user_result = await db.execute(select(User).where(User.id == user_id))
     user_obj = user_result.scalar_one_or_none()
     if user_obj and not user_obj.is_active:
         return "user_disabled"
+
+    # 一次性查询用户现有License（加锁），避免多次查询导致数据不一致
+    existing_result = await db.execute(
+        select(License).where(License.user_id == user_id).with_for_update()
+    )
+    existing_license = existing_result.scalar_one_or_none()
+
+    # 检查用户是否已是PRO会员，如果是则拒绝激活试用码（避免浪费）
+    if license_key_obj.plan_type == PlanType.TRIAL_15D:
+        if existing_license and existing_license.license_type == LicenseType.PRO:
+            return "already_pro"
+
+    # 终身会员不允许被任何激活码降级
+    if existing_license and existing_license.plan_type == PlanType.LIFETIME:
+        return "already_lifetime"
 
     license_key_obj.status = LicenseKeyStatus.ACTIVATED
     license_key_obj.activated_at = datetime.now(timezone.utc)
@@ -272,11 +337,7 @@ async def activate_license(db: AsyncSession, user_id: int, license_key: str) -> 
     # 设置LicenseKey的到期时间，便于管理后台展示
     license_key_obj.expiry_date = expiry_date
 
-    existing_result = await db.execute(
-        select(License).where(License.user_id == user_id).with_for_update()
-    )
-    existing_license = existing_result.scalar_one_or_none()
-
+    # 使用前面已查询并加锁的existing_license，避免重复查询和加锁
     if existing_license:
         existing_license.plan_type = license_key_obj.plan_type
         if license_key_obj.plan_type == PlanType.LIFETIME:
@@ -404,22 +465,33 @@ def encode_license_data(license: License, username: str) -> LicenseData:
     # 计算离线容忍截止时间
     offline_until_str = None
     if license.is_valid:
-        from ..config import settings
-        now = datetime.now(timezone.utc)
-        plan_type_val = license.plan_type.value if license.plan_type else None
-        license_type_val = license.license_type.value if isinstance(license.license_type, str) else license.license_type.value
-        # 离线容忍时长（小时），与客户端_OFFLINE_TOLERANCE保持一致
-        # 商业运营版：收紧离线容忍窗口，防止钻空子
-        offline_hours_map = {
-            "trial": 2, "trial_15d": 2,
-            "monthly": 12, "quarterly": 24,
-            "yearly": 48,
-            "lifetime": 72, "pro": 48,
-        }
-        tolerance_key = plan_type_val if plan_type_val and plan_type_val in offline_hours_map else license_type_val
-        tolerance_hours = offline_hours_map.get(tolerance_key, 2)
-        offline_until_dt = now + timedelta(hours=tolerance_hours)
-        offline_until_str = offline_until_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 额外检查：如果许可证已过期，不应计算offline_until
+        # 防止数据库状态不一致（is_valid=True但expiry_date已过期）时签发错误的离线容忍
+        is_expired = False
+        if license.expiry_date:
+            exp_check = license.expiry_date
+            if exp_check.tzinfo is None:
+                from datetime import timezone as _tz
+                exp_check = exp_check.replace(tzinfo=_tz.utc)
+            if exp_check < datetime.now(timezone.utc):
+                is_expired = True
+        if not is_expired:
+            from ..config import settings
+            now = datetime.now(timezone.utc)
+            plan_type_val = license.plan_type.value if license.plan_type else None
+            license_type_val = license.license_type.value if isinstance(license.license_type, str) else license.license_type.value
+            # 离线容忍时长（小时），与客户端_OFFLINE_TOLERANCE保持一致
+            # 商业运营版：收紧离线容忍窗口，防止钻空子
+            offline_hours_map = {
+                "trial": 2, "trial_15d": 2,
+                "monthly": 12, "quarterly": 24,
+                "yearly": 48,
+                "lifetime": 72, "pro": 48,
+            }
+            tolerance_key = plan_type_val if plan_type_val and plan_type_val in offline_hours_map else license_type_val
+            tolerance_hours = offline_hours_map.get(tolerance_key, 2)
+            offline_until_dt = now + timedelta(hours=tolerance_hours)
+            offline_until_str = offline_until_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # 判断是否终身/试用
     is_lifetime = license.plan_type == PlanType.LIFETIME or (license.license_type == LicenseType.PRO and license.expiry_date is None)
@@ -449,6 +521,7 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         "expiry_date": expiry_str,
         "expires_at": expiry_str,
         "license_key": license.license_key,
+        "machine_fingerprint": license.machine_fingerprint,
         "offline_until": offline_until_str,
     }
 
@@ -470,5 +543,6 @@ def encode_license_data(license: License, username: str) -> LicenseData:
         expiry_date=expiry_str,
         expires_at=expiry_str,
         license_key=license.license_key,
+        machine_fingerprint=license.machine_fingerprint,
         offline_until=offline_until_str,
     )
