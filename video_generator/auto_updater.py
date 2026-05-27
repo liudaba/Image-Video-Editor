@@ -348,6 +348,8 @@ class UpdateManager:
 
     @staticmethod
     def format_size(size_bytes):
+        if not size_bytes or size_bytes < 0:
+            return "未知大小"
         for unit in ['B', 'KB', 'MB', 'GB']:
             if size_bytes < 1024.0:
                 return f"{size_bytes:.2f} {unit}"
@@ -1058,37 +1060,41 @@ class UpdateDialog(tk.Toplevel):
     def show_update_available(self, version_info):
         self.version_info = version_info
 
-        # 判断更新类型
-        is_patch = bool(version_info.get('patch_url'))
-        update_type_label = "增量补丁" if is_patch else "完整安装包"
+        try:
+            # 判断更新类型
+            is_patch = bool(version_info.get('patch_url'))
+            update_type_label = "增量补丁" if is_patch else "完整安装包"
 
-        if self._forced:
-            self.status_var.set(
-                f"必须更新到 v{version_info['version']}! ({update_type_label})\n"
-                f"发布日期: {version_info.get('release_date', '')}"
-            )
-        else:
-            self.status_var.set(
-                f"发现新版本 v{version_info['version']}! ({update_type_label})\n"
-                f"发布日期: {version_info.get('release_date', '')}"
-            )
+            if self._forced:
+                self.status_var.set(
+                    f"必须更新到 v{version_info['version']}! ({update_type_label})\n"
+                    f"发布日期: {version_info.get('release_date', '')}"
+                )
+            else:
+                self.status_var.set(
+                    f"发现新版本 v{version_info['version']}! ({update_type_label})\n"
+                    f"发布日期: {version_info.get('release_date', '')}"
+                )
 
-        # changelog可能是字符串或列表
-        changelog_raw = version_info.get('changelog', '')
-        if isinstance(changelog_raw, list):
-            changelog = "\n".join([f"- {item}" for item in changelog_raw])
-        elif isinstance(changelog_raw, str) and changelog_raw:
-            changelog = changelog_raw
-        else:
-            changelog = "暂无更新说明"
-        self.update_changelog(changelog)
+            # changelog可能是字符串或列表
+            changelog_raw = version_info.get('changelog', '')
+            if isinstance(changelog_raw, list):
+                changelog = "\n".join([f"- {item}" for item in changelog_raw])
+            elif isinstance(changelog_raw, str) and changelog_raw:
+                changelog = changelog_raw
+            else:
+                changelog = "暂无更新说明"
+            self.update_changelog(changelog)
 
-        if is_patch:
-            display_size = UpdateManager.format_size(version_info.get('patch_size', 0))
-            btn_text = f"增量更新 ({display_size})"
-        else:
-            display_size = UpdateManager.format_size(version_info.get('file_size', 0))
-            btn_text = f"下载更新 ({display_size})"
+            if is_patch:
+                display_size = UpdateManager.format_size(version_info.get('patch_size'))
+                btn_text = f"增量更新 ({display_size})"
+            else:
+                display_size = UpdateManager.format_size(version_info.get('file_size'))
+                btn_text = f"下载更新 ({display_size})"
+        except Exception:
+            btn_text = "立即更新"
+
         self.download_btn.config(text=btn_text)
         self.download_btn.pack(side=tk.LEFT, padx=5)
         self.check_btn.config(state=tk.NORMAL)
