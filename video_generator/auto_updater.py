@@ -217,7 +217,7 @@ class UpdateManager:
 
                         if priority == 'critical' or force_update:
                             data['notification_type'] = 'forced_popup'
-                        elif priority == 'high':
+                        elif priority in ('high', 'normal'):
                             data['notification_type'] = 'popup'
                         else:
                             data['notification_type'] = 'log_only'
@@ -757,6 +757,19 @@ class PatchUpdater:
                                 os.remove(backup_path)
                         except Exception:
                             pass
+
+                # 清除已替换文件的 __pycache__ 缓存，确保重启后加载新代码
+                for dst_path, backup_path in replaced_files:
+                    try:
+                        pycache_dir = os.path.join(os.path.dirname(dst_path), '__pycache__')
+                        if os.path.isdir(pycache_dir):
+                            basename = os.path.splitext(os.path.basename(dst_path))[0]
+                            for f in os.listdir(pycache_dir):
+                                if f.startswith(basename + '.') and f.endswith(('.pyc', '.pyo')):
+                                    os.remove(os.path.join(pycache_dir, f))
+                                    logger.debug(f"Cleared cache: {f}")
+                    except Exception:
+                        pass
 
         except Exception:
             # 回滚：恢复备份文件
