@@ -766,16 +766,20 @@ class ImagesMixin:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                    vram = torch.cuda.memory_allocated(0) / 1024**3
-                    if vram > 2.0:
-                        self.log(f"   ⚠️ GPU 显存仍较高 ({vram:.1f} GB)，等待释放...")
+                    # 当前进程显存（不含SD WebUI等独立进程）
+                    vram_self = torch.cuda.memory_allocated(0) / 1024**3
+                    # GPU总显存和已用显存（包含所有进程）
+                    vram_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                    vram_reserved = torch.cuda.memory_reserved(0) / 1024**3
+                    if vram_self > 2.0:
+                        self.log(f"   ⚠️ 本进程GPU显存仍较高 ({vram_self:.1f} GB)，等待释放...")
                         for _ in range(10):
                             time.sleep(1)
                             torch.cuda.empty_cache()
-                            vram = torch.cuda.memory_allocated(0) / 1024**3
-                            if vram < 1.5:
+                            vram_self = torch.cuda.memory_allocated(0) / 1024**3
+                            if vram_self < 1.5:
                                 break
-                    self.log(f"   📊 GPU 显存: {vram:.1f} GB")
+                    self.log(f"   📊 GPU 显存: {vram_self:.1f} GB (本进程) / {vram_total:.1f} GB (总显存)")
             except Exception:
                 pass
             self.log(f"🚀 开始生成 {len(tasks)} 张图像...")
