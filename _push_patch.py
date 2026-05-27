@@ -1,6 +1,7 @@
-"""推送补丁到管理后台"""
+"""推送补丁到管理后台（累加式更新，不删除老版本）"""
 import requests
 import json
+import sys
 
 base = 'https://api.wangzha178.com'
 
@@ -19,17 +20,14 @@ print(f'Token获取成功')
 
 headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-# 2. 查询现有版本，如果1.0.1已存在则先删除
+# 2. 检查版本是否已存在（累加式：已存在则跳过，不删除）
 list_resp = requests.get(f'{base}/api/admin/versions', headers=headers, timeout=10)
 if list_resp.status_code == 200:
     versions = list_resp.json().get('versions', [])
     for v in versions:
         if v['version'] == '1.0.1':
-            vid = v['id']
-            print(f'发现已存在的1.0.1版本 (id={vid})，正在删除...')
-            del_resp = requests.delete(f'{base}/api/admin/versions/{vid}', headers=headers, timeout=10)
-            print(f'删除状态: {del_resp.status_code}')
-            break
+            print(f'版本 1.0.1 已存在 (id={v["id"]})，跳过创建（累加式更新，保留老版本）')
+            sys.exit(0)
 
 # 3. 创建版本 1.0.1
 version_data = {
@@ -50,3 +48,5 @@ print(f'响应: {create_resp.text}')
 
 if create_resp.status_code == 200:
     print('\n补丁推送成功！客户端启动后将自动检测到1.0.1版本更新。')
+elif create_resp.status_code == 409:
+    print('\n版本已存在，无需重复创建。')
