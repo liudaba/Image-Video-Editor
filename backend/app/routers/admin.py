@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Request
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_, delete, update
@@ -1281,6 +1282,36 @@ async def toggle_version_active(
     await _log_audit(db, user, "toggle_version_active", f"version_id={version_id}, is_active={target.is_active}", request)
     await db.commit()
     return {"success": True, "is_active": target.is_active}
+
+
+@router.post("/versions/upload-patch")
+async def upload_patch(
+    file: UploadFile = File(...),
+    user: User = Depends(require_admin),
+):
+    """上传补丁文件到服务器static/patches目录"""
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="只允许上传.zip文件")
+
+    patches_dir = Path(__file__).parent.parent / "static" / "patches"
+    patches_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = patches_dir / file.filename
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # 计算SHA256
+    import hashlib
+    sha256 = hashlib.sha256(content).hexdigest()
+
+    return {
+        "success": True,
+        "filename": file.filename,
+        "size": len(content),
+        "sha256": sha256,
+        "url": f"/static/patches/{file.filename}",
+    }
 
 
 @router.get("/analytics")
