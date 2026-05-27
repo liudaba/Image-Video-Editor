@@ -31,6 +31,41 @@ _DUBBING_SCENE_MAP = {
     '制裁': 'economic sanctions, restricted trade',
     '金融': 'banking, financial center',
     '通胀': 'economic hardship, rising prices',
+    '股票': 'stock market trading floor, falling charts',
+    '投资': 'investment analysis, financial charts',
+    '杠杆': 'financial risk, leveraged trading',
+    '资金': 'capital flow, money transaction',
+    '现金流': 'cash flow crisis, empty wallet',
+    '崩盘': 'market crash, financial panic',
+    '裁员': 'layoff scene, office boxes, unemployment',
+    '就业': 'job market, employment office, resume',
+    '失业': 'unemployment, empty office desks',
+    '工资': 'paycheck, salary, wage slip',
+    '存款': 'bank savings, ATM, deposit',
+    '房贷': 'mortgage, housing loan documents',
+    '消费': 'shopping, consumer spending, retail',
+    '收入': 'income, earnings report',
+    '退休': 'retirement, pension, elderly living',
+    # AI/科技/就业
+    'AI': 'AI neural network visualization, artificial intelligence interface',
+    '人工智能': 'AI technology, digital innovation, futuristic lab',
+    '自动化': 'automated factory, robotic assembly line',
+    '岗位': 'job position, workplace scene',
+    '替代': 'AI replacing workers, automation displacement',
+    '算法': 'algorithm visualization, code on screens',
+    '数字化': 'digital transformation, screens and data',
+    '编程': 'programming, code on monitors, developer workspace',
+    '翻译': 'translation work, language processing',
+    '设计': 'design workspace, creative studio',
+    # 生活/民生
+    '柴米油盐': 'daily necessities, grocery shopping, household items',
+    '保险': 'insurance policy, safety net documents',
+    '储蓄': 'savings, piggy bank, bank book',
+    '养老': 'elderly care, retirement planning',
+    '教育': 'classroom, education, students studying',
+    '医疗': 'hospital, medical care, health insurance',
+    '房价': 'real estate, housing prices, apartment buildings',
+    '物价': 'price tags, inflation, market goods',
     # 社会/民生
     '难民': 'refugees at border, displaced people',
     '民生': 'civilian daily life, community scene',
@@ -175,7 +210,7 @@ def _extract_scene_from_dubbing(dubbing_text: str) -> str:
         if cn_key in dubbing_text and en_scene not in seen:
             scene_parts.append(en_scene)
             seen.add(en_scene)
-            if len(scene_parts) >= 3:
+            if len(scene_parts) >= 5:
                 break
 
     return ", ".join(scene_parts)
@@ -198,6 +233,10 @@ class ARVPromptTemplates:
         "medium": "medium shot, eye level perspective, balanced composition, 50mm lens",
         "wide": "(wide angle shot:1.1), establishing view, panoramic vista, 24mm lens",
         "aerial": "(aerial drone footage:1.2), overhead view, bird's eye perspective",
+        "over_shoulder": "over-the-shoulder shot, looking past subject, depth and context, 85mm lens",
+        "dutch_angle": "(dutch angle:1.1), tilted composition, tension and unease, dynamic framing",
+        "low_angle": "(low angle shot:1.1), looking upward, power and dominance, dramatic perspective",
+        "silhouette": "(silhouette shot:1.2), backlit figure, rim lighting, stark contrast outline",
     }
 
     LIGHTING_TAGS = {
@@ -225,9 +264,10 @@ class ARVPromptTemplates:
     @classmethod
     def generate_prompt(cls, dubbing_text: str, content_type: str = "general",
                         core_theme: str = "", visual_tone: str = "",
-                        model_type: str = "sd15", user_styles: list = None) -> str:
+                        model_type: str = "sd15", user_styles: list = None,
+                        shot_index: int = -1) -> str:
         style = cls._select_style(content_type)
-        composition = cls._select_composition(content_type)
+        composition = cls._select_composition(content_type, visual_tone, shot_index)
         lighting = cls._select_lighting(visual_tone)
 
         # 从配音文本中提取视觉场景描述
@@ -320,7 +360,30 @@ class ARVPromptTemplates:
         return ", ".join(p for p in parts if p)
 
     @classmethod
-    def _select_composition(cls, content_type: str) -> str:
+    def _select_composition(cls, content_type: str, visual_tone: str = "", shot_index: int = -1) -> str:
+        """根据内容类型、视觉基调和分镜序号选择构图
+        
+        策略：
+        - 首分镜(0)：广角建立镜头
+        - 尾分镜：中景收束
+        - 中间分镜：按序号轮换构图，避免视觉单调
+        - 紧张/危机场景：倾斜构图增加张力
+        """
+        # 首分镜强制广角
+        if shot_index == 0:
+            return "wide"
+        
+        # 紧张/危机场景优先倾斜构图
+        if visual_tone and any(w in visual_tone for w in ["紧张", "危机", "冲突", "危急", "动荡", "tense", "crisis"]):
+            if shot_index >= 0 and shot_index % 3 == 0:
+                return "dutch_angle"
+        
+        # 中间分镜轮换构图
+        _COMPOSITION_ROTATION = ["medium", "close_up", "over_shoulder", "silhouette", "low_angle", "medium", "wide", "close_up"]
+        if shot_index >= 0:
+            return _COMPOSITION_ROTATION[shot_index % len(_COMPOSITION_ROTATION)]
+        
+        # 兜底：按内容类型
         if content_type in ["military", "war", "space"]:
             return "wide"
         elif content_type in ["politics", "news"]:

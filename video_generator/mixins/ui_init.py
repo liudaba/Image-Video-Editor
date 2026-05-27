@@ -7,7 +7,7 @@ import warnings
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from video_generator.config import Config
+from video_generator.config import Config, get_http_session
 from video_generator.cache import prompt_cache, image_cache
 from video_generator.version import get_version
 from video_generator.ollama_client import (
@@ -597,24 +597,31 @@ class UIInitMixin:
         self.min_shot_duration_var = tk.DoubleVar(value=DEFAULT_MIN_SHOT_DURATION)
         
         # 音频模型设置 - 初始默认值，由load_config覆盖
-        self.whisper_model_var = tk.StringVar(value="medium")
+        self.whisper_model_var = tk.StringVar(value="large-v3-turbo")
         
         # 云端大模型设置 - 初始默认值，由load_config覆盖
         self.cloud_llm_enabled_var = tk.BooleanVar(value=False)
         self.cloud_llm_provider_var = tk.StringVar(value="DeepSeek 深度求索")
         self.cloud_llm_api_key_var = tk.StringVar(value="")
-        self.cloud_llm_model_var = tk.StringVar(value="deepseek-chat")
+        self.cloud_llm_model_var = tk.StringVar(value="DeepSeek-V3 - 通用对话，性价比极高")
         self.cloud_llm_custom_url_var = tk.StringVar(value="")
         self.cloud_llm_status_var = tk.StringVar(value="❌ 未连接")
         self._cloud_selected_model_id = "deepseek-chat"
         self.cloud_asr_enabled_var = tk.BooleanVar(value=False)
         self.cloud_asr_api_key_var = tk.StringVar(value="")
+        self.cloud_asr_provider_var = tk.StringVar(value="OpenAI Whisper")
+        self.cloud_asr_model_var = tk.StringVar(value="Whisper-1 - OpenAI官方语音识别，多语言支持")
+        self.cloud_asr_custom_url_var = tk.StringVar(value="")
+        self._cloud_selected_asr_model_id = "whisper-1"
         
         self.cloud_image_enabled_var = tk.BooleanVar(value=False)
         self.cloud_image_provider_var = tk.StringVar(value="硅基流动 SiliconFlow")
         self.cloud_image_api_key_var = tk.StringVar(value="")
-        self.cloud_image_model_var = tk.StringVar(value="")
+        self.cloud_image_model_var = tk.StringVar(value="SDXL 1.0 - Stable Diffusion XL，高质量")
         self.cloud_image_custom_url_var = tk.StringVar(value="")
+        self._cloud_selected_image_model_id = "stabilityai/stable-diffusion-xl-base-1.0"
+        self.cloud_asr_status_var = tk.StringVar(value="❌ 未连接")
+        self.cloud_image_status_var = tk.StringVar(value="❌ 未连接")
         
         # 风格预设 - 预创建变量，确保load_config能恢复风格设置
         style_options = ["电影感", "纪录片风", "赛博朋克", "写实摄影", "皮克斯", "达芬奇", "油画", "多巴胺", "黑白线条", "吉卜力", "梵高", "日式动漫", "水彩"]
@@ -729,6 +736,7 @@ class UIInitMixin:
 
             cloud_img = getattr(self, '_cloud_img_enabled', False)
             cloud_llm = getattr(self, '_cloud_llm_enabled', False)
+            cloud_asr = getattr(self, '_cloud_asr_enabled', False)
 
             if cloud_img:
                 self._readiness['sd_api'] = True
@@ -736,13 +744,22 @@ class UIInitMixin:
                 model = getattr(self, '_cloud_img_model', '')
                 self.root.after(0, lambda: self.log(f"  [4/7] ✅ 云端图片服务已启用（{provider} / {model}）"))
             else:
-                self._check_sd_api_impl(silent=True)
-                sd_ok = getattr(self, '_sd_api_connected', False)
-                if sd_ok:
-                    self._readiness['sd_api'] = True
-                    self.root.after(0, lambda: self.log("  [4/7] ✅ Stable Diffusion API 已连接"))
-                else:
-                    self.root.after(0, lambda: self.log("  [4/7] ⚠️ Stable Diffusion API 未连接（图片生成不可用）"))
+                # 自动连接本地 SD API
+                try:
+                    sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+                    resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=5)
+                    if resp.status_code == 200:
+                        self._sd_api_connected = True
+                        self._readiness['sd_api'] = True
+                        if hasattr(self, 'sd_api_status_var'):
+                            self.sd_api_status_var.set("✅ 已连接")
+                        if hasattr(self, 'sd_api_status_label'):
+                            self.sd_api_status_label.config(foreground="green")
+                        self.root.after(0, lambda: self.log("  [4/7] ✅ Stable Diffusion API 已连接"))
+                    else:
+                        self.root.after(0, lambda: self.log("  [4/7] ⚠️ Stable Diffusion API 未连接（本地图片生成不可用，可启用云端生图）"))
+                except Exception:
+                    self.root.after(0, lambda: self.log("  [4/7] ⚠️ Stable Diffusion API 未连接（本地图片生成不可用，可启用云端生图）"))
 
             self.auto_connect_ollama(silent=True)
             from video_generator.ollama_client import is_ollama_available
@@ -757,7 +774,7 @@ class UIInitMixin:
                 ollama_model = self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else ''
                 self.root.after(0, lambda: self.log(f"  [5/7] ✅ Ollama 大模型已连接（{ollama_model}）"))
             else:
-                self.root.after(0, lambda: self.log("  [5/7] ⚠️ 大模型服务未连接（分镜生成不可用）"))
+                self.root.after(0, lambda: self.log("  [5/7] ⚠️ 大模型服务未连接（本地分镜不可用，可启用云端大模型）"))
 
             import shutil
             ffmpeg_found = False
@@ -779,12 +796,16 @@ class UIInitMixin:
                 whisper_cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
                 if os.path.isdir(whisper_cache):
                     has_whisper = any(f.endswith('.pt') for f in os.listdir(whisper_cache))
-            self._readiness['whisper_model'] = has_whisper
-            if has_whisper:
-                whisper_name = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'medium'
+            self._readiness['whisper_model'] = has_whisper or cloud_asr
+            if cloud_asr:
+                provider = getattr(self, '_cloud_asr_provider', '')
+                model = getattr(self, '_cloud_asr_model', '')
+                self.root.after(0, lambda: self.log(f"  [7/7] ✅ 云端语音识别已启用（{provider} / {model}）"))
+            elif has_whisper:
+                whisper_name = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else 'large-v3-turbo'
                 self.root.after(0, lambda: self.log(f"  [7/7] ✅ Whisper 语音识别模型已就绪（{whisper_name}）"))
             else:
-                self.root.after(0, lambda: self.log("  [7/7] ⚠️ Whisper 模型未下载（首次使用时将自动下载）"))
+                self.root.after(0, lambda: self.log("  [7/7] ⚠️ Whisper 模型未下载（本地语音识别不可用，可启用云端ASR）"))
 
             self.root.after(0, self._show_readiness_summary)
 
@@ -808,6 +829,11 @@ class UIInitMixin:
                 try:
                     self.root.after(0, self._update_membership_title)
                     self.root.after(0, self._refresh_auth_status_display)
+                except Exception:
+                    pass
+                # 周期性检测 SD API / Ollama / 后端健康状态
+                try:
+                    self._check_api_heartbeat()
                 except Exception:
                     pass
         threading.Thread(target=api_heartbeat, daemon=True).start()

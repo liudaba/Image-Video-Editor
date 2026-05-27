@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # Windows 下隐藏子进程的控制台窗口，防止蓝色命令框闪烁
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
+# subprocess 统一编码参数：避免 Windows 中文环境下 UnicodeDecodeError
+_SUBPROCESS_TEXT_KWARGS = {"encoding": "utf-8", "errors": "replace"}
+
 
 def _get_ffmpeg_bin():
     """获取FFmpeg可执行文件路径，优先环境变量，回退到打包目录"""
@@ -95,7 +98,7 @@ class HardwareAcceleratedRenderer:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-encoders'],
                 capture_output=True, text=True, timeout=3,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
             )
             stdout = result.stdout
             self._has_cuda = 'h264_nvenc' in stdout
@@ -153,7 +156,7 @@ class HardwareAcceleratedRenderer:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-filters'],
                 capture_output=True, text=True, timeout=3,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
             )
             return 'hwupload_cuda' in result.stdout
         except Exception:
@@ -164,7 +167,7 @@ class HardwareAcceleratedRenderer:
             result = subprocess.run(
                 ['nvidia-smi', '--query-gpu=gpu_name', '--format=csv,noheader'],
                 capture_output=True, text=True, timeout=5,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
             )
             gpu_name = result.stdout.strip().lower()
             if any(k in gpu_name for k in ['quadro', 'tesla', 'rtx a', 'a100', 'a10', 'a30', 'a40', 'l40']):
@@ -178,7 +181,7 @@ class HardwareAcceleratedRenderer:
             result = subprocess.run(
                 [_get_ffmpeg_bin(), '-hide_banner', '-h', 'encoder=h264_nvenc'],
                 capture_output=True, text=True, timeout=5,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
             )
             help_text = result.stdout
             options = {}
@@ -341,7 +344,8 @@ class HardwareAcceleratedRenderer:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS,
+                **_SUBPROCESS_TEXT_KWARGS
             )
 
             duration_pattern = re.compile(r'time=(\d+):(\d+):(\d+\.\d+)')
@@ -545,7 +549,8 @@ class HardwareAcceleratedRenderer:
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     universal_newlines=True,
-                    creationflags=_SUBPROCESS_FLAGS
+                    creationflags=_SUBPROCESS_FLAGS,
+                    **_SUBPROCESS_TEXT_KWARGS
                 )
                 processes.append(proc)
                 progress_data[i]['process'] = proc
@@ -706,7 +711,7 @@ class HardwareAcceleratedRenderer:
 
             merge_result = subprocess.run(
                 merge_cmd, capture_output=True, text=True, timeout=300,
-                creationflags=_SUBPROCESS_FLAGS
+                creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
             )
 
             if merge_result.returncode != 0:
@@ -854,7 +859,7 @@ class HardwareAcceleratedRenderer:
                 audio_file
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                                    creationflags=_SUBPROCESS_FLAGS)
+                                    creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS)
             data = json.loads(result.stdout)
             duration = float(data['format']['duration'])
             if duration <= 0:

@@ -34,9 +34,19 @@ logger = logging.getLogger("auto_updater")
 
 # 应用根目录
 if getattr(sys, "frozen", False):
+    # PyInstaller打包模式：exe所在目录
     _ROOT_DIR = Path(sys.executable).resolve().parent
 else:
-    _ROOT_DIR = Path(__file__).resolve().parent.parent
+    # 非打包模式：检测是否为便携版（内嵌Python）
+    # 便携版特征：python/python.exe 在当前目录下，且 run.py 存在于上级目录
+    _candidate = Path(__file__).resolve().parent.parent
+    _exe_dir = Path(sys.executable).resolve().parent
+    _exe_parent = _exe_dir.parent
+    # 如果python.exe在"python/"子目录中，且上级目录有run.py，则是便携版
+    if _exe_dir.name == "python" and (_exe_parent / "run.py").exists():
+        _ROOT_DIR = _exe_parent
+    else:
+        _ROOT_DIR = _candidate
 
 # 补丁下载缓存目录（不在temp中，避免断点续传文件被系统清理）
 _temp_base = os.getenv('TEMP') or os.getenv('TMP') or os.path.join(os.path.expanduser('~'), '.cache')

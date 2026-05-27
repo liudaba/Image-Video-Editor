@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 import time
 import sqlalchemy
@@ -308,6 +309,11 @@ app.include_router(payment.router)
 app.include_router(user.router)
 app.include_router(version.router)
 app.include_router(admin.router)
+
+# 静态文件服务：提供补丁包下载
+_static_dir = Path(__file__).parent / "static" / "patches"
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir.parent)), name="static")
 
 
 @app.get("/health")

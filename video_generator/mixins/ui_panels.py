@@ -417,11 +417,23 @@ class UIPanelsMixin:
         if not hasattr(self, 'cloud_llm_enabled_var'):
             self.cloud_llm_enabled_var = tk.BooleanVar(value=cloud_config.get("enabled", False))
         if not hasattr(self, 'cloud_llm_provider_var'):
-            self.cloud_llm_provider_var = tk.StringVar(value=cloud_config.get("provider", "deepseek"))
+            # 从配置中恢复服务商显示名（配置存的是ID）
+            llm_provider_id = cloud_config.get("provider", "deepseek")
+            llm_provider_name = PROVIDER_CONFIG.get(llm_provider_id, {}).get("name", "DeepSeek 深度求索")
+            self.cloud_llm_provider_var = tk.StringVar(value=llm_provider_name)
         if not hasattr(self, 'cloud_llm_api_key_var'):
             self.cloud_llm_api_key_var = tk.StringVar(value=cloud_config.get("api_key", ""))
         if not hasattr(self, 'cloud_llm_model_var'):
-            self.cloud_llm_model_var = tk.StringVar(value=cloud_config.get("model", "deepseek-chat"))
+            # 从配置中恢复模型显示名（配置存的是ID）
+            llm_model_id = cloud_config.get("model", "deepseek-chat")
+            llm_provider_id = cloud_config.get("provider", "deepseek")
+            llm_model_name = llm_model_id  # 默认用ID
+            for m in get_provider_models(llm_provider_id):
+                if m['id'] == llm_model_id:
+                    llm_model_name = f"{m['name']} - {m['desc']}"
+                    break
+            self.cloud_llm_model_var = tk.StringVar(value=llm_model_name)
+            self._cloud_selected_model_id = llm_model_id
         if not hasattr(self, 'cloud_llm_custom_url_var'):
             self.cloud_llm_custom_url_var = tk.StringVar(value=cloud_config.get("custom_base_url", ""))
 
@@ -487,30 +499,80 @@ class UIPanelsMixin:
         asr_section.pack(fill=tk.BOTH, expand=True)
 
         try:
-            from video_generator.cloud_llm_client import get_cloud_asr_config
+            from video_generator.cloud_llm_client import get_cloud_asr_config, ASR_PROVIDER_CONFIG, get_asr_provider_models
             asr_config = get_cloud_asr_config()
             asr_available = True
         except ImportError:
             asr_available = False
             asr_config = {}
+            ASR_PROVIDER_CONFIG = {}
 
         if not hasattr(self, 'cloud_asr_enabled_var'):
             self.cloud_asr_enabled_var = tk.BooleanVar(value=asr_config.get("enabled", False))
+        if not hasattr(self, 'cloud_asr_provider_var'):
+            # 从配置中恢复服务商名称
+            asr_provider_id = asr_config.get("provider", "openai")
+            asr_provider_name = ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get("name", "OpenAI Whisper") if asr_available else "OpenAI Whisper"
+            self.cloud_asr_provider_var = tk.StringVar(value=asr_provider_name)
         if not hasattr(self, 'cloud_asr_api_key_var'):
             self.cloud_asr_api_key_var = tk.StringVar(value=asr_config.get("api_key", ""))
+        if not hasattr(self, 'cloud_asr_model_var'):
+            # 从配置中恢复模型显示名（配置存的是ID）
+            asr_model_id = asr_config.get("model", "whisper-1")
+            asr_provider_id = asr_config.get("provider", "openai")
+            asr_model_name = asr_model_id  # 默认用ID
+            if asr_available:
+                for m in get_asr_provider_models(asr_provider_id):
+                    if m['id'] == asr_model_id:
+                        asr_model_name = f"{m['name']} - {m['desc']}"
+                        break
+            self.cloud_asr_model_var = tk.StringVar(value=asr_model_name)
+            self._cloud_selected_asr_model_id = asr_model_id
+        if not hasattr(self, 'cloud_asr_custom_url_var'):
+            self.cloud_asr_custom_url_var = tk.StringVar(value=asr_config.get("custom_base_url", ""))
 
         asr_enable_frame = ttk.Frame(asr_section)
         asr_enable_frame.pack(fill=tk.X, pady=1)
         asr_enable_chk = ttk.Checkbutton(asr_enable_frame, text="启用云端语音识别（替代本地Whisper）", variable=self.cloud_asr_enabled_var, style="Cloud.TCheckbutton")
         asr_enable_chk.pack(anchor=tk.W, padx=2)
 
+        # 服务商选择
+        if asr_available:
+            asr_provider_frame = ttk.Frame(asr_section)
+            asr_provider_frame.pack(fill=tk.X, pady=1)
+            ttk.Label(asr_provider_frame, text="服务商:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+            asr_provider_names = [pcfg["name"] for pcfg in ASR_PROVIDER_CONFIG.values()]
+            self.cloud_asr_provider_combo = ttk.Combobox(asr_provider_frame, textvariable=self.cloud_asr_provider_var,
+                                                          values=asr_provider_names, state="readonly",
+                                                          font=('Microsoft YaHei', large_font_size), width=18)
+            self.cloud_asr_provider_combo.pack(side=tk.LEFT, padx=2, pady=1)
+            self.cloud_asr_provider_combo.bind("<<ComboboxSelected>>", self._on_asr_provider_changed)
+
+            # 模型选择
+            asr_model_frame = ttk.Frame(asr_section)
+            asr_model_frame.pack(fill=tk.X, pady=1)
+            ttk.Label(asr_model_frame, text="模型:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+            self.cloud_asr_model_combo = ttk.Combobox(asr_model_frame, textvariable=self.cloud_asr_model_var,
+                                                       state="readonly", font=('Microsoft YaHei', large_font_size), width=25)
+            self.cloud_asr_model_combo.pack(side=tk.LEFT, padx=2, pady=1)
+            self.cloud_asr_model_combo.bind("<<ComboboxSelected>>", self._on_asr_model_changed)
+            # 初始化模型列表
+            self._update_asr_model_dropdown()
+
         asr_key_frame = ttk.Frame(asr_section)
         asr_key_frame.pack(fill=tk.X, pady=1)
+        asr_key_label_text = "Key:" if not asr_available or asr_config.get("provider", "openai") != "tencent" else "Key(Si:Sk):"
         ttk.Label(asr_key_frame, text="Key:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
         asr_key_entry = ttk.Entry(asr_key_frame, textvariable=self.cloud_asr_api_key_var, font=('Microsoft YaHei', large_font_size), show="*")
         asr_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
         asr_toggle_btn = ttk.Button(asr_key_frame, text="👁", width=3, command=lambda: self._toggle_entry_visibility(asr_key_entry), style="Small.TButton")
         asr_toggle_btn.pack(side=tk.LEFT, padx=1)
+
+        # 自定义API地址
+        asr_url_frame = ttk.Frame(asr_section)
+        asr_url_frame.pack(fill=tk.X, pady=1)
+        ttk.Label(asr_url_frame, text="自定义:", width=8, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, padx=2)
+        ttk.Entry(asr_url_frame, textvariable=self.cloud_asr_custom_url_var, font=('Microsoft YaHei', large_font_size)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=1)
 
         asr_btn_frame = ttk.Frame(asr_section)
         asr_btn_frame.pack(fill=tk.X, pady=1)
@@ -539,11 +601,24 @@ class UIPanelsMixin:
         if not hasattr(self, 'cloud_image_enabled_var'):
             self.cloud_image_enabled_var = tk.BooleanVar(value=img_config.get("enabled", False))
         if not hasattr(self, 'cloud_image_provider_var'):
-            self.cloud_image_provider_var = tk.StringVar(value=img_config.get("provider", "siliconflow"))
+            # 从配置中恢复服务商显示名（配置存的是ID）
+            img_provider_id = img_config.get("provider", "siliconflow")
+            img_provider_name = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get("name", "硅基流动 SiliconFlow") if img_available else "硅基流动 SiliconFlow"
+            self.cloud_image_provider_var = tk.StringVar(value=img_provider_name)
         if not hasattr(self, 'cloud_image_api_key_var'):
             self.cloud_image_api_key_var = tk.StringVar(value=img_config.get("api_key", ""))
         if not hasattr(self, 'cloud_image_model_var'):
-            self.cloud_image_model_var = tk.StringVar(value=img_config.get("model", "stabilityai/stable-diffusion-xl-base-1.0"))
+            # 从配置中恢复模型显示名（配置存的是ID）
+            img_model_id = img_config.get("model", "stabilityai/stable-diffusion-xl-base-1.0")
+            img_provider_id = img_config.get("provider", "siliconflow")
+            img_model_name = img_model_id  # 默认用ID
+            if img_available:
+                for m in get_image_provider_models(img_provider_id):
+                    if m['id'] == img_model_id:
+                        img_model_name = f"{m['name']} - {m['desc']}"
+                        break
+            self.cloud_image_model_var = tk.StringVar(value=img_model_name)
+            self._cloud_selected_image_model_id = img_model_id
         if not hasattr(self, 'cloud_image_custom_url_var'):
             self.cloud_image_custom_url_var = tk.StringVar(value=img_config.get("custom_base_url", ""))
 
@@ -609,7 +684,7 @@ class UIPanelsMixin:
         self._whisper_label = ttk.Label(whisper_frame, text="语音模型:", width=10, font=('Microsoft YaHei', large_font_size))
         self._whisper_label.pack(side=tk.LEFT, padx=2)
 
-        whisper_options = ["small", "medium", "large"]
+        whisper_options = ["medium", "large-v3", "large-v3-turbo"]
         self._whisper_combo = ttk.Combobox(whisper_frame, textvariable=self.whisper_model_var, values=whisper_options, state="readonly", font=('Microsoft YaHei', large_font_size))
         self._whisper_combo.pack(fill=tk.X, padx=2, pady=1)
 
@@ -663,6 +738,7 @@ class UIPanelsMixin:
 
         self.cloud_llm_enabled_var.trace_add('write', self._on_cloud_llm_toggle_ui)
         self.cloud_asr_enabled_var.trace_add('write', self._on_cloud_asr_toggle_ui)
+        self.cloud_image_enabled_var.trace_add('write', self._on_cloud_image_toggle_ui)
         self._update_local_model_panel_state()
 
         # ==================== 并发设置 ====================

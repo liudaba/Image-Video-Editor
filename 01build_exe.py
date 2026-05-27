@@ -25,8 +25,12 @@ OUTPUT_DIR = os.path.join(BASE_DIR, 'dist', 'VideoGenerator')
 # ═══════════════════════════════════════════════════════════════
 
 def clean_build_dirs():
-    """清理构建和输出目录"""
-    dirs = ['build', 'dist', '__pycache__']
+    """清理构建和输出目录（仅清理EXE版相关目录，不影响便携版）"""
+    dirs = ['build', '__pycache__']
+    # 只清理EXE版自己的输出目录
+    exe_output = os.path.join('dist', 'VideoGenerator')
+    if os.path.exists(os.path.join(BASE_DIR, exe_output)):
+        dirs.append(exe_output)
     for d in dirs:
         p = os.path.join(BASE_DIR, d)
         if os.path.exists(p):
@@ -479,10 +483,17 @@ def _clean_output():
         '.env', 'license.json', '.secret_key', '.license_sign_key',
         '.key_salt', '.login_creds', '.license_verify_key',
         '.license_cache', '.license_credentials', '.unlocked',
-        'generate_signing_keys.py', 'check_packing_safety.py',
-        'VideoGenerator.spec', '01build_exe.py', 'pyarmor_config.json',
+        'generate_signing_keys.py', 'generate_config.py', 'setup_config.py',
+        'check_packing_safety.py',
+        'VideoGenerator.spec', '01build_exe.py', '02build_portable.py', 'pyarmor_config.json',
         'run.py', 'run.pyw', 'requirements.txt',
-        'sync_to_server.py', 'pack_patch.py',
+        'sync_to_server.py', 'pack_patch.py', 'release_helper.py',
+        '配置信息.txt', '快速启动指南.txt',
+        # 测试脚本
+        '_test_local_mode.py', '_test_quick_verify.py',
+        '_test_comprehensive.py', '_full_test.py',
+        '_test_deep_bugs.py', '_test_deep_bugs_v2.py', '_test_deep_bugs_v3.py',
+        '_test_out_of_box.py', '_test_linkage.py', '_test_ratelimit_fix.py',
     ]
 
     removed = 0
@@ -500,6 +511,15 @@ def _clean_output():
         for pem in glob.glob(os.path.join(base, '*.pem')):
             if os.path.basename(pem) != '.license_verify_pubkey.pem':
                 os.remove(pem)
+                removed += 1
+
+    # 清理 .db / .db-shm / .db-wal 文件
+    for base in [OUTPUT_DIR, os.path.join(OUTPUT_DIR, '_internal')]:
+        if not os.path.isdir(base):
+            continue
+        for ext in ['*.db', '*.db-shm', '*.db-wal']:
+            for db_file in glob.glob(os.path.join(base, ext)):
+                os.remove(db_file)
                 removed += 1
 
     if removed:
@@ -550,7 +570,66 @@ def verify_output():
         print("  ❌ config.json 格式错误！")
         sys.exit(1)
 
-    # 5.3 敏感文件检查
+    # 5.3 验证 _internal 中关键模块存在
+    internal_dir = os.path.join(OUTPUT_DIR, '_internal')
+    if os.path.isdir(internal_dir):
+        # 检查 video_generator 包是否完整
+        vg_dir = os.path.join(internal_dir, 'video_generator')
+        if os.path.isdir(vg_dir):
+            vg_files = [f for f in os.listdir(vg_dir) if f.endswith('.py') or f.endswith('.pyd')]
+            print(f"  ✅ video_generator 包 ({len(vg_files)} 个文件)")
+        else:
+            # PyInstaller 可能将模块编译到 PYZ 中，检查 base_library.zip
+            pyz_found = False
+            for f in os.listdir(internal_dir):
+                if f.endswith('.pyz') or f == 'base_library.zip':
+                    pyz_found = True
+            if pyz_found:
+                print("  ✅ PYZ/base_library.zip 存在（模块已打包）")
+            else:
+                print("  ❌ video_generator 包缺失且无 PYZ 归档！")
+                sys.exit(1)
+
+        # 检查关键第三方库 DLL/pyd
+        critical_libs = {
+            'torch': ['torch', 'torch_python'],
+            'whisper': ['whisper'],
+            'numpy': ['numpy', 'numpy_core'],
+            'cryptography': ['cryptography', '_rust'],
+            'PIL': ['PIL', '_imaging'],
+            'moviepy': ['moviepy'],
+            'tiktoken': ['tiktoken', '_tiktoken'],
+        }
+        internal_files = set()
+        for root, dirs, files in os.walk(internal_dir):
+            for f in files:
+                internal_files.add(f.lower())
+
+        for lib, patterns in critical_libs.items():
+            found = any(any(p.lower() in f for p in patterns) for f in internal_files)
+            if found:
+                print(f"  ✅ {lib} 运行时文件存在")
+            else:
+                print(f"  ⚠️ {lib} 运行时文件未找到（可能在 PYZ 中）")
+
+        # 检查 ffmpeg 目录
+        ffmpeg_dir = os.path.join(OUTPUT_DIR, 'ffmpeg')
+        if os.path.isdir(ffmpeg_dir) and os.path.exists(os.path.join(ffmpeg_dir, 'ffmpeg.exe')):
+            print("  ✅ FFmpeg 已包含")
+        else:
+            print("  ⚠️ FFmpeg 未包含（视频渲染将不可用）")
+
+        # 检查 whisper_models 目录
+        whisper_dir = os.path.join(OUTPUT_DIR, 'whisper_models')
+        if os.path.isdir(whisper_dir) and any(f.endswith('.pt') for f in os.listdir(whisper_dir)):
+            print("  ✅ Whisper 模型已包含")
+        else:
+            print("  ⚠️ Whisper 模型未包含（首次使用需下载）")
+    else:
+        print("  ❌ _internal 目录不存在！")
+        sys.exit(1)
+
+    # 5.4 敏感文件检查
     sensitive = [
         '.env', 'license.json', '.secret_key', '.license_verify_key',
         'generate_signing_keys.py',
@@ -564,14 +643,18 @@ def verify_output():
     if not found_leak:
         print("  ✅ 无敏感文件泄露")
 
-    # 5.4 输出大小
+    # 5.5 输出大小
     total_size = 0
     for root, dirs, files in os.walk(OUTPUT_DIR):
         for f in files:
             fp = os.path.join(root, f)
             if os.path.exists(fp):
                 total_size += os.path.getsize(fp)
-    print(f"  📦 打包总大小: {total_size / (1024*1024):.0f}MB")
+    size_mb = total_size / (1024*1024)
+    print(f"  📦 打包总大小: {size_mb:.0f}MB")
+    if size_mb < 100:
+        print("  ❌ 打包体积过小（<100MB），很可能缺少关键组件！")
+        sys.exit(1)
     print("✅ 验证通过")
 
 

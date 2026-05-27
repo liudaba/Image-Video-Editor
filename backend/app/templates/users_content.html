@@ -426,6 +426,13 @@
                             <small class="text-muted">加载中...</small>
                         </div>
                     </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">绑定设备管理</label>
+                        <div id="user-devices-list" style="max-height:200px;overflow-y:auto;">
+                            <small class="text-muted">加载中...</small>
+                        </div>
+                    </div>
                 </form>
             `;
             
@@ -437,6 +444,8 @@
             
             // 加载心跳历史
             loadUserHeartbeatHistory(userId);
+            // 加载设备列表
+            loadUserDevices(userId);
             
             document.getElementById('confirmModalBtn').onclick = async function() {
                 try {
@@ -577,6 +586,49 @@
             container.innerHTML = html;
         } catch (error) {
             container.innerHTML = '<small class="text-danger">加载失败</small>';
+        }
+    }
+
+    // 加载用户绑定设备列表
+    async function loadUserDevices(userId) {
+        const container = document.getElementById('user-devices-list');
+        if (!container) return;
+        try {
+            const data = await apiRequest(`/api/admin/users/${userId}/devices`);
+            if (!data.devices || data.devices.length === 0) {
+                container.innerHTML = '<small class="text-muted">暂无绑定设备</small>';
+                return;
+            }
+            let html = `<small class="text-muted mb-2 d-block">已绑定 ${data.current_count}/${data.max_devices} 台设备</small>`;
+            html += '<table class="table table-sm table-bordered" style="font-size:0.8em"><thead><tr><th>指纹</th><th>最后活跃</th><th>绑定时间</th><th>操作</th></tr></thead><tbody>';
+            data.devices.forEach(d => {
+                const fp = d.fingerprint ? d.fingerprint.substring(0, 16) + '...' : '-';
+                html += `<tr><td title="${escapeHtml(d.fingerprint || '')}">${fp}</td><td>${formatDate(d.last_seen)}</td><td>${formatDate(d.created_at)}</td><td><button class="btn btn-sm btn-outline-danger" onclick="unbindDevice(${userId}, '${escapeHtml(d.fingerprint)}')">解绑</button></td></tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        } catch (error) {
+            container.innerHTML = '<small class="text-danger">加载失败</small>';
+        }
+    }
+
+    // 解绑设备
+    async function unbindDevice(userId, fingerprint) {
+        if (!confirm('确定要解绑此设备吗？解绑后该设备上的客户端将需要重新登录。')) return;
+        try {
+            const result = await apiRequest(`/api/admin/users/${userId}/unbind_device`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({fingerprint: fingerprint}),
+            });
+            if (result.success) {
+                showSuccess('设备已解绑');
+                loadUserDevices(userId);
+            } else {
+                showError(result.message || '解绑失败');
+            }
+        } catch (error) {
+            showError('解绑失败: ' + error.message);
         }
     }
 </script>

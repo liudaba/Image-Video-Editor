@@ -144,12 +144,25 @@ def call_cloud_image(prompt, negative_prompt="", width=1024, height=576,
         return None, None
 
     provider_id = config.get("provider", "siliconflow")
+    if provider_id not in IMAGE_PROVIDER_CONFIG:
+        if log_callback:
+            log_callback(f"⚠️ 未知的云端生图服务商: {provider_id}，请检查配置")
+        return None, None
     model = config.get("model", "")
     if not model:
         provider = IMAGE_PROVIDER_CONFIG.get(provider_id, {})
         model = provider.get("default_model", "")
+    if not model:
+        # 从模型列表中取第一个
+        models = IMAGE_PROVIDER_CONFIG.get(provider_id, {}).get("models", [])
+        if models:
+            model = models[0]["id"]
+    if not model:
+        if log_callback:
+            log_callback("⚠️ 云端生图模型未指定，请选择模型")
+        return None, None
 
-    provider = IMAGE_PROVIDER_CONFIG.get(provider_id, {})
+    provider = IMAGE_PROVIDER_CONFIG[provider_id]
     api_format = provider.get("api_format", "openai_image")
 
     if api_format == "openai_image":
@@ -290,7 +303,15 @@ def _call_stability_v2(prompt, negative_prompt, width, height,
                         api_key, provider_id, model, log_callback=None):
     """调用 Stability AI v2beta API 格式的云端生图"""
     base_url = get_effective_image_base_url()
-    url = f"{base_url}/stable-image/generate/sd3"
+
+    # 根据模型选择正确的endpoint
+    endpoint_map = {
+        "stable-diffusion-xl": "sdxl",
+        "stable-diffusion-3": "sd3",
+        "stable-image-core": "core",
+    }
+    endpoint = endpoint_map.get(model, "sd3")
+    url = f"{base_url}/stable-image/generate/{endpoint}"
 
     max_size = 1024
     adj_w = min(width, max_size)
@@ -304,7 +325,8 @@ def _call_stability_v2(prompt, negative_prompt, width, height,
         "output_format": "png",
         "aspect_ratio": _get_aspect_ratio(adj_w, adj_h),
     }
-    if negative_prompt:
+    # core endpoint 不支持 negative_prompt，sdxl 和 sd3 支持
+    if negative_prompt and endpoint in ("sdxl", "sd3"):
         form_data["negative_prompt"] = negative_prompt
 
     headers = {

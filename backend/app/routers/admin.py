@@ -1514,3 +1514,60 @@ async def get_user_heartbeat_history(
             for l in logs
         ],
     }
+
+
+@router.get("/users/{user_id}/devices")
+async def get_user_devices(
+    user_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """查看用户绑定的设备列表"""
+    result = await db.execute(
+        select(MachineBinding).where(MachineBinding.user_id == user_id)
+        .order_by(desc(MachineBinding.last_seen))
+    )
+    bindings = result.scalars().all()
+    return {
+        "user_id": user_id,
+        "max_devices": 3,
+        "current_count": len(bindings),
+        "devices": [
+            {
+                "id": b.id,
+                "fingerprint": b.fingerprint,
+                "last_seen": b.last_seen.isoformat() if b.last_seen else None,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+            }
+            for b in bindings
+        ],
+    }
+
+
+class UnbindDeviceRequest(BaseModel):
+    fingerprint: str = Field(..., min_length=1, max_length=128)
+
+
+@router.post("/users/{user_id}/unbind_device")
+async def unbind_device(
+    user_id: int,
+    body: UnbindDeviceRequest,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """解绑用户设备，允许用户在新设备上登录"""
+    result = await db.execute(
+        select(MachineBinding).where(
+            MachineBinding.user_id == user_id,
+            MachineBinding.fingerprint == body.fingerprint,
+        ).with_for_update()
+    )
+    binding = result.scalar_one_or_none()
+    if not binding:
+        raise HTTPException(status_code=404, detail="设备绑定记录不存在")
+
+    await db.delete(binding)
+    await _log_audit(db, user, "unbind_device", f"user_id={user_id}, fingerprint={body.fingerprint[:16]}...", request)
+    await db.commit()
+    return {"success": True, "message": "设备已解绑"}

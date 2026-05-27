@@ -236,6 +236,19 @@ class ImagesMixin:
 
             if cloud_image_enabled:
                 self._generate_images_cloud()
+                # 云端生图全部失败时，尝试回退本地SD
+                if not self.state_manager.get('images', {}).get('generated', False):
+                    self.log("⚠️ 云端生图全部失败，尝试回退到本地SD...")
+                    try:
+                        api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
+                        response = get_http_session().get(f"{api_url}/sdapi/v1/sd-models", timeout=5)
+                        if response.status_code == 200:
+                            self.log("✅ 检测到本地SD可用，切换到本地生图")
+                            self._generate_images_local()
+                        else:
+                            self.log("❌ 本地SD也不可用，请检查云端配置或启动本地SD")
+                    except Exception as fallback_err:
+                        self.log(f"❌ 本地SD不可用: {fallback_err}")
             else:
                 self._generate_images_local()
         except Exception as e:
@@ -260,13 +273,22 @@ class ImagesMixin:
         from PIL import Image
         from io import BytesIO
 
+        was_on_gpu = self._whisper_on_gpu
         self._safe_release_whisper_gpu()
-        if not self._whisper_on_gpu:
+        if was_on_gpu:
             self.log("   🧹 Whisper GPU 显存已释放（云端生图模式）")
+        # 仅在云端LLM也启用时才卸载Ollama，避免混合模式（LLM=本地, 生图=云端）下误卸本地模型
         try:
-            self._unload_ollama_models(log_prefix="   ☁️ ")
-        except Exception:
-            pass
+            from video_generator.ollama_client import is_cloud_llm_active
+            if is_cloud_llm_active():
+                self._unload_ollama_models(log_prefix="   ☁️ ")
+            else:
+                self.log("   💡 本地LLM模式，保留Ollama模型")
+        except ImportError:
+            try:
+                self._unload_ollama_models(log_prefix="   ☁️ ")
+            except Exception:
+                pass
 
         if not self.shots_data:
             shots_file = os.path.join(self.output_dir, "shots_data.json")
@@ -730,8 +752,9 @@ class ImagesMixin:
         # ========== 步骤4: 预取流水线生成图像 ==========
         if tasks:
             self.log("")
+            was_on_gpu = self._whisper_on_gpu
             self._safe_release_whisper_gpu()
-            if not self._whisper_on_gpu:
+            if was_on_gpu:
                 self.log("   🧹 Whisper GPU 显存已释放")
                 
             try:

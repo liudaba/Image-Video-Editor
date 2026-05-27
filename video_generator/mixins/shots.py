@@ -161,9 +161,28 @@ _SIMPLIFIED_TO_TRADITIONAL.update({
 
 _TRADITIONAL_TO_SIMPLIFIED = {v: k for k, v in _SIMPLIFIED_TO_TRADITIONAL.items() if k != v}
 
+# 尝试使用opencc进行更完整的繁简转换
+_opencc_converter = None
+_opencc_available = False
+try:
+    import opencc
+    _opencc_converter = opencc.OpenCC('t2s')
+    _opencc_available = True
+except (ImportError, Exception):
+    _opencc_available = False
+
 def _ensure_simplified_chinese(text):
+    """将繁体中文转换为简体中文
+    
+    优先使用opencc库（覆盖完整、准确），回退到手动映射字典。
+    """
     if not text:
         return text
+    if _opencc_available and _opencc_converter:
+        try:
+            return _opencc_converter.convert(text)
+        except Exception:
+            pass
     return ''.join(_TRADITIONAL_TO_SIMPLIFIED.get(c, c) for c in text)
 
 _ENTITY_COUNTRY_MAPPING = {
@@ -360,6 +379,31 @@ _TRANSLATION_MAPPING = {
     '合法性': 'legitimacy', '崩盘': 'collapse',
     '难民': 'refugee', '流亡': 'exile',
     '审判': 'trial', '司法': 'judiciary',
+    # 经济/金融/就业
+    '经济': 'economy', '金融': 'finance', '股票': 'stock market',
+    '投资': 'investment', '杠杆': 'leverage', '资金': 'capital, funds',
+    '资金链': 'capital chain', '现金流': 'cash flow',
+    '崩盘': 'market crash', '通胀': 'inflation',
+    '裁员': 'layoff, job cuts', '就业': 'employment', '失业': 'unemployment',
+    '工资': 'wage, salary', '存款': 'savings, deposit',
+    '房贷': 'mortgage', '消费': 'consumption', '收入': 'income',
+    '退休': 'retirement', '养老': 'elderly care, pension',
+    '储蓄': 'savings', '保险': 'insurance',
+    '柴米油盐': 'daily necessities', '物价': 'commodity prices',
+    '岗位': 'job position', '替代': 'replacement, displacement',
+    '自动化': 'automation', '算法': 'algorithm',
+    # AI/科技
+    '人工智能': 'artificial intelligence', '芯片': 'microchip',
+    '数字化': 'digitalization', '编程': 'programming',
+    '翻译': 'translation', '设计': 'design',
+    '机器人': 'robot', '互联网': 'internet',
+    # 情绪/基调补充
+    '冷静': 'calm, composed', '坚定': 'firm, resolute',
+    '审慎': 'prudent, cautious', '务实': 'pragmatic',
+    '理性': 'rational', '思辨': 'contemplative',
+    '贪婪': 'greedy', '算计': 'calculating',
+    '危急': 'critical, dire', '动荡': 'turbulent',
+    '阴沉': 'gloomy', '沉闷': 'dull, oppressive',
     '严肃': 'serious, solemn', '紧张': 'tense, intense', '危急': 'critical, urgent', '贪婪': 'greedy, avaricious', '压抑': 'oppressive, stifling', '绝望': 'desperate, hopeless', '阴沉': 'gloomy, sinister', '动荡': 'turbulent, volatile', '悲凉': 'desolate, sorrowful', '算计': 'calculating, scheming', '沉闷': 'dull, stifling', '思辨': 'contemplative, thoughtful', '激昂': 'passionate, stirring',
     '紧张, 危急': 'critical, urgent', '紧张, 贪婪': 'greedy, intense', '紧张, 压抑': 'oppressive, stifling', '紧张, 绝望': 'desperate, hopeless', '紧张, 阴沉': 'gloomy, sinister', '紧张, 动荡': 'turbulent, volatile', '紧张, 悲凉': 'desolate, sorrowful', '紧张, 算计': 'calculating, scheming', '紧张, 沉闷': 'dull, stifling', '紧张, 思辨': 'contemplative, thoughtful',
     '严肃, 冷峻': 'stern, austere', '严肃, 庄重': 'solemn, dignified', '严肃, 审慎': 'prudent, measured', '严肃, 沉思': 'pensive, reflective', '严肃, 凛然': 'grave, formidable',
@@ -382,6 +426,41 @@ _TRANSLATION_MAPPING = {
     '后路': 'retreat route', '退路': 'way out',
     '金山': 'gold mountain, wealth', '肥差': 'lucrative post',
     '食品': 'food supplies', '底层': 'grassroots, bottom class',
+    # 通用生活/日常领域（确保任何主题都有基础翻译覆盖）
+    '厨房': 'kitchen', '食材': 'ingredients', '烹饪': 'cooking',
+    '菜': 'dish, cuisine', '肉': 'meat', '蔬菜': 'vegetables',
+    '水果': 'fruit', '米饭': 'rice', '面条': 'noodles',
+    '汤': 'soup', '调料': 'seasoning', '刀': 'knife',
+    '锅': 'pot, pan', '碗': 'bowl', '盘子': 'plate',
+    '烤箱': 'oven', '冰箱': 'refrigerator',
+    # 旅游/风光
+    '湖泊': 'lake', '瀑布': 'waterfall', '秋色': 'autumn colors',
+    '山峰': 'mountain peak', '峡谷': 'canyon, gorge',
+    '海滩': 'beach', '岛屿': 'island', '日出': 'sunrise',
+    '日落': 'sunset', '云海': 'sea of clouds', '雪景': 'snowscape',
+    '花海': 'flower field', '草原': 'grassland, prairie',
+    '古镇': 'ancient town', '寺庙': 'temple', '教堂': 'church',
+    '城堡': 'castle', '宫殿': 'palace',
+    # 情感/生活
+    '温馨': 'warm, cozy', '轻松': 'relaxed, lighthearted',
+    '浪漫': 'romantic', '幸福': 'happy, blissful',
+    '孤独': 'lonely, solitary', '思念': 'missing, longing',
+    '回忆': 'memory, reminiscence', '成长': 'growth, coming of age',
+    '奋斗': 'struggle, striving', '梦想': 'dream, aspiration',
+    '家庭': 'family', '朋友': 'friend', '爱情': 'love',
+    '孩子': 'child', '母亲': 'mother', '父亲': 'father',
+    # 教育/知识
+    '课堂': 'classroom', '考试': 'examination', '毕业': 'graduation',
+    '书籍': 'books', '知识': 'knowledge', '智慧': 'wisdom',
+    # 健康/运动
+    '跑步': 'running', '游泳': 'swimming', '瑜伽': 'yoga',
+    '健身': 'fitness', '健康': 'health',
+    # 自然/环境
+    '雨': 'rain', '雪': 'snow', '风': 'wind',
+    '雷': 'thunder', '彩虹': 'rainbow', '雾': 'fog, mist',
+    '星空': 'starry sky', '月亮': 'moon', '阳光': 'sunlight',
+    '树': 'tree', '花': 'flower', '草': 'grass',
+    '河': 'river', '溪': 'stream', '泉': 'spring',
 }
 
 _COMMON_ASR_ERROR_DICT = {
@@ -453,6 +532,40 @@ _COMMON_ASR_ERROR_DICT = {
     '约旦失去': '一旦失去',
     '北韩有着': '北约有着',
     '两个泰国': '两个大国',
+    # 日常/经济/就业常见ASR错误
+    '柴米油眼': '柴米油盐',
+    '资金炼': '资金链',
+    '存购': '存够',
+    '行一行': '心一横',
+    '报复梦': '暴富梦',
+    '内联储': '美联储',
+    '联储': '联储',
+    '加杠': '加杠杆',
+    '去杠': '去杠杆',
+    '现壮': '现状',
+    '保住现': '保持现',
+    '稳住现': '稳住现状',
+    '就也': '就业',
+    '岗位被': '岗位被',
+    '替代岗': '替代岗位',
+    '裁圆': '裁员',
+    '失也': '失业',
+    '工姿': '工资',
+    '存坎': '存款',
+    '房贷压': '房贷压力',
+    '消费降': '消费降级',
+    '收入减': '收入减少',
+    '退修': '退休',
+    '养劳': '养老',
+    '储需': '储蓄',
+    '保险杠': '保险杠',
+    '保显': '保险',
+    '柴米油': '柴米油盐',
+    '油盐酱': '油盐酱醋',
+    '暴复梦': '暴富梦',
+    '报富梦': '暴富梦',
+    '金炼断了': '资金链断了',
+    '资金炼断了': '资金链断了',
 }
 
 def _levenshtein_distance(s1, s2):
@@ -472,33 +585,61 @@ def _levenshtein_distance(s1, s2):
     return prev_row[-1]
 
 def _auto_correct_asr(text, known_entities):
+    """基于已知实体的编辑距离ASR纠错
+    
+    改进：支持2字实体纠错（如"经济"、"就业"），
+    但对2字实体要求更严格的匹配（编辑距离必须为1且首字相同），
+    避免误纠错。
+    """
     if not text or not known_entities:
         return text
-    filtered_entities = {e for e in known_entities if len(e) >= 3}
-    if not filtered_entities:
-        return text
+    
+    # 分离2字实体和3字以上实体
+    short_entities = {e for e in known_entities if len(e) == 2}
+    long_entities = {e for e in known_entities if len(e) >= 3}
+    
     corrected = text
-    entity_lens = set(len(e) for e in filtered_entities)
-    for elen in sorted(entity_lens, reverse=True):
-        for i in range(len(text) - elen + 1):
-            word = text[i:i+elen]
-            if not re.match(r'^[\u4e00-\u9fff]+$', word):
-                continue
-            if word in filtered_entities:
-                continue
-            for entity in filtered_entities:
-                if len(entity) != elen:
+    
+    # 先处理长实体（3字以上），逻辑不变
+    if long_entities:
+        entity_lens = set(len(e) for e in long_entities)
+        for elen in sorted(entity_lens, reverse=True):
+            for i in range(len(text) - elen + 1):
+                word = text[i:i+elen]
+                if not re.match(r'^[\u4e00-\u9fff]+$', word):
                     continue
+                if word in long_entities:
+                    continue
+                for entity in long_entities:
+                    if len(entity) != elen:
+                        continue
+                    dist = _levenshtein_distance(word, entity)
+                    if len(entity) <= 3:
+                        max_dist = 1
+                    elif len(entity) <= 5:
+                        max_dist = 1
+                    else:
+                        max_dist = 2
+                    if 0 < dist <= max_dist:
+                        corrected = corrected.replace(word, entity)
+                        break
+    
+    # 处理2字实体：要求首字相同且编辑距离为1（同音/近音替换）
+    if short_entities:
+        for i in range(len(corrected) - 1):
+            word = corrected[i:i+2]
+            if not re.match(r'^[\u4e00-\u9fff]{2}$', word):
+                continue
+            if word in short_entities:
+                continue
+            for entity in short_entities:
+                if word[0] != entity[0]:
+                    continue  # 首字必须相同
                 dist = _levenshtein_distance(word, entity)
-                if len(entity) <= 3:
-                    max_dist = 1
-                elif len(entity) <= 5:
-                    max_dist = 1
-                else:
-                    max_dist = 2
-                if 0 < dist <= max_dist:
-                    corrected = corrected.replace(word, entity)
+                if dist == 1:
+                    corrected = corrected[:i] + entity + corrected[i+2:]
                     break
+    
     return corrected
 
 def _fix_whisper_repeated_chars(text):
@@ -1962,6 +2103,33 @@ class ShotsMixin:
             score -= 0.08
         elif dup_count >= 1:
             score -= 0.04
+        
+        # 惩罚纯模板化prompt：如果prompt只包含通用模板词而无具体场景描述
+        _template_only_words = {
+            'geopolitical', 'cinematic lighting', 'film grain', 'documentary',
+            'photorealistic', 'raw photo', 'dslr', 'masterpiece', 'best quality',
+            'ultra detailed', '8k', 'high resolution', 'dramatic lighting',
+            'natural lighting', 'soft ambient', 'balanced composition',
+        }
+        _concrete_scene_words = {
+            'office', 'building', 'street', 'room', 'courtroom', 'military base',
+            'border', 'refugee', 'protest', 'election', 'stock exchange',
+            'bank', 'factory', 'hospital', 'school', 'market', 'port',
+            'harbor', 'airport', 'prison', 'palace', 'parliament', 'war zone',
+            'battlefield', 'oil refinery', 'desert', 'forest', 'ocean',
+            'leader', 'soldier', 'diplomat', 'crowd', 'refugees', 'workers',
+            'ai', 'algorithm', 'computer', 'screen', 'code', 'data',
+            'chart', 'money', 'cash', 'wallet', 'document', 'contract',
+        }
+        prompt_lower_for_template = prompt_en.lower()
+        template_hits = sum(1 for w in _template_only_words if w in prompt_lower_for_template)
+        concrete_hits = sum(1 for w in _concrete_scene_words if w in prompt_lower_for_template)
+        if template_hits >= 4 and concrete_hits == 0:
+            score -= 0.15  # 纯模板无具体场景，大幅扣分
+        elif template_hits >= 3 and concrete_hits == 0:
+            score -= 0.10
+        elif concrete_hits >= 2:
+            score += 0.08  # 有具体场景描述，加分
 
         return round(max(0.0, min(1.0, score)), 2)
 
@@ -1977,6 +2145,8 @@ class ShotsMixin:
             '博弈|棋局|筹码|赌|牌': '紧张, 算计',
             '平衡|稳定|喘息|拉锯|维持': '紧张, 沉闷',
             '救|救赎|深思|问题': '紧张, 思辨',
+            '希望|出路|机遇|转机|曙光|突破': '冷静, 坚定',
+            '建议|应该|保持|稳住|理性|冷静': '冷静, 审慎',
         },
         '緊張': {
             '戰爭|戰鬥|導彈|坦克|武裝|軍心|倒戈': '緊張, 危急',
@@ -1985,6 +2155,7 @@ class ShotsMixin:
             '審判|海牙|逮捕|流亡|後路|崩盤': '緊張, 絕望',
             '難民|邊境|底層': '緊張, 悲涼',
             '博弈|棋局|籌碼': '緊張, 算計',
+            '希望|出路|機遇|轉機': '冷靜, 堅定',
         },
         '严肃': {
             '经济|金融|股市|崩盘|危机': '严肃, 冷峻',
@@ -1992,6 +2163,7 @@ class ShotsMixin:
             '调查|报告|数据|研究|分析': '严肃, 审慎',
             '历史|纪念|回顾|反思|教训': '严肃, 沉思',
             '责任|追责|问责|监管|合规': '严肃, 凛然',
+            '建议|应该|保持|理性': '严肃, 理性',
         },
         '嚴肅': {
             '經濟|金融|股市|崩盤|危機': '嚴肅, 冷峻',
@@ -2022,17 +2194,44 @@ class ShotsMixin:
             '损失|代价|牺牲|付出|承受': '沉重, 无奈',
             '反思|忏悔|自责|悔恨|遗憾': '沉重, 愧疚',
         },
+        '冷静': {
+            '分析|理性|数据|研究|客观': '冷静, 理性',
+            '建议|策略|方案|规划|应对': '冷静, 务实',
+            '希望|机遇|转机|出路|曙光': '冷静, 坚定',
+        },
     }
 
-    def _diversify_visual_tone(self, description, base_tone):
+    def _diversify_visual_tone(self, description, base_tone, shot_index=-1, total_shots=0):
+        """根据描述文本和叙事位置差异化视觉基调
+        
+        改进：
+        1. 匹配描述文本中的关键词选择变体
+        2. 尾部分镜允许正向情绪转折（冷静/坚定）
+        3. 避免所有分镜都以同一基调前缀开头
+        """
         if not base_tone:
             return '严肃'
         variants = self._TONE_VARIANTS.get(base_tone)
         if not variants:
             return base_tone
+        
+        # 优先按描述文本关键词匹配
         for pattern, variant in variants.items():
             if re.search(pattern, description):
                 return variant
+        
+        # 尾部分镜（最后20%）允许情绪转折
+        if total_shots > 3 and shot_index >= 0:
+            tail_threshold = int(total_shots * 0.8)
+            if shot_index >= tail_threshold:
+                # 检查描述中是否有建议/理性/出路等正向信号
+                positive_signals = ['建议', '应该', '保持', '理性', '冷静', '稳住', 
+                                   '出路', '希望', '机遇', '转机', '曙光', '准备',
+                                   '保险', '储蓄', '存款', '后路', '退路']
+                if any(s in description for s in positive_signals):
+                    return '冷静, 坚定'
+        
+        # 兜底：按hash轮换
         tones = list(variants.values())
         return tones[hash(description) % len(tones)]
 
@@ -2052,10 +2251,11 @@ class ShotsMixin:
             '权力': ['权', '控制', '掌控', '政权'],
             '军事': ['军', '武', '战', '士兵', '将领', '武装'],
             '政治': ['政治', '总统', '政府', '选举', '反对派'],
-            '经济': ['经济', '金融', '股票', '石油', '制裁'],
+            '经济': ['经济', '金融', '股票', '石油', '制裁', '投资', '杠杆', '资金', '崩盘', '裁员', '就业', '失业', '工资', '存款', '消费'],
             '外交': ['外交', '谈判', '国际', '盟友', '否决权'],
-            '社会': ['社会', '民生', '民众', '底层'],
+            '社会': ['社会', '民生', '民众', '底层', '柴米油盐', '保险', '养老'],
             '能源': ['石油', '矿产', '油价', '能源'],
+            '就业': ['就业', '岗位', '裁员', '失业', '工资', '替代', '自动化'],
         }
 
         matched_elements = []
@@ -2068,19 +2268,27 @@ class ShotsMixin:
                 if any(kw in shot_text for kw in keywords):
                     matched_elements.append(elem)
 
+        # 如果全局元素匹配不足2个，且全局元素总数<=3，直接继承所有全局元素
+        # 这确保了像"经济"、"AI"这样的全局性主题不会因为不在某句配音中而丢失
+        if global_elements and len(matched_elements) < 2 and len(global_elements) <= 3:
+            for elem in global_elements:
+                if elem not in matched_elements:
+                    matched_elements.append(elem)
+
         if not matched_elements:
             dynamic_keywords = []
             concept_patterns = [
                 ('战争', ['战争', '戰爭', '战斗', '軍事', '军事', '导弹', '坦克']),
                 ('政治', ['政治', '总统', '總統', '政府', '选举', '選舉', '权力', '政权']),
-                ('经济', ['经济', '經濟', '金融', '股票', '投资', '投資', '制裁']),
+                ('经济', ['经济', '經濟', '金融', '股票', '投资', '投資', '制裁', '杠杆', '资金', '裁员', '就业']),
                 ('外交', ['外交', '谈判', '談判', '制裁', '国际', '國際', '否决权']),
                 ('军事', ['军队', '軍隊', '武装', '武裝', '军官', '軍官', '士兵', '军方']),
                 ('社会', ['社会', '社會', '民生', '抗议', '抗議', '示威', '底层']),
-                ('科技', ['科技', '技术', '技術', '人工智能', 'AI', '芯片']),
+                ('科技', ['科技', '技术', '技術', '人工智能', 'AI', '芯片', '算法', '数字化']),
                 ('能源', ['石油', '天然气', '能源', '矿产', '礦產']),
                 ('司法', ['审判', '法院', '海牙', '司法', '逮捕']),
-                ('生存', ['生存', '保险', '防线', '后路', '退路']),
+                ('生存', ['生存', '保险', '防线', '后路', '退路', '柴米油盐', '储蓄']),
+                ('就业', ['就业', '岗位', '裁员', '失业', '替代', '自动化']),
             ]
             for concept, patterns in concept_patterns:
                 if any(p in shot_text for p in patterns):
@@ -2089,6 +2297,35 @@ class ShotsMixin:
 
         return matched_elements[:3]
 
+
+    def _infer_shot_content_type(self, shot_text, global_content_type):
+        """根据分镜文本推断更精准的内容类型
+        
+        当全局content_type过于宽泛（如"社会民生"）时，
+        根据分镜文本中的关键词推断更具体的子类型，
+        使prompt生成能匹配更准确的视觉场景。
+        """
+        if not shot_text:
+            return global_content_type
+        
+        _SHOT_TYPE_PATTERNS = [
+            ('财经商业', ['股票', '投资', '杠杆', '资金', '崩盘', '金融', '经济', '通胀', '制裁',
+                         '现金流', '存款', '房贷', '消费', '收入', '工资', '储蓄', '退休']),
+            ('科技科普', ['AI', '人工智能', '算法', '芯片', '数字化', '自动化', '编程', '翻译',
+                         '设计', '机器人', '互联网', '数据', '替代', '岗位']),
+            ('军事分析', ['战争', '导弹', '坦克', '武装', '军方', '军队', '士兵', '军官',
+                         '军事', '核武', '防空']),
+            ('政治分析', ['总统', '政府', '选举', '反对派', '政权', '权力', '执政',
+                         '政治', '否决权', '宪政']),
+            ('外交分析', ['外交', '谈判', '国际', '盟友', '安理会', '制裁',
+                         '邻国', '博弈', '地缘']),
+        ]
+        
+        for subtype, keywords in _SHOT_TYPE_PATTERNS:
+            if any(kw in shot_text for kw in keywords):
+                return subtype
+        
+        return global_content_type
 
     def create_new_shot(self, shot_id, start_time, end_time, sentence, content_type, core_theme='', visual_tone='', theme_elements=None):
         """创建新分镜"""
@@ -2106,6 +2343,12 @@ class ShotsMixin:
         
         # 确保繁体字转为简体
         cleaned_sentence = _ensure_simplified_chinese(cleaned_sentence)
+        
+        # 根据分镜文本推断更精准的内容类型（覆盖全局content_type）
+        shot_content_type = self._infer_shot_content_type(cleaned_sentence, content_type)
+        if shot_content_type != content_type:
+            self.log(f"   📂 分镜{shot_id+1} 内容类型细化: 「{content_type}」→「{shot_content_type}」")
+            content_type = shot_content_type
         
         # ASR纠错安全网：确保_COMMON_ASR_ERROR_DICT纠错一定生效
         for wrong, correct in sorted(_COMMON_ASR_ERROR_DICT.items(), key=lambda x: len(x[0]), reverse=True):
@@ -2175,7 +2418,8 @@ class ShotsMixin:
         # 这是唯一调用_diversify_visual_tone的地方，确保差异化逻辑只执行一次
         original_visual_tone = effective_visual_tone
         if hasattr(self, '_diversify_visual_tone') and effective_visual_tone:
-            diversified = self._diversify_visual_tone(cleaned_sentence, effective_visual_tone)
+            _total_shots = getattr(self, '_total_shot_count', 0)
+            diversified = self._diversify_visual_tone(cleaned_sentence, effective_visual_tone, shot_index=shot_id, total_shots=_total_shots)
             if diversified != effective_visual_tone:
                 self.log(f"   🎨 分镜{shot_id+1} 基调差异化: 「{original_visual_tone}」→「{diversified}」")
                 effective_visual_tone = diversified
@@ -2230,7 +2474,8 @@ class ShotsMixin:
         if re.search(r'[\u4e00-\u9fff]', optimized_prompt):
             dubbing_text = description_parts.get('dubbing', '')
             if dubbing_text:
-                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type)
+                fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type,
+                    theme_elements=theme_elements, shot_index=shot_id)
                 if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
                     optimized_prompt = fallback
                     prompt_quality = self._calculate_prompt_quality(optimized_prompt, dubbing_text)
@@ -2261,7 +2506,8 @@ class ShotsMixin:
                         continue
             if dubbing_text:
                 fallback = self._analyze_and_generate_sd_prompt(dubbing_text, content_type,
-                    custom_theme=effective_theme, custom_visual_tone=effective_visual_tone)
+                    custom_theme=effective_theme, custom_visual_tone=effective_visual_tone,
+                    theme_elements=theme_elements, shot_index=shot_id)
                 if fallback and not re.search(r'[\u4e00-\u9fff]', fallback):
                     fb_quality = self._calculate_prompt_quality(fallback, dubbing_text)
                     if fb_quality > prompt_quality:
@@ -2595,15 +2841,16 @@ class ShotsMixin:
                     except Exception:
                         pass
                 _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
-                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles)
+                return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles, shot_index=shot_id if isinstance(shot_id, int) else -1)
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
-                custom_theme=core_theme, custom_visual_tone=visual_tone)
-        
+                custom_theme=core_theme, custom_visual_tone=visual_tone,
+                theme_elements=theme_elements, shot_index=shot_id if isinstance(shot_id, int) else -1)
+
         return self._generate_prompt_with_llm(
-            dubbing, content_type, 
-            prompt_type="SD提示词", 
-            core_theme=core_theme, 
-            visual_tone=visual_tone, 
+            dubbing, content_type,
+            prompt_type="SD提示词",
+            core_theme=core_theme,
+            visual_tone=visual_tone,
             theme_elements=theme_elements,
             visual_style=visual_style
         )
@@ -3450,10 +3697,11 @@ class ShotsMixin:
                 except Exception:
                     pass
             _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
-            return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles)
+            return ARVPromptTemplates.generate_prompt(dubbing, content_type, core_theme, visual_tone, model_type=_mt, user_styles=_user_styles, shot_index=-1)
         else:
             return self._analyze_and_generate_sd_prompt(dubbing, content_type,
-                custom_theme=core_theme, custom_visual_tone=visual_tone)
+                custom_theme=core_theme, custom_visual_tone=visual_tone,
+                theme_elements=theme_elements, shot_index=-1)
 
 
     def _generate_prompt_with_llm(self, dubbing, content_type, prompt_type="SD提示词", core_theme="", visual_tone="", theme_elements=None, visual_style="", original_dubbing="", full_text="", shot_index=-1):
@@ -3766,7 +4014,9 @@ class ShotsMixin:
 
             shot_visual_tone = effective_visual_tone
             if hasattr(self, '_diversify_visual_tone') and shot_visual_tone and dubbing:
-                diversified = self._diversify_visual_tone(dubbing, shot_visual_tone)
+                _total_shots = getattr(self, '_total_shot_count', 0)
+                _shot_idx = getattr(self, '_current_shot_index', -1)
+                diversified = self._diversify_visual_tone(dubbing, shot_visual_tone, shot_index=_shot_idx, total_shots=_total_shots)
                 if diversified != shot_visual_tone:
                     shot_visual_tone = diversified
                     tone_en = self._translate_to_english(shot_visual_tone)
@@ -3931,6 +4181,22 @@ class ShotsMixin:
         if any(kw in _combined for kw in nature_scene_keywords):
             additional_negative.extend(["indoor", "room", "wall", "ceiling", "furniture"])
 
+        # 经济/金融场景：排除不相关的自然/人物元素
+        economy_keywords = ["股票", "投资", "杠杆", "资金", "崩盘", "金融", "经济", "通胀",
+                           "现金流", "存款", "房贷", "消费", "收入", "工资", "储蓄", "制裁"]
+        if any(kw in _combined for kw in economy_keywords):
+            additional_negative.extend(["(forest:1.2)", "(ocean:1.2)", "(mountain:1.2)", "wildlife", "rural landscape"])
+        
+        # AI/科技场景：排除不相关的传统元素
+        ai_keywords = ["AI", "人工智能", "算法", "芯片", "数字化", "自动化", "编程", "机器人"]
+        if any(kw in _combined for kw in ai_keywords):
+            additional_negative.extend(["(handwriting:1.2)", "(paper document:1.1)", "(typewriter:1.1)"])
+        
+        # 日常生活场景：排除不相关的宏大场景
+        daily_keywords = ["柴米油盐", "保险", "养老", "房贷", "存款", "工资", "消费"]
+        if any(kw in _combined for kw in daily_keywords):
+            additional_negative.extend(["(war zone:1.2)", "(military:1.2)", "(battlefield:1.2)", "(palace:1.1)"])
+
         all_negative = base_negative.copy()
         content_type_lower = content_type.lower() if content_type else ""
         for ct, negatives in content_specific_negative.items():
@@ -4021,12 +4287,24 @@ class ShotsMixin:
 
         return ""
 
-    def _analyze_and_generate_sd_prompt(self, text, content_type, custom_theme='', custom_visual_tone=''):
-        """分析文本语义并生成SD提示词 - 精简版回退方案（Ollama不可用时使用）
+    def _analyze_and_generate_sd_prompt(self, text, content_type, custom_theme='', custom_visual_tone='',
+                                         theme_elements=None, shot_index=-1):
+        """分析文本语义并生成SD提示词 - 自适应回退方案
 
-        改进：基于文本内容生成具有叙事意义的场景描述，而非简单的关键词匹配
+        核心策略：优先利用主题分析阶段LLM已提取的结构化信息（content_type、core_theme、
+        visual_tone、theme_elements），而非依赖硬编码关键词匹配。这确保了无论音频内容
+        是什么主题，回退路径都能生成与主题紧密相关的prompt。
+
+        三层信息源（优先级递减）：
+        1. LLM主题分析结果 → core_theme/visual_tone/theme_elements（最可靠，对任何主题有效）
+        2. 文本语义提取 → 从配音文本中提取实体/场景/人物（补充细节）
+        3. 硬编码关键词映射 → 仅作为兜底（覆盖面有限）
+
         根据模型类型输出不同格式：Flux/SD3用自然语言，SD15/SDXL用关键词
         """
+        if theme_elements is None:
+            theme_elements = []
+
         model_type = "sd15"
         if hasattr(self, 'model_var'):
             mn = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
@@ -4045,178 +4323,281 @@ class ShotsMixin:
             style_text_lower = " ".join(user_selected_styles).lower()
             is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
 
-        keywords = []
-        
+        # ========== 第一层：LLM主题分析结果（最可靠） ==========
+        # core_theme、visual_tone、theme_elements 是LLM分析全文本后提取的，
+        # 对任何主题都有效（经济、科技、体育、美食、旅游……）
+        theme_keywords = []
         if custom_theme:
-            theme_translated = self._translate_to_english(custom_theme)
-            if theme_translated and not re.search(r'[\u4e00-\u9fff]', theme_translated):
-                keywords.append(theme_translated)
+            theme_translated = self._smart_translate(custom_theme)
+            if theme_translated:
+                theme_keywords.append(theme_translated)
         if custom_visual_tone:
-            tone_translated = self._translate_to_english(custom_visual_tone)
-            if tone_translated and not re.search(r'[\u4e00-\u9fff]', tone_translated):
-                keywords.append(tone_translated)
-        
-        theme_map = {
-            'war': (['戰爭', '战争', '戰鬥', '战斗', '軍事', '军事', '導彈', '导弹', '坦克', '枪杆', '武装', '士兵', '军方', '军心'], ['war zone', 'military conflict', 'battlefield', 'armed forces']),
-            'politics': (['政治', '總統', '总统', '總理', '总理', '政府', '部長', '部长', '政权', '权力', '反对派', '选举', '选票', '执政', '在野', '宪政', '否决权', '合法性'], ['political scene', 'government power', 'diplomatic', 'political struggle']),
-            'economy': (['經濟', '经济', '金融', '股票', '投資', '投资', '商', '石油', '油价', '矿产', '制裁', '债务', '崩盘', '通胀', '食品'], ['financial district', 'business', 'economy', 'oil industry', 'economic crisis']),
-            'tech': (['科技', '技術', '技术', '科學', '科学', '創新', '创新'], ['technology', 'laboratory', 'innovation']),
-            'medical': (['醫生', '医生', '醫院', '医院', '健康', '治療', '治疗'], ['hospital', 'medical', 'healthcare']),
-            'geopolitics': (['博弈', '国际', '外交', '安理会', '前哨', '战略', '地缘', '盟友', '邻国', '华盛顿', '莫斯科', '北京', '拉美', '制裁'], ['geopolitical scene', 'diplomatic negotiation', 'international relations', 'UN security council']),
-            'refugee': (['难民', '流亡', '逃亡', '边境', '移民'], ['refugee crisis', 'border crossing', 'displacement']),
-            'justice': (['审判', '法院', '海牙', '刑事', '司法', '逮捕'], ['courtroom', 'international tribunal', 'justice system']),
-            'survival': (['生存', '保险', '压舱石', '防线', '崩塌', '退路', '后路', '赌', '筹码'], ['survival struggle', 'desperate situation', 'high stakes']),
-            'corruption': (['腐败', '贪腐', '金山', '肥差', '利益', '贿赂'], ['corruption', 'power abuse', 'wealth disparity']),
-            'social': (['民生', '社会', '底层', '百姓', '民众', '食品分发'], ['social conditions', 'civilian life', 'hardship']),
-            'space': (['宇宙', '太空', '银河', '黑洞', '恒星', '星云', '行星', '卫星'], ['deep space', 'cosmic scene', 'astronomical phenomenon']),
-            'nature': (['森林', '丛林', '草原', '山脉', '河流', '海洋', '沙漠', '湖泊', '瀑布', '火山', '珊瑚'], ['natural landscape', 'wilderness', 'scenic view']),
-            'science': (['细胞', '基因', 'DNA', '分子', '蛋白质', '实验', '研究', '科学家', '进化', '演化', '物种', '自然选择'], ['scientific research', 'laboratory', 'discovery']),
-            'culture': (['建筑', '古建筑', '寺庙', '教堂', '绘画', '雕塑', '艺术', '博物馆', '音乐', '乐器', '演奏'], ['cultural heritage', 'artistic scene', 'architecture']),
-            'sports': (['比赛', '竞赛', '运动员', '冠军', '奥运', '足球', '篮球', '游泳', '跑步'], ['sports competition', 'athletic event', 'stadium']),
-            'history': (['古代', '朝代', '皇帝', '宫殿', '历史', '文明', '王朝'], ['historical scene', 'ancient civilization', 'imperial court']),
-            'education': (['学校', '教育', '学生', '课堂', '老师', '教授', '大学'], ['education', 'classroom', 'learning environment']),
-            'ai_tech': (['人工智能', 'AI', '机器人', '自动化', '互联网', '网络', '数据', '芯片', '算法'], ['AI technology', 'digital innovation', 'futuristic lab']),
-        }
-        for key, (triggers, tags) in theme_map.items():
-            if any(w in text for w in triggers):
-                keywords.extend(tags)
+            tone_translated = self._smart_translate(custom_visual_tone)
+            if tone_translated:
+                theme_keywords.append(tone_translated)
+        if theme_elements:
+            for elem in theme_elements:
+                elem_translated = self._smart_translate(elem)
+                if elem_translated and elem_translated not in theme_keywords:
+                    theme_keywords.append(elem_translated)
 
+        # ========== 第二层：从配音文本中提取实体/场景/人物（补充细节） ==========
+        entity_keywords = []
+        scene_keyword = ''
+
+        # 实体提取（人名/地名/组织名）
+        entity_hint = self._extract_entities_for_prompt(text)
+        if entity_hint:
+            # entity_hint 格式如 "Entities: Maduro, Venezuela"
+            for part in entity_hint.replace('Entities:', '').split(','):
+                part = part.strip()
+                if part and part not in theme_keywords:
+                    entity_keywords.append(part)
+
+        # 场景提取：基于content_type推断场景类型
+        content_type_scene = self._content_type_to_scene(content_type, text)
+        if content_type_scene:
+            scene_keyword = content_type_scene
+
+        # 人物角色提取
+        person_keyword = self._extract_person_role(text)
+
+        # 构图/镜头：基于shot_index
+        camera_keyword = self._get_camera_for_shot(shot_index)
+
+        # ========== 第三层：硬编码关键词映射（兜底） ==========
+        fallback_keywords = []
         for cn_key, en_val in _TRANSLATION_MAPPING.items():
-            if cn_key in text and en_val not in keywords:
-                keywords.append(en_val)
+            if cn_key in text and en_val not in theme_keywords and en_val not in entity_keywords:
+                fallback_keywords.append(en_val)
 
-        location_patterns = [
-            (r'委内瑞拉|委国', 'Venezuela, Caracas'),
-            (r'加拉加斯', 'Caracas, Venezuela'),
-            (r'俄罗斯|俄国', 'Russia, Moscow'),
-            (r'中国|北京', 'China, Beijing'),
-            (r'美国|华盛顿', 'United States, Washington DC'),
-            (r'巴西', 'Brazil'),
-            (r'哥伦比亚', 'Colombia'),
-            (r'伊朗', 'Iran'),
-        ]
-        for pattern, tag in location_patterns:
-            if re.search(pattern, text):
-                keywords.append(tag)
+        # 如果前两层信息充足，不需要硬编码兜底
+        if len(theme_keywords) + len(entity_keywords) >= 3:
+            fallback_keywords = fallback_keywords[:2]  # 最多补充2个
 
-        person_patterns = [
-            (r'总统|主席|首相|总理', 'national leader, head of state'),
-            (r'将领|军官|司令|将军', 'military general, officer'),
-            (r'夫妇|妻子|夫人', 'leader with spouse'),
-            (r'士兵|军人|武装人员', 'armed soldier'),
-            (r'外交官|大使|代表', 'diplomat, ambassador'),
-        ]
-        for pattern, tag in person_patterns:
-            if re.search(pattern, text):
-                keywords.append(tag)
-
-        scene_keywords = []
-        _SCENE_PATTERNS = [
-            (r'总统|總統|主席|领袖|領導', 'national leader at podium'),
-            (r'军方|軍方|将军|將軍|军官|軍官|武装|武裝', 'military officer in uniform'),
-            (r'石油|礦產|矿产|能源|油价', 'oil refinery, petroleum infrastructure'),
-            (r'制裁|谈判|談判|外交|安理会', 'diplomatic negotiation table'),
-            (r'反对派|選舉|选举|选票|執政', 'political rally, crowd gathering'),
-            (r'难民|難民|流亡|边境|逃亡', 'refugees at border crossing'),
-            (r'腐败|貪腐|金山|利益|贿赂', 'corruption scene, wealth disparity'),
-            (r'审判|審判|法院|海牙|逮捕', 'courtroom, judicial proceedings'),
-            (r'战争|戰短|战斗|戰鬥|导弹|坦克', 'war zone, military conflict'),
-            (r'民众|百姓|民生|食品|底层', 'civilian life, everyday hardship'),
-            (r'签字|签约|合同|协议|握手', 'signing ceremony, handshake over document'),
-            (r'妻子|夫人|夫妇|女性', 'woman in formal attire, political figure'),
-            # 科普/科学领域
-            (r'宇宙|太空|星|银河|黑洞|恒星', 'deep space, cosmic scene, stars'),
-            (r'细胞|基因|DNA|分子|蛋白质', 'microscopic view, molecular structure'),
-            (r'实验|研究|科学家|实验室', 'laboratory, scientific research'),
-            (r'进化|演化|自然选择|物种', 'evolution, life progression, nature'),
-            # 自然/地理领域
-            (r'森林|丛林|树木|草原', 'dense forest, woodland, green landscape'),
-            (r'海洋|大海|海底|珊瑚', 'ocean view, underwater scene, marine life'),
-            (r'山脉|山峰|火山|峡谷', 'mountain landscape, dramatic peaks'),
-            (r'沙漠|荒漠|戈壁', 'desert landscape, sand dunes'),
-            (r'河流|湖泊|瀑布', 'river flowing, lake scenery, waterfall'),
-            # 文化/艺术领域
-            (r'建筑|古建筑|寺庙|教堂', 'architectural landmark, historic building'),
-            (r'绘画|雕塑|艺术|博物馆', 'art gallery, museum interior, artwork'),
-            (r'音乐|乐器|演奏|交响', 'musical performance, concert hall'),
-            # 体育领域
-            (r'比赛|竞赛|运动员|冠军|奥运', 'sports competition, athlete in action'),
-            (r'足球|篮球|游泳|跑步', 'sports event, athletic performance'),
-            # 历史/教育领域
-            (r'古代|朝代|皇帝|宫殿', 'ancient palace, historical scene, imperial court'),
-            (r'学校|教育|学生|课堂|老师', 'classroom, students learning, education'),
-            # 科技领域
-            (r'人工智能|AI|机器人|自动化', 'AI technology, robot, futuristic lab'),
-            (r'互联网|网络|数据|芯片', 'digital technology, network, circuit board'),
-        ]
-        for pattern, scene in _SCENE_PATTERNS:
-            if re.search(pattern, text):
-                scene_keywords.append(scene)
-                break
-
-        camera_keywords = []
-        if hasattr(self, '_shot_texts_for_context'):
-            shot_texts = getattr(self, '_shot_texts_for_context', [])
-            try:
-                idx = shot_texts.index(text) if text in shot_texts else -1
-                total = len(shot_texts)
-                if idx == 0:
-                    camera_keywords.append('wide establishing shot')
-                elif idx == total - 1:
-                    camera_keywords.append('medium shot, reflective')
-                elif idx >= 0:
-                    progress = idx / max(1, total - 1)
-                    if progress <= 0.3:
-                        camera_keywords.append('medium shot')
-                    elif progress <= 0.7:
-                        camera_keywords.append('close-up shot')
-                    else:
-                        camera_keywords.append('medium shot')
-            except (ValueError, AttributeError):
-                pass
-
-        if not keywords:
-            keywords.append('realistic scene')
-
+        # ========== 组装prompt ==========
         all_parts = []
-        if camera_keywords:
-            all_parts.extend(camera_keywords)
-        if scene_keywords:
-            all_parts.extend(scene_keywords)
-        all_parts.extend(keywords)
+        if camera_keyword:
+            all_parts.append(camera_keyword)
+        if scene_keyword:
+            all_parts.append(scene_keyword)
+        if person_keyword:
+            all_parts.append(person_keyword)
+        all_parts.extend(entity_keywords[:3])
+        all_parts.extend(theme_keywords[:5])
+        all_parts.extend(fallback_keywords[:3])
 
+        # 去重
         unique_parts = list(dict.fromkeys(all_parts))
         if len(unique_parts) <= 1:
             unique_parts = ['realistic scene', 'detailed environment']
 
+        # 根据模型类型输出不同格式
+        return self._format_prompt_for_model(unique_parts, model_type, is_non_realistic,
+                                              camera_keyword, scene_keyword)
+
+
+    def _smart_translate(self, chinese_text):
+        """智能中文到英文翻译 - 三层策略确保任何中文都能翻译
+
+        1. 精确匹配 _TRANSLATION_MAPPING
+        2. 子串匹配 + 拼装
+        3. 通用翻译策略（基于content_type推断场景类别词）
+
+        返回纯英文，不含中文。如果无法翻译则返回空字符串。
+        """
+        if not chinese_text:
+            return ""
+
+        # 先用 _translate_to_english 做精确/子串匹配
+        result = self._translate_to_english(chinese_text)
+        if result and not re.search(r'[\u4e00-\u9fff]', result):
+            return result
+
+        # 策略2：拆分后逐段翻译再拼装
+        # 按中文标点、顿号、空格拆分
+        parts = re.split(r'[，。、；：！？\s,;:!?]+', chinese_text)
+        translated_parts = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            tr = self._translate_to_english(part)
+            if tr and not re.search(r'[\u4e00-\u9fff]', tr):
+                translated_parts.append(tr)
+            else:
+                # 尝试逐字/逐词匹配
+                sub_parts = []
+                i = 0
+                while i < len(part):
+                    # 尝试4字→3字→2字→1字匹配
+                    matched = False
+                    for length in range(min(4, len(part) - i), 0, -1):
+                        sub = part[i:i+length]
+                        sub_tr = _TRANSLATION_MAPPING.get(sub, '')
+                        if sub_tr and not re.search(r'[\u4e00-\u9fff]', sub_tr):
+                            sub_parts.append(sub_tr)
+                            i += length
+                            matched = True
+                            break
+                    if not matched:
+                        i += 1  # 跳过无法翻译的字
+                if sub_parts:
+                    translated_parts.append(', '.join(sub_parts))
+
+        if translated_parts:
+            return ', '.join(translated_parts)
+
+        # 策略3：无法翻译时返回空，让调用方使用兜底逻辑
+        return ""
+
+    def _content_type_to_scene(self, content_type, text=''):
+        """根据content_type推断视觉场景关键词
+
+        不依赖硬编码中文关键词匹配，而是直接将content_type映射到
+        对应的英文场景描述。这样无论音频是什么主题，只要LLM
+        正确识别了content_type，就能生成合适的场景。
+        """
+        _CONTENT_TYPE_SCENES = {
+            '军事分析': 'military scene, strategic command',
+            '政治分析': 'political scene, government building',
+            '外交分析': 'diplomatic venue, international summit',
+            '财经商业': 'financial district, business environment',
+            '科技科普': 'technology lab, digital innovation',
+            '科普教育': 'educational setting, knowledge sharing',
+            '新闻播报': 'news broadcast, press conference',
+            '历史纪录': 'historical scene, archival footage',
+            '社会民生': 'everyday life, social conditions',
+            '文化艺术': 'cultural scene, artistic environment',
+            '自然地理': 'natural landscape, geographic feature',
+            '体育竞技': 'sports event, athletic competition',
+            '医疗健康': 'medical setting, healthcare',
+            '美食烹饪': 'kitchen, cooking scene, food preparation',
+            '旅游风光': 'scenic destination, travel landscape',
+            '情感生活': 'emotional scene, personal moment',
+            '教育学习': 'classroom, learning environment',
+            '娱乐综艺': 'entertainment, performance stage',
+        }
+        # 精确匹配
+        if content_type in _CONTENT_TYPE_SCENES:
+            return _CONTENT_TYPE_SCENES[content_type]
+
+        # 模糊匹配：content_type中的关键词
+        _PARTIAL_MAP = {
+            '军事': 'military scene', '战争': 'war zone',
+            '政治': 'political scene', '政府': 'government building',
+            '外交': 'diplomatic venue', '国际': 'international setting',
+            '财经': 'financial district', '经济': 'economic scene',
+            '商业': 'business environment', '金融': 'financial district',
+            '科技': 'technology lab', '科普': 'science, educational',
+            '教育': 'educational setting', '新闻': 'news broadcast',
+            '历史': 'historical scene', '社会': 'social conditions',
+            '文化': 'cultural scene', '艺术': 'artistic environment',
+            '自然': 'natural landscape', '体育': 'sports event',
+            '医疗': 'medical setting', '健康': 'healthcare',
+            '美食': 'kitchen, cooking', '旅游': 'travel, scenic view',
+            '情感': 'emotional scene', '娱乐': 'entertainment',
+        }
+        for key, scene in _PARTIAL_MAP.items():
+            if key in content_type:
+                return scene
+
+        return 'realistic scene'
+
+    def _extract_person_role(self, text):
+        """从文本中提取人物角色关键词"""
+        _PERSON_PATTERNS = [
+            (r'总统|主席|首相|总理|领导人', 'national leader'),
+            (r'将军|军官|司令|将领', 'military general'),
+            (r'士兵|军人|武装人员', 'armed soldier'),
+            (r'外交官|大使|代表', 'diplomat'),
+            (r'科学家|研究员|学者', 'scientist'),
+            (r'医生|护士|医护人员', 'medical professional'),
+            (r'教师|老师|教授', 'teacher'),
+            (r'运动员|选手|冠军', 'athlete'),
+            (r'商人|企业家|CEO', 'business leader'),
+            (r'工人|劳动者|职工', 'worker'),
+            (r'农民|渔民|牧民', 'rural worker'),
+            (r'学生|青年|少年', 'young person, student'),
+            (r'老人|长者|老者', 'elderly person'),
+            (r'女性|妇女|妻子|母亲', 'woman'),
+            (r'儿童|小孩|孩子', 'child'),
+            (r'夫妇|夫妻|伴侣', 'couple'),
+        ]
+        for pattern, role in _PERSON_PATTERNS:
+            if re.search(pattern, text):
+                return role
+        return ''
+
+    def _get_camera_for_shot(self, shot_index):
+        """根据分镜位置返回镜头类型，确保视觉多样性"""
+        if shot_index < 0:
+            # 无shot_index时，使用随机但确定性的选择
+            return 'medium shot'
+
+        _CAMERA_SEQUENCE = [
+            'wide establishing shot',      # 0: 开场广角
+            'medium shot',                  # 1: 中景
+            'close-up shot',                # 2: 特写
+            'over-the-shoulder shot',        # 3: 过肩
+            'low angle shot',               # 4: 仰角
+            'medium shot',                  # 5: 中景
+            'close-up shot, detailed',      # 6: 细节特写
+            'wide shot, reflective',        # 7: 结尾广角
+        ]
+        if shot_index == 0:
+            return _CAMERA_SEQUENCE[0]
+        idx = shot_index % len(_CAMERA_SEQUENCE)
+        return _CAMERA_SEQUENCE[idx]
+
+    def _format_prompt_for_model(self, unique_parts, model_type, is_non_realistic,
+                                  camera_keyword='', scene_keyword=''):
+        """根据模型类型格式化prompt输出
+
+        SD 1.5: 关键词 + 权重标记
+        SDXL:   关键词 + 短描述
+        Flux:   自然语言句子
+        SD3:    自然语言 + 少量关键词
+        """
+        # 移除可能残留的中文
+        clean_parts = [re.sub(r'[\u4e00-\u9fff]+', '', p).strip() for p in unique_parts]
+        clean_parts = [p for p in clean_parts if p]
+
         if model_type in ('flux', 'sd3'):
+            # Flux/SD3: 自然语言描述
             sentence_parts = []
-            if camera_keywords:
-                cam = camera_keywords[0] if camera_keywords else ''
-                sentence_parts.append(f"A {cam}" if cam else 'A scene')
+            if camera_keyword:
+                sentence_parts.append(f"A {camera_keyword}")
             else:
                 sentence_parts.append('A scene')
-            if scene_keywords:
-                sentence_parts.append(f"depicting {scene_keywords[0]}")
-            desc_phrase = ', '.join(unique_parts[len(camera_keywords):len(camera_keywords)+len(scene_keywords)+3])
-            if desc_phrase:
-                sentence_parts.append(f"featuring {desc_phrase}")
+
+            if scene_keyword:
+                sentence_parts.append(f"depicting {scene_keyword}")
+
+            # 将关键词转为描述性短语（跳过camera和scene，避免重复）
+            skip_parts = {camera_keyword, scene_keyword}
+            desc_parts = [p for p in clean_parts if p not in skip_parts][:5]
+            if desc_parts:
+                desc_text = ', '.join(desc_parts)
+                sentence_parts.append(f"featuring {desc_text}")
+
             if not is_non_realistic:
                 sentence_parts.append("cinematic lighting, high quality")
+
             result = '. '.join(p for p in sentence_parts if p)
-            result = re.sub(r'[\u4e00-\u9fff]+', '', result)
             if result and not result[0].isupper():
                 result = result[0].upper() + result[1:]
             return result if result else 'A cinematic scene with dramatic lighting'
 
+        # SD 1.5 / SDXL: 关键词格式
         if is_non_realistic:
             quality_tags = 'highly detailed, vibrant colors, artistic style'
         elif model_type == 'sdxl':
             quality_tags = 'ultra detailed, photorealistic, cinematic lighting, high quality'
         else:
             quality_tags = 'ultra detailed, hyper realistic, photorealistic, cinematic lighting, professional photography'
-        return f"{', '.join(unique_parts)}, {quality_tags}"
 
+        return f"{', '.join(clean_parts)}, {quality_tags}"
 
     def _translate_to_english(self, chinese_text):
         """中文到英文翻译，支持多词组合（逗号/顿号分隔）"""
@@ -4464,7 +4845,10 @@ class ShotsMixin:
     
 
     def _simplify_theme(self, theme_text):
-        """简化核心主题：保留完整语义，仅去除描述性前缀"""
+        """简化核心主题：保留完整语义，仅去除描述性前缀
+        
+        截断时按中文标点/逗号边界截断，避免在字中间切断导致语义残缺。
+        """
         if not theme_text:
             return theme_text
         
@@ -4480,7 +4864,19 @@ class ShotsMixin:
                 cleaned = cleaned[len(prefix):].strip()
         
         if len(cleaned) > 30:
-            cleaned = cleaned[:30]
+            # 优先在标点/逗号处截断，保留完整语义片段
+            _BREAK_CHARS = '，。、；：！？,;:!?'
+            cut_pos = -1
+            for i in range(30, max(15, 30 - 10) - 1, -1):
+                if i < len(cleaned) and cleaned[i] in _BREAK_CHARS:
+                    cut_pos = i
+                    break
+            if cut_pos > 10:
+                cleaned = cleaned[:cut_pos]
+            else:
+                # 没有合适的标点，尝试在最后一个完整词边界截断
+                # 中文每个字都是独立词，直接截到30即可，但确保不切断
+                cleaned = cleaned[:30]
         
         return cleaned
     
@@ -4721,7 +5117,9 @@ class ShotsMixin:
                                     continue
                                 old_simplified = _ensure_simplified_chinese(old)
                                 new_simplified = _ensure_simplified_chinese(new)
-                                if _is_traditional_conversion(old, new):
+                                # 繁→简转换检查应基于simplified版本
+                                # 如果simplified后old==new，说明只是繁简差异，不是真正的纠错
+                                if old_simplified == new_simplified:
                                     skipped_noop += 1
                                     continue
                                 if old_simplified != new_simplified:
@@ -4735,8 +5133,22 @@ class ShotsMixin:
                                         skipped_noop += 1
                                         continue
                                     if len(old_simplified) == 2 and len(new_simplified) == 2 and old_simplified[0] == new_simplified[0] and old_simplified[1] != new_simplified[1]:
-                                        skipped_noop += 1
-                                        continue
+                                        # 同音/近音替换是合法的ASR纠错（如"油眼→油盐"、"金炼→金链"），不应跳过
+                                        # 仅跳过明显非纠错的替换：形近但音不同，且不在常见ASR错误模式中
+                                        try:
+                                            import pypinyin
+                                            old_pinyin = ''.join([p[0] for p in pypinyin.lazy_pinyin(old_simplified)])
+                                            new_pinyin = ''.join([p[0] for p in pypinyin.lazy_pinyin(new_simplified)])
+                                            if old_pinyin == new_pinyin or old_pinyin[-1] == new_pinyin[-1]:
+                                                # 同音或末字同音，是合法ASR纠错，保留
+                                                pass
+                                            else:
+                                                # 非同音替换，可能是LLM幻觉，跳过
+                                                skipped_noop += 1
+                                                continue
+                                        except ImportError:
+                                            # pypinyin不可用时，保守策略：保留纠错（宁可误纠也不漏纠）
+                                            pass
                                     correction_dict[old_simplified] = new_simplified
                                     if old_simplified != old or new_simplified != new:
                                         self.log(f"   🔄 纠错项繁→简: {old}→{new} ⇒ {old_simplified}→{new_simplified}")
@@ -5149,8 +5561,9 @@ class ShotsMixin:
                 self.log(f"   识别片段数: {len(segments)}")
 
                 if self.whisper_model is not None:
+                    was_on_gpu = self._whisper_on_gpu
                     self._safe_release_whisper_gpu()
-                    if not self._whisper_on_gpu:
+                    if was_on_gpu:
                         self.log("   ✅ Whisper GPU 资源已释放（缓存命中）")
                 whisper_used_gpu = False
             else:
@@ -5170,7 +5583,7 @@ class ShotsMixin:
                         self.audio_path, language="zh", log_callback=self.log
                     )
                     
-                    if cloud_segments is not None:
+                    if cloud_segments is not None and len(cloud_segments) > 0:
                         segments = cloud_segments
                         full_text = cloud_text
                         whisper_used_gpu = False
@@ -5181,16 +5594,27 @@ class ShotsMixin:
                         self.cache_set('audio_analysis', audio_key, cache_data)
                         self.log("✅ 音频分析结果已缓存")
                     else:
-                        self.log("⚠️ 云端ASR失败，回退到本地Whisper")
+                        if cloud_segments is not None:
+                            self.log("⚠️ 云端ASR返回空结果，回退到本地Whisper")
+                        else:
+                            self.log("⚠️ 云端ASR失败，回退到本地Whisper")
                         cloud_asr_enabled = False
                 
                 # 本地Whisper语音识别（云端ASR成功时跳过）
                 if not cloud_asr_enabled:
                     self.update_task_progress("正在加载Whisper模型...", 20)
-                    self._unload_ollama_models(log_prefix="   ")
+                    # 仅在云端LLM也启用时才卸载Ollama，避免混合模式（LLM=本地, ASR=云端→回退本地）下误卸本地模型
+                    try:
+                        from video_generator.ollama_client import is_cloud_llm_active
+                        if is_cloud_llm_active():
+                            self._unload_ollama_models(log_prefix="   ")
+                        else:
+                            self.log("   💡 本地LLM模式，保留Ollama模型")
+                    except ImportError:
+                        self._unload_ollama_models(log_prefix="   ")
                     warnings.filterwarnings("ignore", message="Failed to launch Triton kernels")
                     
-                    whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "medium"
+                    whisper_model_size = self.whisper_model_var.get() if hasattr(self, 'whisper_model_var') else "large-v3-turbo"
                     current_model_size = getattr(self, '_whisper_model_size', None)
                     
                     if self.whisper_model and current_model_size and current_model_size != whisper_model_size:
@@ -5334,8 +5758,9 @@ class ShotsMixin:
                     cache_data = {'segments': segments, 'full_text': full_text}
                     self.cache_set('audio_analysis', audio_key, cache_data)
                     self.log("✅ 音频分析结果已缓存")
+                    was_on_gpu = self._whisper_on_gpu
                     self._safe_release_whisper_gpu()
-                    if not self._whisper_on_gpu:
+                    if was_on_gpu:
                         self.log("   ✅ Whisper 模型 GPU 资源已释放")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
@@ -5762,6 +6187,9 @@ class ShotsMixin:
                     })
             self.log(f"📝 共 {len(final_tasks)} 个语音片段分镜（已应用纠错）")
             
+            # 记录总分镜数，供visual_tone差异化使用
+            self._total_shot_count = len(final_tasks)
+            
             # 预先为原始分镜生成提示词
             pregenerated_prompts = {}
             
@@ -5884,7 +6312,7 @@ class ShotsMixin:
                             effective_visual_style = user_style_override if user_style_override else theme_info.get('visual_style', '')
                             shot_visual_tone = theme_info.get('visual_tone', '')
                             if hasattr(self, '_diversify_visual_tone') and shot_visual_tone:
-                                shot_visual_tone = self._diversify_visual_tone(dubbing, shot_visual_tone)
+                                shot_visual_tone = self._diversify_visual_tone(dubbing, shot_visual_tone, shot_index=idx, total_shots=len(pregenerated_prompts))
                             prompt = self._generate_prompt_with_llm(
                                 dubbing,
                                 content_type=theme_info.get('content_type', ''),
@@ -6010,9 +6438,13 @@ class ShotsMixin:
                                     except Exception:
                                         pass
                                 _user_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
-                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''), model_type=_mt, user_styles=_user_styles)
+                                pregenerated_prompts[idx] = ARVPromptTemplates.generate_prompt(dubbing, theme_info.get('content_type', ''), theme_info.get('core_theme', ''), theme_info.get('visual_tone', ''), model_type=_mt, user_styles=_user_styles, shot_index=idx)
                             else:
-                                pregenerated_prompts[idx] = self._analyze_and_generate_sd_prompt(dubbing, theme_info.get('content_type', ''))
+                                pregenerated_prompts[idx] = self._analyze_and_generate_sd_prompt(dubbing, theme_info.get('content_type', ''),
+                                    custom_theme=theme_info.get('core_theme', ''),
+                                    custom_visual_tone=theme_info.get('visual_tone', ''),
+                                    theme_elements=theme_info.get('theme_elements', []),
+                                    shot_index=idx)
                             if pregenerated_prompts[idx]:
                                 self.log(f"   🔄 第{idx+1}个提示词已通过内置逻辑回退生成")
                                 failed_count -= 1

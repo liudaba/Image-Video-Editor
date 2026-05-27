@@ -42,7 +42,7 @@ from pathlib import Path
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_NAME = "VideoGenerator"
+OUTPUT_NAME = "VideoGenerator_Portable"
 
 
 def _load_core_modules_config():
@@ -56,8 +56,14 @@ def _load_core_modules_config():
 
 
 def clean_build_dirs():
-    """清理旧的构建目录"""
-    dirs_to_clean = ['dist', 'dependencies_package', 'installer_output']
+    """清理旧的构建目录（仅清理便携版相关目录，不影响EXE版）"""
+    # 只清理便携版自己的输出目录，不删除整个dist
+    dirs_to_clean = [
+        os.path.join('dist', OUTPUT_NAME),                    # VideoGenerator_Portable
+        os.path.join('dist', f'{OUTPUT_NAME}_Release'),       # VideoGenerator_Portable_Release
+        'dependencies_package',
+        'installer_output',
+    ]
     for dir_name in dirs_to_clean:
         path = os.path.join(BASE_DIR, dir_name)
         if os.path.exists(path):
@@ -75,7 +81,8 @@ def clean_build_dirs():
                     print(f"    强制删除也失败: {e}")
                     print(f"    请手动关闭占用 {dir_name} 的程序后重试")
                     raise
-    for zip_pattern in ['dist/*.zip', 'dist/*.7z']:
+    # 只删除便携版相关的压缩包
+    for zip_pattern in [f'dist/{OUTPUT_NAME}_*.zip', f'dist/{OUTPUT_NAME}_*.7z']:
         for zf in glob.glob(os.path.join(BASE_DIR, zip_pattern)):
             print(f"  删除 {os.path.basename(zf)}")
             os.remove(zf)
@@ -920,9 +927,15 @@ def _clean_output(output_dir):
         '.key_salt', '.login_creds', '.license_verify_key',
         'license.json', '.license_credentials', '.license_cache',
         '.unlocked', '_pythonw_error.log',
-        'generate_signing_keys.py',
+        'generate_signing_keys.py', 'generate_config.py', 'setup_config.py',
         'current_ssh_password.txt', 'ssh_password_history.txt',
         'ssh_password_manager.py',
+        '配置信息.txt', '快速启动指南.txt',
+        # 测试脚本
+        '_test_local_mode.py', '_test_quick_verify.py',
+        '_test_comprehensive.py', '_full_test.py',
+        '_test_deep_bugs.py', '_test_deep_bugs_v2.py', '_test_deep_bugs_v3.py',
+        '_test_out_of_box.py', '_test_linkage.py', '_test_ratelimit_fix.py',
     ]
     for root, dirs, files in os.walk(output_dir):
         for f in files:
@@ -939,10 +952,10 @@ def _clean_output(output_dir):
                 os.remove(fp)
                 print(f"  删除敏感PEM: {os.path.relpath(fp, output_dir)}")
 
-    # 6. 递归删除.db文件
+    # 6. 递归删除.db文件（含临时文件）
     for root, dirs, files in os.walk(output_dir):
         for f in files:
-            if f.endswith('.db'):
+            if f.endswith('.db') or f.endswith('.db-shm') or f.endswith('.db-wal'):
                 os.remove(os.path.join(root, f))
 
     # 7. 删除不需要的顶层文件
@@ -963,6 +976,8 @@ def _clean_output(output_dir):
         'pyarmor_config.json', 'pack_patch.py', 'PackPatch.bat',
         '02build_portable.py', 'file_checksums.txt',
         '_full_test.py', 'pack_patch.py', '.unlocked',
+        '_test_deep_bugs.py', '_test_deep_bugs_v2.py', '_test_deep_bugs_v3.py',
+        '_test_out_of_box.py',
     ]
     for f in unwanted_files:
         fp = os.path.join(output_dir, f)
@@ -1009,14 +1024,9 @@ def _clean_output(output_dir):
                     except OSError:
                         pass
                     break
-            # 删除 .dist-info 目录（安装元数据，运行时不需要）
-            if entry.endswith('.dist-info'):
-                fp = os.path.join(site_packages, entry)
-                try:
-                    if os.path.isdir(fp):
-                        shutil.rmtree(fp, ignore_errors=True)
-                except OSError:
-                    pass
+            # 保留 .dist-info 目录 - 运行时需要
+            # 某些库（如 cryptography, whisper, moviepy）通过 importlib.metadata.version() 读取版本号
+            # 删除 dist-info 会导致 PackageNotFoundError 运行时崩溃
 
     print("  后端专用包清理完成")
 
@@ -1082,6 +1092,8 @@ def _verify_output(output_dir):
         '.license_verify_key', '.key_salt', '.login_creds',
         '.license_credentials', '.license_cache', '.unlocked',
         '_pythonw_error.log', 'generate_signing_keys.py',
+        'generate_config.py', 'setup_config.py',
+        '配置信息.txt', '快速启动指南.txt',
     ]
     found_sensitive = []
     for root, dirs, files in os.walk(output_dir):
@@ -1173,7 +1185,7 @@ def _create_release_archive(output_dir):
         print("  未找到7-Zip，使用Python内置压缩...")
         from datetime import datetime
         date_stamp = datetime.now().strftime("%Y%m%d")
-        archive_zip = os.path.join(BASE_DIR, "dist", f"VideoGenerator_{date_stamp}.zip")
+        archive_zip = os.path.join(BASE_DIR, "dist", f"{OUTPUT_NAME}_{date_stamp}.zip")
 
         import zipfile
         print(f"  创建ZIP压缩包（这可能需要较长时间）...")
@@ -1192,7 +1204,7 @@ def _create_release_archive(output_dir):
 
     from datetime import datetime
     date_stamp = datetime.now().strftime("%Y%m%d")
-    archive_name = f"VideoGenerator_{date_stamp}"
+    archive_name = f"{OUTPUT_NAME}_{date_stamp}"
     archive_7z = os.path.join(BASE_DIR, "dist", f"{archive_name}.7z")
 
     print(f"  使用7z固实压缩...")
@@ -1287,9 +1299,24 @@ def build_portable():
         # 16. 重命名为Release
         final_dir = os.path.join(BASE_DIR, "dist", f"{OUTPUT_NAME}_Release")
         if os.path.exists(final_dir):
-            shutil.rmtree(final_dir)
-        os.rename(output_dir, final_dir)
-        output_dir = final_dir
+            for _retry in range(3):
+                try:
+                    shutil.rmtree(final_dir)
+                    break
+                except PermissionError:
+                    import time
+                    time.sleep(2)
+            else:
+                # 强制重试最后一次
+                try:
+                    shutil.rmtree(final_dir)
+                except Exception:
+                    print(f"  警告: 无法删除旧目录 {final_dir}，尝试直接使用")
+        try:
+            os.rename(output_dir, final_dir)
+            output_dir = final_dir
+        except OSError:
+            print(f"  警告: 无法重命名为 {final_dir}，使用原始目录名")
 
         size = get_directory_size(output_dir)
         print(f"\n{'=' * 60}")

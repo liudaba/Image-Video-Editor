@@ -109,7 +109,13 @@ def get_api_base_url():
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
         else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            # 便携版检测
+            _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            _exe_parent = os.path.dirname(_exe_dir)
+            if os.path.basename(_exe_dir) == "python" and os.path.exists(os.path.join(_exe_parent, "run.py")):
+                base_dir = _exe_parent
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         config_path = os.path.join(base_dir, "config.json")
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
@@ -142,10 +148,15 @@ def get_api_base_url():
 
 
 def get_app_dir():
-    """获取程序根目录（兼容PyInstaller打包和源码运行）"""
+    """获取程序根目录（兼容PyInstaller打包、便携版和源码运行）"""
     import os
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
+    # 便携版检测：python.exe在"python/"子目录中，且上级目录有run.py
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    _exe_parent = os.path.dirname(_exe_dir)
+    if os.path.basename(_exe_dir) == "python" and os.path.exists(os.path.join(_exe_parent, "run.py")):
+        return _exe_parent
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

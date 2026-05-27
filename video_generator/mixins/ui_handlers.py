@@ -32,8 +32,41 @@ from video_generator.app_state import (
 )
 
 class UIHandlersMixin:
+    def on_close(self):
+        """窗口关闭事件处理：保存配置、停止心跳、清理资源"""
+        try:
+            # 保存配置
+            if hasattr(self, 'save_config'):
+                self.save_config()
+        except Exception:
+            pass
+
+        try:
+            # 停止心跳
+            from video_generator.license_manager import LicenseManager
+            mgr = LicenseManager()
+            mgr.stop_heartbeat()
+        except Exception:
+            pass
+
+        try:
+            # 停止渲染进程
+            if hasattr(self, 'renderer') and self.renderer:
+                if hasattr(self.renderer, '_render_process') and self.renderer._render_process:
+                    self.renderer._render_process.terminate()
+        except Exception:
+            pass
+
+        try:
+            # 销毁窗口
+            if hasattr(self, 'root') and self.root:
+                self.root.destroy()
+        except Exception:
+            pass
+
     def _check_api_heartbeat(self):
-        """周期性检测API连接状态，发现恢复时自动连接，发现断开时通知用户"""
+        """周期性检测API连接状态：SD API / Ollama / 后端健康检查"""
+        # 1. SD API 连接检测
         try:
             if not is_cloud_image_active():
                 sd_api_url = self.sd_api_url_var.get() if hasattr(self, 'sd_api_url_var') else Config.SD_API_BASE_URL
@@ -44,6 +77,7 @@ class UIHandlersMixin:
                         resp = get_http_session().get(f"{sd_api_url}/sdapi/v1/sd-models", timeout=5)
                         if resp.status_code == 200:
                             self._sd_api_connected = True
+                            self._sd_disconnect_warned = False
                             if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
                                 self.root.after(0, lambda: self.sd_api_status_var.set("✅ 已连接"))
                             if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
@@ -62,28 +96,63 @@ class UIHandlersMixin:
                                 self.root.after(0, lambda: self.sd_api_status_var.set("❌ 已断开"))
                             if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
                                 self.root.after(0, lambda: self.sd_api_status_label.config(foreground="red"))
-                            self.log("⚠️ SD API 连接已断开")
+                            if not getattr(self, '_sd_disconnect_warned', False):
+                                self._sd_disconnect_warned = True
+                                self.log("⚠️ SD API 连接已断开")
                     except Exception:
                         self._sd_api_connected = False
                         if hasattr(self, 'sd_api_status_var') and hasattr(self, 'root') and self.root:
                             self.root.after(0, lambda: self.sd_api_status_var.set("❌ 已断开"))
                         if hasattr(self, 'sd_api_status_label') and hasattr(self, 'root') and self.root:
                             self.root.after(0, lambda: self.sd_api_status_label.config(foreground="red"))
-                        self.log("⚠️ SD API 连接已断开")
+                        if not getattr(self, '_sd_disconnect_warned', False):
+                            self._sd_disconnect_warned = True
+                            self.log("⚠️ SD API 连接已断开")
+        except Exception:
+            pass
 
+        # 2. Ollama 连接检测
+        try:
             ollama_connected = is_ollama_available()
             if not ollama_connected:
                 if not is_cloud_llm_active():
                     if check_ollama_available():
                         set_ollama_available(True)
+                        self._ollama_disconnect_warned = False
                         self.log("✅ Ollama服务已自动连接")
             else:
                 if not is_cloud_llm_active():
                     if not check_ollama_available():
                         set_ollama_available(False)
-                        self.log("⚠️ Ollama服务已断开")
+                        if not getattr(self, '_ollama_disconnect_warned', False):
+                            self._ollama_disconnect_warned = True
+                            self.log("⚠️ Ollama服务已断开")
         except Exception:
             pass
+
+        # 3. 后端 API 健康检查
+        try:
+            from video_generator.config import get_api_base_url
+            api_url = get_api_base_url()
+            if api_url:
+                resp = get_http_session().get(f"{api_url}/health", timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    db_ok = data.get("database") == "ok"
+                    if not db_ok:
+                        if not getattr(self, '_api_db_warned', False):
+                            self._api_db_warned = True
+                            self.log("⚠️ 后端API数据库状态异常")
+                    # 后端恢复时重置警告标志
+                    self._api_warned = False
+                else:
+                    if not getattr(self, '_api_warned', False):
+                        self._api_warned = True
+                        self.log(f"⚠️ 后端API返回状态码 {resp.status_code}")
+        except Exception:
+            if not getattr(self, '_api_warned', False):
+                self._api_warned = True
+                self.log("⚠️ 后端API不可达")
     
 
     def auto_connect_ollama(self, silent=False):
@@ -139,11 +208,12 @@ class UIHandlersMixin:
                 ))
 
     def _detect_gpu_info_async(self):
+        _sub_enc = {"encoding": "utf-8", "errors": "replace"}
         def _detect():
             try:
                 result = subprocess.run(
                     ["nvidia-smi", "--query-gpu=gpu_name,memory.total", "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=3
+                    capture_output=True, text=True, timeout=3, **_sub_enc
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     line = result.stdout.strip().split("\n")[0]
@@ -158,7 +228,7 @@ class UIHandlersMixin:
             try:
                 result = subprocess.run(
                     ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                    capture_output=True, text=True, timeout=3
+                    capture_output=True, text=True, timeout=3, **_sub_enc
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     gpu_name = result.stdout.strip().split("\n")[0].strip()
@@ -1370,16 +1440,53 @@ class UIHandlersMixin:
     # 云端大模型相关处理
     # =======================================================================
 
+    def _resolve_provider_id(self, provider_name):
+        """将LLM服务商显示名解析为ID"""
+        from video_generator.cloud_llm_client import PROVIDER_CONFIG
+        # 先检查是否已经是ID
+        if provider_name in PROVIDER_CONFIG:
+            return provider_name
+        for pid, pcfg in PROVIDER_CONFIG.items():
+            if pcfg.get("name") == provider_name:
+                return pid
+        return "deepseek"
+
+    def _resolve_asr_provider_id(self, provider_name):
+        """将ASR服务商显示名解析为ID"""
+        from video_generator.cloud_llm_client import ASR_PROVIDER_CONFIG
+        # 先检查是否已经是ID
+        if provider_name in ASR_PROVIDER_CONFIG:
+            return provider_name
+        for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+            if pcfg.get("name") == provider_name:
+                return pid
+        return "openai"
+
+    def _resolve_image_provider_id(self, provider_name):
+        """将生图服务商显示名解析为ID"""
+        from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG
+        # 先检查是否已经是ID
+        if provider_name in IMAGE_PROVIDER_CONFIG:
+            return provider_name
+        for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+            if pcfg.get("name") == provider_name:
+                return pid
+        return "siliconflow"
+
     def _on_cloud_provider_changed(self, event=None):
         """云端大模型服务商切换时更新模型列表"""
         from video_generator.cloud_llm_client import PROVIDER_CONFIG, get_provider_models
         
         provider_name = self.cloud_llm_provider_var.get()
         provider_id = None
-        for pid, pcfg in PROVIDER_CONFIG.items():
-            if pcfg["name"] == provider_name:
-                provider_id = pid
-                break
+        # 先检查是否已经是ID
+        if provider_name in PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
         
         if not provider_id:
             return
@@ -1392,8 +1499,13 @@ class UIHandlersMixin:
             self._cloud_model_combo['values'] = model_names
         
         default_model = PROVIDER_CONFIG[provider_id]["default_model"]
-        self.cloud_llm_model_var.set(default_model)
         self._cloud_selected_model_id = default_model
+        # 设置combobox显示名为默认模型对应的显示名
+        if default_model in self._cloud_model_ids:
+            idx = self._cloud_model_ids.index(default_model)
+            self.cloud_llm_model_var.set(model_names[idx])
+        else:
+            self.cloud_llm_model_var.set(default_model)
         
         self.log(f"☁️ 已切换云端服务商: {provider_name}")
 
@@ -1409,8 +1521,191 @@ class UIHandlersMixin:
                     self._cloud_selected_model_id = actual_id
                     self.log(f"☁️ 已选择云端模型: {selected_display} ({actual_id})")
                     return
+            # selected_display不在values中，尝试从ID直接匹配
+            if selected_display in self._cloud_model_ids:
+                self._cloud_selected_model_id = selected_display
+                self.log(f"☁️ 已选择云端模型: {selected_display}")
+                return
+        # 无法解析，保持原ID不变
         self.log(f"☁️ 已选择云端模型: {selected_display}")
 
+    def _update_cloud_model_dropdown(self):
+        """初始化/恢复云端LLM模型下拉菜单"""
+        try:
+            from video_generator.cloud_llm_client import PROVIDER_CONFIG, get_provider_models
+        except ImportError:
+            return
+
+        provider_name = self.cloud_llm_provider_var.get()
+        provider_id = None
+        # 先检查是否已经是ID
+        if provider_name in PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
+
+        if not provider_id:
+            provider_id = "deepseek"
+
+        models = get_provider_models(provider_id)
+        model_names = [f"{m['name']} - {m['desc']}" for m in models]
+        self._cloud_model_ids = [m['id'] for m in models]
+
+        if hasattr(self, '_cloud_model_combo'):
+            self._cloud_model_combo['values'] = model_names
+
+        # 恢复已保存的模型选择
+        current_model = self.cloud_llm_model_var.get()
+        selected_id = getattr(self, '_cloud_selected_model_id', '')
+        if selected_id and selected_id in self._cloud_model_ids:
+            # 优先使用已保存的模型ID
+            idx = self._cloud_model_ids.index(selected_id)
+            self.cloud_llm_model_var.set(model_names[idx])
+        elif current_model and current_model in model_names:
+            # current_model是显示名，直接保持，同步ID
+            idx = model_names.index(current_model)
+            self._cloud_selected_model_id = self._cloud_model_ids[idx]
+        elif current_model and current_model in self._cloud_model_ids:
+            # current_model是模型ID（旧格式），找到对应的显示名
+            idx = self._cloud_model_ids.index(current_model)
+            self.cloud_llm_model_var.set(model_names[idx])
+            self._cloud_selected_model_id = current_model
+        else:
+            default_model = PROVIDER_CONFIG[provider_id]["default_model"]
+            self._cloud_selected_model_id = default_model
+            if default_model in self._cloud_model_ids:
+                idx = self._cloud_model_ids.index(default_model)
+                self.cloud_llm_model_var.set(model_names[idx])
+            else:
+                self.cloud_llm_model_var.set(default_model)
+
+
+    def _on_asr_provider_changed(self, event=None):
+        """云端ASR服务商切换时更新模型列表"""
+        try:
+            from video_generator.cloud_llm_client import ASR_PROVIDER_CONFIG, get_asr_provider_models
+        except ImportError:
+            return
+
+        provider_name = self.cloud_asr_provider_var.get()
+        provider_id = None
+        # 先检查是否已经是ID
+        if provider_name in ASR_PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
+
+        if not provider_id:
+            return
+
+        models = get_asr_provider_models(provider_id)
+        model_names = [f"{m['name']} - {m['desc']}" for m in models]
+        self._asr_model_ids = [m['id'] for m in models]
+
+        if hasattr(self, 'cloud_asr_model_combo'):
+            self.cloud_asr_model_combo['values'] = model_names
+
+        default_model = ASR_PROVIDER_CONFIG[provider_id]["default_model"]
+        self._cloud_selected_asr_model_id = default_model
+        # 设置combobox显示名为默认模型对应的显示名
+        if default_model in self._asr_model_ids:
+            idx = self._asr_model_ids.index(default_model)
+            self.cloud_asr_model_var.set(model_names[idx])
+        else:
+            self.cloud_asr_model_var.set(default_model)
+
+        # 腾讯云提示 Key 格式
+        if provider_id == "tencent":
+            self.log("💡 腾讯云ASR Key格式: SecretId:SecretKey")
+
+        self.log(f"☁️ 已切换ASR服务商: {provider_name}")
+
+    def _on_asr_model_changed(self, event=None):
+        """云端ASR模型切换时更新_cloud_selected_asr_model_id"""
+        if hasattr(self, '_asr_model_ids') and hasattr(self, 'cloud_asr_model_combo'):
+            selected_display = self.cloud_asr_model_var.get()
+            try:
+                from video_generator.cloud_llm_client import ASR_PROVIDER_CONFIG
+                provider_name = self.cloud_asr_provider_var.get()
+                provider_id = None
+                # 先检查是否已经是ID
+                if provider_name in ASR_PROVIDER_CONFIG:
+                    provider_id = provider_name
+                else:
+                    for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+                        if pcfg["name"] == provider_name:
+                            provider_id = pid
+                            break
+                if provider_id:
+                    model_names = [f"{m['name']} - {m['desc']}" for m in ASR_PROVIDER_CONFIG[provider_id]['models']]
+                    if selected_display in model_names:
+                        idx = model_names.index(selected_display)
+                        self._cloud_selected_asr_model_id = self._asr_model_ids[idx]
+                    elif selected_display in self._asr_model_ids:
+                        # selected_display是模型ID（旧格式），直接使用
+                        self._cloud_selected_asr_model_id = selected_display
+            except Exception:
+                pass
+
+    def _update_asr_model_dropdown(self):
+        """初始化ASR模型下拉菜单"""
+        try:
+            from video_generator.cloud_llm_client import ASR_PROVIDER_CONFIG, get_asr_provider_models
+        except ImportError:
+            return
+
+        provider_name = self.cloud_asr_provider_var.get()
+        provider_id = None
+        # 先检查是否已经是ID
+        if provider_name in ASR_PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
+
+        if not provider_id:
+            provider_id = "openai"
+
+        models = get_asr_provider_models(provider_id)
+        model_names = [f"{m['name']} - {m['desc']}" for m in models]
+        self._asr_model_ids = [m['id'] for m in models]
+
+        if hasattr(self, 'cloud_asr_model_combo'):
+            self.cloud_asr_model_combo['values'] = model_names
+
+        # 恢复已保存的模型选择
+        current_model = self.cloud_asr_model_var.get()
+        selected_id = getattr(self, '_cloud_selected_asr_model_id', '')
+        if selected_id and selected_id in self._asr_model_ids:
+            # 优先使用已保存的模型ID
+            idx = self._asr_model_ids.index(selected_id)
+            self.cloud_asr_model_var.set(model_names[idx])
+        elif current_model and current_model in model_names:
+            # current_model是显示名，直接保持，同步ID
+            idx = model_names.index(current_model)
+            self._cloud_selected_asr_model_id = self._asr_model_ids[idx]
+        elif current_model and current_model in self._asr_model_ids:
+            # current_model是模型ID（旧格式），找到对应的显示名
+            idx = self._asr_model_ids.index(current_model)
+            self.cloud_asr_model_var.set(model_names[idx])
+            self._cloud_selected_asr_model_id = current_model
+        else:
+            default_model = ASR_PROVIDER_CONFIG[provider_id]["default_model"]
+            self._cloud_selected_asr_model_id = default_model
+            # 设置combobox显示名
+            if default_model in self._asr_model_ids:
+                idx = self._asr_model_ids.index(default_model)
+                self.cloud_asr_model_var.set(model_names[idx])
+            else:
+                self.cloud_asr_model_var.set(default_model)
 
 
     def _test_cloud_asr_connection(self):
@@ -1427,6 +1722,40 @@ class UIHandlersMixin:
             messagebox.showwarning("提示", "请先输入API Key再测试连接！")
             return
 
+        # 获取当前选择的服务商
+        try:
+            from video_generator.cloud_llm_client import ASR_PROVIDER_CONFIG
+            provider_name = self.cloud_asr_provider_var.get()
+            provider_id = None
+            # 先检查是否已经是ID
+            if provider_name in ASR_PROVIDER_CONFIG:
+                provider_id = provider_name
+            else:
+                for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+                    if pcfg["name"] == provider_name:
+                        provider_id = pid
+                        break
+            if not provider_id:
+                provider_id = "openai"
+            model = getattr(self, '_cloud_selected_asr_model_id', '')
+            # 如果_cloud_selected_asr_model_id为空，尝试从_asr_model_ids中查找
+            if not model and hasattr(self, '_asr_model_ids'):
+                model_display = self.cloud_asr_model_var.get()
+                try:
+                    model_names = [f"{m['name']} - {m['desc']}" for m in ASR_PROVIDER_CONFIG[provider_id]['models']]
+                    if model_display in model_names:
+                        idx = model_names.index(model_display)
+                        model = self._asr_model_ids[idx]
+                except Exception:
+                    pass
+            if not model:
+                model = ASR_PROVIDER_CONFIG.get(provider_id, {}).get("default_model", "whisper-1")
+            custom_url = self.cloud_asr_custom_url_var.get().strip()
+        except ImportError:
+            provider_id = "openai"
+            model = None
+            custom_url = ""
+
         self.log("☁️ 正在测试云端语音识别连接...")
         self.cloud_asr_status_var.set("⏳ 测试中...")
         if hasattr(self, 'cloud_asr_status_label'):
@@ -1436,7 +1765,7 @@ class UIHandlersMixin:
             self.btn_test_cloud_asr.config(state='disabled')
 
         def _do_test():
-            success, message = test_cloud_asr_connection(api_key)
+            success, message = test_cloud_asr_connection(api_key, provider=provider_id, model=model, custom_base_url=custom_url)
 
             def _update_ui():
                 if success:
@@ -1471,10 +1800,14 @@ class UIHandlersMixin:
         
         provider_name = self.cloud_llm_provider_var.get()
         provider_id = None
-        for pid, pcfg in PROVIDER_CONFIG.items():
-            if pcfg["name"] == provider_name:
-                provider_id = pid
-                break
+        # 先检查是否已经是ID
+        if provider_name in PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
         
         if not provider_id:
             self.log("⚠️ 未选择云端服务商")
@@ -1486,7 +1819,18 @@ class UIHandlersMixin:
             messagebox.showwarning("提示", "请先输入API Key再测试连接！")
             return
         
-        model = getattr(self, '_cloud_selected_model_id', '') or self.cloud_llm_model_var.get()
+        model = getattr(self, '_cloud_selected_model_id', '')
+        if not model:
+            # 从显示名解析模型ID
+            if hasattr(self, '_cloud_model_ids') and hasattr(self, '_cloud_model_combo'):
+                model_display = self.cloud_llm_model_var.get()
+                model_names = list(self._cloud_model_combo['values'])
+                if model_display in model_names:
+                    idx = model_names.index(model_display)
+                    if idx < len(self._cloud_model_ids):
+                        model = self._cloud_model_ids[idx]
+            if not model:
+                model = PROVIDER_CONFIG.get(provider_id, {}).get('default_model', '')
         custom_url = self.cloud_llm_custom_url_var.get().strip()
         
         self.log(f"☁️ 正在测试云端模型连接: {provider_name} / {model}...")
@@ -1533,10 +1877,14 @@ class UIHandlersMixin:
             from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG, get_image_provider_models
             provider_name = self.cloud_image_provider_var.get()
             provider_id = None
-            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
-                if pcfg["name"] == provider_name:
-                    provider_id = pid
-                    break
+            # 先检查是否已经是ID
+            if provider_name in IMAGE_PROVIDER_CONFIG:
+                provider_id = provider_name
+            else:
+                for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                    if pcfg["name"] == provider_name:
+                        provider_id = pid
+                        break
             if not provider_id:
                 return
             models = get_image_provider_models(provider_id)
@@ -1545,21 +1893,96 @@ class UIHandlersMixin:
             if hasattr(self, '_cloud_img_model_combo'):
                 self._cloud_img_model_combo['values'] = model_names
             default_model = IMAGE_PROVIDER_CONFIG[provider_id].get("default_model", "")
-            self.cloud_image_model_var.set(default_model)
+            if not default_model and self._cloud_img_model_ids:
+                default_model = self._cloud_img_model_ids[0]
             self._cloud_selected_image_model_id = default_model
+            # 设置combobox显示名为默认模型对应的显示名
+            if default_model in self._cloud_img_model_ids:
+                idx = self._cloud_img_model_ids.index(default_model)
+                self.cloud_image_model_var.set(model_names[idx])
+            else:
+                self.cloud_image_model_var.set(default_model)
         except ImportError:
             pass
 
 
     def _on_cloud_image_model_changed(self, event=None):
         """云端生图模型变更"""
-        idx = getattr(self, '_cloud_img_model_combo', None)
-        if idx is not None:
-            current = self._cloud_img_model_combo.current()
+        combo = getattr(self, '_cloud_img_model_combo', None)
+        if combo is not None:
+            current = combo.current()
             if 0 <= current < len(self._cloud_img_model_ids):
                 self._cloud_selected_image_model_id = self._cloud_img_model_ids[current]
             else:
-                self._cloud_selected_image_model_id = self.cloud_image_model_var.get()
+                # combobox未选中有效项，从显示名解析ID
+                model_display = self.cloud_image_model_var.get()
+                if hasattr(self, '_cloud_img_model_ids'):
+                    model_names = list(combo['values'])
+                    if model_display in model_names:
+                        idx = model_names.index(model_display)
+                        if idx < len(self._cloud_img_model_ids):
+                            self._cloud_selected_image_model_id = self._cloud_img_model_ids[idx]
+                            return
+                    # model_display是模型ID（旧格式），直接使用
+                    if model_display in self._cloud_img_model_ids:
+                        self._cloud_selected_image_model_id = model_display
+                        return
+                # 无法解析，保持原ID不变
+                if not getattr(self, '_cloud_selected_image_model_id', ''):
+                    self._cloud_selected_image_model_id = ''
+
+    def _update_cloud_image_model_dropdown(self):
+        """初始化/恢复云端生图模型下拉菜单"""
+        try:
+            from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG, get_image_provider_models
+        except ImportError:
+            return
+
+        provider_name = self.cloud_image_provider_var.get()
+        provider_id = None
+        # 先检查是否已经是ID
+        if provider_name in IMAGE_PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
+
+        if not provider_id:
+            provider_id = "siliconflow"
+
+        models = get_image_provider_models(provider_id)
+        model_names = [f"{m['name']} - {m['desc']}" for m in models]
+        self._cloud_img_model_ids = [m['id'] for m in models]
+
+        if hasattr(self, '_cloud_img_model_combo'):
+            self._cloud_img_model_combo['values'] = model_names
+
+        # 恢复已保存的模型选择
+        current_model = self.cloud_image_model_var.get()
+        selected_id = getattr(self, '_cloud_selected_image_model_id', '')
+        if selected_id and selected_id in self._cloud_img_model_ids:
+            # 优先使用已保存的模型ID
+            idx = self._cloud_img_model_ids.index(selected_id)
+            self.cloud_image_model_var.set(model_names[idx])
+        elif current_model and current_model in model_names:
+            # current_model是显示名，直接保持，同步ID
+            idx = model_names.index(current_model)
+            self._cloud_selected_image_model_id = self._cloud_img_model_ids[idx]
+        elif current_model and current_model in self._cloud_img_model_ids:
+            # current_model是模型ID（旧格式），找到对应的显示名
+            idx = self._cloud_img_model_ids.index(current_model)
+            self.cloud_image_model_var.set(model_names[idx])
+            self._cloud_selected_image_model_id = current_model
+        else:
+            default_model = IMAGE_PROVIDER_CONFIG.get(provider_id, {}).get("default_model", "")
+            self._cloud_selected_image_model_id = default_model
+            if default_model and default_model in self._cloud_img_model_ids:
+                idx = self._cloud_img_model_ids.index(default_model)
+                self.cloud_image_model_var.set(model_names[idx])
+            else:
+                self.cloud_image_model_var.set(default_model or "未知模型")
 
 
     def _toggle_entry_visibility(self, entry_widget):
@@ -1580,10 +2003,14 @@ class UIHandlersMixin:
 
         provider_name = self.cloud_image_provider_var.get()
         provider_id = None
-        for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
-            if pcfg["name"] == provider_name:
-                provider_id = pid
-                break
+        # 先检查是否已经是ID
+        if provider_name in IMAGE_PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
 
         if not provider_id:
             self.log("⚠️ 未选择云端生图服务商")
@@ -1595,7 +2022,18 @@ class UIHandlersMixin:
             messagebox.showwarning("提示", "请先输入API Key再测试连接！")
             return
 
-        model = getattr(self, '_cloud_selected_image_model_id', '') or self.cloud_image_model_var.get()
+        model = getattr(self, '_cloud_selected_image_model_id', '')
+        if not model:
+            # 从显示名解析模型ID
+            if hasattr(self, '_cloud_img_model_ids') and hasattr(self, '_cloud_img_model_combo'):
+                model_display = self.cloud_image_model_var.get()
+                model_names = list(self._cloud_img_model_combo['values'])
+                if model_display in model_names:
+                    idx = model_names.index(model_display)
+                    if idx < len(self._cloud_img_model_ids):
+                        model = self._cloud_img_model_ids[idx]
+            if not model:
+                model = IMAGE_PROVIDER_CONFIG.get(provider_id, {}).get('default_model', '')
         custom_url = self.cloud_image_custom_url_var.get().strip()
 
         self.log(f"☁️ 正在测试云端生图连接: {provider_name} / {model}...")
@@ -1642,17 +2080,32 @@ class UIHandlersMixin:
         
         provider_name = self.cloud_llm_provider_var.get()
         provider_id = None
-        for pid, pcfg in PROVIDER_CONFIG.items():
-            if pcfg["name"] == provider_name:
-                provider_id = pid
-                break
+        # 先检查是否已经是ID
+        if provider_name in PROVIDER_CONFIG:
+            provider_id = provider_name
+        else:
+            for pid, pcfg in PROVIDER_CONFIG.items():
+                if pcfg["name"] == provider_name:
+                    provider_id = pid
+                    break
         
         if not provider_id:
             provider_id = "deepseek"
         
         enabled = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
         api_key = self.cloud_llm_api_key_var.get().strip() if hasattr(self, 'cloud_llm_api_key_var') else ""
-        model = getattr(self, '_cloud_selected_model_id', '') or (self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else "")
+        model = getattr(self, '_cloud_selected_model_id', '')
+        if not model and hasattr(self, '_cloud_model_ids') and hasattr(self, 'cloud_llm_model_var'):
+            model_display = self.cloud_llm_model_var.get()
+            try:
+                model_names = [f"{m['name']} - {m['desc']}" for m in PROVIDER_CONFIG[provider_id]['models']]
+                if model_display in model_names:
+                    idx = model_names.index(model_display)
+                    model = self._cloud_model_ids[idx]
+            except Exception:
+                pass
+        if not model:
+            model = PROVIDER_CONFIG.get(provider_id, {}).get("default_model", "deepseek-chat")
         custom_url = self.cloud_llm_custom_url_var.get().strip() if hasattr(self, 'cloud_llm_custom_url_var') else ""
         
         if enabled and not api_key:
@@ -1670,13 +2123,47 @@ class UIHandlersMixin:
         })
         
         try:
-            from video_generator.cloud_llm_client import set_cloud_asr_config
+            from video_generator.cloud_llm_client import set_cloud_asr_config, ASR_PROVIDER_CONFIG
             asr_enabled = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
             asr_api_key = self.cloud_asr_api_key_var.get().strip() if hasattr(self, 'cloud_asr_api_key_var') else ""
+            asr_provider_name = self.cloud_asr_provider_var.get() if hasattr(self, 'cloud_asr_provider_var') else "OpenAI Whisper"
+            asr_provider_id = None
+            # 先检查是否已经是ID
+            if asr_provider_name in ASR_PROVIDER_CONFIG:
+                asr_provider_id = asr_provider_name
+            else:
+                for pid, pcfg in ASR_PROVIDER_CONFIG.items():
+                    if pcfg["name"] == asr_provider_name:
+                        asr_provider_id = pid
+                        break
+            if not asr_provider_id:
+                asr_provider_id = "openai"
+            asr_model = getattr(self, '_cloud_selected_asr_model_id', '')
+            if not asr_model and hasattr(self, '_asr_model_ids') and hasattr(self, 'cloud_asr_model_var'):
+                asr_model_display = self.cloud_asr_model_var.get()
+                try:
+                    model_names = [f"{m['name']} - {m['desc']}" for m in ASR_PROVIDER_CONFIG[asr_provider_id]['models']]
+                    if asr_model_display in model_names:
+                        idx = model_names.index(asr_model_display)
+                        asr_model = self._asr_model_ids[idx]
+                except Exception:
+                    pass
+            if not asr_model:
+                asr_model = ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get("default_model", "whisper-1")
+            asr_custom_url = self.cloud_asr_custom_url_var.get().strip() if hasattr(self, 'cloud_asr_custom_url_var') else ""
+
+            if asr_enabled and not asr_api_key:
+                self.log("⚠️ 启用云端语音识别需要提供API Key")
+                asr_enabled = False
+                if hasattr(self, 'cloud_asr_enabled_var'):
+                    self.cloud_asr_enabled_var.set(False)
+
             set_cloud_asr_config({
                 "enabled": asr_enabled,
-                "provider": "openai",
+                "provider": asr_provider_id,
                 "api_key": asr_api_key,
+                "model": asr_model,
+                "custom_base_url": asr_custom_url,
             })
         except ImportError:
             pass
@@ -1687,13 +2174,28 @@ class UIHandlersMixin:
             img_api_key = self.cloud_image_api_key_var.get().strip() if hasattr(self, 'cloud_image_api_key_var') else ""
             img_provider_name = self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else ""
             img_provider_id = None
-            for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
-                if pcfg["name"] == img_provider_name:
-                    img_provider_id = pid
-                    break
+            # 先检查是否已经是ID
+            if img_provider_name in IMAGE_PROVIDER_CONFIG:
+                img_provider_id = img_provider_name
+            else:
+                for pid, pcfg in IMAGE_PROVIDER_CONFIG.items():
+                    if pcfg["name"] == img_provider_name:
+                        img_provider_id = pid
+                        break
             if not img_provider_id:
                 img_provider_id = "siliconflow"
-            img_model = getattr(self, '_cloud_selected_image_model_id', '') or (self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else "")
+            img_model = getattr(self, '_cloud_selected_image_model_id', '')
+            if not img_model and hasattr(self, '_cloud_img_model_ids') and hasattr(self, 'cloud_image_model_var'):
+                img_model_display = self.cloud_image_model_var.get()
+                try:
+                    model_names = [f"{m['name']} - {m['desc']}" for m in IMAGE_PROVIDER_CONFIG[img_provider_id]['models']]
+                    if img_model_display in model_names:
+                        idx = model_names.index(img_model_display)
+                        img_model = self._cloud_img_model_ids[idx]
+                except Exception:
+                    pass
+            if not img_model:
+                img_model = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get("default_model", "")
             img_custom_url = self.cloud_image_custom_url_var.get().strip() if hasattr(self, 'cloud_image_custom_url_var') else ""
 
             if img_enabled and not img_api_key:
@@ -1725,12 +2227,8 @@ class UIHandlersMixin:
             self._cloud_llm_enabled = True
             self._cloud_llm_provider = provider_display
             self._cloud_llm_model = model
-            if not getattr(self, 'task_running', False) and is_ollama_available():
-                try:
-                    self._unload_ollama_models(log_prefix="")
-                    set_ollama_available(False)
-                except Exception:
-                    pass
+            # 不再无条件卸载Ollama和设置不可用，保留本地回退能力
+            # Ollama模型会在任务执行时按需卸载释放GPU显存
         else:
             self._cloud_llm_enabled = False
 
@@ -1742,6 +2240,11 @@ class UIHandlersMixin:
 
     def _on_cloud_asr_toggle_ui(self, *args):
         """云端ASR启用状态变化时，更新Whisper模型选择器的可用性"""
+        if hasattr(self, 'root') and self.root:
+            self.root.after(0, self._update_local_model_panel_state)
+
+    def _on_cloud_image_toggle_ui(self, *args):
+        """云端生图启用状态变化时，更新本地SD面板的可用性"""
         if hasattr(self, 'root') and self.root:
             self.root.after(0, self._update_local_model_panel_state)
 
@@ -1791,10 +2294,10 @@ class UIHandlersMixin:
         if hasattr(self, '_cloud_mode_note'):
             notes = []
             if cloud_llm:
-                notes.append("☁️ Ollama模型已禁用（云端LLM替代）")
+                notes.append("☁️ 优先使用云端LLM（本地Ollama自动回退）")
                 notes.append("   配置模式仅temperature生效")
             if cloud_asr:
-                notes.append("☁️ 语音模型已禁用（云端ASR替代）")
+                notes.append("☁️ 优先使用云端ASR（本地Whisper自动回退）")
             if cloud_img:
                 notes.append("🎨 本地SD设置已禁用（云端生图替代）")
             self._cloud_mode_note.config(text="\n".join(notes))
@@ -1821,16 +2324,25 @@ class UIHandlersMixin:
 
     def load_config(self):
         """加载配置"""
+        # 预加载云端配置模块（load_config中多处使用）
+        try:
+            from video_generator.cloud_llm_client import PROVIDER_CONFIG, ASR_PROVIDER_CONFIG
+            asr_available = True
+        except ImportError:
+            PROVIDER_CONFIG = {}
+            ASR_PROVIDER_CONFIG = {}
+            asr_available = False
+        try:
+            from video_generator.cloud_image_client import IMAGE_PROVIDER_CONFIG
+            img_available = True
+        except ImportError:
+            IMAGE_PROVIDER_CONFIG = {}
+            img_available = False
+
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                
-                try:
-                    from video_generator.crypto_utils import decrypt_config
-                    decrypt_config(config, self.base_dir)
-                except ImportError:
-                    pass
                 
                 # 加载绘图设置
                 if 'model' in config:
@@ -1907,28 +2419,132 @@ class UIHandlersMixin:
                 if 'cloud_llm_enabled' in config and hasattr(self, 'cloud_llm_enabled_var'):
                     self.cloud_llm_enabled_var.set(config['cloud_llm_enabled'])
                 if 'cloud_llm_provider' in config and hasattr(self, 'cloud_llm_provider_var'):
-                    self.cloud_llm_provider_var.set(config['cloud_llm_provider'])
+                    # 兼容旧版本：配置中可能是ID而非显示名
+                    llm_prov_val = config['cloud_llm_provider']
+                    if PROVIDER_CONFIG and llm_prov_val in PROVIDER_CONFIG:
+                        llm_prov_val = PROVIDER_CONFIG[llm_prov_val]["name"]
+                    # 验证值是否在combobox的可选列表中
+                    if PROVIDER_CONFIG:
+                        valid_names = [pcfg["name"] for pcfg in PROVIDER_CONFIG.values()]
+                        if llm_prov_val not in valid_names:
+                            llm_prov_val = PROVIDER_CONFIG.get("deepseek", {}).get("name", "DeepSeek 深度求索")
+                    self.cloud_llm_provider_var.set(llm_prov_val)
                 if 'cloud_llm_api_key' in config and hasattr(self, 'cloud_llm_api_key_var'):
                     self.cloud_llm_api_key_var.set(config['cloud_llm_api_key'])
                 if 'cloud_llm_model' in config and hasattr(self, 'cloud_llm_model_var'):
-                    self.cloud_llm_model_var.set(config['cloud_llm_model'])
-                    self._cloud_selected_model_id = config.get('cloud_llm_model_id', config['cloud_llm_model'])
+                    # 优先使用cloud_llm_model_id，兼容旧版本只有显示名的情况
+                    model_id = config.get('cloud_llm_model_id', '')
+                    if not model_id:
+                        model_id = config['cloud_llm_model']
+                    # 验证model_id是否是有效ID，如果无效则尝试从显示名解析
+                    provider_id = self._resolve_provider_id(self.cloud_llm_provider_var.get()) if hasattr(self, 'cloud_llm_provider_var') else 'deepseek'
+                    valid_ids = [m['id'] for m in PROVIDER_CONFIG.get(provider_id, {}).get('models', [])]
+                    if valid_ids and model_id not in valid_ids:
+                        # model_id可能是显示名，尝试匹配
+                        model_names = [f"{m['name']} - {m['desc']}" for m in PROVIDER_CONFIG[provider_id]['models']]
+                        if model_id in model_names:
+                            idx = model_names.index(model_id)
+                            model_id = valid_ids[idx]
+                        else:
+                            model_id = PROVIDER_CONFIG.get(provider_id, {}).get('default_model', 'deepseek-chat')
+                    self._cloud_selected_model_id = model_id
+                    # 将模型ID转为显示名设置到var（combobox显示用）
+                    if PROVIDER_CONFIG.get(provider_id, {}).get('models'):
+                        for m in PROVIDER_CONFIG[provider_id]['models']:
+                            if m['id'] == model_id:
+                                self.cloud_llm_model_var.set(f"{m['name']} - {m['desc']}")
+                                break
+                        else:
+                            self.cloud_llm_model_var.set(model_id)
+                    else:
+                        self.cloud_llm_model_var.set(model_id)
                 if 'cloud_llm_custom_url' in config and hasattr(self, 'cloud_llm_custom_url_var'):
                     self.cloud_llm_custom_url_var.set(config['cloud_llm_custom_url'])
                 if 'cloud_asr_enabled' in config and hasattr(self, 'cloud_asr_enabled_var'):
                     self.cloud_asr_enabled_var.set(config['cloud_asr_enabled'])
                 if 'cloud_asr_api_key' in config and hasattr(self, 'cloud_asr_api_key_var'):
                     self.cloud_asr_api_key_var.set(config['cloud_asr_api_key'])
+                if 'cloud_asr_provider' in config and hasattr(self, 'cloud_asr_provider_var'):
+                    # 兼容旧版本：配置中可能是ID而非显示名
+                    asr_prov_val = config['cloud_asr_provider']
+                    if asr_available and asr_prov_val in ASR_PROVIDER_CONFIG:
+                        asr_prov_val = ASR_PROVIDER_CONFIG[asr_prov_val]["name"]
+                    # 验证值是否在combobox的可选列表中
+                    if asr_available:
+                        asr_valid_names = [pcfg["name"] for pcfg in ASR_PROVIDER_CONFIG.values()]
+                        if asr_prov_val not in asr_valid_names:
+                            asr_prov_val = ASR_PROVIDER_CONFIG.get("openai", {}).get("name", "OpenAI Whisper")
+                    self.cloud_asr_provider_var.set(asr_prov_val)
+                if 'cloud_asr_model' in config and hasattr(self, 'cloud_asr_model_var'):
+                    # 优先使用cloud_asr_model_id，兼容旧版本
+                    asr_model_id = config.get('cloud_asr_model_id', '')
+                    if not asr_model_id:
+                        asr_model_id = config['cloud_asr_model']
+                    # 验证ASR模型ID是否有效
+                    asr_provider_id = self._resolve_asr_provider_id(self.cloud_asr_provider_var.get()) if hasattr(self, 'cloud_asr_provider_var') else 'openai'
+                    asr_valid_ids = [m['id'] for m in ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get('models', [])]
+                    if asr_valid_ids and asr_model_id not in asr_valid_ids:
+                        asr_model_names = [f"{m['name']} - {m['desc']}" for m in ASR_PROVIDER_CONFIG[asr_provider_id]['models']]
+                        if asr_model_id in asr_model_names:
+                            idx = asr_model_names.index(asr_model_id)
+                            asr_model_id = asr_valid_ids[idx]
+                        else:
+                            asr_model_id = ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get('default_model', 'whisper-1')
+                    self._cloud_selected_asr_model_id = asr_model_id
+                    # 将模型ID转为显示名设置到var（combobox显示用）
+                    if asr_available and ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get('models'):
+                        for m in ASR_PROVIDER_CONFIG[asr_provider_id]['models']:
+                            if m['id'] == asr_model_id:
+                                self.cloud_asr_model_var.set(f"{m['name']} - {m['desc']}")
+                                break
+                        else:
+                            self.cloud_asr_model_var.set(asr_model_id)
+                    else:
+                        self.cloud_asr_model_var.set(asr_model_id)
+                if 'cloud_asr_custom_url' in config and hasattr(self, 'cloud_asr_custom_url_var'):
+                    self.cloud_asr_custom_url_var.set(config['cloud_asr_custom_url'])
 
                 if 'cloud_image_enabled' in config and hasattr(self, 'cloud_image_enabled_var'):
                     self.cloud_image_enabled_var.set(config['cloud_image_enabled'])
                 if 'cloud_image_provider' in config and hasattr(self, 'cloud_image_provider_var'):
-                    self.cloud_image_provider_var.set(config['cloud_image_provider'])
+                    # 兼容旧版本：配置中可能是ID而非显示名
+                    img_prov_val = config['cloud_image_provider']
+                    if img_available and img_prov_val in IMAGE_PROVIDER_CONFIG:
+                        img_prov_val = IMAGE_PROVIDER_CONFIG[img_prov_val]["name"]
+                    # 验证值是否在combobox的可选列表中
+                    if img_available:
+                        img_valid_names = [pcfg["name"] for pcfg in IMAGE_PROVIDER_CONFIG.values()]
+                        if img_prov_val not in img_valid_names:
+                            img_prov_val = IMAGE_PROVIDER_CONFIG.get("siliconflow", {}).get("name", "硅基流动 SiliconFlow")
+                    self.cloud_image_provider_var.set(img_prov_val)
                 if 'cloud_image_api_key' in config and hasattr(self, 'cloud_image_api_key_var'):
                     self.cloud_image_api_key_var.set(config['cloud_image_api_key'])
                 if 'cloud_image_model' in config and hasattr(self, 'cloud_image_model_var'):
-                    self.cloud_image_model_var.set(config['cloud_image_model'])
-                    self._cloud_selected_image_model_id = config.get('cloud_image_model_id', config['cloud_image_model'])
+                    # 优先使用cloud_image_model_id，兼容旧版本
+                    img_model_id = config.get('cloud_image_model_id', '')
+                    if not img_model_id:
+                        img_model_id = config['cloud_image_model']
+                    # 验证生图模型ID是否有效
+                    img_provider_id = self._resolve_image_provider_id(self.cloud_image_provider_var.get()) if hasattr(self, 'cloud_image_provider_var') else 'siliconflow'
+                    img_valid_ids = [m['id'] for m in IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get('models', [])]
+                    if img_valid_ids and img_model_id not in img_valid_ids:
+                        img_model_names = [f"{m['name']} - {m['desc']}" for m in IMAGE_PROVIDER_CONFIG[img_provider_id]['models']]
+                        if img_model_id in img_model_names:
+                            idx = img_model_names.index(img_model_id)
+                            img_model_id = img_valid_ids[idx]
+                        else:
+                            img_model_id = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get('default_model', img_valid_ids[0] if img_valid_ids else '')
+                    self._cloud_selected_image_model_id = img_model_id
+                    # 将模型ID转为显示名设置到var（combobox显示用）
+                    if img_available and IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get('models'):
+                        for m in IMAGE_PROVIDER_CONFIG[img_provider_id]['models']:
+                            if m['id'] == img_model_id:
+                                self.cloud_image_model_var.set(f"{m['name']} - {m['desc']}")
+                                break
+                        else:
+                            self.cloud_image_model_var.set(img_model_id)
+                    else:
+                        self.cloud_image_model_var.set(img_model_id)
                 if 'cloud_image_custom_url' in config and hasattr(self, 'cloud_image_custom_url_var'):
                     self.cloud_image_custom_url_var.set(config['cloud_image_custom_url'])
 
@@ -1939,6 +2555,27 @@ class UIHandlersMixin:
                 if hasattr(self, '_apply_cloud_llm_config'):
                     try:
                         self._apply_cloud_llm_config()
+                    except Exception:
+                        pass
+                
+                # 配置加载后同步云端模型下拉菜单
+                if hasattr(self, '_update_cloud_model_dropdown'):
+                    try:
+                        self._update_cloud_model_dropdown()
+                    except Exception:
+                        pass
+                
+                # 配置加载后同步ASR模型下拉菜单
+                if hasattr(self, '_update_asr_model_dropdown'):
+                    try:
+                        self._update_asr_model_dropdown()
+                    except Exception:
+                        pass
+                
+                # 配置加载后同步生图模型下拉菜单
+                if hasattr(self, '_update_cloud_image_model_dropdown'):
+                    try:
+                        self._update_cloud_image_model_dropdown()
                     except Exception:
                         pass
                 
@@ -1983,58 +2620,48 @@ class UIHandlersMixin:
                 'thread_count': self.thread_count_var.get() if hasattr(self, 'thread_count_var') else 8,
                 'batch_size': self.batch_size_var.get() if hasattr(self, 'batch_size_var') else 2,
                 'cloud_llm_enabled': self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False,
-                'cloud_llm_provider': self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else 'DeepSeek 深度求索',
+                'cloud_llm_provider': self._resolve_provider_id(self.cloud_llm_provider_var.get()) if hasattr(self, 'cloud_llm_provider_var') else 'deepseek',
                 'cloud_llm_api_key': self.cloud_llm_api_key_var.get() if hasattr(self, 'cloud_llm_api_key_var') else '',
-                'cloud_llm_model': self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else 'deepseek-chat',
+                'cloud_llm_model': getattr(self, '_cloud_selected_model_id', '') or 'deepseek-chat',
                 'cloud_llm_model_id': getattr(self, '_cloud_selected_model_id', '') or 'deepseek-chat',
                 'cloud_llm_custom_url': self.cloud_llm_custom_url_var.get() if hasattr(self, 'cloud_llm_custom_url_var') else '',
                 'cloud_asr_enabled': self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False,
                 'cloud_asr_api_key': self.cloud_asr_api_key_var.get() if hasattr(self, 'cloud_asr_api_key_var') else '',
+                'cloud_asr_provider': self._resolve_asr_provider_id(self.cloud_asr_provider_var.get()) if hasattr(self, 'cloud_asr_provider_var') else 'openai',
+                'cloud_asr_model': getattr(self, '_cloud_selected_asr_model_id', '') or 'whisper-1',
+                'cloud_asr_model_id': getattr(self, '_cloud_selected_asr_model_id', '') or 'whisper-1',
+                'cloud_asr_custom_url': self.cloud_asr_custom_url_var.get() if hasattr(self, 'cloud_asr_custom_url_var') else '',
                 'cloud_image_enabled': self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False,
-                'cloud_image_provider': self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else 'siliconflow',
+                'cloud_image_provider': self._resolve_image_provider_id(self.cloud_image_provider_var.get()) if hasattr(self, 'cloud_image_provider_var') else 'siliconflow',
                 'cloud_image_api_key': self.cloud_image_api_key_var.get() if hasattr(self, 'cloud_image_api_key_var') else '',
-                'cloud_image_model': self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else '',
-                'cloud_image_model_id': getattr(self, '_cloud_selected_image_model_id', '') or '',
+                'cloud_image_model': getattr(self, '_cloud_selected_image_model_id', '') or 'stabilityai/stable-diffusion-xl-base-1.0',
+                'cloud_image_model_id': getattr(self, '_cloud_selected_image_model_id', '') or 'stabilityai/stable-diffusion-xl-base-1.0',
                 'cloud_image_custom_url': self.cloud_image_custom_url_var.get() if hasattr(self, 'cloud_image_custom_url_var') else '',
                 'min_shot_duration': self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0,
             }
             
-            try:
-                from video_generator.crypto_utils import encrypt_config
-                encrypt_config(config, self.base_dir)
-            except ImportError:
-                pass
-            
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
+            
+            # 更新配置签名文件，防止下次加载时签名校验失败
+            try:
+                import hmac as _hmac
+                import hashlib as _hashlib
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    raw_content = f.read()
+                sig_key = "VideoGen2025ConfigSignatureKey_v1"
+                sig = _hmac.new(
+                    sig_key.encode("utf-8"),
+                    raw_content.encode("utf-8"),
+                    _hashlib.sha256
+                ).hexdigest()
+                sig_path = self.config_file + ".sig"
+                with open(sig_path, 'w', encoding='utf-8') as sf:
+                    sf.write(sig)
+            except Exception:
+                pass
             
             self.log("✅ 配置保存完成")
         except Exception as e:
             self.log(f"⚠️ 配置保存失败: {e}")
-
-    def _check_api_heartbeat(self):
-        try:
-            from video_generator.config import get_api_base_url, get_http_session
-            api_url = get_api_base_url()
-            if not api_url:
-                return
-            resp = get_http_session().get(
-                f"{api_url}/health",
-                timeout=5,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                db_ok = data.get("database") == "ok"
-                if not db_ok:
-                    if not getattr(self, '_api_db_warned', False):
-                        self._api_db_warned = True
-                        self.log("⚠️ Backend API database degraded")
-            else:
-                if not getattr(self, '_api_warned', False):
-                    self._api_warned = True
-                    self.log(f"⚠️ Backend API returned status {resp.status_code}")
-        except Exception:
-            if not getattr(self, '_api_warned', False):
-                self._api_warned = True
-                self.log("⚠️ Backend API unreachable")
 

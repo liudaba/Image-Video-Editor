@@ -15,6 +15,9 @@ import subprocess
 # Windows 下隐藏子进程的控制台窗口，防止蓝色命令框闪烁
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
+# subprocess 统一编码参数：避免 Windows 中文环境下 UnicodeDecodeError
+_SUBPROCESS_TEXT_KWARGS = {"encoding": "utf-8", "errors": "replace"}
+
 logger = logging.getLogger("auth_fingerprint")
 
 
@@ -30,7 +33,7 @@ def _run_wmic(command: str, field: str) -> str:
                 result = subprocess.run(
                     ["wmic", command],
                     capture_output=True, text=True, timeout=5,
-                    creationflags=_SUBPROCESS_FLAGS
+                    creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
                 )
                 if result.returncode == 0:
                     lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
@@ -45,7 +48,7 @@ def _run_wmic(command: str, field: str) -> str:
                 result = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", ps_cmd],
                     capture_output=True, text=True, timeout=10,
-                    creationflags=_SUBPROCESS_FLAGS
+                    creationflags=_SUBPROCESS_FLAGS, **_SUBPROCESS_TEXT_KWARGS
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()

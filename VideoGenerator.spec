@@ -86,12 +86,12 @@ for _pkg in ['whisper', 'moviepy', 'imageio', 'imageio_ffmpeg', 'proglog', 'dote
 # ── 4. 排除模块 ──
 excludes = [
     'test', 'tests', 'setuptools', 'pip', 'easy_install', 'pkg_resources',
-    'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'notebook', 'IPython',
+    'PyQt5', 'PyQt6', 'matplotlib', 'notebook', 'IPython',
     'jupyter', 'tornado', 'fastapi', 'uvicorn', 'sqlalchemy', 'alembic',
     'redis', 'asyncpg', 'aiosqlite', 'paramiko', 'bcrypt', 'passlib',
     'python_jose', 'python_multipart', 'jose', 'httpx', 'websockets',
-    'starlette', 'anyio', 'httptools', 'pydantic', 'uvloop', 'sympy',
-    'networkx',
+    'starlette', 'anyio', 'httptools', 'pydantic', 'uvloop',
+    # 注意: scipy, sympy, networkx 是 whisper 的运行时依赖，不能排除！
 ]
 
 # ── 5. Analysis ──

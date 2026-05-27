@@ -433,14 +433,22 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
                 num_predict=num_predict,
                 llm_config=llm_config,
             )
-            return result, model
+            # 云端调用成功且有结果时直接返回
+            if result is not None:
+                return result, model
+            # 云端返回空结果，尝试回退本地
+            if log_callback:
+                log_callback("⚠️ 云端模型返回空结果，尝试回退本地 Ollama...")
         except Exception as e:
             if log_callback:
                 log_callback(f"⚠️ 云端模型调用失败: {e}")
-            if not is_ollama_available():
-                if log_callback:
-                    log_callback("⚠️ 本地 Ollama 也不可用（云端模式下已释放），请检查云端配置")
-                return None, None
+        # 云端失败或返回空结果，尝试回退本地
+        if not check_ollama_available():
+            if log_callback:
+                log_callback("⚠️ 本地 Ollama 也不可用，请检查云端配置或启动本地Ollama")
+            return None, None
+        if log_callback:
+            log_callback("🔄 云端失败，回退到本地 Ollama...")
 
     if not is_ollama_available():
         if not check_ollama_available():

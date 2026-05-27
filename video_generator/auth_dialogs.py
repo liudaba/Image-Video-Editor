@@ -1602,6 +1602,38 @@ def check_and_show_login(parent=None):
     license_mgr = LicenseManager()
     license_status = license_mgr.check_license()
 
+    # 注册授权撤销/恢复回调，确保管理平台操作能及时通知用户
+    def _on_auth_revoked():
+        """授权被撤销时在主线程通知用户"""
+        try:
+            if parent and hasattr(parent, 'after'):
+                parent.after(0, lambda: _show_auth_revoked_warning(parent))
+        except Exception:
+            pass
+
+    def _on_auth_recovered():
+        """授权恢复时在主线程通知用户"""
+        try:
+            if parent and hasattr(parent, 'after') and hasattr(parent, 'log'):
+                parent.after(0, lambda: parent.log("✅ 授权已恢复，可继续使用"))
+        except Exception:
+            pass
+
+    def _show_auth_revoked_warning(parent_win):
+        """显示授权撤销警告"""
+        try:
+            import tkinter.messagebox as mb
+            mb.showwarning(
+                "授权通知",
+                "您的授权已被管理员撤销，部分功能可能受限。\n\n如有疑问，请联系客服。",
+                parent=parent_win
+            )
+        except Exception:
+            pass
+
+    license_mgr.set_auth_revoked_callback(_on_auth_revoked)
+    license_mgr.set_auth_recovered_callback(_on_auth_recovered)
+
     # 辅助函数：尝试登录对话框并返回结果
     def _try_login_dialog():
         dialog = LoginDialog(parent)
