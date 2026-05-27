@@ -441,37 +441,94 @@ class ResourceMixin:
             timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
             trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
 
-            if hasattr(self, 'output_dir') and os.path.exists(self.output_dir):
-                has_content = any(os.listdir(self.output_dir))
-                if not has_content:
-                    return 0
+            if not hasattr(self, 'output_dir'):
+                self.log("⚠️ output_dir 未设置，跳过垃圾桶操作")
+                return 0
 
-                try:
-                    shutil.move(self.output_dir, trash_session_dir)
-                    os.makedirs(self.output_dir, exist_ok=True)
-                    if hasattr(self, 'images_dir'):
-                        os.makedirs(self.images_dir, exist_ok=True)
-                    moved_count = 1
-                except Exception:
-                    os.makedirs(trash_session_dir, exist_ok=True)
-                    if hasattr(self, 'images_dir') and os.path.exists(self.images_dir):
-                        images_trash_dir = os.path.join(trash_session_dir, "images")
-                        os.makedirs(images_trash_dir, exist_ok=True)
-                        for f in os.listdir(self.images_dir):
-                            fp = os.path.join(self.images_dir, f)
-                            if os.path.isfile(fp):
-                                if self._move_to_trash(fp, images_trash_dir):
-                                    moved_count += 1
-                    for f in os.listdir(self.output_dir):
-                        fp = os.path.join(self.output_dir, f)
-                        if os.path.isfile(fp):
-                            if self._move_to_trash(fp, trash_session_dir):
-                                moved_count += 1
+            if not os.path.exists(self.output_dir):
+                self.log(f"⚠️ output_dir 不存在: {self.output_dir}")
+                return 0
+
+            has_content = any(os.listdir(self.output_dir))
+            if not has_content:
+                return 0
+
+            self.log(f"🗑️ 正在将输出目录移至垃圾桶({reason})...")
+
+            # 方法1: 尝试整目录移动（最快，原子操作）
+            try:
+                shutil.move(self.output_dir, trash_session_dir)
+                # 重新创建空的 output_dir 和 images_dir
+                os.makedirs(self.output_dir, exist_ok=True)
+                if hasattr(self, 'images_dir'):
+                    os.makedirs(self.images_dir, exist_ok=True)
+                self.log(f"✅ 已将输出目录移至垃圾桶: {trash_session_dir}")
+                return 1
+            except Exception as move_err:
+                self.log(f"⚠️ 整目录移动失败，改用逐文件移动: {move_err}")
+
+            # 方法2: 逐文件/子目录移动到垃圾桶（fallback）
+            os.makedirs(trash_session_dir, exist_ok=True)
+
+            for item in os.listdir(self.output_dir):
+                src = os.path.join(self.output_dir, item)
+                dst = os.path.join(trash_session_dir, item)
+
+                if os.path.isfile(src):
+                    try:
+                        if os.path.exists(dst):
+                            name, ext = os.path.splitext(item)
+                            dst = os.path.join(trash_session_dir, f"{name}_{int(time.time()*1000)}{ext}")
+                        shutil.move(src, dst)
+                        moved_count += 1
+                    except Exception as e:
+                        self._log_exception(f"⚠️ 移动文件到垃圾桶失败: {item}", e)
+                elif os.path.isdir(src):
+                    try:
+                        if os.path.exists(dst):
+                            # 目标已存在，合并目录内容
+                            for root, dirs, files in os.walk(src):
+                                rel = os.path.relpath(root, src)
+                                target_dir = os.path.join(dst, rel)
+                                os.makedirs(target_dir, exist_ok=True)
+                                for f in files:
+                                    src_file = os.path.join(root, f)
+                                    dst_file = os.path.join(target_dir, f)
+                                    if not os.path.exists(dst_file):
+                                        shutil.move(src_file, dst_file)
+                                        moved_count += 1
+                            # 尝试删除空的源目录
+                            try:
+                                shutil.rmtree(src, ignore_errors=True)
+                            except Exception:
+                                pass
+                        else:
+                            shutil.move(src, dst)
+                            moved_count += 1
+                    except Exception as e:
+                        self._log_exception(f"⚠️ 移动目录到垃圾桶失败: {item}", e)
+
+            # 确保 output_dir 和 images_dir 始终存在
+            if not os.path.exists(self.output_dir):
+                os.makedirs(self.output_dir, exist_ok=True)
+            if hasattr(self, 'images_dir') and not os.path.exists(self.images_dir):
+                os.makedirs(self.images_dir, exist_ok=True)
 
             if moved_count > 0:
-                self.log(f"🗑️ 已将残留文件移至垃圾桶: {trash_session_dir}")
+                self.log(f"✅ 已将 {moved_count} 个文件/目录移至垃圾桶: {trash_session_dir}")
+            else:
+                self.log("⚠️ 垃圾桶操作完成，但未移动任何文件")
+
         except Exception as e:
             self._log_exception("⚠️ 移动文件到垃圾桶失败", e)
+            # 确保 output_dir 始终存在
+            try:
+                if hasattr(self, 'output_dir') and not os.path.exists(self.output_dir):
+                    os.makedirs(self.output_dir, exist_ok=True)
+                if hasattr(self, 'images_dir') and not os.path.exists(self.images_dir):
+                    os.makedirs(self.images_dir, exist_ok=True)
+            except Exception:
+                pass
 
         return moved_count
 
