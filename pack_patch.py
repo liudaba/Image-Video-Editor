@@ -20,33 +20,65 @@ from video_generator.auto_updater import create_patch_zip
 from video_generator.version import get_version
 
 
-def get_changed_files():
-    """从git获取变更文件列表（已提交 + 未提交）"""
+def get_changed_files(from_version=None):
+    """从git获取变更文件列表（已提交 + 未提交）
+    
+    Args:
+        from_version: 起始版本号，用于查找对应的git tag。如果为None，则只看最近一次提交。
+    """
     files = set()
 
-    # 1. 最近一次提交的变更（首次提交时 HEAD~1 不存在，需要用 --diff-filter）
-    try:
-        result = subprocess.run(
-            ['git', 'diff', '--name-only', 'HEAD~1'],
-            capture_output=True, text=True, encoding='utf-8', errors='replace'
-        )
-        if result.returncode == 0:
-            for line in result.stdout.strip().split('\n'):
-                line = line.strip()
-                if line:
-                    files.add(line)
-        else:
-            # 首次提交，尝试用 git diff --cached HEAD（无父提交）
-            result2 = subprocess.run(
-                ['git', 'diff', '--name-only', '--cached'],
+    # 1. 尝试从版本标签获取所有变更
+    base_ref = None
+    if from_version:
+        # 查找版本标签（支持 v1.0.0 和 1.0.0 两种格式）
+        for tag_fmt in [f'v{from_version}', from_version]:
+            result = subprocess.run(
+                ['git', 'rev-parse', tag_fmt],
                 capture_output=True, text=True, encoding='utf-8', errors='replace'
             )
-            for line in result2.stdout.strip().split('\n'):
-                line = line.strip()
-                if line:
-                    files.add(line)
-    except Exception:
-        pass
+            if result.returncode == 0:
+                base_ref = tag_fmt
+                break
+
+    if base_ref:
+        # 从版本标签到HEAD的所有变更
+        try:
+            result = subprocess.run(
+                ['git', 'diff', '--name-only', base_ref, 'HEAD'],
+                capture_output=True, text=True, encoding='utf-8', errors='replace'
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line:
+                        files.add(line)
+        except Exception:
+            pass
+    else:
+        # 无版本标签，回退到最近一次提交
+        try:
+            result = subprocess.run(
+                ['git', 'diff', '--name-only', 'HEAD~1'],
+                capture_output=True, text=True, encoding='utf-8', errors='replace'
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line:
+                        files.add(line)
+            else:
+                # 首次提交
+                result2 = subprocess.run(
+                    ['git', 'diff', '--name-only', '--cached'],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace'
+                )
+                for line in result2.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line:
+                        files.add(line)
+        except Exception:
+            pass
 
     # 2. 工作区未提交的变更
     try:
@@ -109,7 +141,7 @@ def main():
     print()
 
     # 获取变更文件
-    all_changed = get_changed_files()
+    all_changed = get_changed_files(old_version)
     if not all_changed:
         print("未检测到任何变更文件。请确认已修改文件并提交。")
         sys.exit(1)
