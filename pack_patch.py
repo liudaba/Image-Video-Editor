@@ -119,8 +119,9 @@ def main():
         print(f"  {f}")
     print()
 
-    # 过滤：只打包 video_generator/ 下的文件 + run.py/run.pyw
-    client_files = [f for f in all_changed if f.startswith('video_generator/') or f in ('run.py', 'run.pyw')]
+    # 过滤：打包 video_generator/ 下的文件 + run.py/run.pyw + 根目录脚本文件(.bat/.ps1)
+    root_scripts = {f for f in all_changed if '/' not in f and os.path.splitext(f)[1].lower() in ('.bat', '.ps1')}
+    client_files = [f for f in all_changed if f.startswith('video_generator/') or f in ('run.py', 'run.pyw') or f in root_scripts]
     if not client_files:
         print("变更文件中没有 video_generator/ 下的文件，无需生成补丁。")
         print("如果是后端或文档变更，不需要客户端补丁更新。")
