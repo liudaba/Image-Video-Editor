@@ -619,9 +619,15 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
-                       llm_config=None, extra_options=None, timeout=120):
+                       llm_config=None, extra_options=None, timeout=120,
+                       fallback_to_available=False):
+    if fallback_to_available:
+        available = get_available_models()
+        model_list = [model] + [m for m in available if m != model]
+    else:
+        model_list = [model]
     return call_ollama_model(
-        [model], system_prompt, user_prompt,
+        model_list, system_prompt, user_prompt,
         log_callback=log_callback,
         num_predict=num_predict,
         num_ctx=num_ctx,

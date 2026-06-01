@@ -96,8 +96,15 @@ class AudioMixin:
                 messagebox.showerror("错误", f"音频文件过大，请选择小于500MB的文件")
                 return
             
-            if self.state_manager.get('audio', {}).get('loaded', False):
-                if not messagebox.askyesno("确认", "导入新音频将清除当前所有分镜数据和图片，是否继续？"):
+            # 检查是否需要弹出确认提示（已有音频 或 已有输出文件）
+            has_existing_audio = self.state_manager.get('audio', {}).get('loaded', False)
+            output_dir = getattr(self, 'output_dir', None)
+            has_existing_output = False
+            if output_dir and os.path.isdir(output_dir):
+                has_existing_output = any(os.listdir(output_dir))
+            
+            if has_existing_audio or has_existing_output:
+                if not messagebox.askyesno("确认", "导入新音频将清除当前所有分镜数据、图片和视频文件（移入垃圾桶保存），是否继续？"):
                     self.log("ℹ️ 已取消导入新音频")
                     return
             

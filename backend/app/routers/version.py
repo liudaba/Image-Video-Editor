@@ -46,6 +46,7 @@ async def get_latest_version(
     # 智能匹配：优先查找适用于当前版本的增量补丁
     patch_info = None
     if current_version:
+        # 1. 精确匹配：from_version == current_version
         for v in all_versions:
             if (v.version == latest_version.version
                     and v.update_type == "patch"
@@ -53,6 +54,30 @@ async def get_latest_version(
                     and v.patch_url):
                 patch_info = v
                 break
+
+        # 2. Fallback：找 from_version <= current_version 的补丁
+        #    客户端可以收到一个包含所有变更的补丁（可能多包含一些文件，但不会遗漏）
+        if not patch_info:
+            candidates = []
+            all_patches = []
+            for v in all_versions:
+                if (v.version == latest_version.version
+                        and v.update_type == "patch"
+                        and v.patch_url
+                        and v.from_version):
+                    all_patches.append(v)
+                    from_parts = _version_tuple(v.from_version)
+                    client_parts = _version_tuple(current_version)
+                    # 优先选 from_version <= current_version 的补丁
+                    if from_parts <= client_parts:
+                        candidates.append(v)
+            if candidates:
+                # 选 from_version 最大的（最接近客户端版本的），减少多余文件
+                patch_info = max(candidates, key=lambda v: _version_tuple(v.from_version))
+            elif all_patches:
+                # 最终兜底：没有任何 from_version <= current_version 的补丁时，
+                # 使用 from_version 最低的补丁（包含所有变更文件，确保更新完整）
+                patch_info = min(all_patches, key=lambda v: _version_tuple(v.from_version))
 
     # 构建返回信息：优先使用最新版本号对应的全量包记录
     full_info = None

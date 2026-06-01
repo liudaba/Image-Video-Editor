@@ -414,7 +414,7 @@ class ResourceMixin:
             os.makedirs(trash_dir, exist_ok=True)
 
             if trash_session_dir is None:
-                timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 trash_session_dir = os.path.join(trash_dir, f"cleanup_{timestamp}")
             os.makedirs(trash_session_dir, exist_ok=True)
             
@@ -438,8 +438,8 @@ class ResourceMixin:
             trash_dir = self._get_trash_dir()
             os.makedirs(trash_dir, exist_ok=True)
 
-            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-            trash_session_dir = os.path.join(trash_dir, f"{reason}_{timestamp}")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            trash_session_dir = os.path.join(trash_dir, f"output_project_{timestamp}")
 
             if not hasattr(self, 'output_dir'):
                 self.log("⚠️ output_dir 未设置，跳过垃圾桶操作")

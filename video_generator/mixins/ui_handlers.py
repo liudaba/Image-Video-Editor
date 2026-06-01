@@ -4,6 +4,7 @@ import re
 import sys
 import json
 import time
+import shutil
 import threading
 import subprocess
 import tkinter as tk
@@ -1162,105 +1163,112 @@ class UIHandlersMixin:
         self._open_folder(output_folder)
 
     def open_trash_browser(self):
-        if hasattr(self, '_trash_window') and self._trash_window is not None:
-            try:
-                self._trash_window.focus_force()
-                return
-            except tk.TclError:
-                self._trash_window = None
+        try:
+            if hasattr(self, '_trash_window') and self._trash_window is not None:
+                try:
+                    self._trash_window.focus_force()
+                    return
+                except tk.TclError:
+                    self._trash_window = None
 
-        self._trash_window = tk.Toplevel(self.root)
-        self._trash_window.title("垃圾桶 - 已删除文件")
-        self._trash_window.geometry("960x640")
-        self._trash_window.configure(bg="#1e1e1e")
-        self._trash_window.transient(self.root)
+            self._trash_window = tk.Toplevel(self.root)
+            self._trash_window.title("垃圾桶 - 已删除文件")
+            self._trash_window.geometry("960x640")
+            self._trash_window.configure(bg="#1e1e1e")
+            self._trash_window.transient(self.root)
 
-        header = tk.Frame(self._trash_window, bg="#252526", height=44)
-        header.pack(fill=tk.X, padx=0, pady=0)
-        header.pack_propagate(False)
+            header = tk.Frame(self._trash_window, bg="#252526", height=44)
+            header.pack(fill=tk.X, padx=0, pady=0)
+            header.pack_propagate(False)
 
-        tk.Label(header, text="  🗑️ 垃圾桶 - 已删除的文件", font=("Microsoft YaHei", 14, "bold"),
-                 bg="#252526", fg="#d4d4d4").pack(side=tk.LEFT, padx=8, pady=6)
+            tk.Label(header, text="  🗑️ 垃圾桶 - 已删除的文件", font=("Microsoft YaHei", 14, "bold"),
+                     bg="#252526", fg="#d4d4d4").pack(side=tk.LEFT, padx=8, pady=6)
 
-        btn_empty = ttk.Button(header, text="清空垃圾桶", command=self._empty_trash_and_refresh, style="Small.TButton")
-        btn_empty.pack(side=tk.RIGHT, padx=8, pady=6)
+            btn_empty = ttk.Button(header, text="清空垃圾桶", command=self._empty_trash_and_refresh, style="Small.TButton")
+            btn_empty.pack(side=tk.RIGHT, padx=8, pady=6)
 
-        btn_refresh = ttk.Button(header, text="刷新", command=self._refresh_trash_list, style="Small.TButton")
-        btn_refresh.pack(side=tk.RIGHT, padx=4, pady=6)
+            btn_refresh = ttk.Button(header, text="刷新", command=self._refresh_trash_list, style="Small.TButton")
+            btn_refresh.pack(side=tk.RIGHT, padx=4, pady=6)
 
-        # 主区域：左侧列表 + 右侧预览
-        main_pane = tk.PanedWindow(self._trash_window, orient=tk.HORIZONTAL, bg="#1e1e1e",
-                                    sashwidth=4, sashrelief=tk.FLAT)
-        main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            # 主区域：左侧列表 + 右侧预览
+            main_pane = tk.PanedWindow(self._trash_window, orient=tk.HORIZONTAL, bg="#1e1e1e",
+                                        sashwidth=4, sashrelief=tk.FLAT)
+            main_pane.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # 左侧：会话列表
-        left_frame = tk.Frame(main_pane, bg="#1e1e1e")
-        main_pane.add(left_frame, width=520)
+            # 左侧：会话列表
+            left_frame = tk.Frame(main_pane, bg="#1e1e1e")
+            main_pane.add(left_frame, width=520)
 
-        columns = ("session", "files", "size", "contents")
-        self._trash_tree = ttk.Treeview(left_frame, columns=columns, show="headings", selectmode="browse")
-        self._trash_tree.heading("session", text="会话")
-        self._trash_tree.heading("files", text="文件数")
-        self._trash_tree.heading("size", text="大小")
-        self._trash_tree.heading("contents", text="内容")
-        self._trash_tree.column("session", width=200, minwidth=150)
-        self._trash_tree.column("files", width=55, minwidth=40, anchor="center")
-        self._trash_tree.column("size", width=80, minwidth=60, anchor="center")
-        self._trash_tree.column("contents", width=160, minwidth=100)
+            columns = ("session", "files", "size", "contents")
+            self._trash_tree = ttk.Treeview(left_frame, columns=columns, show="headings", selectmode="browse")
+            self._trash_tree.heading("session", text="会话")
+            self._trash_tree.heading("files", text="文件数")
+            self._trash_tree.heading("size", text="大小")
+            self._trash_tree.heading("contents", text="内容")
+            self._trash_tree.column("session", width=200, minwidth=150)
+            self._trash_tree.column("files", width=55, minwidth=40, anchor="center")
+            self._trash_tree.column("size", width=80, minwidth=60, anchor="center")
+            self._trash_tree.column("contents", width=160, minwidth=100)
 
-        tree_font = ("Microsoft YaHei", 11)
-        self._trash_tree.tag_configure("normal", font=tree_font)
-        self._trash_tree.configure(font=tree_font, rowheight=32)
+            tree_font = ("Microsoft YaHei", 11)
+            self._trash_tree.tag_configure("normal", font=tree_font)
+            style = ttk.Style()
+            style.configure("Trash.Treeview", rowheight=32)
+            self._trash_tree.configure(style="Trash.Treeview")
 
-        scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
-        self._trash_tree.configure(yscrollcommand=scrollbar.set)
-        self._trash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self._trash_tree.yview)
+            self._trash_tree.configure(yscrollcommand=scrollbar.set)
+            self._trash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._trash_tree.bind("<<TreeviewSelect>>", self._on_trash_select)
+            self._trash_tree.bind("<<TreeviewSelect>>", self._on_trash_select)
 
-        # 右侧：预览区
-        right_frame = tk.Frame(main_pane, bg="#2d2d2d")
-        main_pane.add(right_frame, width=400)
+            # 右侧：预览区
+            right_frame = tk.Frame(main_pane, bg="#2d2d2d")
+            main_pane.add(right_frame, width=400)
 
-        preview_label = tk.Label(right_frame, text="📁 文件预览", font=("Microsoft YaHei", 12, "bold"),
-                                  bg="#2d2d2d", fg="#cccccc")
-        preview_label.pack(fill=tk.X, padx=8, pady=(8, 4))
+            preview_label = tk.Label(right_frame, text="📁 文件预览", font=("Microsoft YaHei", 12, "bold"),
+                                      bg="#2d2d2d", fg="#cccccc")
+            preview_label.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        # 文件列表
-        self._trash_file_list = tk.Listbox(right_frame, bg="#1e1e1e", fg="#d4d4d4",
-                                            font=("Microsoft YaHei", 11), selectbackground="#094771",
-                                            selectforeground="#ffffff", activestyle="none",
-                                            relief=tk.FLAT, highlightthickness=0)
-        self._trash_file_list.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-        self._trash_file_list.bind("<Double-Button-1>", self._on_trash_file_double_click)
+            # 文件列表
+            self._trash_file_list = tk.Listbox(right_frame, bg="#1e1e1e", fg="#d4d4d4",
+                                                font=("Microsoft YaHei", 11), selectbackground="#094771",
+                                                selectforeground="#ffffff", activestyle="none",
+                                                relief=tk.FLAT, highlightthickness=0)
+            self._trash_file_list.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+            self._trash_file_list.bind("<Double-Button-1>", self._on_trash_file_double_click)
 
-        # 缩略图预览区
-        self._trash_preview_frame = tk.Frame(right_frame, bg="#2d2d2d", height=120)
-        self._trash_preview_frame.pack(fill=tk.X, padx=8, pady=(4, 8))
-        self._trash_preview_frame.pack_propagate(False)
-        self._trash_preview_label = tk.Label(self._trash_preview_frame, text="双击图片文件可预览",
-                                              bg="#2d2d2d", fg="#888888", font=("Microsoft YaHei", 10))
-        self._trash_preview_label.pack(fill=tk.BOTH, expand=True)
+            # 缩略图预览区
+            self._trash_preview_frame = tk.Frame(right_frame, bg="#2d2d2d", height=120)
+            self._trash_preview_frame.pack(fill=tk.X, padx=8, pady=(4, 8))
+            self._trash_preview_frame.pack_propagate(False)
+            self._trash_preview_label = tk.Label(self._trash_preview_frame, text="双击图片文件可预览",
+                                                  bg="#2d2d2d", fg="#888888", font=("Microsoft YaHei", 10))
+            self._trash_preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # 底部按钮
-        btn_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
-        btn_frame.pack(fill=tk.X, padx=10, pady=8)
+            # 底部按钮
+            btn_frame = tk.Frame(self._trash_window, bg="#1e1e1e")
+            btn_frame.pack(fill=tk.X, padx=10, pady=8)
 
-        btn_restore = ttk.Button(btn_frame, text="📂 恢复选中项", command=self._restore_selected_trash, style="Medium.TButton")
-        btn_restore.pack(side=tk.LEFT, padx=5)
+            btn_restore = ttk.Button(btn_frame, text="📂 恢复选中项", command=self._restore_selected_trash, style="Medium.TButton")
+            btn_restore.pack(side=tk.LEFT, padx=5)
 
-        btn_delete = ttk.Button(btn_frame, text="❌ 永久删除", command=self._delete_selected_trash, style="Medium.TButton")
-        btn_delete.pack(side=tk.LEFT, padx=5)
+            btn_delete = ttk.Button(btn_frame, text="❌ 永久删除", command=self._delete_selected_trash, style="Medium.TButton")
+            btn_delete.pack(side=tk.LEFT, padx=5)
 
-        btn_open_dir = ttk.Button(btn_frame, text="📁 打开文件夹", command=self._open_trash_folder, style="Medium.TButton")
-        btn_open_dir.pack(side=tk.LEFT, padx=5)
+            btn_open_dir = ttk.Button(btn_frame, text="📁 打开文件夹", command=self._open_trash_folder, style="Medium.TButton")
+            btn_open_dir.pack(side=tk.LEFT, padx=5)
 
-        self._trash_session_map = {}
-        self._trash_current_session_path = None
-        self._refresh_trash_list()
+            self._trash_session_map = {}
+            self._trash_current_session_path = None
+            self._refresh_trash_list()
 
-        self._trash_window.protocol("WM_DELETE_WINDOW", self._on_trash_window_close)
+            self._trash_window.protocol("WM_DELETE_WINDOW", self._on_trash_window_close)
+        except Exception as e:
+            self.log(f"⚠️ 打开垃圾桶窗口失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _on_trash_window_close(self):
         if hasattr(self, '_trash_window') and self._trash_window:
@@ -1404,11 +1412,128 @@ class UIHandlersMixin:
         self._refresh_trash_list()
 
     def _open_trash_folder(self):
-        trash_dir = self._get_trash_dir()
-        os.makedirs(trash_dir, exist_ok=True)
-        self._open_folder(trash_dir)
+        # 优先打开选中的会话文件夹，否则打开垃圾桶根目录
+        target_dir = None
+        if hasattr(self, '_trash_tree') and self._trash_tree:
+            sel = self._trash_tree.selection()
+            if sel:
+                target_dir = self._trash_session_map.get(sel[0])
+        if not target_dir or not os.path.isdir(target_dir):
+            target_dir = self._get_trash_dir()
+        os.makedirs(target_dir, exist_ok=True)
+        self._open_folder(target_dir)
 
-    @staticmethod
+    def _list_trash_sessions(self):
+        """扫描垃圾桶目录，返回所有会话信息列表"""
+        sessions = []
+        trash_dir = self._get_trash_dir()
+        if not os.path.isdir(trash_dir):
+            return sessions
+        for name in sorted(os.listdir(trash_dir), reverse=True):
+            path = os.path.join(trash_dir, name)
+            if not os.path.isdir(path):
+                continue
+            file_count = 0
+            total_size = 0
+            has_shots = False
+            has_images = False
+            has_video = False
+            for root, dirs, files in os.walk(path):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except Exception:
+                        pass
+                    file_count += 1
+                    lf = f.lower()
+                    if lf == "shots_data.json":
+                        has_shots = True
+                    elif lf.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                        has_images = True
+                    elif lf.endswith((".mp4", ".avi", ".mkv", ".mov", ".webm")):
+                        has_video = True
+            # 跳过空会话
+            if file_count == 0:
+                continue
+            sessions.append({
+                "name": name,
+                "path": path,
+                "file_count": file_count,
+                "total_size": total_size,
+                "has_shots": has_shots,
+                "has_images": has_images,
+                "has_video": has_video,
+            })
+        return sessions
+
+    def _restore_trash_session(self, session_path):
+        """将垃圾桶会话的文件恢复到 output_project 目录"""
+        try:
+            if not session_path or not os.path.isdir(session_path):
+                return False
+            output_dir = getattr(self, 'output_dir', None)
+            if not output_dir:
+                output_dir = os.path.join(self.base_dir, "output_project")
+            os.makedirs(output_dir, exist_ok=True)
+
+            restored = 0
+            for root, dirs, files in os.walk(session_path):
+                for f in files:
+                    src = os.path.join(root, f)
+                    # 保持相对目录结构
+                    rel = os.path.relpath(src, session_path)
+                    dst = os.path.join(output_dir, rel)
+                    dst_dir = os.path.dirname(dst)
+                    os.makedirs(dst_dir, exist_ok=True)
+                    if os.path.exists(dst):
+                        # 同名文件不覆盖
+                        continue
+                    try:
+                        shutil.copy2(src, dst)
+                        restored += 1
+                    except Exception as e:
+                        self._log_exception(f"⚠️ 恢复文件失败: {f}", e)
+
+            # 恢复成功后删除垃圾桶中的会话
+            if restored > 0:
+                try:
+                    shutil.rmtree(session_path, ignore_errors=True)
+                except Exception:
+                    pass
+            self.log(f"✅ 已恢复 {restored} 个文件到 output_project")
+            return True
+        except Exception as e:
+            self._log_exception("⚠️ 恢复文件失败", e)
+            return False
+
+    def _delete_trash_session(self, session_path):
+        """永久删除垃圾桶中的一个会话"""
+        try:
+            if not session_path or not os.path.isdir(session_path):
+                return False
+            shutil.rmtree(session_path, ignore_errors=True)
+            return True
+        except Exception as e:
+            self._log_exception("⚠️ 删除会话失败", e)
+            return False
+
+    def _empty_trash(self):
+        """清空垃圾桶，返回删除的会话数"""
+        count = 0
+        trash_dir = self._get_trash_dir()
+        if not os.path.isdir(trash_dir):
+            return count
+        for name in os.listdir(trash_dir):
+            path = os.path.join(trash_dir, name)
+            if os.path.isdir(path):
+                try:
+                    shutil.rmtree(path, ignore_errors=True)
+                    count += 1
+                except Exception:
+                    pass
+        return count
+
     def _format_size(size_bytes):
         if size_bytes < 1024:
             return f"{size_bytes} B"

@@ -4057,7 +4057,8 @@ class ShotsMixin:
                     num_predict=num_predict,
                     num_ctx=num_ctx,
                     llm_config=getattr(self, 'current_llm_config', None),
-                    timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size // 2)
+                    timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size),
+                    fallback_to_available=True
                 )
             finally:
                 _batch_hb_stop.set()
