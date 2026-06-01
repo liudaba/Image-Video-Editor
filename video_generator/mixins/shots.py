@@ -706,7 +706,8 @@ class ShotsMixin:
                 user_prompt=user_message,
                 log_callback=self.log,
                 llm_config=getattr(self, 'current_llm_config', None),
-                timeout=Config.API_TIMEOUT_LLM_PROMPT
+                timeout=Config.API_TIMEOUT_LLM_PROMPT,
+                cancel_check=lambda: not self.task_running
             )
             
             if result_text:
@@ -1314,7 +1315,8 @@ class ShotsMixin:
                 num_predict=4000,
                 num_ctx=8192,
                 llm_config=getattr(self, 'current_llm_config', None),
-                timeout=Config.API_TIMEOUT_LLM_ANALYSIS
+                timeout=Config.API_TIMEOUT_LLM_ANALYSIS,
+                cancel_check=lambda: not self.task_running
             )
             
             if not result_text:
@@ -2734,7 +2736,8 @@ class ShotsMixin:
                 num_predict=256,
                 num_ctx=1532,
                 llm_config=getattr(self, 'current_llm_config', None),
-                timeout=Config.API_TIMEOUT_LLM_PROMPT
+                timeout=Config.API_TIMEOUT_LLM_PROMPT,
+                cancel_check=lambda: not self.task_running
             )
             if result_text:
                 return result_text.strip()
@@ -3876,7 +3879,8 @@ class ShotsMixin:
                     num_predict=512,
                     num_ctx=2560,
                     llm_config=llm_config,
-                    timeout=Config.API_TIMEOUT_LLM_PROMPT
+                    timeout=Config.API_TIMEOUT_LLM_PROMPT,
+                    cancel_check=lambda: not self.task_running
                 )
             finally:
                 _prompt_hb_stop.set()
@@ -4076,7 +4080,8 @@ class ShotsMixin:
                     num_ctx=num_ctx,
                     llm_config=getattr(self, 'current_llm_config', None),
                     timeout=Config.API_TIMEOUT_LLM_PROMPT * max(1, batch_size),
-                    fallback_to_available=True
+                    fallback_to_available=True,
+                    cancel_check=lambda: not self.task_running
                 )
             finally:
                 _batch_hb_stop.set()
@@ -5990,7 +5995,8 @@ class ShotsMixin:
                                             num_predict=2000,
                                             num_ctx=8192,
                                             llm_config=getattr(self, 'current_llm_config', None),
-                                            timeout=Config.API_TIMEOUT_LLM_ANALYSIS
+                                            timeout=Config.API_TIMEOUT_LLM_ANALYSIS,
+                                            cancel_check=lambda: not self.task_running
                                         )
                                     finally:
                                         _heartbeat_stop.set()

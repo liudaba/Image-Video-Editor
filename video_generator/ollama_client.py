@@ -423,7 +423,12 @@ def _parse_chat_response(response, model, log_callback=None):
 
 def call_ollama_model(model_list, system_prompt, user_prompt,
                       log_callback=None, num_predict=512, num_ctx=4096,
-                      llm_config=None, extra_options=None, timeout=120):
+                      llm_config=None, extra_options=None, timeout=120,
+                      cancel_check=None):
+    if cancel_check and cancel_check():
+        if log_callback:
+            log_callback("   ⏹ 任务已取消，跳过LLM调用")
+        return None, None
     if is_cloud_llm_active():
         try:
             from video_generator.cloud_llm_client import call_cloud_llm
@@ -495,6 +500,10 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
     gpu_failed_models = set()
 
     for model in candidate_models:
+        if cancel_check and cancel_check():
+            if log_callback:
+                log_callback("   ⏹ 任务已取消，跳过模型调用")
+            return None, None
         try:
             if log_callback and len(candidate_models) > 1:
                 log_callback(f"   尝试模型: {model}")
@@ -620,7 +629,7 @@ def call_ollama_model(model_list, system_prompt, user_prompt,
 def call_ollama_single(model, system_prompt, user_prompt,
                        log_callback=None, num_predict=512, num_ctx=4096,
                        llm_config=None, extra_options=None, timeout=120,
-                       fallback_to_available=False):
+                       fallback_to_available=False, cancel_check=None):
     if fallback_to_available:
         available = get_available_models()
         model_list = [model] + [m for m in available if m != model]
@@ -634,6 +643,7 @@ def call_ollama_single(model, system_prompt, user_prompt,
         llm_config=llm_config,
         extra_options=extra_options,
         timeout=timeout,
+        cancel_check=cancel_check,
     )
 
 
