@@ -478,7 +478,9 @@ Output: 中文语义骨架 || English understanding || SD prompt"""
                 theme_instruction += f"\n【Narrative Strategy】{strategy_text}"
 
             content_type_for_rules = kwargs.get("content_type", "") or "general"
-            # 检测非写实风格，传递给规则选择器
+            from video_generator.model_profiles import detect_model_type as _dmt
+            _sd_model_name = kwargs.get("sd_model_name", "")
+            model_type = _dmt(_sd_model_name) if _sd_model_name else "sd15"
             visual_style_lower = (visual_style or "").lower()
             from video_generator.model_profiles import NON_REALISTIC_KEYWORDS as _NRK
             is_non_realistic = any(kw.lower() in visual_style_lower for kw in _NRK)

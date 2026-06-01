@@ -3744,7 +3744,8 @@ class ShotsMixin:
             "visual_tone": visual_tone or "",
             "theme_elements": ", ".join(theme_elements) if theme_elements else "根据配音内容确定",
             "dubbing": dubbing,
-            "visual_narrative_strategy": getattr(self, '_visual_narrative_strategy', '')
+            "visual_narrative_strategy": getattr(self, '_visual_narrative_strategy', ''),
+            "sd_model_name": "",
         }
         
         context_hint = ""
@@ -3827,6 +3828,7 @@ class ShotsMixin:
         if hasattr(self, 'model_var'):
             sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
         template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
+        template_params["sd_model_name"] = sd_model_name
         
         template = PromptTemplates.get_template(template_key, **template_params)
         
@@ -3949,7 +3951,8 @@ class ShotsMixin:
             "visual_tone": effective_visual_tone,
             "theme_elements": ", ".join(theme_info.get('theme_elements', [])) if theme_info.get('theme_elements') else "根据配音内容确定",
             "dubbing": "",
-            "visual_narrative_strategy": theme_info.get('visual_narrative_strategy', '')
+            "visual_narrative_strategy": theme_info.get('visual_narrative_strategy', ''),
+            "sd_model_name": "",
         }
 
         if user_prompt_type == "ARV写实提示词":
@@ -3962,6 +3965,7 @@ class ShotsMixin:
             if hasattr(self, 'model_var'):
                 sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
             template_key = PromptTemplates.get_template_key_for_model(sd_model_name)
+        template_params["sd_model_name"] = sd_model_name
 
         dubbings = []
         for original_idx, task in batch_items:
