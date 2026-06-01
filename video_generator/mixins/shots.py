@@ -2856,7 +2856,7 @@ class ShotsMixin:
         )
     
 
-    def _clean_prompt_output(self, raw_output):
+    def _clean_prompt_output(self, raw_output, model_type=None):
         """清洗大模型输出的提示词，移除解释性文字和格式污染
         
         支持输出格式:
@@ -2866,6 +2866,7 @@ class ShotsMixin:
         
         Args:
             raw_output: 大模型返回的原始输出
+            model_type: 模型类型(sd15/sdxl/flux/sd3)，Flux/SD3保留自然语言描述
             
         Returns:
             清洗后的纯净提示词
@@ -3075,19 +3076,24 @@ class ShotsMixin:
         # 拦截完整英文句子泄漏（最严重问题）
         # SD提示词应为逗号分隔关键词，完整英文句子是LLM推理文本泄漏
         # 策略：检测含主谓结构的完整句子并移除
+        # 但 Flux/SD3 需要自然语言描述，只移除明显的推理/解释性句子
+        _is_natural_language_model = model_type in ('flux', 'sd3')
         full_sentence_patterns = [
-            r'[A-Z][a-z]+(?:,\s*(?:as|but|and|or|not)\s+[a-z]+)*\s+(?:is|are|was|were|has|have|had|will|would|can|could|should|must|does|did)\s+[^,]*\.\s*',
             r'It\'?s about\s+[^,]*\.\s*',
             r'This (?:is|means|shows|depicts|represents|conveys|illustrates)\s+[^,]*\.\s*',
-            r'(?:China|Russia|Beijing|Moscow|Venezuela|Maduro),?\s+as\s+a\s+[^,]*\.\s*',
             r'(?:The|A|An)\s+(?:key|main|primary|important|central|core)\s+(?:message|point|idea|concept|theme|meaning)\s+[^,]*\.\s*',
             r'The line (?:means|suggests|implies|indicates|highlights|emphasizes|conveys)\s+[^,]*\.\s*',
             r'A visual representation of this would be[^,]*\.\s*',
-            r'(?:Maduro|Cilia|He|She|They|It) is (?:actively |currently )?(?:building|engaging|offering|standing|examining|distributing|holding|maintaining|attempting|controlling|using|trying|engaging|offering|sitting|negotiating|reinforcing)[^,]*\.\s*',
             r'(?:This |The )?(?:line |phrase |idiom )?(?:means|suggests|implies|indicates|highlights|conveys|signifies|emphasizes) that\s+[^,]*\.\s*',
-            r'Maduro\'?s?\s+(?:defenses|control|power|survival|approach|strategy)\s+[^,]*\.\s*',
-            r'(?:External |The )?(?:sanctions|pressure|situation|problem|issue)\s+(?:are|is)\s+(?:a\s+)?(?:Liabilities?|chronic|slow|persistent)[^,]*\.\s*',
         ]
+        if not _is_natural_language_model:
+            full_sentence_patterns.extend([
+                r'[A-Z][a-z]+(?:,\s*(?:as|but|and|or|not)\s+[a-z]+)*\s+(?:is|are|was|were|has|have|had|will|would|can|could|should|must|does|did)\s+[^,]*\.\s*',
+                r'(?:China|Russia|Beijing|Moscow|Venezuela|Maduro),?\s+as\s+a\s+[^,]*\.\s*',
+                r'(?:Maduro|Cilia|He|She|They|It) is (?:actively |currently )?(?:building|engaging|offering|standing|examining|distributing|holding|maintaining|attempting|controlling|using|trying|engaging|offering|sitting|negotiating|reinforcing)[^,]*\.\s*',
+                r'Maduro\'?s?\s+(?:defenses|control|power|survival|approach|strategy)\s+[^,]*\.\s*',
+                r'(?:External |The )?(?:sanctions|pressure|situation|problem|issue)\s+(?:are|is)\s+(?:a\s+)?(?:Liabilities?|chronic|slow|persistent)[^,]*\.\s*',
+            ])
         for pat in full_sentence_patterns:
             text = re.sub(pat, '', text, flags=re.IGNORECASE)
 
@@ -3115,15 +3121,19 @@ class ShotsMixin:
         # gemma3 推理文本后置剥离：删除残留的英文完整句子
         # SD提示词是逗号分隔的关键词，不应包含完整英文句子
         # 策略：匹配以大写字母开头、以句号结尾、且不包含SD权重语法的片段
-        sentence_pattern = re.compile(
-            r'(?:^|,\s*)([A-Z][a-z][^.]*?(?:translates|implies|suggests|highlights|describes|indicates|'
-            r'references|depicts|represents|conveys|signifies|emphasizes|discusses|mentions|'
-            r'refers to|lends itself|breaks down|craft|analyze|reasoning|step \d|'
-            r'what scene|the audio|the narration|the line|the phrase|this chinese|given the|'
-            r'here are|let\'s|okay|so the)[^.]*\.\s*)',
-            re.IGNORECASE
-        )
-        text = sentence_pattern.sub('', text)
+        # Flux/SD3使用自然语言描述，只移除明显的推理标记
+        if _is_natural_language_model:
+            text = re.sub(r'(?:^|,\s*)[A-Z][a-z][^.]*?(?:reasoning|step \d|let\'s analyze|here are the)[^.]*\.\s*', '', text, flags=re.IGNORECASE)
+        else:
+            sentence_pattern = re.compile(
+                r'(?:^|,\s*)([A-Z][a-z][^.]*?(?:translates|implies|suggests|highlights|describes|indicates|'
+                r'references|depicts|represents|conveys|signifies|emphasizes|discusses|mentions|'
+                r'refers to|lends itself|breaks down|craft|analyze|reasoning|step \d|'
+                r'what scene|the audio|the narration|the line|the phrase|this chinese|given the|'
+                r'here are|let\'s|okay|so the)[^.]*\.\s*)',
+                re.IGNORECASE
+            )
+            text = sentence_pattern.sub('', text)
         
         # 清除 "What scene shows this?" 等疑问句
         text = re.sub(r'[^,]*[Ww]hat (?:scene|image|visual|shot) (?:shows|depicts|represents|conveys)[^,]*\?\s*', '', text)
@@ -3133,14 +3143,15 @@ class ShotsMixin:
         text = re.sub(r'[^,]*directly relates to[^,]*', '', text, flags=re.IGNORECASE)
         # 清除 "This highlights" 等解释
         text = re.sub(r'[^,]*This highlights[^,]*', '', text, flags=re.IGNORECASE)
-        # 清除 "He is distributing" 等描述性句子
-        text = re.sub(r'[^,]*(?:He|She|They|It|Maduro|The regime) is (?:distributing|holding|maintaining|attempting|controlling|using|trying)[^,]*\.\s*', '', text)
-        # 清除 "Once they lose power" 等叙述性句子
-        text = re.sub(r'[^,]*Once (?:they|he|she)[^,]*\.\s*', '', text)
-        # 清除 "China, as a creditor" 等解释
-        text = re.sub(r'[^,]*as a (?:creditor|leader|result|consequence)[^,]*\.\s*', '', text, flags=re.IGNORECASE)
-        # 清除 "A low-ranking soldier" 等描述
-        text = re.sub(r'A\s+(?:low-ranking|high-ranking|senior|junior)[^,]*\.\s*', '', text)
+        if not _is_natural_language_model:
+            # 清除 "He is distributing" 等描述性句子（Flux/SD3需要这类描述）
+            text = re.sub(r'[^,]*(?:He|She|They|It|Maduro|The regime) is (?:distributing|holding|maintaining|attempting|controlling|using|trying)[^,]*\.\s*', '', text)
+            # 清除 "Once they lose power" 等叙述性句子
+            text = re.sub(r'[^,]*Once (?:they|he|she)[^,]*\.\s*', '', text)
+            # 清除 "China, as a creditor" 等解释
+            text = re.sub(r'[^,]*as a (?:creditor|leader|result|consequence)[^,]*\.\s*', '', text, flags=re.IGNORECASE)
+            # 清除 "A low-ranking soldier" 等描述
+            text = re.sub(r'A\s+(?:low-ranking|high-ranking|senior|junior)[^,]*\.\s*', '', text)
         # 清除 "The narrator is questioning" 等
         text = re.sub(r'The narrator is[^,]*\.\s*', '', text, flags=re.IGNORECASE)
         # 清除 "It's describing" 等
@@ -3509,12 +3520,10 @@ class ShotsMixin:
 
         user_selected_styles = self.get_selected_styles()
         is_non_realistic = False
-        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
-                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
-                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        from video_generator.model_profiles import NON_REALISTIC_KEYWORDS
         if user_selected_styles:
             style_text_lower = " ".join(user_selected_styles).lower()
-            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+            is_non_realistic = any(kw in style_text_lower for kw in NON_REALISTIC_KEYWORDS)
 
         if is_non_realistic:
             prefix = re.sub(r',?\s*\(?\s*RAW photo\s*\)?\s*,?', ',', prefix, flags=re.IGNORECASE)
@@ -3873,7 +3882,12 @@ class ShotsMixin:
             
             if result_text:
                 raw_output = result_text.strip()
-                cleaned_prompt = self._clean_prompt_output(raw_output)
+                _sd_model_name = ""
+                if hasattr(self, 'model_var'):
+                    _sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                from video_generator.model_profiles import detect_model_type as _dt
+                _current_model_type = _dt(_sd_model_name)
+                cleaned_prompt = self._clean_prompt_output(raw_output, model_type=_current_model_type)
                 if cleaned_prompt:
                     understanding = self._extract_understanding(raw_output)
                     if understanding and hasattr(self, '_pregenerated_understandings_for_context') and shot_index >= 0:
@@ -4085,7 +4099,12 @@ class ShotsMixin:
                     original_idx = shot_num - 1
                     idx_keys = [idx for idx, _ in batch_items]
                     if original_idx in idx_keys:
-                        cleaned = self._clean_prompt_output(content)
+                        _batch_sd_model_name = ""
+                        if hasattr(self, 'model_var'):
+                            _batch_sd_model_name = self.model_var.get() if hasattr(self.model_var, 'get') else str(self.model_var)
+                        from video_generator.model_profiles import detect_model_type as _bdt
+                        _batch_model_type = _bdt(_batch_sd_model_name)
+                        cleaned = self._clean_prompt_output(content, model_type=_batch_model_type)
                         if cleaned:
                             results[original_idx] = cleaned
                             understanding = self._extract_understanding(content)
@@ -4124,12 +4143,10 @@ class ShotsMixin:
 
         user_selected_styles = self.get_selected_styles()
         is_non_realistic = False
-        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
-                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
-                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        from video_generator.model_profiles import NON_REALISTIC_KEYWORDS as _NRK2
         if user_selected_styles:
             style_text_lower = " ".join(user_selected_styles).lower()
-            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+            is_non_realistic = any(kw in style_text_lower for kw in _NRK2)
 
         if is_non_realistic and profile.get("non_realistic_negative"):
             base_negative = profile.get("non_realistic_negative", "").split(", ")
@@ -4173,6 +4190,14 @@ class ShotsMixin:
         has_person = any(kw in _combined for kw in person_keywords)
         if has_abstract and not has_person:
             additional_negative.extend(["realistic person", "portrait", "face close-up", "selfie"])
+        
+        face_closeup_keywords = ["特写", "面部", "表情", "脸", "肖像", "面容",
+                                  "close-up", "portrait", "face detail", "facial expression"]
+        needs_face = any(kw in _combined for kw in face_closeup_keywords)
+        if not needs_face and not has_person:
+            additional_negative.extend(["(face close-up:1.1)", "(portrait:1.1)", "selfie", "(unwanted face:1.1)"])
+        elif has_person and not needs_face:
+            additional_negative.extend(["(face close-up:1.1)", "selfie"])
         
         data_keywords = ["98%", "百分比", "数据", "數據", "统计", "統計", "比例", "相似度"]
         if any(kw in _combined for kw in data_keywords):
@@ -4317,12 +4342,10 @@ class ShotsMixin:
 
         user_selected_styles = self.get_selected_styles() if hasattr(self, 'get_selected_styles') else []
         is_non_realistic = False
-        non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'cartoon', '3d animation',
-                                   'oil painting', 'watercolor', 'van gogh', 'da vinci',
-                                   'sketch', 'line art', 'dopamine', 'cyberpunk']
+        from video_generator.model_profiles import NON_REALISTIC_KEYWORDS as _NRK3
         if user_selected_styles:
             style_text_lower = " ".join(user_selected_styles).lower()
-            is_non_realistic = any(kw in style_text_lower for kw in non_realistic_keywords)
+            is_non_realistic = any(kw in style_text_lower for kw in _NRK3)
 
         # ========== 第一层：LLM主题分析结果（最可靠） ==========
         # core_theme、visual_tone、theme_elements 是LLM分析全文本后提取的，

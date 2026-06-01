@@ -114,6 +114,14 @@ MODEL_PROFILES = {
     },
 }
 
+NON_REALISTIC_KEYWORDS = [
+    'pixar', 'ghibli', 'anime', 'manga', 'cartoon',
+    'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
+    'sketch', 'illustration', '3d animation', 'cel shading',
+    'dopamine', 'cyberpunk',
+    '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺',
+]
+
 
 def detect_model_type(model_name):
     """根据模型名称检测模型类型

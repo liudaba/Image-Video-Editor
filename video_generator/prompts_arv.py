@@ -80,7 +80,7 @@ _DUBBING_SCENE_MAP = {
     '将军': 'military general in uniform',
     '外交官': 'diplomat at negotiation table',
     '夫妇': 'couple in formal setting',
-    '妻子': 'woman in formal attire',
+    '妻子': 'spouse in formal setting',
     # 地点
     '委内瑞拉': 'Venezuela, Caracas cityscape',
     '俄罗斯': 'Russia, Moscow skyline',

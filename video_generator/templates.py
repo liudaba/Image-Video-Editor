@@ -83,14 +83,34 @@ D. 语句通顺：读起来语义不通的可能是识别错误
         "2. SEMANTIC FIDELITY: The visual scene MUST directly reflect the SPECIFIC meaning of THIS dubbing line, not just the general topic. Each line has a unique message - your scene must capture THAT message.\n"
         "3. VISUALLY RENDERABLE ONLY: Every keyword must be something SD can draw. BANNED abstract terms: 'political intrigue', 'international relations', 'tension', 'power struggle', 'strategic control', 'political landscape', 'energy sector', 'decay', 'fragility', 'conflict'. Replace with concrete visuals: 'men in suits arguing at a table', 'soldiers standing guard outside a palace', 'hands shaking over a contract'.\n"
         "4. FOCUS: Use 3-5 key visual elements per prompt. Too many elements = SD produces noise. Prioritize the MOST important visual that captures the core meaning.\n"
-        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, use their name consistently. If unsure, use a generic descriptor like 'a president', 'a woman in power suit'.\n"
+        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, use their name consistently. If unsure, use a generic descriptor like 'a president', 'an official', 'a diplomat'.\n"
         "6. NO GENERIC BACKGROUNDS: Match the background to the SPECIFIC content of each line.\n"
+        "7. GENDER NEUTRALITY: Unless the dubbing text EXPLICITLY mentions a specific gender (女/她/妻子/女人/母亲/男/他/丈夫/男人/父亲), use gender-neutral terms like 'person', 'figure', 'official', 'diplomat', 'leader'. Do NOT default to 'woman', 'girl', 'female' or 'man', 'boy'. If gender is unspecified, describe the ROLE or ACTION instead of the person's appearance.\n"
         "\n"
         "OUTPUT FORMAT:\n"
         "- Output ONLY: 中文语义骨架 || English understanding || SD prompt\n"
         "- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调\n"
         "- English understanding: 1 English sentence capturing the SPECIFIC meaning\n"
         "- SD prompt: ONLY comma-separated keywords/phrases, NO Chinese, NO quality tags\n"
+        "- NO explanatory sentences, NO reasoning text, NO style labels"
+    )
+
+    _CORE_RULES_NATURAL_LANGUAGE = (
+        "CRITICAL RULES - SEMANTIC ACCURACY (NATURAL LANGUAGE MODEL):\n"
+        "1. CONCRETE SCENE FIRST: Every prompt MUST describe a specific, photographable scene that directly illustrates the dubbing text's meaning. Think 'what would a photographer shoot?' NOT 'what abstract concept does this relate to?'\n"
+        "2. SEMANTIC FIDELITY: The visual scene MUST directly reflect the SPECIFIC meaning of THIS dubbing line, not just the general topic. Each line has a unique message - your scene must capture THAT message.\n"
+        "3. NATURAL LANGUAGE DESCRIPTION: Write 1-3 descriptive sentences that paint a vivid, specific picture. Unlike SD 1.5, you CAN use atmospheric words like 'tension', 'dramatic atmosphere', 'mysterious mood' to convey the emotional tone. BANNED: purely conceptual terms with no visual form like 'political system', 'economic theory'.\n"
+        "4. FOCUS: Describe 3-5 key visual elements. Too many elements produce noise. Prioritize the MOST important visual that captures the core meaning.\n"
+        "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, use their name consistently. If unsure, use a generic descriptor like 'a president', 'an official', 'a diplomat'.\n"
+        "6. NO GENERIC BACKGROUNDS: Match the background to the SPECIFIC content of each line.\n"
+        "7. GENDER NEUTRALITY: Unless the dubbing text EXPLICITLY mentions a specific gender (女/她/妻子/女人/母亲/男/他/丈夫/男人/父亲), use gender-neutral terms like 'person', 'figure', 'official', 'diplomat', 'leader'. Do NOT default to 'woman', 'girl', 'female' or 'man', 'boy'. Describe the ROLE or ACTION instead.\n"
+        "\n"
+        "OUTPUT FORMAT:\n"
+        "- Output ONLY: 中文语义骨架 || English understanding || Scene description\n"
+        "- 中文语义骨架: 2-3个中文短语概括核心含义、关键视觉元素、情感基调\n"
+        "- English understanding: 1 English sentence capturing the SPECIFIC meaning\n"
+        "- Scene description: 1-3 natural language sentences describing a CONCRETE visual scene\n"
+        "- NO weight syntax like (keyword:1.3). NO quality tags (added auto). NO Chinese.\n"
         "- NO explanatory sentences, NO reasoning text, NO style labels"
     )
 
@@ -103,6 +123,7 @@ D. 语句通顺：读起来语义不通的可能是识别错误
         "4. FOCUS: Use 3-5 key visual elements per prompt. Prioritize the MOST important visual that captures the core meaning.\n"
         "5. CHARACTER CONSISTENCY: If the dubbing mentions a real person, render them in the chosen artistic style consistently.\n"
         "6. STYLE INTEGRATION: The artistic style MUST be applied to EVERY element in the scene - characters, backgrounds, lighting, atmosphere all conform to the style.\n"
+        "7. GENDER NEUTRALITY: Unless the dubbing text EXPLICITLY mentions a specific gender (女/她/妻子/女人/母亲/男/他/丈夫/男人/父亲), use gender-neutral terms like 'person', 'figure', 'official', 'leader'. Do NOT default to 'woman', 'girl', 'female' or 'man', 'boy'. Describe the ROLE or ACTION instead.\n"
         "\n"
         "OUTPUT FORMAT:\n"
         "- Output ONLY: 中文语义骨架 || English understanding || SD prompt\n"
@@ -151,7 +172,12 @@ D. 语句通顺：读起来语义不通的可能是识别错误
         "\n"
         "BACKGROUND VARIETY - MANDATORY:\n"
         "- Do NOT use the same background setting more than twice in the entire video\n"
-        "- Rotate backgrounds: palace interior -> city street -> military base -> courtroom -> border crossing -> rural landscape -> port/harbor -> diplomatic venue -> refugee camp -> oil facility -> parliament hall -> prison corridor -> airport tarmac -> hotel lobby\n"
+        "- For POLITICAL/MILITARY content: palace interior -> city street -> military base -> courtroom -> border crossing -> rural landscape -> port/harbor -> diplomatic venue -> refugee camp -> oil facility -> parliament hall -> prison corridor -> airport tarmac -> hotel lobby\n"
+        "- For SCIENCE/TECH content: laboratory -> microscope close-up -> data visualization screen -> observatory -> university lecture hall -> research library -> field station -> satellite control room -> nature reserve -> underwater research vessel -> particle accelerator -> greenhouse\n"
+        "- For NATURE content: dense forest -> ocean coastline -> mountain peak -> grassland savanna -> polar ice cap -> coral reef -> volcanic landscape -> river delta -> desert dunes -> tropical rainforest -> deep sea -> aurora borealis\n"
+        "- For ECONOMY/BUSINESS content: stock exchange floor -> factory production line -> bank vault -> shipping port -> corporate boardroom -> market stall -> construction site -> farm field -> tech startup office -> trade fair -> customs checkpoint\n"
+        "- For HISTORY content: ancient ruins -> medieval castle -> battlefield -> museum archive -> royal court -> colonial building -> revolution square -> old map room -> archaeological dig -> historical painting -> vintage photograph\n"
+        "- For CULTURE/LIFE content: family dining table -> school classroom -> hospital ward -> neighborhood street -> temple courtyard -> community center -> traditional market -> festival scene -> library reading room -> public park -> rooftop garden\n"
         "- BANNED from overuse: 'dimly lit room', 'dimly lit office', 'mahogany table', 'overcast sky' - use these AT MOST once every 5 shots\n"
         "\n"
         "WHEN TO USE METAPHORS (sparingly):\n"
@@ -189,16 +215,22 @@ D. 语句通顺：读起来语义不通的可能是识别错误
     }
 
     @classmethod
-    def get_rules_for_content_type(cls, content_type, is_non_realistic=False):
+    def get_rules_for_content_type(cls, content_type, is_non_realistic=False, model_type=None):
         """根据内容类型和风格动态组合规则
 
         Args:
             content_type: 内容类型（军事/新闻/科普等）
             is_non_realistic: 是否为非写实风格（动漫/油画等），非写实风格使用放宽的规则
+            model_type: 模型类型(sd15/sdxl/flux/sd3)，Flux/SD3使用宽松版规则
         """
         content_lower = (content_type or "general").lower()
         active_extensions = cls._CONTENT_TYPE_RULE_MAP.get(content_lower, ["variety"])
-        rules = cls._CORE_RULES_NON_REALISTIC if is_non_realistic else cls._CORE_RULES
+        if is_non_realistic:
+            rules = cls._CORE_RULES_NON_REALISTIC
+        elif model_type in ('flux', 'sd3'):
+            rules = cls._CORE_RULES_NATURAL_LANGUAGE
+        else:
+            rules = cls._CORE_RULES
         if "metaphor" in active_extensions:
             rules += cls._METAPHOR_RULES
         if "variety" in active_extensions:
@@ -227,7 +259,7 @@ Examples:
 总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.3), standing alone on palace balcony, empty courtyard below, storm clouds, no allies visible, medium shot
 军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || (soldier's hand:1.3) holding rifle, ballot papers scattered on ground, boot stepping on votes, close-up, low angle
 石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.3), military general counting gold, handshake over contract, dim office, medium shot
-女性编织政治关系网 || A woman weaving a network of political connections || (woman in suit:1.3), connecting red threads on a wall of photos, judicial building in background, close-up on hands
+外交官在谈判桌前斡旋 || A diplomat mediating between opposing factions at a negotiation table || (diplomat:1.3), standing between two delegations, hands raised in mediation, formal conference room, medium shot
 
 {style_instruction}
 {theme_instruction}
@@ -270,7 +302,7 @@ Examples:
 总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.2), standing alone on a palace balcony looking down at an empty courtyard, storm clouds gathering overhead, no allies in sight, medium shot, dramatic atmosphere
 军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || a soldier's hand gripping a rifle, scattered ballot papers on the ground being stepped on, close-up shot from low angle, stark lighting
 石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.2), a military general counting gold bars across a desk covered in contracts, handshake in progress, dimly lit office, medium shot
-女性编织政治关系网 || A woman weaving a network of political connections || (woman in power suit:1.2), connecting red threads between photos on a wall, judicial building visible through window, close-up on hands threading connections
+外交官在谈判桌前斡旋 || A diplomat mediating between opposing factions at a negotiation table || (diplomat:1.2), standing between two delegations with hands raised in mediation, formal conference room with flags, medium shot, diplomatic atmosphere
 
 {style_instruction}
 {theme_instruction}
@@ -312,7 +344,7 @@ Examples:
 总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || A man resembling Maduro stands alone on a grand palace balcony, gazing down at an empty courtyard with no allies in sight, storm clouds gathering overhead, conveying isolation and the absence of rescue
 军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || A close-up of a soldier's boot stepping on scattered ballot papers, a rifle slung over the shoulder, stark overhead lighting casting sharp shadows on the discarded votes
 石油财富换取军方效忠 || Oil wealth is traded for military allegiance || A military general counting gold bars across a desk covered in oil contracts, a handshake frozen mid-motion, dim office lighting revealing the exchange of wealth for loyalty
-女性编织政治关系网 || A woman weaving a network of political connections || A woman in a power suit carefully connecting red threads between framed photos on a wall, a judicial building visible through the window behind her, close-up on her hands as she ties another connection
+外交官在谈判桌前斡旋 || A diplomat mediating between opposing factions at a negotiation table || A diplomat standing between two opposing delegations at a long conference table, hands raised in a calming gesture, formal room with national flags, the tension between the two sides palpable as the mediator bridges the divide
 
 {style_instruction}
 {theme_instruction}
@@ -355,7 +387,7 @@ Examples:
 总统生存依赖军方忠诚 || A president's survival depends on military loyalty, not divine intervention || (Maduro:1.2), standing alone on palace balcony, empty courtyard below, storm clouds gathering, no allies visible, medium shot, isolation
 军事权力凌驾民主选票 || Power comes from military guns, not ballot boxes || soldier's hand gripping rifle, ballot papers scattered on ground, boot stepping on votes, close-up from low angle, stark lighting
 石油财富换取军方效忠 || Oil wealth is traded for military allegiance || (oil barrel:1.2), military general counting gold bars, handshake over contract, desk covered in documents, dim office, medium shot
-女性编织政治关系网 || A woman weaving a network of political connections || (woman in power suit:1.2), connecting red threads between photos on wall, judicial building through window, close-up on hands, political network
+外交官在谈判桌前斡旋 || A diplomat mediating between opposing factions at a negotiation table || (diplomat:1.2), standing between two delegations, hands raised in mediation, formal conference room with flags, medium shot, diplomatic negotiation
 
 {style_instruction}
 {theme_instruction}
@@ -400,11 +432,8 @@ Output: 中文语义骨架 || English understanding || SD prompt"""
         if is_shot_prompt:
             visual_style = kwargs.get("visual_style", "")
             if visual_style and visual_style.strip():
-                non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon',
-                    'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
-                    'sketch', 'illustration', '3d animation', 'cel shading',
-                    '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺']
-                is_non_realistic = any(kw.lower() in visual_style.lower() for kw in non_realistic_keywords)
+                from video_generator.model_profiles import NON_REALISTIC_KEYWORDS
+                is_non_realistic = any(kw.lower() in visual_style.lower() for kw in NON_REALISTIC_KEYWORDS)
                 if is_non_realistic:
                     style_instruction = f"【Style】Must use: {visual_style}\n【Style Override】This is a NON-REALISTIC style. Do NOT use photorealistic, RAW photo, or documentary keywords. Embrace the artistic/stylized aesthetic."
                 else:
@@ -451,12 +480,9 @@ Output: 中文语义骨架 || English understanding || SD prompt"""
             content_type_for_rules = kwargs.get("content_type", "") or "general"
             # 检测非写实风格，传递给规则选择器
             visual_style_lower = (visual_style or "").lower()
-            non_realistic_keywords = ['pixar', 'ghibli', 'anime', 'manga', 'cartoon',
-                'oil painting', 'watercolor', 'line art', 'van gogh', 'da vinci',
-                'sketch', 'illustration', '3d animation', 'cel shading',
-                '皮克斯', '吉卜力', '动漫', '油画', '水彩', '梵高', '达芬奇', '黑白线条', '多巴胺']
-            is_non_realistic = any(kw.lower() in visual_style_lower for kw in non_realistic_keywords)
-            effective_rules = cls.get_rules_for_content_type(content_type_for_rules, is_non_realistic=is_non_realistic)
+            from video_generator.model_profiles import NON_REALISTIC_KEYWORDS as _NRK
+            is_non_realistic = any(kw.lower() in visual_style_lower for kw in _NRK)
+            effective_rules = cls.get_rules_for_content_type(content_type_for_rules, is_non_realistic=is_non_realistic, model_type=model_type)
 
             system_content = template["system"].format(
                 style_instruction=style_instruction,
