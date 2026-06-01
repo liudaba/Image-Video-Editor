@@ -13,7 +13,7 @@ from video_generator.mixins.logging import safe_print_exc
 
 from video_generator.config import Config, get_http_session, validate_image_size
 from video_generator.cache import image_cache
-from video_generator.model_profiles import get_model_profile
+from video_generator.model_profiles import get_model_profile, detect_model_type, MODEL_TYPE_FLUX, MODEL_TYPE_SD3
 from video_generator.ollama_client import is_cloud_image_active
 
 class ImagesMixin:
@@ -827,6 +827,9 @@ class ImagesMixin:
                     max_retries = 3
                     retry_delay = 5
                     for retry in range(max_retries):
+                        if retry > 0:
+                            _actual_delay = retry_delay * (2 ** (retry - 1))
+                            time.sleep(_actual_delay)
                         if not self.task_running:
                             try:
                                 result_queue.put((idx, None, None, "cancelled"), timeout=5)
@@ -856,8 +859,13 @@ class ImagesMixin:
                                 _sid = _shot_data.get('id', 0)
                                 _is_keyframe = _sw >= 2.0 or _sid == 0 or _sid == _total_shots - 1
                                 if _is_keyframe:
-                                    request_payload["steps"] = min(gen_params["steps"] + 8, 50)
-                                    request_payload["cfg_scale"] = min(gen_params["cfg_scale"] + 0.5, 12.0)
+                                    _model_type = detect_model_type(selected_model)
+                                    if _model_type in (MODEL_TYPE_FLUX, MODEL_TYPE_SD3):
+                                        request_payload["steps"] = min(gen_params["steps"] + 4, 35)
+                                        request_payload["cfg_scale"] = min(gen_params["cfg_scale"] + 0.3, 6.0)
+                                    else:
+                                        request_payload["steps"] = min(gen_params["steps"] + 6, 40)
+                                        request_payload["cfg_scale"] = min(gen_params["cfg_scale"] + 0.5, 9.0)
                             override_settings = {}
                             if use_vae and vae_name:
                                 override_settings["sd_vae"] = vae_name
@@ -881,12 +889,9 @@ class ImagesMixin:
                                     except queue.Full:
                                         pass
                                     break
-                                else:
-                                    if retry < max_retries - 1:
-                                        time.sleep(retry_delay)
                             else:
                                 if retry < max_retries - 1:
-                                    time.sleep(retry_delay)
+                                    continue
                         except requests.exceptions.ConnectionError:
                             try:
                                 result_queue.put((idx, None, None, "connection_error"), timeout=5)
@@ -895,10 +900,10 @@ class ImagesMixin:
                             break
                         except requests.exceptions.Timeout:
                             if retry < max_retries - 1:
-                                time.sleep(retry_delay)
+                                continue
                         except Exception as e:
                             if retry < max_retries - 1:
-                                time.sleep(retry_delay)
+                                continue
                     else:
                         try:
                             result_queue.put((idx, None, None, "failed"), timeout=5)
