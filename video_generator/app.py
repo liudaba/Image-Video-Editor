@@ -8,6 +8,7 @@ import os
 import sys
 import io
 import datetime
+import time
 import warnings
 import ctypes
 
@@ -118,7 +119,7 @@ def _print_console_banner():
         print("=" * 60)
         print("🎬 短视频生成器 - 日志控制台")
         print("=" * 60)
-        print(f"启动时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"启动时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         print(f"运行模式: {'pythonw.exe (GUI模式)' if _is_pythonw else 'python.exe (控制台模式)'}")
         print("=" * 60)
         print()
@@ -171,7 +172,7 @@ def _check_critical_files(app_dir):
     if not logger.handlers:
         handler = logging.FileHandler(os.path.join(app_dir, "startup_check.log"), encoding="utf-8")
         handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
-        handler.formatter.converter = lambda: datetime.datetime.now().timetuple()  # 使用本地时间
+        handler.formatter.converter = time.localtime
         logger.addHandler(handler)
 
     internal_dir = os.path.join(app_dir, "_internal")
