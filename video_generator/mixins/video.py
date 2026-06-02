@@ -4,7 +4,6 @@ import sys
 import json
 import time
 import gc
-import datetime
 import traceback
 import threading
 from video_generator.mixins.logging import safe_print_exc
@@ -284,7 +283,7 @@ class VideoMixin:
                         self.log(f"\n🎥 开始FFmpeg直接渲染...")
                         self.log(f"   📊 {len(resized_images)} 张图片, 总时长 {sum(shot_durations):.1f}s")
                         
-                        output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+                        output_path = os.path.join(self.output_dir, f"output_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}.mp4")
                         
                         _ffmpeg_render_start = time.time()
                         
@@ -517,7 +516,7 @@ class VideoMixin:
             # 步骤12: 渲染视频
             self.update_task_progress("正在渲染视频...", 70)
             self.log("\n🎥 开始渲染视频...")
-            output_path = os.path.join(self.output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+            output_path = os.path.join(self.output_dir, f"output_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}.mp4")
             
             if not hasattr(self, '_gpu_encoder_cache'):
                 self._gpu_encoder_cache = None

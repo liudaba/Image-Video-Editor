@@ -5,7 +5,6 @@ import gc
 import json
 import time
 import ctypes
-import datetime
 import threading
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -414,7 +413,7 @@ class ResourceMixin:
             os.makedirs(trash_dir, exist_ok=True)
 
             if trash_session_dir is None:
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
                 trash_session_dir = os.path.join(trash_dir, f"cleanup_{timestamp}")
             os.makedirs(trash_session_dir, exist_ok=True)
             
@@ -438,7 +437,7 @@ class ResourceMixin:
             trash_dir = self._get_trash_dir()
             os.makedirs(trash_dir, exist_ok=True)
 
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
             trash_session_dir = os.path.join(trash_dir, f"output_project_{timestamp}")
 
             if not hasattr(self, 'output_dir'):

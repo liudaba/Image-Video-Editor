@@ -733,7 +733,7 @@ class PatchUpdater:
                 version_file = _ROOT_DIR / 'version.json'
                 version_data = {
                     'version': new_version,
-                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime()),
                 }
                 tmp_version = str(version_file) + '.tmp'
                 if os.path.exists(tmp_version):

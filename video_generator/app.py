@@ -7,7 +7,6 @@ import tkinter as tk
 import os
 import sys
 import io
-import datetime
 import time
 import warnings
 import ctypes

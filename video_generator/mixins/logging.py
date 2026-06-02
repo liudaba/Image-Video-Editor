@@ -1,5 +1,4 @@
 """Logging mixin - thread-safe logging with smart auto-scroll and file persistence."""
-import datetime
 import logging
 import os
 import threading
