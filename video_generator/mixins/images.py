@@ -488,6 +488,13 @@ class ImagesMixin:
 
     def _generate_images_local(self):
         """本地SD生图流程（原有逻辑）"""
+        # 本地SD需要GPU显存，主动卸载Ollama模型和Whisper GPU资源，避免显存冲突
+        was_whisper_on_gpu = self._whisper_on_gpu
+        self._safe_release_whisper_gpu()
+        if was_whisper_on_gpu:
+            self.log("   🧹 Whisper GPU 显存已释放（本地SD生图模式）")
+        self._unload_ollama_models(log_prefix="   🖼️ ")
+
         # 检查是否有分镜数据，如果没有则尝试从文件加载
         if not self.shots_data:
             shots_file = os.path.join(self.output_dir, "shots_data.json")

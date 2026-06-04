@@ -325,6 +325,12 @@ class VideoMixin:
                             self.log(f"✅ 视频生成完成！耗时{_video_min}分{_video_sec}秒")
                             self.log(f"   📁 {output_path}")
                             
+                            # 释放audio资源（FFmpeg路径直接return，需手动关闭）
+                            if audio:
+                                try: audio.close()
+                                except Exception: pass
+                            self._active_audio = None
+                            
                             self.state_manager['video']['generated'] = True
                             self.state_manager['video']['path'] = output_path
                             
@@ -1086,17 +1092,27 @@ class VideoMixin:
                         self.log("⚠️ SD API 当前未连接，先跳过生图步骤")
                         self.log("   💡 分镜数据已保存，等待 SD API 连接后自动恢复生图...")
                         self.log("   💡 请确保 Stable Diffusion Web UI 已启动")
-                        self.log("   💡 系统将每15秒自动检测SD连接状态")
+                        self.log("   💡 系统将每15秒自动检测SD连接状态（超时10分钟自动停止）")
                         self.log("")
                         self.update_task_progress("⏳ 等待SD API连接...", 35)
                         
                         self._waiting_for_sd = True
                         sd_connected = False
+                        _sd_wait_start = time.time()
+                        _SD_WAIT_TIMEOUT = 600  # 10分钟超时
                         
                         while self.task_running and self._waiting_for_sd:
                             time.sleep(15)
                             if not self.task_running:
                                 self.log("❌ 任务已被取消")
+                                return
+                            
+                            # 超时检查
+                            if time.time() - _sd_wait_start > _SD_WAIT_TIMEOUT:
+                                self.log("")
+                                self.log(f"❌ 等待SD API连接超时（{_SD_WAIT_TIMEOUT // 60}分钟）")
+                                self.log("   💡 分镜数据已保存，待SD连接后可重新执行任务")
+                                self.update_task_progress("就绪 - SD API连接超时")
                                 return
                             
                             sd_available_now = self._check_sd_available()
@@ -1107,7 +1123,8 @@ class VideoMixin:
                                 sd_connected = True
                                 break
                             else:
-                                self.log("⏳ SD API 仍未连接，继续等待...（可点击「停止任务」取消）")
+                                _elapsed_min = int((time.time() - _sd_wait_start) // 60)
+                                self.log(f"⏳ SD API 仍未连接，已等待{_elapsed_min}分钟...（可点击「停止任务」取消）")
                         
                         if not sd_connected:
                             self.log("")

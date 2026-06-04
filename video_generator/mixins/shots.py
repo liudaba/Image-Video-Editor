@@ -12,7 +12,7 @@ import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import messagebox
 
-from video_generator.config import Config, get_whisper_model_path
+from video_generator.config import Config, get_whisper_model_path, get_http_session
 from video_generator.cache import prompt_cache, image_cache
 from video_generator.ollama_client import (
     call_ollama_model,
@@ -5792,9 +5792,28 @@ class ShotsMixin:
                     self.cache_set('audio_analysis', audio_key, cache_data)
                     self.log("✅ 音频分析结果已缓存")
                     was_on_gpu = self._whisper_on_gpu
-                    self._safe_release_whisper_gpu()
+                    # 语音识别已完成，彻底删除Whisper模型释放CPU+GPU内存
+                    # 后续不再需要Whisper，保留在CPU内存浪费约3GB
+                    if self.whisper_model is not None:
+                        try:
+                            del self.whisper_model
+                        except Exception:
+                            pass
+                        self.whisper_model = None
+                        self._whisper_on_gpu = False
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except Exception:
+                            pass
+                        try:
+                            import gc
+                            gc.collect()
+                        except Exception:
+                            pass
                     if was_on_gpu:
-                        self.log("   ✅ Whisper 模型 GPU 资源已释放")
+                        self.log("   ✅ Whisper 模型已彻底卸载（GPU + CPU 内存已释放）")
             
             # 步骤2: 大模型分析文章内容（用于统一分镜基调）
             self.log("\n📍 步骤 2/4: 主题分析与纠错")
@@ -5891,7 +5910,22 @@ class ShotsMixin:
                     self.log(f"✨ 主题元素: {', '.join(theme_info['theme_elements'][:8])}")
                 
                 self.log("✅ 主题提取完成，将应用纠错结果到分镜文本")
+                # 缓存路径：检查Ollama是否已有模型加载，避免后续不必要的重启/预热
                 _ollama_model_already_loaded = False
+                try:
+                    from video_generator.cloud_llm_client import is_cloud_llm_active
+                    if is_cloud_llm_active():
+                        _ollama_model_already_loaded = True  # 云端模式不需要预热本地模型
+                    else:
+                        # 检查Ollama是否有模型已加载
+                        status_resp = get_http_session().get(
+                            f"{Config.OLLAMA_BASE_URL}/api/ps", timeout=3
+                        )
+                        if status_resp.status_code == 200:
+                            loaded = status_resp.json().get('models', [])
+                            _ollama_model_already_loaded = len(loaded) > 0
+                except Exception:
+                    pass
             else:
                 if len(full_text) > 20:
                     llm_ready = is_llm_available()

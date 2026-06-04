@@ -99,6 +99,7 @@ class ResourceMixin:
     
 
     _last_unload_time = 0
+    _last_unload_success = True  # 上次卸载是否成功
     _UNLOAD_COOLDOWN = 5
 
     def _unload_ollama_models(self, log_prefix="", exit_mode=False):
@@ -113,7 +114,8 @@ class ResourceMixin:
         """
         if not exit_mode:
             now = time.time()
-            if now - self._last_unload_time < self._UNLOAD_COOLDOWN:
+            # 如果上次卸载成功，才应用冷却期；上次失败则允许立即重试
+            if self._last_unload_success and now - self._last_unload_time < self._UNLOAD_COOLDOWN:
                 return
             self._last_unload_time = now
         api_timeout = 1 if exit_mode else 5
@@ -163,10 +165,15 @@ class ResourceMixin:
                             pass
                         if released:
                             self.log(f"{log_prefix}🧹 Ollama 模型已卸载，GPU 显存已释放")
+                            self._last_unload_success = True
                         else:
                             self.log(f"{log_prefix}🧹 Ollama 模型卸载指令已发送（显存释放中）")
+                            self._last_unload_success = False
+                    else:
+                        # 没有模型需要卸载，视为成功
+                        self._last_unload_success = True
         except Exception:
-            pass
+            self._last_unload_success = False
 
 
     def init_thread_pool(self):
