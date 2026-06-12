@@ -483,6 +483,29 @@ class UIHandlersMixin:
                 print(f"  视觉基调:     {visual_tone}")
             if styles:
                 print(f"  风格预设:     {', '.join(styles)}")
+            # 云端设置
+            cloud_llm_on = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
+            cloud_asr_on = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
+            cloud_img_on = self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False
+            print("  ── 云端设置 ──")
+            if cloud_llm_on:
+                llm_provider = self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else ''
+                llm_model = self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else ''
+                print(f"  ☁️ 云端大模型: 已启用 ({llm_provider} / {llm_model})")
+            else:
+                print(f"  ☁️ 云端大模型: 未启用（使用本地Ollama）")
+            if cloud_asr_on:
+                asr_provider = self.cloud_asr_provider_var.get() if hasattr(self, 'cloud_asr_provider_var') else ''
+                asr_model = self.cloud_asr_model_var.get() if hasattr(self, 'cloud_asr_model_var') else ''
+                print(f"  🎙️ 云端语音: 已启用 ({asr_provider} / {asr_model})")
+            else:
+                print(f"  🎙️ 云端语音: 未启用（使用本地Whisper）")
+            if cloud_img_on:
+                img_provider = self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else ''
+                img_model = self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else ''
+                print(f"  🎨 云端生图: 已启用 ({img_provider} / {img_model})")
+            else:
+                print(f"  🎨 云端生图: 未启用（使用本地SD API）")
             print("━" * 50)
             print("")
         except Exception:
@@ -696,6 +719,30 @@ class UIHandlersMixin:
         min_shot_dur = self.min_shot_duration_var.get() if hasattr(self, 'min_shot_duration_var') else 4.0
         confirm_msg += f"最短分镜时长: {min_shot_dur:.1f}秒\n"
 
+        # 云端设置信息
+        cloud_llm_on = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
+        cloud_asr_on = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
+        cloud_img_on = self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False
+        confirm_msg += "\n── 云端设置 ──\n"
+        if cloud_llm_on:
+            llm_provider = self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else ''
+            llm_model = self.cloud_llm_model_var.get() if hasattr(self, 'cloud_llm_model_var') else ''
+            confirm_msg += f"☁️ 云端大模型: 已启用 ({llm_provider} / {llm_model})\n"
+        else:
+            confirm_msg += "☁️ 云端大模型: 未启用（使用本地Ollama）\n"
+        if cloud_asr_on:
+            asr_provider = self.cloud_asr_provider_var.get() if hasattr(self, 'cloud_asr_provider_var') else ''
+            asr_model = self.cloud_asr_model_var.get() if hasattr(self, 'cloud_asr_model_var') else ''
+            confirm_msg += f"🎙️ 云端语音识别: 已启用 ({asr_provider} / {asr_model})\n"
+        else:
+            confirm_msg += "🎙️ 云端语音识别: 未启用（使用本地Whisper）\n"
+        if cloud_img_on:
+            img_provider = self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else ''
+            img_model = self.cloud_image_model_var.get() if hasattr(self, 'cloud_image_model_var') else ''
+            confirm_msg += f"🎨 云端生图: 已启用 ({img_provider} / {img_model})\n"
+        else:
+            confirm_msg += "🎨 云端生图: 未启用（使用本地SD API）\n"
+
         # 显示确认对话框
         confirmed = messagebox.askyesno("确认设置", confirm_msg)
 
@@ -707,6 +754,16 @@ class UIHandlersMixin:
                 msg += f"\n视觉基调: {custom_tone}"
             if hasattr(self, 'min_shot_duration_var'):
                 msg += f"\n最短分镜时长: {self.min_shot_duration_var.get():.1f}秒"
+            # 云端设置日志
+            if cloud_llm_on:
+                llm_provider = self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else ''
+                msg += f"\n☁️ 云端大模型: 已启用 ({llm_provider})"
+            if cloud_asr_on:
+                asr_provider = self.cloud_asr_provider_var.get() if hasattr(self, 'cloud_asr_provider_var') else ''
+                msg += f"\n🎙️ 云端语音识别: 已启用 ({asr_provider})"
+            if cloud_img_on:
+                img_provider = self.cloud_image_provider_var.get() if hasattr(self, 'cloud_image_provider_var') else ''
+                msg += f"\n🎨 云端生图: 已启用 ({img_provider})"
             self._sync_all_settings()
             self.log(msg)
             self.save_config()
@@ -719,15 +776,15 @@ class UIHandlersMixin:
     
 
     def _sync_all_settings(self):
-        """同步所有高级设置面板变量到运行时状态（无需点击应用按钮）"""
+        """同步所有高级设置面板变量到运行时状态"""
         try:
             if hasattr(self, 'min_shot_duration_var'):
                 self.MIN_SHOT_DURATION = self.min_shot_duration_var.get()
         except Exception:
             pass
+        # 同步云端配置到运行时模块（_apply_cloud_llm_config内部同时处理LLM/ASR/Image）
         try:
-            if hasattr(self, '_apply_cloud_llm_config'):
-                self._apply_cloud_llm_config()
+            self._apply_cloud_llm_config()
         except Exception:
             pass
 
@@ -2677,11 +2734,11 @@ class UIHandlersMixin:
                     self.min_shot_duration_var.set(float(config['min_shot_duration']))
                     self.MIN_SHOT_DURATION = float(config['min_shot_duration'])
 
-                if hasattr(self, '_apply_cloud_llm_config'):
-                    try:
-                        self._apply_cloud_llm_config()
-                    except Exception:
-                        pass
+                # 同步云端配置到运行时模块（_apply_cloud_llm_config内部同时处理LLM/ASR/Image）
+                try:
+                    self._apply_cloud_llm_config()
+                except Exception:
+                    pass
                 
                 # 配置加载后同步云端模型下拉菜单
                 if hasattr(self, '_update_cloud_model_dropdown'):
@@ -2713,8 +2770,8 @@ class UIHandlersMixin:
     def save_config(self):
         """保存配置"""
         try:
-            if hasattr(self, '_apply_cloud_llm_config'):
-                self._apply_cloud_llm_config()
+            # 同步云端配置到运行时模块（_apply_cloud_llm_config内部同时处理LLM/ASR/Image）
+            self._apply_cloud_llm_config()
             
             selected_styles = self.get_selected_styles()
             
