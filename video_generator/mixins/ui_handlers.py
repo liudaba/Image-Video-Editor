@@ -723,6 +723,13 @@ class UIHandlersMixin:
         cloud_llm_on = self.cloud_llm_enabled_var.get() if hasattr(self, 'cloud_llm_enabled_var') else False
         cloud_asr_on = self.cloud_asr_enabled_var.get() if hasattr(self, 'cloud_asr_enabled_var') else False
         cloud_img_on = self.cloud_image_enabled_var.get() if hasattr(self, 'cloud_image_enabled_var') else False
+        # 调试：打印变量实际值到日志
+        try:
+            self.log(f"[DEBUG] cloud_llm={cloud_llm_on}, cloud_asr={cloud_asr_on}, cloud_img={cloud_img_on}")
+            if hasattr(self, 'cloud_asr_enabled_var'):
+                self.log(f"[DEBUG] cloud_asr_enabled_var type={type(self.cloud_asr_enabled_var.get())}, value={self.cloud_asr_enabled_var.get()}")
+        except Exception as e:
+            self.log(f"[DEBUG] 读取异常: {e}")
         confirm_msg += "\n── 云端设置 ──\n"
         if cloud_llm_on:
             llm_provider = self.cloud_llm_provider_var.get() if hasattr(self, 'cloud_llm_provider_var') else ''

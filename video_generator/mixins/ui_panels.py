@@ -415,14 +415,14 @@ class UIPanelsMixin:
         cloud_config = get_cloud_llm_config()
 
         if not hasattr(self, 'cloud_llm_enabled_var'):
-            self.cloud_llm_enabled_var = tk.BooleanVar(value=cloud_config.get("enabled", False))
+            self.cloud_llm_enabled_var = tk.BooleanVar(master=self.root, value=cloud_config.get("enabled", False))
         if not hasattr(self, 'cloud_llm_provider_var'):
             # 从配置中恢复服务商显示名（配置存的是ID）
             llm_provider_id = cloud_config.get("provider", "deepseek")
             llm_provider_name = PROVIDER_CONFIG.get(llm_provider_id, {}).get("name", "DeepSeek 深度求索")
-            self.cloud_llm_provider_var = tk.StringVar(value=llm_provider_name)
+            self.cloud_llm_provider_var = tk.StringVar(master=self.root, value=llm_provider_name)
         if not hasattr(self, 'cloud_llm_api_key_var'):
-            self.cloud_llm_api_key_var = tk.StringVar(value=cloud_config.get("api_key", ""))
+            self.cloud_llm_api_key_var = tk.StringVar(master=self.root, value=cloud_config.get("api_key", ""))
         if not hasattr(self, 'cloud_llm_model_var'):
             # 从配置中恢复模型显示名（配置存的是ID）
             llm_model_id = cloud_config.get("model", "deepseek-chat")
@@ -432,10 +432,10 @@ class UIPanelsMixin:
                 if m['id'] == llm_model_id:
                     llm_model_name = f"{m['name']} - {m['desc']}"
                     break
-            self.cloud_llm_model_var = tk.StringVar(value=llm_model_name)
+            self.cloud_llm_model_var = tk.StringVar(master=self.root, value=llm_model_name)
             self._cloud_selected_model_id = llm_model_id
         if not hasattr(self, 'cloud_llm_custom_url_var'):
-            self.cloud_llm_custom_url_var = tk.StringVar(value=cloud_config.get("custom_base_url", ""))
+            self.cloud_llm_custom_url_var = tk.StringVar(master=self.root, value=cloud_config.get("custom_base_url", ""))
 
         enable_frame = ttk.Frame(cloud_section)
         enable_frame.pack(fill=tk.X, pady=1)
@@ -490,7 +490,7 @@ class UIPanelsMixin:
         self.btn_test_cloud.pack(side=tk.LEFT, padx=2, pady=1)
 
         if not hasattr(self, 'cloud_llm_status_var'):
-            self.cloud_llm_status_var = tk.StringVar(value="❌ 未连接")
+            self.cloud_llm_status_var = tk.StringVar(master=self.root, value="❌ 未连接")
         self.cloud_llm_status_label = ttk.Label(cloud_btn_frame, textvariable=self.cloud_llm_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
         self.cloud_llm_status_label.pack(side=tk.LEFT, padx=5)
 
@@ -508,14 +508,14 @@ class UIPanelsMixin:
             ASR_PROVIDER_CONFIG = {}
 
         if not hasattr(self, 'cloud_asr_enabled_var'):
-            self.cloud_asr_enabled_var = tk.BooleanVar(value=asr_config.get("enabled", False))
+            self.cloud_asr_enabled_var = tk.BooleanVar(master=self.root, value=asr_config.get("enabled", False))
         if not hasattr(self, 'cloud_asr_provider_var'):
             # 从配置中恢复服务商名称
             asr_provider_id = asr_config.get("provider", "openai")
             asr_provider_name = ASR_PROVIDER_CONFIG.get(asr_provider_id, {}).get("name", "OpenAI Whisper") if asr_available else "OpenAI Whisper"
-            self.cloud_asr_provider_var = tk.StringVar(value=asr_provider_name)
+            self.cloud_asr_provider_var = tk.StringVar(master=self.root, value=asr_provider_name)
         if not hasattr(self, 'cloud_asr_api_key_var'):
-            self.cloud_asr_api_key_var = tk.StringVar(value=asr_config.get("api_key", ""))
+            self.cloud_asr_api_key_var = tk.StringVar(master=self.root, value=asr_config.get("api_key", ""))
         if not hasattr(self, 'cloud_asr_model_var'):
             # 从配置中恢复模型显示名（配置存的是ID）
             asr_model_id = asr_config.get("model", "whisper-1")
@@ -526,10 +526,10 @@ class UIPanelsMixin:
                     if m['id'] == asr_model_id:
                         asr_model_name = f"{m['name']} - {m['desc']}"
                         break
-            self.cloud_asr_model_var = tk.StringVar(value=asr_model_name)
+            self.cloud_asr_model_var = tk.StringVar(master=self.root, value=asr_model_name)
             self._cloud_selected_asr_model_id = asr_model_id
         if not hasattr(self, 'cloud_asr_custom_url_var'):
-            self.cloud_asr_custom_url_var = tk.StringVar(value=asr_config.get("custom_base_url", ""))
+            self.cloud_asr_custom_url_var = tk.StringVar(master=self.root, value=asr_config.get("custom_base_url", ""))
 
         asr_enable_frame = ttk.Frame(asr_section)
         asr_enable_frame.pack(fill=tk.X, pady=1)
@@ -581,7 +581,7 @@ class UIPanelsMixin:
         self.btn_test_cloud_asr.pack(side=tk.LEFT, padx=2, pady=1)
 
         if not hasattr(self, 'cloud_asr_status_var'):
-            self.cloud_asr_status_var = tk.StringVar(value="❌ 未连接")
+            self.cloud_asr_status_var = tk.StringVar(master=self.root, value="❌ 未连接")
         self.cloud_asr_status_label = ttk.Label(asr_btn_frame, textvariable=self.cloud_asr_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
         self.cloud_asr_status_label.pack(side=tk.LEFT, padx=5)
 
@@ -599,14 +599,14 @@ class UIPanelsMixin:
             IMAGE_PROVIDER_CONFIG = {}
 
         if not hasattr(self, 'cloud_image_enabled_var'):
-            self.cloud_image_enabled_var = tk.BooleanVar(value=img_config.get("enabled", False))
+            self.cloud_image_enabled_var = tk.BooleanVar(master=self.root, value=img_config.get("enabled", False))
         if not hasattr(self, 'cloud_image_provider_var'):
             # 从配置中恢复服务商显示名（配置存的是ID）
             img_provider_id = img_config.get("provider", "siliconflow")
             img_provider_name = IMAGE_PROVIDER_CONFIG.get(img_provider_id, {}).get("name", "硅基流动 SiliconFlow") if img_available else "硅基流动 SiliconFlow"
-            self.cloud_image_provider_var = tk.StringVar(value=img_provider_name)
+            self.cloud_image_provider_var = tk.StringVar(master=self.root, value=img_provider_name)
         if not hasattr(self, 'cloud_image_api_key_var'):
-            self.cloud_image_api_key_var = tk.StringVar(value=img_config.get("api_key", ""))
+            self.cloud_image_api_key_var = tk.StringVar(master=self.root, value=img_config.get("api_key", ""))
         if not hasattr(self, 'cloud_image_model_var'):
             # 从配置中恢复模型显示名（配置存的是ID）
             img_model_id = img_config.get("model", "stabilityai/stable-diffusion-xl-base-1.0")
@@ -617,10 +617,10 @@ class UIPanelsMixin:
                     if m['id'] == img_model_id:
                         img_model_name = f"{m['name']} - {m['desc']}"
                         break
-            self.cloud_image_model_var = tk.StringVar(value=img_model_name)
+            self.cloud_image_model_var = tk.StringVar(master=self.root, value=img_model_name)
             self._cloud_selected_image_model_id = img_model_id
         if not hasattr(self, 'cloud_image_custom_url_var'):
-            self.cloud_image_custom_url_var = tk.StringVar(value=img_config.get("custom_base_url", ""))
+            self.cloud_image_custom_url_var = tk.StringVar(master=self.root, value=img_config.get("custom_base_url", ""))
 
         cimg_enable_frame = ttk.Frame(cloud_img_section)
         cimg_enable_frame.pack(fill=tk.X, pady=1)
@@ -671,7 +671,7 @@ class UIPanelsMixin:
         self.btn_test_cloud_image.pack(side=tk.LEFT, padx=2, pady=1)
 
         if not hasattr(self, 'cloud_image_status_var'):
-            self.cloud_image_status_var = tk.StringVar(value="❌ 未连接")
+            self.cloud_image_status_var = tk.StringVar(master=self.root, value="❌ 未连接")
         self.cloud_image_status_label = ttk.Label(cimg_btn_frame, textvariable=self.cloud_image_status_var, font=('Microsoft YaHei', large_font_size), foreground="red")
         self.cloud_image_status_label.pack(side=tk.LEFT, padx=5)
 
