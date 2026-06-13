@@ -263,6 +263,7 @@ class ImagesMixin:
             try:
                 import torch
                 if torch.cuda.is_available():
+                    torch.cuda.synchronize()
                     torch.cuda.empty_cache()
             except ImportError:
                 pass
@@ -759,19 +760,12 @@ class ImagesMixin:
         # ========== 步骤4: 预取流水线生成图像 ==========
         if tasks:
             self.log("")
-            was_on_gpu = self._whisper_on_gpu
-            self._safe_release_whisper_gpu()
-            if was_on_gpu:
-                self.log("   🧹 Whisper GPU 显存已释放")
-                
-            try:
-                self._unload_ollama_models(log_prefix="   ")
-            except Exception:
-                pass
+            # Whisper 和 Ollama 已在方法开头释放，无需重复释放
             
             try:
                 import torch
                 if torch.cuda.is_available():
+                    torch.cuda.synchronize()
                     torch.cuda.empty_cache()
                     # 当前进程显存（不含SD WebUI等独立进程）
                     vram_self = torch.cuda.memory_allocated(0) / 1024**3
@@ -916,6 +910,11 @@ class ImagesMixin:
                             result_queue.put((idx, None, None, "failed"), timeout=5)
                         except queue.Full:
                             pass
+
+                    # 每张图生成后短暂间隔，让GPU散热，避免连续满载导致温度持续攀升
+                    if self.task_running:
+                        time.sleep(2)
+
                 try:
                     result_queue.put(None, timeout=5)
                 except queue.Full:
