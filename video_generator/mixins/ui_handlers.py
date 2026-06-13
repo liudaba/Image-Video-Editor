@@ -51,10 +51,37 @@ class UIHandlersMixin:
             pass
 
         try:
+            # 释放Whisper模型GPU显存（退出模式，使用极短超时避免阻塞UI关闭）
+            if hasattr(self, '_unload_ollama_models'):
+                self._unload_ollama_models(log_prefix="🧹 ", exit_mode=True)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, '_safe_release_whisper_gpu'):
+                self._safe_release_whisper_gpu()
+        except Exception:
+            pass
+
+        try:
             # 停止渲染进程
             if hasattr(self, 'renderer') and self.renderer:
                 if hasattr(self.renderer, '_render_process') and self.renderer._render_process:
                     self.renderer._render_process.terminate()
+        except Exception:
+            pass
+
+        try:
+            # 最终GPU显存清理
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        try:
+            import gc
+            gc.collect()
         except Exception:
             pass
 

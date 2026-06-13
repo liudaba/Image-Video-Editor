@@ -42,24 +42,44 @@ class AudioMixin:
     # =======================================================================
 
     def _safe_release_whisper_gpu(self):
-        if not self._whisper_on_gpu or self.whisper_model is None:
-            return
-        
+        """安全释放Whisper模型占用的GPU显存和CPU内存（AudioMixin版本）
+
+        注意：由于 MRO 顺序，AudioMixin 排在 ShotsMixin 之前，
+        因此此版本是实际被 VideoGenApp 使用的版本。
+        不要先 model.to("cpu") 再 del，这会在CPU上额外分配一份
+        模型权重副本，反而增加内存峰值。直接 del 即可。
+        无论模型在GPU还是CPU上，都会被删除释放内存。
+        """
+        _cuda_available = False
         try:
             import torch
-            device_type = next(self.whisper_model.parameters()).device.type
-            if device_type == "cuda":
-                self.whisper_model = self.whisper_model.to("cpu")
+            _cuda_available = torch.cuda.is_available()
+            if _cuda_available:
                 torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                self._whisper_on_gpu = False
-        except (StopIteration, Exception):
+        except Exception:
+            pass
+
+        if not hasattr(self, 'whisper_model') or self.whisper_model is None:
+            return
+
+        try:
+            del self.whisper_model
+            self.whisper_model = None
+            self._whisper_on_gpu = False
+            self._whisper_model_size = None
+        except Exception:
+            pass
+
+        try:
+            gc.collect()
+        except Exception:
+            pass
+
+        if _cuda_available:
             try:
                 import torch
-                self.whisper_model = self.whisper_model.to("cpu")
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                self._whisper_on_gpu = False
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
             except Exception:
                 pass
     
@@ -114,8 +134,9 @@ class AudioMixin:
             self.log("🗑️ 清除旧分镜数据，防止混入旧音频内容...")
             
             # 释放Whisper GPU资源（如果上次任务异常退出未释放）
+            _was_on_gpu = getattr(self, '_whisper_on_gpu', False)
             self._safe_release_whisper_gpu()
-            if not self._whisper_on_gpu:
+            if _was_on_gpu:
                 self.log("   🧹 Whisper GPU资源已释放")
             
             self._move_output_to_trash(reason="new_audio")
@@ -178,11 +199,9 @@ class AudioMixin:
             if self.whisper_model is not None:
                 self.log("🔄 释放Whisper模型内存...")
                 self._safe_release_whisper_gpu()
-                del self.whisper_model
-                self.whisper_model = None
+                # _safe_release_whisper_gpu 已完成 del + gc.collect + empty_cache
+                # 只需额外清理 _whisper_model_size
                 self._whisper_model_size = None
-                self._whisper_on_gpu = False
-                gc.collect()
                 self.log("✅ Whisper模型内存已释放")
             
             self.audio_path = None

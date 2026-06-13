@@ -119,20 +119,17 @@ class ResourceManager:
                     log_callback(f"⚠️ GPU显存清理失败: {e}")
 
     def unload_whisper_model(self, whisper_model_ref, log_callback=None, full_unload=False):
+        """卸载Whisper模型，释放GPU显存和CPU内存
+
+        注意：不要先 model.to("cpu") 再 del，这会在CPU上额外分配一份
+        模型权重副本，反而增加内存峰值。直接 del 即可释放GPU显存。
+        """
         try:
             import torch
             if whisper_model_ref is not None:
+                # 确保所有异步CUDA操作完成
                 if torch.cuda.is_available():
-                    try:
-                        device_type = next(whisper_model_ref.parameters()).device.type
-                    except (StopIteration, Exception):
-                        device_type = "cpu"
-                    if device_type == "cuda":
-                        whisper_model_ref = whisper_model_ref.to("cpu")
-                        torch.cuda.synchronize()
-                        torch.cuda.empty_cache()
-                        if log_callback:
-                            log_callback("   🧹 Whisper GPU显存已释放")
+                    torch.cuda.synchronize()
 
                 if full_unload:
                     del whisper_model_ref
@@ -140,8 +137,15 @@ class ResourceManager:
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
                     if log_callback:
                         log_callback("   🧹 Whisper模型已完全卸载，内存已释放")
+                else:
+                    # 非完全卸载时，仅释放GPU显存缓存
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    if log_callback:
+                        log_callback("   🧹 Whisper GPU显存缓存已清理")
 
             return whisper_model_ref
         except Exception as e:

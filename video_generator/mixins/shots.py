@@ -655,6 +655,55 @@ def _fix_whisper_repeated_chars(text):
     return text
 
 class ShotsMixin:
+    def _safe_release_whisper_gpu(self):
+        """安全释放Whisper模型占用的GPU显存和CPU内存
+
+        关键步骤：
+        1. 如果CUDA可用，先 synchronize() 确保所有异步CUDA操作完成
+        2. 删除模型对象释放Python侧引用（无论模型在GPU还是CPU上）
+        3. gc.collect() 回收Python对象
+        4. 如果CUDA可用，empty_cache() + synchronize() 释放CUDA缓存
+
+        注意：不要先 model.to("cpu") 再 del，这会在CPU上额外分配一份
+        模型权重副本，反而增加内存峰值。直接 del 即可。
+        """
+        # 步骤1: 如果CUDA可用，先同步所有异步操作
+        _cuda_available = False
+        try:
+            import torch
+            _cuda_available = torch.cuda.is_available()
+            if _cuda_available:
+                torch.cuda.synchronize()
+        except Exception:
+            pass
+
+        # 步骤2: 无论模型在GPU还是CPU上，都要删除释放内存
+        if not hasattr(self, 'whisper_model') or self.whisper_model is None:
+            return
+
+        try:
+            del self.whisper_model
+            self.whisper_model = None
+            self._whisper_on_gpu = False
+            self._whisper_model_size = None
+        except Exception:
+            pass
+
+        # 步骤3: 回收Python对象
+        try:
+            gc.collect()
+        except Exception:
+            pass
+
+        # 步骤4: 如果CUDA可用，释放CUDA缓存
+        if _cuda_available:
+            try:
+                import torch
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+
     def _get_current_model(self):
         return (self.ollama_model_var.get() if hasattr(self, 'ollama_model_var') else None) or "gemma3:4b"
 
@@ -5653,15 +5702,13 @@ class ShotsMixin:
                     if self.whisper_model and current_model_size and current_model_size != whisper_model_size:
                         self.log(f"🔄 模型大小已变更 ({current_model_size} → {whisper_model_size})，重新加载...")
                         self._safe_release_whisper_gpu()
-                        del self.whisper_model
-                        self.whisper_model = None
-                        gc.collect()
                     
                     if self.whisper_model is not None and current_model_size == whisper_model_size:
                         try:
                             import torch
                             if torch.cuda.is_available():
                                 self.whisper_model = self.whisper_model.to("cuda")
+                                torch.cuda.synchronize()
                                 self._whisper_on_gpu = True
                                 whisper_used_gpu = True
                                 self.log(f"✅ Whisper {whisper_model_size} 已迁移到GPU")
@@ -5698,6 +5745,7 @@ class ShotsMixin:
                                 
                                 try:
                                     self.whisper_model = whisper.load_model(model_arg, device="cuda")
+                                    torch.cuda.synchronize()
                                 finally:
                                     _whisper_load_hb_stop.set()
                                     _whisper_load_hb_t.join(timeout=2)
@@ -5758,11 +5806,13 @@ class ShotsMixin:
                         _whisper_hb_thread.start()
                         
                         try:
+                            # GPU使用FP16减少显存占用（约节省50%），CPU必须用FP32
+                            _use_fp16 = self._whisper_on_gpu
                             result = self.whisper_model.transcribe(
                                 self.audio_path,
                                 language="zh",
                                 word_timestamps=True,
-                                fp16=False,
+                                fp16=_use_fp16,
                                 verbose=False,
                                 condition_on_previous_text=False,
                                 no_speech_threshold=0.3
@@ -5794,24 +5844,12 @@ class ShotsMixin:
                     was_on_gpu = self._whisper_on_gpu
                     # 语音识别已完成，彻底删除Whisper模型释放CPU+GPU内存
                     # 后续不再需要Whisper，保留在CPU内存浪费约3GB
-                    if self.whisper_model is not None:
-                        try:
-                            del self.whisper_model
-                        except Exception:
-                            pass
-                        self.whisper_model = None
-                        self._whisper_on_gpu = False
-                        try:
-                            import torch
-                            if torch.cuda.is_available():
-                                torch.cuda.empty_cache()
-                        except Exception:
-                            pass
-                        try:
-                            import gc
-                            gc.collect()
-                        except Exception:
-                            pass
+                    # 先清理result对象（可能间接引用模型内部张量），再释放模型
+                    try:
+                        del result
+                    except Exception:
+                        pass
+                    self._safe_release_whisper_gpu()
                     if was_on_gpu:
                         self.log("   ✅ Whisper 模型已彻底卸载（GPU + CPU 内存已释放）")
             
@@ -7016,22 +7054,18 @@ class ShotsMixin:
                 self._unload_ollama_models(log_prefix="🧹 ")
             except Exception:
                 pass
+            # _safe_release_whisper_gpu 已包含 del + gc.collect + empty_cache + synchronize
             if hasattr(self, 'whisper_model') and self.whisper_model:
                 self._safe_release_whisper_gpu()
-                del self.whisper_model
-                self.whisper_model = None
-                self._whisper_on_gpu = False
                 self.log("🧹 Whisper模型已完全卸载，内存已释放")
-            try:
-                gc.collect()
-            except Exception:
-                pass
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
+            else:
+                # 即使模型已卸载，也确保GPU缓存清理
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
     def generate_shots_threaded(self):
         """生成分镜脚本（线程化版本）"""
@@ -7093,12 +7127,10 @@ class ShotsMixin:
                         self._unload_ollama_models(log_prefix="🔄 分镜任务结束: ")
                     except Exception:
                         pass
+                    # _safe_release_whisper_gpu 已包含完整的 del + gc + empty_cache + synchronize
                     try:
                         if hasattr(self, 'whisper_model') and self.whisper_model:
                             self._safe_release_whisper_gpu()
-                            del self.whisper_model
-                            self.whisper_model = None
-                            self._whisper_on_gpu = False
                     except Exception:
                         pass
                     # 注意：不在 finally 中无条件清空 shots_data

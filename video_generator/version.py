@@ -12,10 +12,10 @@ from pathlib import Path
 
 logger = logging.getLogger("version")
 
-__version__ = "1.0.16"
+__version__ = "1.0.17"
 __app_name__ = "短视频生成器"
 __app_name_en__ = "VideoGen"
-__build_number__ = 2026061202
+__build_number__ = 2026061401
 
 VERSION_TUPLE = tuple(int(x) for x in __version__.split("."))
 

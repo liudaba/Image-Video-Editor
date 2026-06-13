@@ -1179,9 +1179,6 @@ class VideoMixin:
                 try:
                     if hasattr(self, 'whisper_model') and self.whisper_model:
                         self._safe_release_whisper_gpu()
-                        del self.whisper_model
-                        self.whisper_model = None
-                        self._whisper_on_gpu = False
                 except Exception:
                     pass
                 # 注意：不在 finally 中无条件清空 shots_data
