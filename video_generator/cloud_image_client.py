@@ -195,10 +195,9 @@ def _call_openai_image_format(prompt, negative_prompt, width, height,
 
     adj_w = min(width, max_size)
     adj_h = min(height, max_size)
-    if adj_w % 8 != 0:
-        adj_w = (adj_w // 8) * 8
-    if adj_h % 8 != 0:
-        adj_h = (adj_h // 8) * 8
+    # 对齐到 8 的倍数（多数扩散模型要求），并保证下限 >= 8 避免极端输入产生 0
+    adj_w = max(8, (adj_w // 8) * 8)
+    adj_h = max(8, (adj_h // 8) * 8)
 
     if (adj_w != width or adj_h != height) and log_callback:
         log_callback(f"⚠️ 云端模型最大尺寸{max_size}px，已将 {width}x{height} 调整为 {adj_w}x{adj_h}")
@@ -211,7 +210,12 @@ def _call_openai_image_format(prompt, negative_prompt, width, height,
         "response_format": "b64_json",
     }
 
-    if provider_id == "siliconflow" and negative_prompt:
+    # 各服务商对 negative_prompt 的支持情况：
+    # - siliconflow: 支持（Stable Diffusion / FLUX 系列）
+    # - tongyi_wanxiang: 通义万相支持 negative_prompt 字段
+    # - openai_dalle: DALL-E 3 不支持 negative_prompt（会被 API 拒绝）
+    _OPENAI_IMAGE_NEG_SUPPORTED = {"siliconflow", "tongyi_wanxiang"}
+    if provider_id in _OPENAI_IMAGE_NEG_SUPPORTED and negative_prompt:
         request_body["negative_prompt"] = negative_prompt
 
     headers = {
