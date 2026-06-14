@@ -34,26 +34,36 @@ class SmartCache:
             expire_time = self._expire_times.get(key)
             if expire_time is not None:
                 if expire_time > time.time():
+                    # 命中：刷新访问时间用于 LRU 淘汰
                     self._hits += 1
                     self._access_times[key] = time.time()
                     return self._cache.get(key)
                 else:
+                    # 已过期：惰性删除，并计为 miss（而非 hit）
                     self._cache.pop(key, None)
                     self._expire_times.pop(key, None)
                     self._access_times.pop(key, None)
+                    self._misses += 1
+                    return None
+            # key 不存在：计为 miss
             self._misses += 1
             return None
 
     def set(self, key, value, ttl=None):
         with self._lock:
-            if len(self._cache) >= self.max_size:
+            # 若 key 已存在，直接覆盖（不计入新条目，避免误触发淘汰）
+            is_new = key not in self._cache
+            if is_new and len(self._cache) >= self.max_size:
                 self._evict()
-                # 如果淘汰后仍超限（极端情况），强制淘汰最旧的一项
+                # 极端情况：淘汰后仍超限（例如 max_size=1 且无过期项），强制淘汰最旧的一项
                 if len(self._cache) >= self.max_size and self._access_times:
                     oldest_key = min(self._access_times, key=self._access_times.get)
                     self._cache.pop(oldest_key, None)
                     self._expire_times.pop(oldest_key, None)
                     self._access_times.pop(oldest_key, None)
+                # 兜底：若 max_size <= 0（错误配置），不写入，避免无限增长
+                if self.max_size <= 0:
+                    return
 
             ttl = ttl if ttl is not None else self.default_ttl
             now = time.time()

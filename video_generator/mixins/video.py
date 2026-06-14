@@ -324,17 +324,12 @@ class VideoMixin:
                             self.update_task_progress("视频生成完成", 100)
                             self.log(f"✅ 视频生成完成！耗时{_video_min}分{_video_sec}秒")
                             self.log(f"   📁 {output_path}")
-                            
-                            # 释放audio资源（FFmpeg路径直接return，需手动关闭）
-                            if audio:
-                                try: audio.close()
-                                except Exception: pass
-                            self._active_audio = None
-                            
+
                             self.state_manager['video']['generated'] = True
                             self.state_manager['video']['path'] = output_path
-                            
-                            self.task_running = False
+
+                            # 注意：task_running 重置、audio/clip 资源释放统一交由函数级 finally 处理，
+                            # 这里不提前手动关闭 audio，避免与 finally 块产生重复 close / 无锁写竞争。
                             self.log("\n📂 打开输出文件夹...")
                             self._open_folder(os.path.dirname(output_path))
                             return
@@ -750,15 +745,19 @@ class VideoMixin:
 
             w, h = clip.size
             base_frame = clip.get_frame(0)
+            # 复制 base_frame，避免 moviepy 内部对原始帧的延迟释放导致回退路径访问已释放内存
+            base_frame = np.array(base_frame)
             base_img = Image.fromarray(base_frame)
 
             if animation_type == "缩放":
                 max_scale = 1.10
-                max_w = int(w * max_scale)
-                max_h = int(h * max_scale)
+                # 使用 round 而非 int，避免奇数分辨率下丢 1 像素导致动画边缘错位
+                max_w = max(w, round(w * max_scale))
+                max_h = max(h, round(h * max_scale))
                 source_img = base_img.resize((max_w, max_h), Image.LANCZOS)
-                source_arr = np.array(source_img)
-                cached_source = Image.fromarray(source_arr)
+                # 复制为独立缓冲区，断开与 LANCZOS 内部临时缓冲的引用，
+                # 避免后续 transform() 期间源数据被意外回收。
+                cached_source = source_img.copy()
                 source_img.close()
                 base_img.close()
 

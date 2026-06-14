@@ -213,8 +213,10 @@ def call_cloud_llm(system_prompt, user_prompt, log_callback=None,
 
     effective_num_predict = num_predict
     if llm_config:
-        config_num_predict = llm_config.config.get("num_predict")
-        if config_num_predict and config_num_predict > num_predict:
+        # 注意：num_predict 不在 PRESETS 中，只能通过 set_custom_param 设置，
+        # 因此必须从 custom_params 读取，否则永远返回 None 导致逻辑失效。
+        config_num_predict = llm_config.custom_params.get("num_predict")
+        if config_num_predict and isinstance(config_num_predict, int) and config_num_predict > num_predict:
             effective_num_predict = config_num_predict
     request_body["max_tokens"] = effective_num_predict
 

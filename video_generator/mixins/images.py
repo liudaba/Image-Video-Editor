@@ -17,6 +17,36 @@ from video_generator.model_profiles import get_model_profile, detect_model_type,
 from video_generator.ollama_client import is_cloud_image_active
 
 class ImagesMixin:
+    def _safe_result_put(self, result_queue, item, max_total_wait=30):
+        """安全地把结果放入 result_queue，避免 queue.Full 导致结果丢失。
+
+        Producer 线程在 put 失败时如果直接 break，消费者会一直等不到该任务的结果，
+        直到 30s 超时才放弃，造成整批任务延迟。这里采用退避重试：
+        先快速重试几次，再逐步拉长间隔，总等待不超过 max_total_wait 秒。
+        若最终仍失败（通常意味着消费者已退出），则放弃以避免 producer 永久阻塞。
+        """
+        import queue as _q
+        delays = [0.1, 0.3, 0.5, 1.0, 2.0, 3.0]
+        waited = 0.0
+        for d in delays:
+            try:
+                result_queue.put(item, timeout=d)
+                return True
+            except _q.Full:
+                waited += d
+                if waited >= max_total_wait:
+                    return False
+                if not getattr(self, 'task_running', True):
+                    return False
+                import time as _t
+                _t.sleep(0.1)
+        # 最后一次尽力尝试，长超时
+        try:
+            result_queue.put(item, timeout=max(1.0, max_total_wait - waited))
+            return True
+        except _q.Full:
+            return False
+
     def _run_image_saver(self, save_queue):
         """独立IO线程: 解码base64并保存图片到磁盘"""
         from PIL import Image
@@ -412,20 +442,14 @@ class ImagesMixin:
                 ck = hashlib.md5(f"{prompt}_{neg or ''}_{width}_{height}_{cloud_model}".encode()).hexdigest()
                 cached = image_cache.get(ck)
                 if cached:
-                    try:
-                        result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
-                    except queue.Full:
-                        pass
+                    self._safe_result_put(result_queue, (idx, ck, cached, "cached", 0.0, img_path))
                     continue
 
                 max_retries = 3
                 retry_delay = 8
                 for retry in range(max_retries):
                     if not self.task_running:
-                        try:
-                            result_queue.put((idx, None, None, "cancelled"), timeout=5)
-                        except queue.Full:
-                            pass
+                        self._safe_result_put(result_queue, (idx, None, None, "cancelled"), max_total_wait=5)
                         break
                     try:
                         req_start = time.time()
@@ -440,34 +464,25 @@ class ImagesMixin:
 
                         if img_b64:
                             image_cache.set(ck, img_b64)
-                            try:
-                                result_queue.put((idx, ck, img_b64, "generated", req_time, img_path), timeout=30)
-                            except queue.Full:
-                                pass
+                            # put 失败时不能简单 pass 后 break，否则消费者会一直等不到结果，
+                            # 导致整批任务卡在 30s 超时。改为带退避的重试 put。
+                            self._safe_result_put(result_queue, (idx, ck, img_b64, "generated", req_time, img_path))
                             break
                         else:
                             if retry < max_retries - 1:
                                 self.log(f"   ⚠️ 第{retry+1}次生成失败，{retry_delay}秒后重试...")
                                 time.sleep(retry_delay)
                             else:
-                                try:
-                                    result_queue.put((idx, None, None, "failed"), timeout=5)
-                                except queue.Full:
-                                    pass
+                                self._safe_result_put(result_queue, (idx, None, None, "failed"), max_total_wait=5)
                     except Exception as e:
                         if retry < max_retries - 1:
                             self._log_exception(f"   ⚠️ 云端生图异常，{retry_delay}秒后重试", e)
                             time.sleep(retry_delay)
                         else:
-                            try:
-                                result_queue.put((idx, None, None, "failed"), timeout=5)
-                            except queue.Full:
-                                pass
+                            self._safe_result_put(result_queue, (idx, None, None, "failed"), max_total_wait=5)
 
-            try:
-                result_queue.put(None, timeout=5)
-            except queue.Full:
-                pass
+            # producer 结束信号必须可靠送达，否则消费者会阻塞在 get(timeout=30)
+            self._safe_result_put(result_queue, None, max_total_wait=10)
 
         producer_thread = threading.Thread(target=cloud_producer, daemon=True, name="Cloud-Image-Producer")
         producer_thread.start()
@@ -819,10 +834,7 @@ class ImagesMixin:
                     ck = hashlib.md5(f"{prompt}_{neg}_{width}_{height}_{current_sd_model}".encode()).hexdigest()
                     cached = image_cache.get(ck)
                     if cached:
-                        try:
-                            result_queue.put((idx, ck, cached, "cached", 0.0, img_path), timeout=30)
-                        except queue.Full:
-                            pass
+                        self._safe_result_put(result_queue, (idx, ck, cached, "cached", 0.0, img_path))
                         continue
 
                     max_retries = 3
@@ -832,10 +844,7 @@ class ImagesMixin:
                             _actual_delay = retry_delay * (2 ** (retry - 1))
                             time.sleep(_actual_delay)
                         if not self.task_running:
-                            try:
-                                result_queue.put((idx, None, None, "cancelled"), timeout=5)
-                            except queue.Full:
-                                pass
+                            self._safe_result_put(result_queue, (idx, None, None, "cancelled"), max_total_wait=5)
                             break
                         try:
                             req_start = time.time()
@@ -885,19 +894,13 @@ class ImagesMixin:
                                 if "images" in rj and rj["images"]:
                                     img_data = rj["images"][0]
                                     image_cache.set(ck, img_data)
-                                    try:
-                                        result_queue.put((idx, ck, img_data, "generated", req_time, img_path), timeout=30)
-                                    except queue.Full:
-                                        pass
+                                    self._safe_result_put(result_queue, (idx, ck, img_data, "generated", req_time, img_path))
                                     break
                             else:
                                 if retry < max_retries - 1:
                                     continue
                         except requests.exceptions.ConnectionError:
-                            try:
-                                result_queue.put((idx, None, None, "connection_error"), timeout=5)
-                            except queue.Full:
-                                pass
+                            self._safe_result_put(result_queue, (idx, None, None, "connection_error"), max_total_wait=5)
                             break
                         except requests.exceptions.Timeout:
                             if retry < max_retries - 1:
@@ -906,19 +909,14 @@ class ImagesMixin:
                             if retry < max_retries - 1:
                                 continue
                     else:
-                        try:
-                            result_queue.put((idx, None, None, "failed"), timeout=5)
-                        except queue.Full:
-                            pass
+                        self._safe_result_put(result_queue, (idx, None, None, "failed"), max_total_wait=5)
 
                     # 每张图生成后短暂间隔，让GPU散热，避免连续满载导致温度持续攀升
                     if self.task_running:
                         time.sleep(2)
 
-                try:
-                    result_queue.put(None, timeout=5)
-                except queue.Full:
-                    pass
+                # producer 结束信号必须可靠送达，否则消费者会阻塞在 get(timeout=30)
+                self._safe_result_put(result_queue, None, max_total_wait=10)
 
             producer_thread = threading.Thread(target=sd_producer, daemon=True, name="SD-Producer")
             producer_thread.start()

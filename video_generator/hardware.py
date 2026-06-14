@@ -251,15 +251,25 @@ class HardwareAcceleratedRenderer:
     def cancel_render(self):
         """取消正在进行的渲染"""
         self._cancel_requested = True
+        # 终止主渲染进程
         if self._render_process and self._render_process.poll() is None:
             try:
                 self._render_process.terminate()
+                try:
+                    self._render_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self._render_process.kill()
             except Exception:
                 pass
+        # 终止所有并行渲染子进程
         for proc in self._render_processes:
             if proc.poll() is None:
                 try:
                     proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
                 except Exception:
                     pass
 
@@ -361,7 +371,18 @@ class HardwareAcceleratedRenderer:
 
             for line in self._render_process.stderr:
                 if self._cancel_requested:
-                    self._render_process.terminate()
+                    try:
+                        self._render_process.terminate()
+                    except Exception:
+                        pass
+                    # 确保子进程彻底退出，避免残留 ffmpeg 占用文件锁导致输出文件无法移动
+                    try:
+                        self._render_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            self._render_process.kill()
+                        except Exception:
+                            pass
                     if log_callback:
                         log_callback("⚠️ 渲染已取消")
                     return False
@@ -432,7 +453,15 @@ class HardwareAcceleratedRenderer:
                             log_parts.append(f"大小:{size}")
                         log_callback(" ".join(log_parts))
 
-            self._render_process.wait()
+            # 等待进程退出；超时则强制终止，避免阻塞 UI
+            try:
+                self._render_process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                try:
+                    self._render_process.kill()
+                    self._render_process.wait(timeout=5)
+                except Exception:
+                    pass
             self._render_process = None
 
             if self._cancel_requested:
@@ -684,8 +713,16 @@ class HardwareAcceleratedRenderer:
 
                 time.sleep(0.2)
 
+            # 等待所有进程退出，避免僵尸进程；超时则强制终止
             for proc in processes:
-                proc.wait()
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        pass
 
             if self._cancel_requested:
                 return False
