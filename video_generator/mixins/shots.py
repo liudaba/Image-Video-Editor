@@ -655,7 +655,7 @@ def _fix_whisper_repeated_chars(text):
     return text
 
 class ShotsMixin:
-    def _safe_release_whisper_gpu(self):
+    def _safe_release_whisper_gpu(self, skip_gc=False):
         """安全释放Whisper模型占用的GPU显存和CPU内存
 
         关键步骤：
@@ -666,8 +666,11 @@ class ShotsMixin:
 
         注意：不要先 model.to("cpu") 再 del，这会在CPU上额外分配一份
         模型权重副本，反而增加内存峰值。直接 del 即可。
+
+        Args:
+            skip_gc: 是否跳过gc.collect()。在后台线程中调用时可以跳过，
+                     由调用方统一在适当时机执行gc.collect()以减少阻塞。
         """
-        # 步骤1: 如果CUDA可用，先同步所有异步操作
         _cuda_available = False
         try:
             import torch
@@ -677,7 +680,6 @@ class ShotsMixin:
         except Exception:
             pass
 
-        # 步骤2: 无论模型在GPU还是CPU上，都要删除释放内存
         if not hasattr(self, 'whisper_model') or self.whisper_model is None:
             return
 
@@ -689,13 +691,12 @@ class ShotsMixin:
         except Exception:
             pass
 
-        # 步骤3: 回收Python对象
-        try:
-            gc.collect()
-        except Exception:
-            pass
+        if not skip_gc:
+            try:
+                gc.collect()
+            except Exception:
+                pass
 
-        # 步骤4: 如果CUDA可用，释放CUDA缓存
         if _cuda_available:
             try:
                 import torch
